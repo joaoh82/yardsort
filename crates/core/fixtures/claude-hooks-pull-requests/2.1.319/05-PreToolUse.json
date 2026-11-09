@@ -1,0 +1,19 @@
+{
+  "session_id": "33333333-3333-4333-8333-333333333333",
+  "transcript_path": "/home/user/.claude/projects/-tmp-yardsort-fixture-repo/33333333-3333-4333-8333-333333333333.jsonl",
+  "cwd": "/tmp/yardsort-fixture/repo/lib",
+  "prompt_id": "85400b4d-f808-4aa7-9645-05070565202b",
+  "permission_mode": "default",
+  "effort": { "level": "medium" },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "mcp__github__create_pull_request",
+  "tool_input": {
+    "owner": "example",
+    "repo": "lib",
+    "title": "Bump the client",
+    "head": "bump",
+    "base": "main"
+  },
+  "tool_use_id": "toolu_01CbKxxBGrFSngZm7UghE5cB",
+  "mcp_server": { "name": "github", "source": "dynamic" }
+}

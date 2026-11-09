@@ -1,7 +1,8 @@
 # 38 — Pull requests in other repositories
 
-_Proposed 2026-11-09. Slice 1 is built — see [slice 1](#slice-1-what-shipped). Slices 2–5 are
-to do; [M31](05-roadmap.md#m31--pull-requests-in-other-repositories) tracks them._
+_Proposed 2026-11-09. Slices 1 and 2 are built — see [slice 1](#slice-1-what-shipped) and
+[slice 2](#slice-2-what-shipped). Slices 3–5 are to do;
+[M31](05-roadmap.md#m31--pull-requests-in-other-repositories) tracks them._
 
 A project is one repository, and every pull request Yardsort shows is one of that repository's.
 Some projects are not used that way. A **parent repository** holds other repositories as
@@ -213,8 +214,8 @@ note and `ys pr track` cover it.
 1. **Tracking and following.** ✅ The table, `ys pr track | tracked | untrack`, **Track pull
    request…**, the launch section, reading by link, and every surface above with the Summary.
    See [slice 1](#slice-1-what-shipped).
-2. **Seen: Claude Code.** The `PostToolUse` rule, recorded fixtures of `gh pr create` and of a
-   GitHub MCP tool, the exception written into 09.
+2. **Seen: Claude Code.** ✅ The `PostToolUse` rule, recorded fixtures of `gh pr create` and of
+   a GitHub MCP tool, the exception written into 09. See [slice 2](#slice-2-what-shipped).
 3. **Seen: the other adapters**, one by one, each with its coverage stated.
 4. **Acting on them.** Merge, close, reopen and the reply box by link; **Code** from the nested
    clone.
@@ -282,11 +283,78 @@ unread notice, before and after a first read, two hosts with the same `owner/nam
 toolbar, and **Stop tracking** from each place. Not yet done: the app by hand against a real
 nested clone, and the three systems' hands-on pass.
 
+## Slice 2: what shipped
+
+Built 2026-11-09. A pull request Claude Code opens is tracked with its workspace, by `hook`, as
+soon as the inbox is drained, with nobody typing its link — when **Capture what Claude Code
+reports** is on, which it is not by default. The launch section and `ys pr track` stay as
+they were: they cover the switch off, and every other agent until slice 3.
+
+- **Claude Code says so itself.** Recorded against 2.1.319 (`scripts/record-claude-pr-hooks.sh`,
+  fixtures in `crates/core/fixtures/claude-hooks-pull-requests/`), a `Bash` call that ran
+  `gh pr create` comes back with `tool_response.gitOperation.pr` —
+  `{ number, url, action: "created" }`. That is the first rule: Claude Code's own judgement,
+  not ours. A `gitOperation.pr` with any other `action` is taken at its word, as not a creation.
+- **The command, when it does not.** For a version without `gitOperation`, a `Bash` call whose
+  command runs `gh pr create` — in command position, after `cd … &&`, a variable set for it,
+  `env`, `sudo` or a path to `gh`, with `-R owner/name` between — gives the first pull request
+  link on its stdout. `gh` as an argument (`echo gh pr create`, a commit message) does not count.
+  The command is split as a shell splits it: a separator inside quotes is text, and comments
+  and here-document bodies are left out, so `printf '…; gh pr create …'` or a here-document
+  holding the words, both of which print a link without opening anything, do not count either.
+  A `$(gh pr create)` inside double quotes is missed on purpose — a link missed is still in the
+  launch note's reach, a link invented tracks the wrong pull request.
+- **The MCP tool.** `mcp__<server>__create_pull_request` from a server whose name says GitHub
+  (`github`, `claude_ai_GitHub`). Its answer, recorded, is text blocks holding JSON; the link is
+  its `html_url` when there is one — a full answer names other pull requests in its description —
+  then a `url` that is a pull request's, then the first link anywhere. An API address
+  (`/repos/…/pulls/9`) and a branch's "open a pull request" link (`/pull/new/…`) are not links.
+- **Only the link is kept**, as `pullRequestUrl` on the `tool.completed` event; the adapter's
+  tests check that nothing else of either recorded call — the title, the body, the command, the
+  MCP answer's id — reaches the payload. A failed call keeps nothing.
+- **Tracked when drained, not in the hook.** Telling the project's own repository apart needs
+  `git`, which the hook has no business running. `import_inbox` hands on the links of events it
+  recorded for the first time (`InboxReport::pull_requests`), and every drainer tracks them with
+  `tracked::track_seen`: the app's watcher and its drain on exit, `yardsort-host`, and `ys`
+  before any command that drains — `ys pr tracked` now drains first. The import at start is a
+  drain too: `settle_at_start` returns the links it took (`Settled`, which must be used), and
+  the app tracks them once its state, and so the login shell's environment `git` is found by,
+  exists; `yardsort-host` at once. `git` is found only when there is something to track. An event drained twice is handed on once, so a pull request
+  untracked since is not tracked again. Without `git` nothing is tracked and
+  `pull_request_seen_no_git` is counted; a link `track` refuses for another reason counts
+  `pull_request_seen_refused`.
+- **The window hears of it at once** — when the app drained it. The app emits
+  `TrackedPullRequestsChanged` with the projects whose workspaces gained one, and the window
+  asks those projects' pull requests again instead of waiting for the next minute's look. The
+  tracking runs on a thread of its own, since it runs git and the drain after an exit is on the
+  daemon's event thread. When `ys` drained first — an agent ran a `ys` command right after — the
+  window finds it at its next look, within a minute or on focus.
+- **What `gh pr create` printed ends with its link**, so a command's output gives its _last_
+  pull request link: `cat notes.md; gh pr create` must not track a pull request the notes name.
+  The shell's own words and the common runners in front of `gh` leave it in command position:
+  `if`, `then`, `!`, `nice -n 10`, `xargs`, and `timeout 60`.
+- **Known gaps.** Without `git`, a seen link is counted and dropped, as is one the store would
+  not take: its event is recorded, and is never handed on again. A fork whose parent repository
+  is known only to `gh`'s own configuration, with no remote for it, can have its own pull request
+  tracked as elsewhere.
+
+How it was checked: the adapter against both recordings and against hand-made payloads for a
+version without `gitOperation`, a `gh pr view`, a failed call and a full GitHub answer; the
+link, command and tool rules with unit tests, quoted and here-document text among them; a
+report left in the inbox while nothing ran, tracked from the start and not again by the drain
+after; `track_seen` against a real repository with an
+`origin`, refusing the project's own and doing nothing without `git`; the drain handing on a
+link once; the real `ys` binary as the hook with the recorded payloads, then `ys pr tracked`
+showing it by `hook`; the sidebar's badge appearing on the event. Not yet done: a real Claude
+Code session in a real parent project opening a real pull request, and the three systems'
+hands-on pass.
+
 ## Documentation this touches
 
 `docs/guide/commits-and-pull-requests.md` (a workspace's pull requests elsewhere),
 `docs/guide/pull-requests.md` (their rows), `docs/guide/cli.md` (`ys pr`), `CHANGELOG.md`,
 [03-architecture](03-architecture.md) (the tracked table and how it is read),
 [05-roadmap](05-roadmap.md) (M31), [06-open-questions](06-open-questions.md) (56–57),
-[09](09-agent-events-and-memory.md) (the exception, in slice 2), and this doc's index line in
+[09](09-agent-events-and-memory.md) and [11](11-agent-events-stage-2-claude.md) (the exception,
+in slice 2), `docs/guide/activity.md` (what the Claude Code hook keeps), and this doc's index line in
 [README](README.md).

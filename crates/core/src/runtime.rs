@@ -21,9 +21,24 @@ use pty_host::ExitInfo;
 use crate::activity::{self, grok, ExitFacts, Via};
 use crate::store::Store;
 
+/// What [`settle_at_start`] leaves for its caller.
+#[derive(Debug, Default)]
+#[must_use = "pull requests agents were seen creating are tracked only if the caller does it"]
+pub struct Settled {
+    /// Pull requests agents were seen creating while nothing was running. Their reports are out
+    /// of the inbox now, so no later drain hands them on again: the caller tracks them with
+    /// [`track_seen`] once it can find git — at start the app has not yet read the login
+    /// shell's environment that git is found by.
+    pub pull_requests: Vec<crate::tracked::Seen>,
+}
+
 /// Settle the records before anything is served: exits and reports kept while nobody was
 /// connected, then every session still marked running whose process is not in `alive`.
-pub fn settle_at_start(store: &Store, data_dir: &Path, alive: &[String]) -> Result<(), String> {
+pub fn settle_at_start(
+    store: &Store,
+    data_dir: &Path,
+    alive: &[String],
+) -> Result<Settled, String> {
     // What agents reported while nothing was running.
     let inbox = activity::import_inbox(store, data_dir);
     if inbox.imported > 0 || inbox.unlinked > 0 || inbox.unreadable > 0 || inbox.dropped > 0 {
@@ -52,7 +67,9 @@ pub fn settle_at_start(store: &Store, data_dir: &Path, alive: &[String]) -> Resu
         .map_err(|e| format!("cannot tidy session records: {e}"))?;
     activity::end_interrupted(store, alive);
     activity::prune(store);
-    Ok(())
+    Ok(Settled {
+        pull_requests: inbox.pull_requests,
+    })
 }
 
 /// The daemon says the process in terminal `pty_id` exited: settle its record first, so a client
@@ -73,20 +90,38 @@ pub struct Drained {
     pub workspaces: BTreeSet<String>,
     /// Entries left for later, and Grok runs still being followed: worth looking at again soon.
     pub pending: usize,
+    /// The workspaces that began following a pull request an agent was seen creating.
+    pub tracked: BTreeSet<String>,
+}
+
+/// [`crate::tracked::track_seen`], with `git` found only when there is something to track.
+pub fn track_seen(
+    store: &Store,
+    seen: &[crate::tracked::Seen],
+    git: impl FnOnce() -> Option<crate::git::Git>,
+) -> BTreeSet<String> {
+    if seen.is_empty() {
+        return BTreeSet::new();
+    }
+    crate::tracked::track_seen(store, git().as_ref(), seen)
 }
 
 /// Take what the inbox holds into the store, and, given `grok_home`, what Yardsort's own Grok
-/// launches wrote into their session directories.
+/// launches wrote into their session directories. A pull request an agent was seen creating is
+/// tracked with its workspace; `git`, asked for only then, tells the project's own apart.
 pub fn drain(
     store: &Store,
     data_dir: &Path,
     grok_home: Option<&Path>,
     cursors: &mut grok::Cursors,
+    git: impl FnOnce() -> Option<crate::git::Git>,
 ) -> Drained {
     let report = activity::import_inbox(store, data_dir);
+    let tracked = track_seen(store, &report.pull_requests, git);
     let mut drained = Drained {
         workspaces: report.workspaces,
         pending: report.deferred,
+        tracked,
     };
     if let Some(home) = grok_home {
         let read = grok::import(store, home, cursors);
@@ -202,6 +237,74 @@ fn brings_entries(kind: &EventKind) -> bool {
 mod tests {
     use super::*;
     use notify::event::{AccessKind, AccessMode, CreateKind, ModifyKind, RemoveKind, RenameMode};
+
+    /// Claude opened a pull request elsewhere while nothing was running: the start takes its
+    /// report out of the inbox and hands the link on, since no drain after will see it again.
+    #[test]
+    fn a_pull_request_seen_while_nothing_ran_is_tracked_from_the_start() {
+        use crate::activity::inbox::{Inbox, InboxEntry, INBOX_VERSION};
+        use crate::git::testing::git;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("parent");
+        std::fs::create_dir_all(&root).unwrap();
+        git().run(&root, &["init", "-q"]).unwrap();
+        git()
+            .run(
+                &root,
+                &["remote", "add", "origin", "git@github.com:o/parent.git"],
+            )
+            .unwrap();
+        let store = Store::in_memory();
+        let project = store
+            .add_project("parent", &root.to_string_lossy())
+            .unwrap();
+        let ws = store
+            .add_worktree(&project.id, "fix", "/wt/fix", Some("ys/fix"), Some("main"))
+            .unwrap();
+        let data_dir = dir.path().join("profile");
+        let created = InboxEntry {
+            version: INBOX_VERSION,
+            id: "e-pr".into(),
+            at_ms: 1_790_000_000_000,
+            producer: activity::claude::PRODUCER.into(),
+            method: activity::claude::METHOD.into(),
+            fidelity: activity::claude::FIDELITY.into(),
+            run_id: None,
+            workspace_id: Some(ws.id.clone()),
+            session_record_id: None,
+            native_session_id: None,
+            kind: "tool.completed".into(),
+            privacy_class: activity::PRIVACY_METADATA.into(),
+            payload: serde_json::json!({
+                "tool": "Bash",
+                "pullRequestUrl": "https://github.com/o/lib/pull/7",
+            }),
+        };
+        let inbox = Inbox::new(activity::inbox_dir(&data_dir));
+        inbox.record(&created).unwrap();
+
+        let settled = settle_at_start(&store, &data_dir, &[]).unwrap();
+        assert_eq!(settled.pull_requests.len(), 1);
+        let gained = track_seen(&store, &settled.pull_requests, || Some(git()));
+        assert_eq!(gained, BTreeSet::from([ws.id.clone()]));
+        let rows = store.tracked_pull_requests(&ws.id).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].url, "https://github.com/o/lib/pull/7");
+        assert_eq!(rows[0].tracked_by, "hook");
+
+        // The drain that follows finds the inbox empty, and the same report written again is a
+        // duplicate: nothing tracked twice, nothing lost.
+        let mut cursors = grok::Cursors::default();
+        assert!(drain(&store, &data_dir, None, &mut cursors, || Some(git()))
+            .tracked
+            .is_empty());
+        inbox.record(&created).unwrap();
+        assert!(drain(&store, &data_dir, None, &mut cursors, || Some(git()))
+            .tracked
+            .is_empty());
+        assert_eq!(store.tracked_pull_requests(&ws.id).unwrap().len(), 1);
+    }
 
     #[test]
     fn only_a_file_arriving_wakes_the_drain_never_the_drain_itself() {

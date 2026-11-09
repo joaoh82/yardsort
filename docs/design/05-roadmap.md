@@ -1207,7 +1207,10 @@ requests that no project's list has.
       pull request…**, the launch section for a checkout with nested repositories, reading by
       link, and the row, the toolbar and the Pull requests view with the Summary. Recorded in
       [38 § slice 1](38-pull-requests-elsewhere.md#slice-1-what-shipped).
-- [ ] Slice 2: Claude Code's `PostToolUse` keeps the link of a pull request a tool call created.
+- [x] Slice 2: Claude Code's `PostToolUse` keeps the link of a pull request a tool call created —
+      Claude Code's own `gitOperation`, else `gh pr create` or a GitHub MCP tool — and every
+      drain of the inbox tracks it. Recorded in
+      [38 § slice 2](38-pull-requests-elsewhere.md#slice-2-what-shipped).
 - [ ] Slice 3: the same for Codex, OpenCode, pi, OMP, Grok and Cursor, or their coverage says
       why not.
 - [ ] Slice 4: merge, close, reopen and the reply box by link; **Code** from the nested clone.

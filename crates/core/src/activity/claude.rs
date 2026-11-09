@@ -10,7 +10,8 @@
 //!
 //! What is kept from a payload is metadata: which event, a tool's name, a path relative to the
 //! workspace, a duration, ids. Never the prompt, a command, a tool's input or output, or what
-//! the assistant said. The shapes are those of the payloads recorded under
+//! the assistant said — with one exception: a tool call that created a pull request keeps that
+//! pull request's link, so the workspace can follow it (`crate::tracked`). The shapes are those of the payloads recorded under
 //! `crates/core/fixtures/claude-hooks/` — see `docs/design/11-agent-events-stage-2-claude.md`
 //! for which events were seen and which are only documented.
 
@@ -191,6 +192,9 @@ pub fn normalize(hook: &Value) -> Result<Reported, String> {
         "PostToolUse" => {
             let mut payload = tool();
             payload["durationMs"] = json!(number("duration_ms"));
+            if let Some(url) = created_pull_request(hook) {
+                payload["pullRequestUrl"] = Value::String(url);
+            }
             ("tool.completed", payload)
         }
         "PostToolUseFailure" => {
@@ -276,6 +280,40 @@ pub fn add_context(
     reported.payload["contextTokens"] = json!(tokens);
     reported.payload["model"] = json!(model);
     reported.payload["configuredModel"] = json!(super::context::claude_configured_model(cwd, env));
+}
+
+/// The link of the pull request a finished tool call created, if it created one. Claude Code
+/// says so itself for a shell command (`tool_response.gitOperation.pr`, with `action` created);
+/// a version that does not is judged by the command — `gh pr create`, with the link it prints —
+/// and an MCP call by its tool, a GitHub server's `create_pull_request`, and what it answered.
+/// Nothing else of the call is looked at, and only the link is kept.
+fn created_pull_request(hook: &Value) -> Option<String> {
+    let response = hook.get("tool_response")?;
+    let pr = response.get("gitOperation").and_then(|git| git.get("pr"));
+    if let Some(pr) = pr {
+        if pr.get("action").and_then(Value::as_str) == Some("created") {
+            if let Some(url) = pr.get("url").and_then(Value::as_str) {
+                return crate::tracked::link_in(url);
+            }
+        }
+        // Claude Code looked and found it was not a creation: a `gh pr view`, say.
+        return None;
+    }
+    let tool = hook.get("tool_name").and_then(Value::as_str)?;
+    if tool == "Bash" {
+        let command = hook
+            .get("tool_input")
+            .and_then(|input| input.get("command"))
+            .and_then(Value::as_str)?;
+        if !crate::tracked::runs_pr_create(command) {
+            return None;
+        }
+        return crate::tracked::last_link_in(response.get("stdout").and_then(Value::as_str)?);
+    }
+    if crate::tracked::creates_pull_request_tool(tool) {
+        return crate::tracked::link_in_tool_result(response);
+    }
+    None
 }
 
 /// The file a tool is about, relative to the workspace — or nothing, and a flag, when it is
@@ -433,6 +471,134 @@ mod tests {
                 assert!(!text.contains(content), "{name} leaked {content:?}: {text}");
             }
         }
+    }
+
+    /// Recorded with `scripts/record-claude-pr-hooks.sh`: `gh pr create` in a nested clone and
+    /// a GitHub MCP server's `create_pull_request`, both stand-ins.
+    fn pull_request_fixtures() -> Vec<(String, Value)> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures")
+            .join("claude-hooks-pull-requests")
+            .join("2.1.319");
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|ext| ext == "json"))
+            .collect();
+        files.sort();
+        files
+            .into_iter()
+            .map(|path| {
+                let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+                (
+                    name,
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_pull_request_a_tool_call_created_keeps_its_link_and_nothing_else() {
+        let seen: Vec<(String, &'static str, Option<String>)> = pull_request_fixtures()
+            .iter()
+            .map(|(name, hook)| {
+                let reported = normalize(hook).unwrap_or_else(|e| panic!("{name}: {e}"));
+                let url = reported.payload["pullRequestUrl"]
+                    .as_str()
+                    .map(str::to_owned);
+                (name.clone(), reported.kind, url)
+            })
+            .collect();
+        let link = |n: u32| Some(format!("https://github.com/example/lib/pull/{n}"));
+        assert_eq!(
+            seen,
+            [
+                ("01-PreToolUse".into(), "tool.started", None),
+                // `cd lib && gh pr create …`: Claude Code's own `gitOperation` says so.
+                ("02-PostToolUse".into(), "tool.completed", link(41)),
+                ("03-PreToolUse".into(), "tool.started", None),
+                ("04-PostToolUse".into(), "tool.completed", None),
+                ("05-PreToolUse".into(), "tool.started", None),
+                // `mcp__github__create_pull_request`: its answer's `url`.
+                ("06-PostToolUse".into(), "tool.completed", link(42)),
+            ]
+        );
+        for (name, hook) in pull_request_fixtures() {
+            let text = normalize(&hook).unwrap().payload.to_string();
+            for content in [
+                "Bump the client",
+                "Moves to the new client",
+                "cd lib",
+                "--base",
+                "Creating pull request",
+                "2989102733",
+                "\"head\"",
+                "/tmp/yardsort-fixture",
+            ] {
+                assert!(!text.contains(content), "{name} leaked {content:?}: {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn without_claude_code_saying_so_the_command_or_the_tool_decides() {
+        let bash = |command: &str, stdout: &str| {
+            normalize(&json!({
+                "hook_event_name": "PostToolUse", "session_id": "s", "tool_name": "Bash",
+                "tool_input": { "command": command },
+                "tool_response": { "stdout": stdout, "stderr": "" }
+            }))
+            .unwrap()
+            .payload["pullRequestUrl"]
+                .as_str()
+                .map(str::to_owned)
+        };
+        let printed = "https://github.com/o/lib/pull/7\n";
+        assert_eq!(
+            bash("cd lib && gh pr create --fill", printed).as_deref(),
+            Some("https://github.com/o/lib/pull/7")
+        );
+        assert_eq!(bash("gh pr view 7", printed), None, "only a creation");
+        assert_eq!(bash("echo https://github.com/o/lib/pull/7", printed), None);
+        assert_eq!(bash("gh pr create --fill", "no link here"), None);
+
+        // Claude Code saw the command and says it created nothing: that is the answer.
+        let viewed = normalize(&json!({
+            "hook_event_name": "PostToolUse", "session_id": "s", "tool_name": "Bash",
+            "tool_input": { "command": "gh pr create --fill" },
+            "tool_response": { "stdout": printed,
+                "gitOperation": { "pr": { "number": 7, "url": "https://github.com/o/lib/pull/7", "action": "viewed" } } }
+        }))
+        .unwrap();
+        assert!(viewed.payload.get("pullRequestUrl").is_none());
+
+        // A full answer from GitHub names other pull requests in its description first.
+        let full = normalize(&json!({
+            "hook_event_name": "PostToolUse", "session_id": "s",
+            "tool_name": "mcp__claude_ai_GitHub__create_pull_request",
+            "tool_input": { "owner": "o", "repo": "lib" },
+            "tool_response": [{ "type": "text", "text": json!({
+                "url": "https://api.github.com/repos/o/lib/pulls/9",
+                "body": "Follows https://github.com/o/lib/pull/3.",
+                "html_url": "https://github.com/o/lib/pull/9"
+            }).to_string() }]
+        }))
+        .unwrap();
+        assert_eq!(
+            full.payload["pullRequestUrl"],
+            "https://github.com/o/lib/pull/9"
+        );
+        assert!(!full.payload.to_string().contains("Follows"));
+
+        // Only a finished call: one that failed or is about to run has no pull request yet.
+        let failed = normalize(&json!({
+            "hook_event_name": "PostToolUseFailure", "session_id": "s", "tool_name": "Bash",
+            "tool_input": { "command": "gh pr create --fill" },
+            "tool_response": { "stdout": printed }
+        }))
+        .unwrap();
+        assert!(failed.payload.get("pullRequestUrl").is_none());
     }
 
     #[test]

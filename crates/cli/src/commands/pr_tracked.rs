@@ -84,6 +84,8 @@ pub fn track(
 
 /// The pull requests the workspace follows in other repositories.
 pub fn list(ys: &Yardsort, workspace: Option<&str>, out: &Output) -> Result<(), Failure> {
+    // What the agents' hooks saw them create since anyone last looked, first.
+    ys.drain_spool();
     let workspace = locate(ys, workspace)?;
     let rows = ys.store.tracked_pull_requests(&workspace.id)?;
     let listed: Vec<Tracked> = rows.iter().map(Tracked::from).collect();

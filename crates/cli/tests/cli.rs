@@ -1244,6 +1244,74 @@ fn the_binary_is_a_hook_that_leaves_an_entry_the_next_command_takes_in() {
     assert_eq!(report["inboxDir"].as_str(), Some(&*inbox.to_string_lossy()));
 }
 
+/// The hook again, with what Claude Code sent after it opened a pull request in a nested clone:
+/// the next `ys` command takes it in, and the workspace follows that pull request — tracked by
+/// `hook`, with only the link kept on the event.
+#[test]
+fn a_pull_request_claude_opened_elsewhere_is_followed_without_anyone_saying_so() {
+    use std::io::Write;
+    let fx = Fixture::new();
+    let made = make_workspace(&fx, "Bump the library");
+    let workspace_id = made["id"].as_str().unwrap().to_owned();
+    fx.git()
+        .run(
+            &fx.repo,
+            &["remote", "add", "origin", "git@github.com:o/parent.git"],
+        )
+        .unwrap();
+    let inbox = yardsort_core::activity::inbox_dir(&fx.data_dir);
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../core/fixtures/claude-hooks-pull-requests/2.1.319");
+    for name in ["01-PreToolUse.json", "02-PostToolUse.json"] {
+        let mut hook = Command::new(env!("CARGO_BIN_EXE_ys"))
+            .arg(yardsort_core::activity::hook::HOOK_FLAG)
+            .arg("claude")
+            .arg(&inbox)
+            .env(yardsort_core::activity::WORKSPACE_ENV, &workspace_id)
+            .env_remove(yardsort_core::activity::RUN_ENV)
+            .env_remove(yardsort_core::activity::RECORD_ENV)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        hook.stdin
+            .take()
+            .unwrap()
+            .write_all(&std::fs::read(fixtures.join(name)).unwrap())
+            .unwrap();
+        let output = hook.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+    }
+
+    let listed: serde_json::Value = serde_json::from_str(
+        &fx.ys(&["pr", "tracked", "--workspace", &workspace_id, "--json"])
+            .ok(),
+    )
+    .unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
+    assert_eq!(listed[0]["url"], "https://github.com/example/lib/pull/41");
+    assert_eq!(listed[0]["trackedBy"], "hook");
+
+    let events: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["activity", "list", "--json"]).ok()).unwrap();
+    let done = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "tool.completed")
+        .unwrap();
+    assert_eq!(
+        done["payload"]["pullRequestUrl"],
+        "https://github.com/example/lib/pull/41"
+    );
+    assert!(
+        !done["payload"].to_string().contains("Bump the client"),
+        "{}",
+        done["payload"]
+    );
+}
+
 /// `ys --yardsort-hook codex <inbox> <payload>` is what Codex's `notify` runs at the end of a
 /// turn: the payload as the last argument, the launcher's ids in the environment. The next `ys`
 /// command reads the turn out of Codex's session file — here, the fixture, placed where Codex

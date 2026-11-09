@@ -94,7 +94,10 @@ impl Yardsort {
     pub fn drain_spool(&self) -> yardsort_core::activity::ImportReport {
         // What agents' hooks reported since anyone last looked comes in at the same time, and
         // so does what Grok wrote into its own session directories, when that is switched on.
-        yardsort_core::activity::import_inbox(&self.store, &self.data_dir);
+        let report = yardsort_core::activity::import_inbox(&self.store, &self.data_dir);
+        // A pull request an agent was seen creating is tracked with its workspace here too, so
+        // `ys pr tracked` and the app agree whoever drained first.
+        yardsort_core::runtime::track_seen(&self.store, &report.pull_requests, || self.git().ok());
         if self.settings.activity.capture_grok {
             let home = yardsort_core::activity::grok::grok_home(&|name| {
                 std::env::var(name)

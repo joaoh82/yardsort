@@ -72,7 +72,10 @@ pub async fn run(profile: Profile) -> Result<(), String> {
         .map(|session| session.id.0)
         .collect();
     let home = HostHome::open(profile, Some(connected))?;
-    runtime::settle_at_start(&home.store, &home.profile.data_dir, &alive)?;
+    let settled = runtime::settle_at_start(&home.store, &home.profile.data_dir, &alive)?;
+    runtime::track_seen(&home.store, &settled.pull_requests, || {
+        yardsort_core::git::Git::new(home.env()).ok()
+    });
     let watching = {
         let dir = home.profile.data_dir.clone();
         // Weak: the watcher's thread must not keep the host alive past its stop.
@@ -88,7 +91,10 @@ pub async fn run(profile: Profile) -> Result<(), String> {
                 .capture_grok
                 .then(|| runtime::grok_home(home.env()))
                 .flatten();
-            runtime::drain(&home.store, &dir, grok_home.as_deref(), cursors).pending
+            runtime::drain(&home.store, &dir, grok_home.as_deref(), cursors, || {
+                yardsort_core::git::Git::new(home.env()).ok()
+            })
+            .pending
         })
     };
     match watching {

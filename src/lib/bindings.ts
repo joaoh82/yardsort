@@ -705,6 +705,7 @@ export const events = {
 	testResultSent: makeEvent<TestResultSent>("test-result-sent"),
 	testRunOutput: makeEvent<TestRunOutput>("test-run-output"),
 	testRunsChanged: makeEvent<TestRunsChanged>("test-runs-changed"),
+	trackedPullRequestsChanged: makeEvent<TrackedPullRequestsChanged>("tracked-pull-requests-changed"),
 	triggersChanged: makeEvent<TriggersChanged>("triggers-changed"),
 	workflowRunsChanged: makeEvent<WorkflowRunsChanged>("workflow-runs-changed"),
 	workspaceFilesChanged: makeEvent<WorkspaceFilesChanged>("workspace-files-changed"),
@@ -3320,6 +3321,14 @@ export type TrackedPullRequest = {
 	pullRequest: PullRequest | null,
 	/**  Why the last read failed. What was read before stays in `pull_request`. */
 	problem: string | null,
+};
+
+/**
+ *  A pull request an agent was seen creating is now tracked with these projects' workspaces:
+ *  the window should ask about their pull requests again rather than wait for its next look.
+ */
+export type TrackedPullRequestsChanged = {
+	projectIds: string[],
 };
 
 /**  What starts a run, and what a run is about. */

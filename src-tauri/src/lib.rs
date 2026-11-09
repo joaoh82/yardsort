@@ -277,6 +277,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             terminal::PtyHostEvent,
             changes::commands::WorkspaceFilesChanged,
             activity::ActivityChanged,
+            activity::TrackedPullRequestsChanged,
             quit::QuitRequested,
             workflows::SessionStarted,
             workflows::commands::WorkflowRunsChanged,
@@ -490,7 +491,7 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
         .into_iter()
         .map(|session| session.id.0)
         .collect();
-    yardsort_core::runtime::settle_at_start(&store, &data_dir, &alive)?;
+    let settled = yardsort_core::runtime::settle_at_start(&store, &data_dir, &alive)?;
 
     app.manage(state::AppState::new(
         data_dir.clone(),
@@ -498,6 +499,8 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
         store,
         settings,
     ));
+    // Pull requests agents opened while the app was closed: tracked now that git can be found.
+    activity::track_settled(app.handle(), settled);
 
     // Hooks write to the inbox whenever an agent does something; watch it, so the
     // timeline moves while the agent works rather than when it exits.
