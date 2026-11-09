@@ -7,6 +7,7 @@ import { native } from "@/lib/native";
 import { ContextMenu } from "@/features/sidebar/ContextMenu";
 import { PullRequestBadge } from "@/features/sidebar/PullRequestBadge";
 import { shownFor, untrackPullRequest, usePublishStore } from "@/stores/publish";
+import { nameOf } from "@/stores/pullRequests";
 import { useTerminalStore } from "@/stores/terminals";
 import { PullRequestDetails } from "./PullRequestDetails";
 import { conflicting, pullRequestColour } from "./appearance";
@@ -31,12 +32,10 @@ export function PullRequestToolbar({
   const [chosen, setChosen] = useState<string | null>(null);
   const shown = prs.find((candidate) => candidate.key === chosen) ?? prs[0];
   const pr = shown?.pr;
-  // One elsewhere is read by its link; merging it and its conflicts are not this toolbar's yet.
+  // One elsewhere is read and merged by its link; its conflicts are not this toolbar's.
   const tracked = shown?.tracked ?? null;
   const more = prs.length - 1;
-  const name = tracked
-    ? `${tracked.repo.owner}/${tracked.repo.name}#${pr?.number}`
-    : `#${pr?.number}`;
+  const name = tracked ? pr && nameOf({ pr, tracked }) : `#${pr?.number}`;
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
@@ -59,15 +58,26 @@ export function PullRequestToolbar({
     }
   }
   async function merge(method: MergeMethod, label: string) {
-    // The workspace's command merges its project's own by number: never one elsewhere.
-    if (!pr?.details || tracked) return;
+    if (!pr?.details) return;
+    // One elsewhere is merged by its link, in its own repository, which the confirmation names.
     const confirmed = await native.confirm(
-      `${label} pull request #${pr.number}: ${pr.title}\n\n${pr.branch} → ${pr.details.base}\nCommit ${pr.details.headOid.slice(0, 12)}\n\nGitHub may queue the merge if this branch requires it. Your workspace and local branch will be kept.`,
+      tracked
+        ? `${label} pull request ${nameOf({ pr, tracked })}: ${pr.title}\n\nIn ${tracked.repo.owner}/${tracked.repo.name}, tracked with this workspace.\n${pr.branch} → ${pr.details.base}\nCommit ${pr.details.headOid.slice(0, 12)}\n\nGitHub may queue the merge if this branch requires it. No branch is deleted.`
+        : `${label} pull request #${pr.number}: ${pr.title}\n\n${pr.branch} → ${pr.details.base}\nCommit ${pr.details.headOid.slice(0, 12)}\n\nGitHub may queue the merge if this branch requires it. Your workspace and local branch will be kept.`,
       { title: "Merge pull request", okLabel: label },
     );
     if (!confirmed) return;
     try {
-      await ipc.workspaceMergePullRequest(workspace.id, pr.number, pr.details.headOid, method);
+      if (tracked) {
+        await ipc.trackedPullRequestMerge(
+          tracked.workspaceId,
+          tracked.id,
+          pr.details.headOid,
+          method,
+        );
+      } else {
+        await ipc.workspaceMergePullRequest(workspace.id, pr.number, pr.details.headOid, method);
+      }
       setNotice("Merge request sent. GitHub may queue it; refresh to check its status.");
     } finally {
       await usePublishStore.getState().loadProject(projectId, true);
@@ -169,21 +179,20 @@ export function PullRequestToolbar({
                       },
                     ]
                   : []),
-                ...(tracked ? [] : methods).map(({ method, label }, index) => ({
-                  divider: index === 0 && more > 0 && !conflicting(pr),
+                ...methods.map(({ method, label }, index) => ({
+                  divider: index === 0 && more > 0 && (!conflicting(pr) || !!tracked),
                   label,
                   disabled:
                     busy ||
                     pr.state !== "open" ||
                     pr.draft ||
                     !pr.details?.headOid ||
-                    workspace.missing ||
-                    workspace.archived,
+                    // One elsewhere goes by its link, and needs no folder of this workspace's.
+                    (!tracked && (workspace.missing || workspace.archived)),
                   onSelect: () => void action(() => merge(method, label)),
                 })),
                 {
                   label: "View on GitHub",
-                  divider: !!tracked && more > 0,
                   onSelect: () => void action(() => openUrl(pr.url)),
                 },
                 { label: "Copy PR link", onSelect: () => void action(() => writeText(pr.url)) },

@@ -283,6 +283,8 @@ pub struct Forge {
     forgotten: AtomicU64,
     /// Pull requests tracked in other repositories, as last read, by link.
     tracked: Mutex<tracked::TrackedReads>,
+    /// The nested clone each one's **Code** was read in, by link: found once, not on every file.
+    tracked_clones: Mutex<HashMap<String, std::path::PathBuf>>,
 }
 
 /// A project's open pull requests and when they were read. `at` is `None` once something has

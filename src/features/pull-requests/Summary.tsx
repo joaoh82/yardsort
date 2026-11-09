@@ -99,8 +99,8 @@ export function Summary({ row, now }: { row: Row; now: number }) {
             Comments on particular lines are under <b>Code</b>, beside the lines they are about.
           </p>
         )}
-        {/* Replying goes by number in the project's repository; one elsewhere waits for that. */}
-        {summary && !tracked && <Reply target={target} />}
+        {/* One elsewhere is replied to by its link, in its own repository. */}
+        {summary && <Reply target={target} />}
       </Section>
     </div>
   );

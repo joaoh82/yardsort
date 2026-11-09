@@ -135,7 +135,7 @@ pub async fn pull_request_diff(
     .await
 }
 
-fn commit_id(text: &str) -> IpcResult<()> {
+pub(super) fn commit_id(text: &str) -> IpcResult<()> {
     if is_commit_id(text) {
         Ok(())
     } else {
@@ -469,7 +469,7 @@ fn no_longer(number: u32, what: &str) -> IpcError {
     )
 }
 
-fn closable(pr: &PullRequest) -> IpcResult<()> {
+pub(super) fn closable(pr: &PullRequest) -> IpcResult<()> {
     match pr.state {
         PullRequestState::Open => Ok(()),
         PullRequestState::Merged => Err(no_longer(pr.number, "already merged")),
@@ -477,7 +477,7 @@ fn closable(pr: &PullRequest) -> IpcResult<()> {
     }
 }
 
-fn reopenable(pr: &PullRequest) -> IpcResult<()> {
+pub(super) fn reopenable(pr: &PullRequest) -> IpcResult<()> {
     match pr.state {
         PullRequestState::Closed => Ok(()),
         PullRequestState::Merged => Err(no_longer(pr.number, "merged, and cannot be reopened")),
@@ -863,8 +863,16 @@ mod tests {
         let (git, repo, _remote, head) = fixture();
         let trunk = rev(&git, repo.path(), "trunk").unwrap();
         let summary = in_full(pr(7, "theirs", false), &head, &trunk);
+        // What someone working here fetched last, for their own `git merge FETCH_HEAD`.
+        let fetch_head = repo.path().join(".git/FETCH_HEAD");
+        std::fs::write(&fetch_head, "theirs, fetched by hand\n").unwrap();
 
         let changes = changes_of(&git, repo.path(), &summary).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&fetch_head).unwrap(),
+            "theirs, fetched by hand\n",
+            "Yardsort's fetch leaves FETCH_HEAD as it was"
+        );
         assert_eq!(changes.head_oid, head);
         assert_eq!(changes.base_oid, trunk, "where it left trunk");
         assert_eq!(changes.files.len(), 1);

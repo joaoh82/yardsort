@@ -1221,7 +1221,9 @@ requests that no project's list has.
       recorded with `scripts/record-pr-creation.sh` but for Grok, which was not signed in.
       OpenCode 2 turned out not to load the plugin at all. Recorded in
       [38 § slice 3](38-pull-requests-elsewhere.md#slice-3-what-shipped).
-- [ ] Slice 4: merge, close, reopen and the reply box by link; **Code** from the nested clone.
+- [x] Slice 4: merge, close, reopen and the reply box by link — in the Pull requests view, and
+      the merges in the session toolbar — and **Code** from the nested clone, with its line
+      comments. Recorded in [38 § slice 4](38-pull-requests-elsewhere.md#slice-4-what-shipped).
 - [ ] Slice 5: _Request code review_ on a tracked pull request, in the nested clone.
 
 _Exit:_ on all three platforms, an agent in a parent project's workspace opens a pull request in a

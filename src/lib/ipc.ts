@@ -672,6 +672,45 @@ export const ipc = {
   /** A tracked pull request in full, read by its link. */
   trackedPullRequestSummary: (workspaceId: string, id: string, refresh = false) =>
     unwrap(commands.trackedPullRequestSummary(workspaceId, id, refresh)),
+  /** Merge a tracked pull request, by its link, if it is still at the head confirmed. */
+  trackedPullRequestMerge: (
+    workspaceId: string,
+    id: string,
+    headOid: string,
+    method: MergeMethod,
+  ) => done(commands.trackedPullRequestMerge(workspaceId, id, headOid, method)),
+  /** Close a tracked pull request without merging it. */
+  trackedPullRequestClose: (workspaceId: string, id: string) =>
+    done(commands.trackedPullRequestClose(workspaceId, id)),
+  /** Open a closed tracked pull request again. */
+  trackedPullRequestReopen: (workspaceId: string, id: string) =>
+    done(commands.trackedPullRequestReopen(workspaceId, id)),
+  /** Post a comment on a tracked pull request's conversation. */
+  trackedPullRequestComment: (workspaceId: string, id: string, body: string) =>
+    done(commands.trackedPullRequestComment(workspaceId, id, body)),
+  /** The files a tracked pull request changes, read in the project's nested clone of it. */
+  trackedPullRequestChanges: (workspaceId: string, id: string) =>
+    unwrap(commands.trackedPullRequestChanges(workspaceId, id)),
+  /** Both sides of one of those files, in the same clone. */
+  trackedPullRequestDiff: (
+    workspaceId: string,
+    id: string,
+    commits: Pick<PullRequestChanges, "baseOid" | "headOid">,
+    change: Pick<FileChange, "path" | "oldPath">,
+  ) =>
+    unwrap(
+      commands.trackedPullRequestDiff(
+        workspaceId,
+        id,
+        commits.baseOid,
+        commits.headOid,
+        change.path,
+        change.oldPath,
+      ),
+    ),
+  /** The comments on lines of a tracked pull request's diff. */
+  trackedPullRequestLineComments: (workspaceId: string, id: string) =>
+    unwrap(commands.trackedPullRequestLineComments(workspaceId, id)),
   /** One pull request in full: description, checks with links, reviewers, conversation. */
   pullRequestSummary: (projectId: string, number: number, refresh = false) =>
     unwrap(commands.pullRequestSummary(projectId, number, refresh)),

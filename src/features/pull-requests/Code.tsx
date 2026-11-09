@@ -9,6 +9,7 @@ import {
   type FileChange,
   type FileDiff,
   type PullRequestChanges,
+  type TrackedPullRequest,
 } from "@/lib/ipc";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { usePullRequestsStore, type Target } from "@/stores/pullRequests";
@@ -23,6 +24,7 @@ const quiet =
 /** One file's two sides, for the file in view: asked for when it is chosen. */
 function useFileDiff(
   projectId: string,
+  tracked: TrackedPullRequest | null,
   changes: PullRequestChanges | null,
   file: FileChange | null,
 ): { diff: FileDiff | null; error: string | null } {
@@ -38,17 +40,24 @@ function useFileDiff(
   const path = file?.path;
   const oldPath = file?.oldPath ?? null;
 
+  const workspaceId = tracked?.workspaceId;
+  const trackedId = tracked?.id;
   useEffect(() => {
     if (!about || !base || !head || !path) return;
     let stale = false;
-    ipc.pullRequestDiff(projectId, { baseOid: base, headOid: head }, { path, oldPath }).then(
+    const commits = { baseOid: base, headOid: head };
+    // One elsewhere is read in the project's nested clone of its repository.
+    (workspaceId && trackedId
+      ? ipc.trackedPullRequestDiff(workspaceId, trackedId, commits, { path, oldPath })
+      : ipc.pullRequestDiff(projectId, commits, { path, oldPath })
+    ).then(
       (diff) => !stale && setAnswer({ about, diff, error: null }),
       (reason: unknown) => !stale && setAnswer({ about, diff: null, error: errorMessage(reason) }),
     );
     return () => {
       stale = true;
     };
-  }, [projectId, about, base, head, path, oldPath]);
+  }, [projectId, workspaceId, trackedId, about, base, head, path, oldPath]);
 
   return answer && answer.about === about
     ? { diff: answer.diff, error: answer.error }
@@ -70,24 +79,25 @@ export function Code({ row, now }: { row: Row; now: number }) {
   const [chosen, setChosen] = useState<string | null>(null);
   const [selection, setSelection] = useState<LineSelection | null>(null);
   const [noting, setNoting] = useState<LineSelection | null>(null);
-  const target: Target = { key: row.key, projectId, pr, viewer: row.viewer };
+  const tracked = row.tracked ?? null;
+  const target: Target = { key: row.key, projectId, pr, viewer: row.viewer, tracked };
 
   useEffect(() => {
     const store = usePullRequestsStore.getState();
-    const about: Target = { key: row.key, projectId, pr, viewer: null };
+    const about: Target = { key: row.key, projectId, pr, viewer: null, tracked };
     void store.loadChanges(about);
     // The comments on lines come with the diff, and again when the list says the pull request
     // changed: a comment moves `updatedAt`.
     void store.loadLineComments(about);
     // `pr` is a new object on every poll; both compare what matters in it themselves.
-  }, [row.key, projectId, pr]);
+  }, [row.key, projectId, pr, tracked]);
 
   const changes = state?.changes ?? null;
   const files = changes?.files ?? [];
   // A file that a later push removed from the diff is no longer something to look at.
   const index = files.findIndex((file) => file.path === chosen);
   const file = index >= 0 ? files[index]! : null;
-  const { diff, error: diffError } = useFileDiff(projectId, changes, file);
+  const { diff, error: diffError } = useFileDiff(projectId, tracked, changes, file);
   const counts = useMemo(() => threadCounts(comments ?? []), [comments]);
   const threads = useMemo(
     () => (file ? threadsOf(comments ?? [], file.path) : []),
@@ -220,11 +230,13 @@ export function Code({ row, now }: { row: Row; now: number }) {
         </button>
         <button
           type="button"
-          disabled={!selection}
+          disabled={!selection || !!tracked}
           title={
-            selection
-              ? "Write a note about the selected lines for an agent, or for GitHub"
-              : "Select lines in the diff first"
+            tracked
+              ? "Notes on lines are for a project's own pull requests"
+              : selection
+                ? "Write a note about the selected lines for an agent, or for GitHub"
+                : "Select lines in the diff first"
           }
           onClick={() => selection && setNoting(selection)}
           className={quiet}

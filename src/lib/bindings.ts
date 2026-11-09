@@ -127,6 +127,35 @@ export const commands = {
 	 */
 	trackedPullRequestSummary: (workspaceId: string, id: string, refresh: boolean) => typedError<PullRequestSummary, IpcError>(__TAURI_INVOKE("tracked_pull_request_summary", { workspaceId, id, refresh })),
 	/**
+	 *  Merge a tracked pull request, as [`super::pull_requests::pull_request_merge`] merges a
+	 *  project's own: only if it is still open, not a draft, and at the head the user confirmed.
+	 *  Never deletes a branch, never bypasses a protection.
+	 */
+	trackedPullRequestMerge: (workspaceId: string, id: string, headOid: string, method: MergeMethod) => typedError<null, IpcError>(__TAURI_INVOKE("tracked_pull_request_merge", { workspaceId, id, headOid, method })),
+	/**  Close a tracked pull request without merging it. Its branch stays, and nothing is posted. */
+	trackedPullRequestClose: (workspaceId: string, id: string) => typedError<null, IpcError>(__TAURI_INVOKE("tracked_pull_request_close", { workspaceId, id })),
+	/**  Open a closed tracked pull request again. */
+	trackedPullRequestReopen: (workspaceId: string, id: string) => typedError<null, IpcError>(__TAURI_INVOKE("tracked_pull_request_reopen", { workspaceId, id })),
+	/**
+	 *  Post a comment on a tracked pull request's conversation. The words are the user's, sent as
+	 *  they are; pressing Send was the confirmation.
+	 */
+	trackedPullRequestComment: (workspaceId: string, id: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("tracked_pull_request_comment", { workspaceId, id, body })),
+	/**
+	 *  The files a tracked pull request changes, read in the project's nested clone of its
+	 *  repository: its commits are fetched there, into refs of Yardsort's own, as a project's own
+	 *  are fetched into the project's checkout. Nothing is checked out, and no branch moves. The
+	 *  head and base are the ones last read, which the window shows; one never read is read now.
+	 */
+	trackedPullRequestChanges: (workspaceId: string, id: string) => typedError<PullRequestChanges, IpcError>(__TAURI_INVOKE("tracked_pull_request_changes", { workspaceId, id })),
+	/**
+	 *  Both sides of one file of a tracked pull request, between the two commits
+	 *  [`tracked_pull_request_changes`] answered with, in the same nested clone.
+	 */
+	trackedPullRequestDiff: (workspaceId: string, id: string, baseOid: string, headOid: string, path: string, oldPath: string | null) => typedError<FileDiff, IpcError>(__TAURI_INVOKE("tracked_pull_request_diff", { workspaceId, id, baseOid, headOid, path, oldPath })),
+	/**  The comments on lines of a tracked pull request's diff, asked of its own repository by name. */
+	trackedPullRequestLineComments: (workspaceId: string, id: string) => typedError<LineComment[], IpcError>(__TAURI_INVOKE("tracked_pull_request_line_comments", { workspaceId, id })),
+	/**
 	 *  One pull request in full: its description, every check with its link, its reviewers and
 	 *  the conversation. What the Pull requests view's Summary shows, read when a row is opened.
 	 */

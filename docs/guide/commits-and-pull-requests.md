@@ -185,10 +185,12 @@ told about it instead, and **tracks** it:
 A tracked pull request is shown with the workspace like its own, named by its repository so its
 number does not read as the project's: **lib#7** on the row, counted with the others and listed
 under _Also opened from this workspace_ on hover; **lib#7** in the toolbar once chosen from its
-arrow menu. Its checks colour it as always. The toolbar's menu offers **View on GitHub**, **Copy
-PR link**, **Refresh pull request** and **Stop tracking**; merging it and asking an agent to
-resolve its conflicts are not offered for one in another repository yet. It is also listed in
-the [Pull requests view](pull-requests.md#pull-requests-in-other-repositories).
+arrow menu. Its checks colour it as always. The toolbar's menu offers the three ways to merge it,
+**View on GitHub**, **Copy PR link**, **Refresh pull request** and **Stop tracking**; a merge is
+done by its link, in its own repository, after a confirmation that names it. Asking an agent to
+resolve its conflicts is not offered for one in another repository. It is also listed in the
+[Pull requests view](pull-requests.md#pull-requests-in-other-repositories), where it can be
+closed, reopened and replied to, and its diff read from the project's nested clone of it.
 
 Yardsort reads each one with `gh pr view <link>`, which needs nothing checked out: an open one
 is read again whenever the project's list is, a merged or closed one every ten minutes. Up to 20

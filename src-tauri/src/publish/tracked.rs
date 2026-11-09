@@ -11,11 +11,14 @@ use serde::Serialize;
 use specta::Type;
 use tauri::AppHandle;
 
-use super::commands::{failed, project_root};
+use super::commands::{failed, project_root, pull_request_changed, still_mergeable};
+use super::pull_requests::{changes_of, closable, commit_id, reopenable, PullRequestChanges};
 use super::Forge;
+use crate::changes::{Between, FileDiff};
 use crate::error::{IpcError, IpcResult};
 use crate::forge::{
-    ForgeError, ForgeResult, Gh, PullRequest, PullRequestState, PullRequestSummary, Repo,
+    ForgeError, ForgeResult, Gh, LineComment, MergeMethod, PullRequest, PullRequestState,
+    PullRequestSummary, Repo,
 };
 use crate::git::Git;
 use crate::state::{blocking, AppState};
@@ -163,6 +166,15 @@ impl Forge {
             .collect()
     }
 
+    /// The pull request at `url` as last read, however long ago: what the window was shown.
+    pub fn last_tracked(&self, url: &str) -> Option<PullRequest> {
+        self.tracked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(url)
+            .and_then(|read| read.pull_request.clone())
+    }
+
     /// Read `url` afresh on the next look: something was just done to it.
     pub fn forget_tracked(&self, url: &str) {
         self.tracked
@@ -263,9 +275,43 @@ pub async fn workspace_untrack_pull_request(
         state.store.untrack_pull_request(&workspace_id, &row.id)?;
         // Another workspace may follow it too; that one reads it afresh, which costs one call.
         state.forge.forget_tracked(&row.url);
+        forget_commits(state, &workspace_id, &row);
         Ok(())
     })
     .await
+}
+
+/// The refs **Code** fetched a pull request's commits into, in the nested clone: Yardsort's own,
+/// and nobody else's, so they go when no workspace of the project follows it any more. Best
+/// effort — they are fetched again if anyone asks.
+fn forget_commits(state: &AppState, workspace_id: &str, row: &TrackedPullRequestRow) {
+    let Ok(Some(workspace)) = state.store.workspace(workspace_id) else {
+        return;
+    };
+    let still = state
+        .store
+        .tracked_pull_requests_in_project(&workspace.project_id)
+        .is_ok_and(|rows| rows.iter().any(|other| other.url == row.url));
+    if still {
+        return;
+    }
+    state
+        .forge
+        .tracked_clones
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .remove(&row.url);
+    let (Ok(git), Ok(root)) = (
+        Git::new(&state.env()),
+        project_root(state, &workspace.project_id),
+    ) else {
+        return;
+    };
+    if let Ok(clone) = clone_in(&git, &root, row) {
+        for which in ["head", "base"] {
+            let _ = git.delete_ref(&clone, &crate::git::pull_request_ref(row.number, which));
+        }
+    }
 }
 
 /// A tracked pull request in full, as [`super::pull_requests::pull_request_summary`] reads a
@@ -296,21 +342,256 @@ fn summary_of(
     refresh: bool,
 ) -> IpcResult<PullRequestSummary> {
     let row = row_in(store, workspace_id, id)?;
-    let workspace = store
-        .workspace(workspace_id)?
-        .ok_or_else(|| IpcError::new("unknown_workspace", "That workspace no longer exists."))?;
-    let root = store
-        .project(&workspace.project_id)?
-        .map(|project| PathBuf::from(project.root_path))
-        .filter(|root| root.is_dir())
-        .unwrap_or_else(std::env::temp_dir);
+    let root = cwd_of(store, workspace_id)?;
     // Kept apart from the project's own summaries, whose numbers this one's would collide with:
     // the key is the link.
     forge
-        .summary(&format!("tracked:{}", row.url), row.number, refresh, || {
+        .summary(&summary_key(&row.url), row.number, refresh, || {
             gh.pull_request_summary_at(&root, &row.url, super::pull_requests::SUMMARY_LIMIT)
         })
         .map_err(failed)
+}
+
+/// Where `gh` runs for a workspace's tracked pull requests: its project's checkout, or, when
+/// that has gone, anywhere — a link needs no repository around it.
+fn cwd_of(store: &Store, workspace_id: &str) -> IpcResult<PathBuf> {
+    let workspace = store
+        .workspace(workspace_id)?
+        .ok_or_else(|| IpcError::new("unknown_workspace", "That workspace no longer exists."))?;
+    Ok(store
+        .project(&workspace.project_id)?
+        .map(|project| PathBuf::from(project.root_path))
+        .filter(|root| root.is_dir())
+        .unwrap_or_else(std::env::temp_dir))
+}
+
+/// A tracked pull request as the forge has it this moment, with what is needed to act on it:
+/// nothing done to one rests on an answer half a minute old.
+fn fresh(
+    state: &AppState,
+    workspace_id: &str,
+    id: &str,
+) -> IpcResult<(Gh, PathBuf, TrackedPullRequestRow, PullRequest)> {
+    let row = row_of(state, workspace_id, id)?;
+    let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+    let cwd = cwd_of(&state.store, workspace_id)?;
+    let pr = gh
+        .pull_request_at(&cwd, &row.url, READ_LIMIT)
+        .map_err(failed)?;
+    Ok((gh, cwd, row, pr))
+}
+
+/// Something was done to the pull request at `url`: read it, and its summary, afresh.
+fn changed(state: &AppState, url: &str) {
+    state.forge.forget_tracked(url);
+    state.forge.forget(&summary_key(url));
+}
+
+/// Where a tracked pull request's summary is kept, apart from the project's own, whose numbers
+/// its number would collide with.
+fn summary_key(url: &str) -> String {
+    format!("tracked:{url}")
+}
+
+/// Merge a tracked pull request, as [`super::pull_requests::pull_request_merge`] merges a
+/// project's own: only if it is still open, not a draft, and at the head the user confirmed.
+/// Never deletes a branch, never bypasses a protection.
+#[tauri::command]
+#[specta::specta]
+pub async fn tracked_pull_request_merge(
+    app: AppHandle,
+    workspace_id: String,
+    id: String,
+    head_oid: String,
+    method: MergeMethod,
+) -> IpcResult<()> {
+    blocking(app, move |state| {
+        let (gh, cwd, row, pr) = fresh(state, &workspace_id, &id)?;
+        if !still_mergeable(&pr, &head_oid) {
+            return Err(pull_request_changed());
+        }
+        let result = gh.merge_pull_request_at(&cwd, &row.url, &head_oid, method);
+        changed(state, &row.url);
+        result.map_err(failed)
+    })
+    .await
+}
+
+/// Close a tracked pull request without merging it. Its branch stays, and nothing is posted.
+#[tauri::command]
+#[specta::specta]
+pub async fn tracked_pull_request_close(
+    app: AppHandle,
+    workspace_id: String,
+    id: String,
+) -> IpcResult<()> {
+    blocking(app, move |state| {
+        let (gh, cwd, row, pr) = fresh(state, &workspace_id, &id)?;
+        closable(&pr)?;
+        let result = gh.close_pull_request_at(&cwd, &row.url);
+        changed(state, &row.url);
+        result.map_err(failed)
+    })
+    .await
+}
+
+/// Open a closed tracked pull request again.
+#[tauri::command]
+#[specta::specta]
+pub async fn tracked_pull_request_reopen(
+    app: AppHandle,
+    workspace_id: String,
+    id: String,
+) -> IpcResult<()> {
+    blocking(app, move |state| {
+        let (gh, cwd, row, pr) = fresh(state, &workspace_id, &id)?;
+        reopenable(&pr)?;
+        let result = gh.reopen_pull_request_at(&cwd, &row.url);
+        changed(state, &row.url);
+        result.map_err(failed)
+    })
+    .await
+}
+
+/// Post a comment on a tracked pull request's conversation. The words are the user's, sent as
+/// they are; pressing Send was the confirmation.
+#[tauri::command]
+#[specta::specta]
+pub async fn tracked_pull_request_comment(
+    app: AppHandle,
+    workspace_id: String,
+    id: String,
+    body: String,
+) -> IpcResult<()> {
+    let body = body.trim().to_owned();
+    if body.is_empty() {
+        return Err(IpcError::new("empty_comment", "Write something first."));
+    }
+    blocking(app, move |state| {
+        let row = row_of(state, &workspace_id, &id)?;
+        let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+        let cwd = cwd_of(&state.store, &workspace_id)?;
+        let result = gh.comment_at(&cwd, &row.url, &body);
+        changed(state, &row.url);
+        result.map_err(failed)
+    })
+    .await
+}
+
+/// The nested clone a tracked pull request's diff is read in.
+fn clone_for(
+    state: &AppState,
+    git: &Git,
+    workspace_id: &str,
+    row: &TrackedPullRequestRow,
+) -> IpcResult<PathBuf> {
+    let mut known = state
+        .forge
+        .tracked_clones
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if let Some(clone) = known.get(&row.url).filter(|clone| clone.is_dir()) {
+        return Ok(clone.clone());
+    }
+    let workspace = state
+        .store
+        .workspace(workspace_id)?
+        .ok_or_else(|| IpcError::new("unknown_workspace", "That workspace no longer exists."))?;
+    let clone = clone_in(git, &project_root(state, &workspace.project_id)?, row)?;
+    known.insert(row.url.clone(), clone.clone());
+    Ok(clone)
+}
+
+/// [`clone_for`] in the project's checkout at `root`.
+fn clone_in(git: &Git, root: &std::path::Path, row: &TrackedPullRequestRow) -> IpcResult<PathBuf> {
+    let repo = crate::tracked::repo_from_key(&row.repo).ok_or_else(|| {
+        IpcError::new("not_tracked", "That pull request's repository is unknown.")
+    })?;
+    crate::tracked::clone_of(git, root, &repo).ok_or_else(|| {
+        IpcError::new(
+            "no_clone",
+            format!(
+                "This project's folder holds no clone of {}/{} to read the diff in. Its diff is on \
+                 GitHub.",
+                repo.owner, repo.name
+            ),
+        )
+    })
+}
+
+/// The files a tracked pull request changes, read in the project's nested clone of its
+/// repository: its commits are fetched there, into refs of Yardsort's own, as a project's own
+/// are fetched into the project's checkout. Nothing is checked out, and no branch moves. The
+/// head and base are the ones last read, which the window shows; one never read is read now.
+#[tauri::command]
+#[specta::specta]
+pub async fn tracked_pull_request_changes(
+    app: AppHandle,
+    workspace_id: String,
+    id: String,
+) -> IpcResult<PullRequestChanges> {
+    blocking(app, move |state| {
+        let row = row_of(state, &workspace_id, &id)?;
+        let git = Git::new(&state.env())?;
+        let clone = clone_for(state, &git, &workspace_id, &row)?;
+        let pr = match state.forge.last_tracked(&row.url) {
+            Some(pr) if pr.details.is_some() => pr,
+            _ => fresh(state, &workspace_id, &id)?.3,
+        };
+        changes_of(&git, &clone, &pr)
+    })
+    .await
+}
+
+/// Both sides of one file of a tracked pull request, between the two commits
+/// [`tracked_pull_request_changes`] answered with, in the same nested clone.
+#[tauri::command]
+#[specta::specta]
+pub async fn tracked_pull_request_diff(
+    app: AppHandle,
+    workspace_id: String,
+    id: String,
+    base_oid: String,
+    head_oid: String,
+    path: String,
+    old_path: Option<String>,
+) -> IpcResult<FileDiff> {
+    blocking(app, move |state| {
+        // They come back from the window; they go to git only as commit ids, written in full.
+        commit_id(&base_oid)?;
+        commit_id(&head_oid)?;
+        let row = row_of(state, &workspace_id, &id)?;
+        let git = Git::new(&state.env())?;
+        let clone = clone_for(state, &git, &workspace_id, &row)?;
+        Between {
+            git: &git,
+            root: &clone,
+            old: &base_oid,
+            new: &head_oid,
+        }
+        .diff(&path, old_path.as_deref())
+    })
+    .await
+}
+
+/// The comments on lines of a tracked pull request's diff, asked of its own repository by name.
+#[tauri::command]
+#[specta::specta]
+pub async fn tracked_pull_request_line_comments(
+    app: AppHandle,
+    workspace_id: String,
+    id: String,
+) -> IpcResult<Vec<LineComment>> {
+    blocking(app, move |state| {
+        let row = row_of(state, &workspace_id, &id)?;
+        let repo = crate::tracked::repo_from_key(&row.repo).ok_or_else(|| {
+            IpcError::new("not_tracked", "That pull request's repository is unknown.")
+        })?;
+        let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+        let cwd = cwd_of(&state.store, &workspace_id)?;
+        gh.line_comments_in(&cwd, &repo, row.number).map_err(failed)
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -345,6 +626,75 @@ mod tests {
             author: None,
             created_at: None,
         }
+    }
+
+    /// **Code** on a tracked pull request reads its diff in the project's nested clone of its
+    /// repository, which has its history — never in the project's own checkout, which has not.
+    /// The commits are where a fetch would have put them, so no network is needed.
+    #[test]
+    fn a_tracked_pull_requests_diff_is_read_in_the_nested_clone() {
+        use crate::forge::{CheckCounts, Mergeable, PullRequestDetails};
+        let git = crate::git::testing::git();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git.init(root).unwrap();
+        let clone = root.join("lib");
+        std::fs::create_dir_all(&clone).unwrap();
+        git.init(&clone).unwrap();
+        git.run(
+            &clone,
+            &["remote", "add", "origin", "https://github.com/o/lib.git"],
+        )
+        .unwrap();
+        std::fs::write(clone.join("lib.rs"), "one\n").unwrap();
+        git.run(&clone, &["add", "."]).unwrap();
+        git.run(&clone, &["commit", "-qm", "base"]).unwrap();
+        let base = git.commit_id(&clone, "HEAD").unwrap().unwrap();
+        std::fs::write(clone.join("lib.rs"), "one\ntwo\n").unwrap();
+        git.run(&clone, &["commit", "-qam", "bump"]).unwrap();
+        let head = git.commit_id(&clone, "HEAD").unwrap().unwrap();
+        git.run(&clone, &["reset", "-q", "--hard", &base]).unwrap();
+        git.update_ref(&clone, &crate::git::pull_request_ref(7, "head"), &head)
+            .unwrap();
+
+        let tracked = row("a", 7);
+        let found = clone_in(&git, root, &tracked).unwrap();
+        assert_eq!(found, clone);
+        let mut pull_request = pr(7, PullRequestState::Open);
+        pull_request.details = Some(PullRequestDetails {
+            base: "main".into(),
+            head_oid: head.clone(),
+            base_oid: base.clone(),
+            additions: 1,
+            deletions: 0,
+            review: String::new(),
+            updated_at: String::new(),
+            checks: vec![],
+            check_counts: CheckCounts::default(),
+            mergeable: Mergeable::Mergeable,
+            review_requests: vec![],
+            reviews: vec![],
+            cross_repository: false,
+        });
+        let changes = changes_of(&git, &found, &pull_request).unwrap();
+        assert_eq!(
+            (changes.head_oid.as_str(), changes.base_oid.as_str()),
+            (head.as_str(), base.as_str())
+        );
+        assert_eq!(changes.files.len(), 1);
+        assert_eq!(changes.files[0].path, "lib.rs");
+        assert_eq!(
+            git.run(&clone, &["status", "--porcelain"]).unwrap().trim(),
+            "",
+            "nothing checked out, nothing changed in the clone"
+        );
+
+        // No clone of it: said so, with where the diff is instead.
+        let mut elsewhere = row("b", 8);
+        elsewhere.repo = "github.com/o/other".into();
+        let refused = clone_in(&git, root, &elsewhere).unwrap_err();
+        assert_eq!(refused.code, "no_clone");
+        assert!(refused.message.contains("o/other"), "{}", refused.message);
     }
 
     fn number_of(url: &str) -> u32 {

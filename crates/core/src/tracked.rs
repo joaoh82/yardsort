@@ -168,6 +168,35 @@ pub fn track(
     })?)
 }
 
+/// The nested clone of `repo` in the project's checkout at `root`: a folder directly inside it
+/// with a `.git` of its own and a remote that is that repository. Where a tracked pull request's
+/// commits are fetched for its diff (slice 4 of docs/design/38-pull-requests-elsewhere.md):
+/// the project's own repository has none of its history.
+pub fn clone_of(git: &Git, root: &Path, repo: &Repo) -> Option<std::path::PathBuf> {
+    let clones: Vec<(std::path::PathBuf, Vec<Repo>)> = nested_repositories(root)
+        .into_iter()
+        .map(|name| root.join(name))
+        .map(|clone| {
+            let repos = crate::forge::repos_at(git, &clone);
+            (clone, repos)
+        })
+        .collect();
+    let named = |here: &Repo| {
+        here.owner.eq_ignore_ascii_case(&repo.owner) && here.name.eq_ignore_ascii_case(&repo.name)
+    };
+    // On its own host first; then by owner and name alone, for a remote reached through an SSH
+    // host alias (`git@github-work:o/lib`), which names no forge's host.
+    clones
+        .iter()
+        .find(|(_, repos)| {
+            repos
+                .iter()
+                .any(|here| named(here) && here.host.eq_ignore_ascii_case(&repo.host))
+        })
+        .or_else(|| clones.iter().find(|(_, repos)| repos.iter().any(named)))
+        .map(|(clone, _)| clone.clone())
+}
+
 /// The git repositories directly inside `root`, by folder name, sorted: the nested clones a
 /// parent repository keeps. A `.git` file counts as well as a folder — a worktree or a
 /// submodule's checkout is one too.
@@ -677,6 +706,58 @@ mod tests {
         .unwrap_err();
         assert_eq!(own.code, "own_pull_request");
         assert_eq!(store.tracked_pull_requests(&ws.id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_pull_requests_nested_clone_is_found_by_its_remote() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for (name, remote) in [
+            ("app", "git@github.com:o/app.git"),
+            ("lib", "https://github.com/O/Lib.git"),
+            ("fork", "git@github.example.com:o/lib.git"),
+        ] {
+            let clone = root.join(name);
+            std::fs::create_dir_all(&clone).unwrap();
+            git().run(&clone, &["init", "-q"]).unwrap();
+            git()
+                .run(&clone, &["remote", "add", "origin", remote])
+                .unwrap();
+        }
+        let repo = |host: &str, owner: &str, name: &str| crate::forge::Repo {
+            host: host.into(),
+            owner: owner.into(),
+            name: name.into(),
+            kind: ForgeKind::GitHub,
+        };
+        assert_eq!(
+            clone_of(&git(), root, &repo("github.com", "o", "lib")),
+            Some(root.join("lib")),
+            "by its remote, whatever the case"
+        );
+        assert_eq!(
+            clone_of(&git(), root, &repo("github.example.com", "o", "lib")),
+            Some(root.join("fork")),
+            "the host counts"
+        );
+        assert_eq!(
+            clone_of(&git(), root, &repo("github.com", "o", "other")),
+            None
+        );
+        // A remote through an SSH host alias names no forge's host: found by its name.
+        let alias = root.join("alias");
+        std::fs::create_dir_all(&alias).unwrap();
+        git().run(&alias, &["init", "-q"]).unwrap();
+        git()
+            .run(
+                &alias,
+                &["remote", "add", "origin", "git@github-work:o/tool.git"],
+            )
+            .unwrap();
+        assert_eq!(
+            clone_of(&git(), root, &repo("github.com", "o", "tool")),
+            Some(alias)
+        );
     }
 
     #[test]

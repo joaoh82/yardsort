@@ -896,21 +896,37 @@ impl Gh {
         head: &str,
         method: MergeMethod,
     ) -> ForgeResult<()> {
+        self.merge_of(root, &number.to_string(), head, method)
+    }
+
+    /// [`Gh::merge_pull_request`] for the pull request at `url`, in whatever repository: `gh`
+    /// takes a link in place of a number for every `pr` command, and then needs no repository
+    /// around it. For a pull request a workspace tracks elsewhere.
+    pub fn merge_pull_request_at(
+        &self,
+        cwd: &Path,
+        url: &str,
+        head: &str,
+        method: MergeMethod,
+    ) -> ForgeResult<()> {
+        self.merge_of(cwd, url, head, method)
+    }
+
+    fn merge_of(
+        &self,
+        cwd: &Path,
+        selector: &str,
+        head: &str,
+        method: MergeMethod,
+    ) -> ForgeResult<()> {
         let flag = match method {
             MergeMethod::Squash => "--squash",
             MergeMethod::Merge => "--merge",
             MergeMethod::Rebase => "--rebase",
         };
         self.run(
-            root,
-            &[
-                "pr",
-                "merge",
-                &number.to_string(),
-                flag,
-                "--match-head-commit",
-                head,
-            ],
+            cwd,
+            &["pr", "merge", selector, flag, "--match-head-commit", head],
         )?;
         Ok(())
     }
@@ -968,11 +984,16 @@ impl Gh {
 
     /// Post `body` as a comment on pull request `number`'s conversation.
     pub fn comment(&self, root: &Path, number: u32, body: &str) -> ForgeResult<()> {
-        self.run_with_stdin(
-            root,
-            &["pr", "comment", &number.to_string(), "--body-file", "-"],
-            body,
-        )?;
+        self.comment_on(root, &number.to_string(), body)
+    }
+
+    /// [`Gh::comment`] on the pull request at `url`, in whatever repository.
+    pub fn comment_at(&self, cwd: &Path, url: &str, body: &str) -> ForgeResult<()> {
+        self.comment_on(cwd, url, body)
+    }
+
+    fn comment_on(&self, cwd: &Path, selector: &str, body: &str) -> ForgeResult<()> {
+        self.run_with_stdin(cwd, &["pr", "comment", selector, "--body-file", "-"], body)?;
         Ok(())
     }
 
@@ -981,6 +1002,29 @@ impl Gh {
     pub fn line_comments(&self, root: &Path, number: u32) -> ForgeResult<Vec<LineComment>> {
         let endpoint = format!("repos/{{owner}}/{{repo}}/pulls/{number}/comments");
         let out = self.run(root, &["api", "--paginate", "--slurp", &endpoint])?;
+        line_comments(&out)
+    }
+
+    /// [`Gh::line_comments`] of pull request `number` of `repo`, named rather than found from
+    /// the folder `gh` runs in — and on its host, so a GitHub Enterprise one is asked there.
+    pub fn line_comments_in(
+        &self,
+        cwd: &Path,
+        repo: &Repo,
+        number: u32,
+    ) -> ForgeResult<Vec<LineComment>> {
+        let endpoint = format!("repos/{}/{}/pulls/{number}/comments", repo.owner, repo.name);
+        let out = self.run(
+            cwd,
+            &[
+                "api",
+                "--hostname",
+                &repo.host,
+                "--paginate",
+                "--slurp",
+                &endpoint,
+            ],
+        )?;
         line_comments(&out)
     }
 
@@ -1019,9 +1063,21 @@ impl Gh {
         Ok(())
     }
 
+    /// [`Gh::close_pull_request`] for the pull request at `url`, in whatever repository.
+    pub fn close_pull_request_at(&self, cwd: &Path, url: &str) -> ForgeResult<()> {
+        self.run(cwd, &["pr", "close", url])?;
+        Ok(())
+    }
+
     /// Open a closed pull request again.
     pub fn reopen_pull_request(&self, root: &Path, number: u32) -> ForgeResult<()> {
         self.run(root, &["pr", "reopen", &number.to_string()])?;
+        Ok(())
+    }
+
+    /// [`Gh::reopen_pull_request`] for the pull request at `url`, in whatever repository.
+    pub fn reopen_pull_request_at(&self, cwd: &Path, url: &str) -> ForgeResult<()> {
+        self.run(cwd, &["pr", "reopen", url])?;
         Ok(())
     }
 
@@ -1706,6 +1762,57 @@ mod tests {
         );
         assert!(lines[1].starts_with(&format!("pr view {url} --json ")));
         assert!(lines[1].ends_with(",body,comments,reviews,changedFiles"));
+    }
+
+    /// What is done to a pull request elsewhere is done by its link, never by a number that
+    /// would be read against the folder `gh` runs in; its line comments by its repository and
+    /// host, named.
+    #[cfg(unix)]
+    #[test]
+    fn a_pull_request_elsewhere_is_acted_on_by_its_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("gh");
+        let asked = dir.path().join("asked");
+        let body = dir.path().join("body");
+        crate::program::testing::executable(
+            &script,
+            format!(
+                "#!/bin/sh\necho \"$@\" >> '{}'\ncase \"$1\" in api) echo '[[]]' ;; *) cat >> '{}' ;; esac\n",
+                asked.display(),
+                body.display()
+            ),
+        );
+        let env = crate::env::ShellEnv {
+            vars: std::env::vars().collect(),
+            source: crate::env::EnvSource::Process,
+            warning: None,
+        };
+        let gh = Gh::at(script, &env);
+        let url = "https://github.example.com/o/lib/pull/7";
+        let head = "0123456789abcdef0123456789abcdef01234567";
+        gh.merge_pull_request_at(dir.path(), url, head, MergeMethod::Squash)
+            .unwrap();
+        gh.close_pull_request_at(dir.path(), url).unwrap();
+        gh.reopen_pull_request_at(dir.path(), url).unwrap();
+        gh.comment_at(dir.path(), url, "Looks right.").unwrap();
+        let repo = parse_remote("https://github.example.com/o/lib.git").unwrap();
+        assert!(gh
+            .line_comments_in(dir.path(), &repo, 7)
+            .unwrap()
+            .is_empty());
+        let asked = std::fs::read_to_string(&asked).unwrap();
+        assert_eq!(
+            asked.lines().collect::<Vec<_>>(),
+            [
+                format!("pr merge {url} --squash --match-head-commit {head}"),
+                format!("pr close {url}"),
+                format!("pr reopen {url}"),
+                format!("pr comment {url} --body-file -"),
+                "api --hostname github.example.com --paginate --slurp repos/o/lib/pulls/7/comments"
+                    .to_owned(),
+            ]
+        );
+        assert_eq!(std::fs::read_to_string(&body).unwrap(), "Looks right.");
     }
 
     #[test]
