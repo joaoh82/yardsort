@@ -12,6 +12,19 @@ has the downloads and the full commit lists.
   sidebar, online or offline since when, and opens to its workspaces, agents and recent activity,
   named across the top, with no Changes panel or Git action. Watching and typing into its terminals
   come next. See [Reaching another computer](docs/guide/remote.md#reaching-another-computer).
+- **The Floor Manager: one agent that sees every project.** **Floor Manager** in the bottom
+  bar's lower-right corner, or **Mod+J**, opens a panel with an agent you pick, started in a
+  folder of its own and told how to use `ys`. Ask it what projects there are and what is
+  running, which pull requests are not reviewed or need attention, or to start a task. It
+  suggests a workflow and proposes exactly what it will run, then waits for your yes before it
+  starts an agent, a workspace or a review, or writes to GitHub. Closing the panel leaves it
+  running. _Floor Manager_ is a working name. See [Floor Manager](docs/guide/floor-manager.md).
+- **`ys pr list`**: every project's open pull requests from the command line, with the Pull
+  requests view's review filters (`--reviews none`, `not-by-me`, `awaiting-me`…) and
+  `--attention` for failing checks, conflicts, changes requested, a review asked of you, or no
+  review at all. **`ys pr checkout <n>`** opens a workspace on a pull request's branch, so
+  `ys workflow run code-review` can review someone else's pull request. See
+  [`ys pr`](docs/guide/cli.md#ys-pr).
 
 ## 0.23.0
 

@@ -3784,3 +3784,215 @@ fn a_preset_watches_the_pull_request_from_what_is_on_it_when_it_is_added() {
         tasks.asked()
     );
 }
+
+/// On GitHub, with a `gh` that has the recorded open pull requests, two pages of them.
+#[cfg(unix)]
+fn pull_requests() -> Tasks {
+    Tasks::new(
+        Some("git@github.com:example/widgets.git"),
+        Some(
+            "case \"$*\" in\n\
+             *pullRequests*after=*) cat \"$fixtures/open-page-2.json\" ;;\n\
+             *pullRequests*) cat \"$fixtures/open-page-1.json\" ;;\n\
+             *) echo \"not recorded: $*\" >&2; exit 1 ;;\nesac",
+        ),
+    )
+}
+
+#[cfg(unix)]
+fn numbers(json: &str) -> Vec<u64> {
+    let parsed: serde_json::Value = serde_json::from_str(json).expect("valid JSON");
+    parsed
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|pr| pr["number"].as_u64().unwrap())
+        .collect()
+}
+
+#[cfg(unix)]
+#[test]
+fn open_pull_requests_are_listed_from_every_page_with_what_needs_attention() {
+    let prs = pull_requests();
+    let table = prs.ys(None, &["pr", "list"]).ok();
+    let lines: Vec<&str> = table.lines().collect();
+    assert!(lines[0].starts_with("PROJECT  PR"), "{table}");
+    assert_eq!(lines.len(), 8, "a heading and seven pull requests: {table}");
+    assert!(
+        table.contains("#13506  open   changes requested"),
+        "{table}"
+    );
+    let asked = prs.asked();
+    assert_eq!(asked.len(), 2, "two pages: {asked:?}");
+    assert!(asked[1].contains("after="), "{asked:?}");
+
+    // Failing checks, conflicts, changes asked for, a review asked of you, or none at all.
+    let json = prs.ys(None, &["pr", "list", "--attention", "--json"]).ok();
+    assert_eq!(numbers(&json), [14572, 13506, 13947]);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed[0]["attention"], serde_json::json!(["unreviewed"]));
+    assert_eq!(
+        parsed[1]["attention"],
+        serde_json::json!(["changesRequested"])
+    );
+    assert_eq!(parsed[2]["attention"], serde_json::json!(["conflicts"]));
+    assert_eq!(parsed[0]["viewer"], "ada");
+}
+
+#[cfg(unix)]
+#[test]
+fn pull_requests_are_narrowed_by_the_pull_request_views_review_rules() {
+    let prs = pull_requests();
+    let list = |args: &[&str]| {
+        let mut all = vec!["pr", "list", "--json"];
+        all.extend_from_slice(args);
+        numbers(&prs.ys(None, &all).ok())
+    };
+    assert_eq!(list(&["--reviews", "none"]), [14572, 14044]);
+    assert_eq!(list(&["--reviews", "approved"]), [13665]);
+    assert_eq!(list(&["--reviews", "changes"]), [13506]);
+    // "ada" is who gh is logged in as: her own pull request is not one she failed to review.
+    assert_eq!(
+        list(&["--reviews", "not-by-me"]),
+        [14578, 14572, 14044, 13665, 13506, 14017]
+    );
+    assert_eq!(list(&["--author", "@me"]), [13947]);
+    assert_eq!(list(&["--author", "Frances"]), [13506]);
+    assert_eq!(list(&["--no-drafts"]), [14572, 13665, 13506]);
+    assert_eq!(list(&["--limit", "2"]), [14578, 14572]);
+    let none = prs
+        .ys(None, &["pr", "list", "--reviews", "awaiting-me"])
+        .ok();
+    assert_eq!(none.trim(), "No open pull requests match.");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_pull_request_with_a_workspace_says_which() {
+    let prs = pull_requests();
+    let fx = &prs.fx;
+    fx.git().run(&fx.repo, &["branch", "branch-14572"]).unwrap();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let project = store.projects().unwrap().remove(0);
+    let git = fx.git();
+    let settings = WorkspaceSettings::default();
+    Workspaces {
+        env: &ShellEnv {
+            vars: std::env::vars().collect(),
+            source: EnvSource::Process,
+            warning: None,
+        },
+        store: &store,
+        git: &git,
+        worktree_root: &fx.worktree_root,
+        settings: &settings,
+    }
+    .open_branch(&project.id, "branch-14572")
+    .unwrap();
+
+    let table = prs.ys(None, &["pr", "list"]).ok();
+    assert!(
+        table.contains("Add a retry to the uploader (in branch-14572)"),
+        "{table}"
+    );
+    let json = prs.ys(None, &["pr", "list", "--json"]).ok();
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed[1]["workspace"], "branch-14572");
+    assert_eq!(parsed[0]["workspace"], serde_json::Value::Null);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_project_not_on_github_is_said_and_the_rest_still_listed() {
+    let prs = Tasks::new(None, Some("echo \"not asked: $*\" >&2; exit 1"));
+    let run = prs.ys(None, &["pr", "list"]);
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert_eq!(run.stdout.trim(), "No open pull requests.");
+    assert!(
+        run.stderr.contains("Demo: no remote on GitHub"),
+        "{}",
+        run.stderr
+    );
+    assert!(
+        prs.asked().is_empty(),
+        "gh was not asked: {:?}",
+        prs.asked()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn listing_pull_requests_without_gh_says_how_to_get_it() {
+    let prs = Tasks::new(Some("git@github.com:example/widgets.git"), None);
+    let refused = prs.ys(None, &["pr", "list"]).failed();
+    assert!(refused.contains("https://cli.github.com"), "{refused}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_pull_request_is_checked_out_into_a_workspace_once() {
+    let remote = tempfile::tempdir().unwrap();
+    let git = git();
+    git.run(remote.path(), &["init", "--bare", "-q"]).unwrap();
+    let prs = Tasks::new(
+        Some(&remote.path().to_string_lossy()),
+        Some(
+            "case \"$*\" in\n\
+             'pr view 13665 '*) cat \"$fixtures/pr-view.json\" ;;\n\
+             *) echo \"not recorded: $*\" >&2; exit 1 ;;\nesac",
+        ),
+    );
+    let fx = &prs.fx;
+    // Their branch is on the remote and not here.
+    git.run(
+        &fx.repo,
+        &["push", "-q", "origin", "HEAD:refs/heads/branch-13665"],
+    )
+    .unwrap();
+    assert!(!git.branch_exists(&fx.repo, "branch-13665").unwrap());
+
+    let json = prs
+        .ys(
+            None,
+            &["pr", "checkout", "#13665", "--project", "Demo", "--json"],
+        )
+        .ok();
+    let made: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(made["existing"], false);
+    assert_eq!(made["fork"], false);
+    assert_eq!(made["branch"], "branch-13665");
+    assert_eq!(made["pullRequest"], 13665);
+    let path = PathBuf::from(made["path"].as_str().unwrap());
+    assert!(
+        path.join(".git").exists(),
+        "a worktree at {}",
+        path.display()
+    );
+    assert_eq!(
+        git.run(&path, &["branch", "--show-current"])
+            .unwrap()
+            .trim(),
+        "branch-13665"
+    );
+
+    // Asked again, the same workspace, and nothing new is made.
+    let again = prs
+        .ys(None, &["pr", "checkout", "13665", "--project", "Demo"])
+        .ok();
+    assert!(
+        again.starts_with("#13665 is already in branch-13665"),
+        "{again}"
+    );
+    assert!(
+        again.contains("ys workflow run code-review --workspace branch-13665"),
+        "{again}"
+    );
+    let listed = fx.ys(&["workspace", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&listed).unwrap();
+    assert_eq!(worktrees_in(&listed).len(), 1);
+
+    let refused = prs
+        .ys(None, &["pr", "checkout", "twelve", "--project", "Demo"])
+        .failed();
+    assert!(refused.contains("not a pull request number"), "{refused}");
+}

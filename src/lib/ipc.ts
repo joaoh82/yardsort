@@ -14,6 +14,7 @@ import {
   type ActivityPage,
   type ActivitySettingsDto,
   type ContextUsage,
+  type CoordinatorStatus,
   type ConversationContext,
   type AgentOutcomes,
   type Attempt,
@@ -191,6 +192,7 @@ import {
 } from "./bindings";
 
 export type {
+  CoordinatorStatus,
   RemoteRepository,
   Repositories,
   ResolvedLink,
@@ -841,6 +843,16 @@ export const ipc = {
   assistReview: (workspaceId: string) => unwrap(commands.assistReview(workspaceId)),
   /** A harness and an effort for a message being typed; empty fields mean "nothing to offer". */
   assistSuggest: (message: string) => unwrap(commands.assistSuggest(message)),
+
+  // --- the Floor Manager -------------------------------------------------------------------
+
+  /** The Floor Manager the daemon holds, running or the last to end, and where it lives. */
+  coordinatorStatus: () => unwrap(commands.coordinatorStatus()),
+  /** Start it with this harness, or get the one already running. */
+  coordinatorStart: (harness: string, size: TermSize) =>
+    unwrap(commands.coordinatorStart(harness, size)),
+  /** End the running one. Its last screen stays until it is started again. */
+  coordinatorStop: () => unwrap(commands.coordinatorStop()),
 
   ptySpawn: (request: SpawnRequest) => unwrap(commands.ptySpawn(request)),
   ptyList: () => unwrap(commands.ptyList()),

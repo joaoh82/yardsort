@@ -4,6 +4,7 @@ import {
   openProjectFromDisk,
 } from "@/features/sidebar/actions";
 import type { CommandId } from "@/lib/shortcuts";
+import { useCoordinatorStore } from "@/stores/coordinator";
 import { useLayoutStore } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
 import { useSmokeTestsStore } from "@/stores/smokeTests";
@@ -111,6 +112,9 @@ export function runCommand(id: CommandId) {
       break;
     case "startFromLink":
       projects.openLink(true);
+      break;
+    case "floorManager":
+      useCoordinatorStore.getState().toggle();
       break;
     case "tour":
       layout.setTourOpen(true);

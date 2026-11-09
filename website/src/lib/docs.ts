@@ -165,6 +165,12 @@ export const DOCS_NAV: DocSection[] = [
           "Start a workflow or a smoke test in Yardsort when something happens: an agent says it is done, a pull request gets a review or failing checks, a run ends, or a custom event, with presets, limits against loops and ys trigger.",
       },
       {
+        slug: "guide/floor-manager",
+        title: "Floor Manager",
+        description:
+          "One agent in Yardsort that sees every project: ask which pull requests need a review or what is running, and have it propose workspaces, reviews and workflows, starting them when you say yes.",
+      },
+      {
         slug: "guide/updates",
         title: "Updates",
         description:

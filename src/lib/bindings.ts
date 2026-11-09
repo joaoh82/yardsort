@@ -459,6 +459,12 @@ export const commands = {
 	 *  window later still puts the question.
 	 */
 	quitCancelled: () => typedError<null, IpcError>(__TAURI_INVOKE("quit_cancelled")),
+	/**  What the Floor Manager panel shows: the one the daemon holds, and where it lives. */
+	coordinatorStatus: () => typedError<CoordinatorStatus, IpcError>(__TAURI_INVOKE("coordinator_status")),
+	/**  Start the Floor Manager with `harness`, or hand back the one already running. */
+	coordinatorStart: (harness: string, size: TermSize) => typedError<CoordinatorStatus, IpcError>(__TAURI_INVOKE("coordinator_start", { harness, size })),
+	/**  End the running Floor Manager. Its last screen stays until it is started again. */
+	coordinatorStop: () => typedError<CoordinatorStatus, IpcError>(__TAURI_INVOKE("coordinator_stop")),
 	ptySpawn: (request: SpawnRequest) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("pty_spawn", { request })),
 	/**  Stream a session into `output`: first a snapshot that repaints the terminal, then live bytes. */
 	ptyAttach: (id: SessionId, output: Channel<RawBytes>) => typedError<number, IpcError>(__TAURI_INVOKE("pty_attach", { id, output })),
@@ -993,6 +999,21 @@ export type ConversationContext = {
 	note: string,
 	/**  What `ys workspace context` gives now. */
 	digest: string,
+};
+
+/**  What the panel needs to draw itself. */
+export type CoordinatorStatus = {
+	/**  The one the daemon holds: running, or the last to end. `None` before the first start. */
+	session: SessionInfo | null,
+	/**  The harness it runs, or ran. */
+	harness: string | null,
+	/**  Its folder, where its instructions are. */
+	folder: string,
+	/**
+	 *  Whether this copy of the app has a `ys` of its own to give it. Without one it finds
+	 *  whatever `ys` the user installed, or none.
+	 */
+	hasYs: boolean,
 };
 
 /**  A task that was just made: what its source now calls it. */

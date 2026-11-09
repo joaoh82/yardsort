@@ -25,6 +25,7 @@ use crate::env::ShellEnv;
 use crate::git::HeadHistory;
 use crate::program::Program;
 
+pub mod checkout;
 mod watch;
 pub use watch::{pr_look, PrLook, WatchPost, WatchPostKind};
 

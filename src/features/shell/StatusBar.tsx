@@ -1,3 +1,4 @@
+import { FloorManagerButton } from "@/features/coordinator/FloorManager";
 import { useShortcutLabel } from "@/stores/preferences";
 import { useAppStore } from "@/stores/app";
 import { useLayoutStore } from "@/stores/layout";
@@ -116,6 +117,7 @@ export function StatusBar() {
             ? `${info.name} ${info.version}${info.debug ? "-dev" : ""} · ${info.os}/${info.arch}`
             : "Yardsort · no core"}
         </span>
+        <FloorManagerButton />
       </div>
     </footer>
   );

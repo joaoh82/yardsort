@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { ChangesPanel } from "@/features/changes/ChangesPanel";
+import { FloorManagerPanel } from "@/features/coordinator/FloorManager";
 import { CommandPalette } from "@/features/keyboard/CommandPalette";
 import { StartFromLinkDialog } from "@/features/sidebar/StartFromLinkDialog";
 import { useAppShortcuts } from "@/features/keyboard/useAppShortcuts";
@@ -14,6 +15,7 @@ import { QuitDialog } from "@/features/shell/QuitDialog";
 import { WorkspacePanel } from "@/features/workspace/WorkspacePanel";
 import { hasCore } from "@/lib/ipc";
 import { useAppStore } from "@/stores/app";
+import { useCoordinatorStore } from "@/stores/coordinator";
 import { useHarnessStore } from "@/stores/harnesses";
 import { useLayoutStore, type SidePanel } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
@@ -41,6 +43,7 @@ export function AppShell() {
   const setCollapsed = useLayoutStore((s) => s.setCollapsed);
   const settingsOpen = useLayoutStore((s) => s.settingsOpen);
   const updateOpen = useUpdatesStore((s) => s.open);
+  const floorOpen = useCoordinatorStore((s) => s.open);
   useUpdateChecks();
   const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen);
   const remoteHostOpen = useProjectsStore((s) => s.remoteHostId !== null);
@@ -73,6 +76,8 @@ export function AppShell() {
     void useAppStore.getState().load().catch(console.error);
     void usePreferencesStore.getState().load();
     if (hasCore()) void useHarnessStore.getState().load();
+    // Whether a Floor Manager is running already, for the status bar to say.
+    void useCoordinatorStore.getState().refresh();
     const listening = listenForQuitRequests();
     const runs = listenForWorkflowRuns();
     const testRuns = listenForTestRuns();
@@ -142,6 +147,7 @@ export function AppShell() {
       {linkOpen && (
         <StartFromLinkDialog onClose={() => useProjectsStore.getState().openLink(false)} />
       )}
+      {floorOpen && <FloorManagerPanel />}
       <WelcomeTour />
       <QuitDialog />
     </div>

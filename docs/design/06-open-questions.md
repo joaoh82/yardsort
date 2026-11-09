@@ -366,3 +366,17 @@ From the design pass in [36-triggers](36-triggers.md), 2026-11-06.
     from a person after the agent's last push may be a reason to start counting again.
 52. **Should the phone list triggers, and switch them?** Remote exposes no workflows, tests or
     runs yet; triggers would follow them.
+
+## Floor Manager
+
+From the first slice in [37-floor-manager](37-floor-manager.md), 2026-11-09.
+
+53. **Are told boundaries enough?** The Floor Manager is told what to ask before and what never
+    to do. Nothing stops an agent in auto mode from doing it anyway. The lean is to keep it
+    told, because every agent in Yardsort is trusted the same way. If it is not enough, `ys`
+    could refuse its destructive commands when `YARDSORT_COORDINATOR` is set.
+54. **How should a fork's pull request be reviewed?** `ys pr checkout` makes `pr/<number>`, and
+    the built-in review finds a pull request by its branch name. The review could take a pull
+    request number as an input instead.
+55. **What is it called?** _Floor Manager_ and _Floor Planner_ were offered. The code calls it
+    `coordinator` so that a rename touches only the words.

@@ -458,6 +458,52 @@ before anything is written.
 The issue text it prints was written by whoever opened or commented on the issue. An agent
 reading it should treat it as a description of work, not as instructions.
 
+### `ys pr`
+
+The open pull requests of every project on GitHub, read through `gh` as the
+[Pull requests](pull-requests.md) view reads them, and a workspace on one for reviewing it.
+Nothing is written to GitHub.
+
+```sh
+ys pr list                               # every project's open pull requests, most recently updated first
+ys pr list --project api-gateway         # one project's
+ys pr list --attention                   # only those that need attention (below)
+ys pr list --reviews none                # nobody has reviewed it yet
+ys pr checkout 12 --project api-gateway  # a workspace on #12's branch, to review it in
+```
+
+```
+PROJECT  PR   STATE  REVIEW             CHECKS         AUTHOR  ATTENTION                          TITLE
+web      #48  open   review required    passing 12/12  grace   not reviewed                       Add a retry to the uploader
+web      #45  open   changes requested  failing 10/12  ken     checks failing, changes requested  Tidy the settings page (in tidy-settings)
+```
+
+A pull request with a Yardsort workspace on its branch says which, after its title.
+
+| Option             | What it does                                                                                                                                                                                                                                                                                  |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--project <name>` | One project, by name or id. Default: all of them.                                                                                                                                                                                                                                             |
+| `--reviews <how>`  | The view's review filter: `none`, `required`, `approved`, `changes`, `by-me`, `not-by-me`, `awaiting-me`. _Me_ is whoever `gh` is logged in as. Your own pull requests are not counted as ones you have not reviewed, and a review asked of a team you are in is not counted as asked of you. |
+| `--attention`      | Only those with a reason in the **ATTENTION** column: failing checks, conflicts with the base, changes requested, your review asked for by name, or no review at all on one that is not a draft.                                                                                              |
+| `--author <login>` | Only those opened by this login. `@me` is whoever `gh` is logged in as.                                                                                                                                                                                                                       |
+| `--no-drafts`      | Leave drafts out.                                                                                                                                                                                                                                                                             |
+| `--limit <n>`      | At most this many.                                                                                                                                                                                                                                                                            |
+
+Up to 200 open pull requests are read per repository, as in the view. A project that cannot be read
+— not on GitHub, no remote, its folder missing, `gh` failing — is named on standard error, and the
+others are still listed. With `--json`, each pull request carries its `reviews`, `reviewRequests`,
+`checkCounts`, `mergeable`, `workspace`, and `attention` as a list of `checksFailing`, `conflicts`,
+`changesRequested`, `awaitingYou` and `unreviewed`.
+
+`checkout` fetches the pull request's branch from the project's remote and opens a workspace on
+it, as the view's [**Start workspace**](pull-requests.md#start-a-workspace-from-a-pull-request) does: no new branch, and no agent started. A branch that
+is already here is opened as it is, and it says how far behind it is. One from a fork is
+`pr/<number>`, following the pull request. If a workspace already has the branch, `checkout` says
+which and makes nothing. A merged or closed pull request is refused. Then
+`ys workflow run code-review --workspace <name>` has an agent review it. That does not work yet for
+a pull request from a fork, because the review finds a pull request by its branch name. It is how
+the [Floor Manager](floor-manager.md) reviews other people's pull requests.
+
 ### `ys workflow`
 
 The [workflows](workflows.md) Yardsort knows: the built-in ones and the files in your profile's

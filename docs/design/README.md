@@ -41,6 +41,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 34  | [Schedules](34-schedules.md)                                            | Built: start a workflow or a smoke test once at a set time or on a routine, in an existing workspace, while the app is open      |
 | 35  | [Remote, R4 and R5](35-remote-r4-r5.md)                                 | Planned: a host with no screen the phone reaches first, then the desktop as a client, then the phone hardened and push           |
 | 36  | [Triggers](36-triggers.md)                                              | Proposal: start a workflow or a smoke test when something happens — the agent is done, a PR opens, a review arrives, checks fail |
+| 37  | [Floor Manager](37-floor-manager.md)                                    | First slice built: one agent that sees every project through `ys`, in a panel; `ys pr list` and `ys pr checkout`                 |
 
 ## Vocabulary
 

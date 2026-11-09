@@ -39,6 +39,10 @@ const LINES: { command: string; note: string }[] = [
     note: "the GitHub issues waiting on you — and ys task create files one",
   },
   {
+    command: "ys pr list --attention",
+    note: "every project's open pull requests that need a review, a fix or you",
+  },
+  {
     command: "ys test run login",
     note: "run a smoke test and read its verdict with ys test wait",
   },

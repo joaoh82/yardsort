@@ -22,9 +22,11 @@ use super::{ensure_own, ProjectPullRequests};
 use crate::changes::commands::workspace;
 use crate::changes::{safe_relative, Between, FileChange, FileDiff};
 use crate::error::{IpcError, IpcResult};
+use crate::forge::checkout::remote_of;
+pub use crate::forge::checkout::{prepare_branch, PreparedBranch};
 use crate::forge::{
-    parse_remote, ForgeError, Gh, LineComment, LinePlace, MergeMethod, PullRequest,
-    PullRequestState, PullRequestSummary,
+    ForgeError, Gh, LineComment, LinePlace, MergeMethod, PullRequest, PullRequestState,
+    PullRequestSummary,
 };
 use crate::git::{is_commit_id, pull_request_ref, Git, PULL_REQUEST_REFS};
 use crate::state::{blocking, AppState};
@@ -534,19 +536,6 @@ pub async fn pull_request_reopen(app: AppHandle, project_id: String, number: u32
     .await
 }
 
-/// A local branch a workspace can be opened on for a pull request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct PreparedBranch {
-    pub branch: String,
-    /// Commits the pull request has that this branch does not. Only a branch that was already
-    /// here can be behind: it is opened as it is and never moved.
-    pub behind: u32,
-    /// The pull request comes from a fork, so the branch is `pr/<number>` and follows the pull
-    /// request rather than a branch of this project's remote. Yardsort will not push it.
-    pub fork: bool,
-}
-
 /// Get pull request `number`'s branch into the project's repository, ready for the composer's
 /// "open existing branch". Nothing is checked out and no worktree is made here: that is the
 /// composer's, with the agent and the message the user gives it.
@@ -564,108 +553,6 @@ pub async fn pull_request_prepare_branch(
         prepare_branch(&git, &root, &pr)
     })
     .await
-}
-
-/// See [`pull_request_prepare_branch`]. Four cases, by where the branch lives:
-///
-/// 1. Checked out somewhere already — refused, saying where. Git allows a branch one place.
-/// 2. Here and not checked out — left exactly as it is, however far behind.
-/// 3. In this project's remote and not here — fetched, and a local branch made that tracks it.
-/// 4. In a fork — `pr/<number>`, made at the pull request's head and set to follow it.
-pub fn prepare_branch(git: &Git, root: &Path, pr: &PullRequest) -> IpcResult<PreparedBranch> {
-    let fork = pr
-        .details
-        .as_ref()
-        .is_some_and(|details| details.cross_repository);
-    let remote = remote_of(git, root, &pr.url)?.ok_or_else(|| {
-        IpcError::new(
-            "no_remote",
-            "This project has no remote to fetch the pull request from.",
-        )
-    })?;
-
-    if fork {
-        let branch = format!("pr/{}", pr.number);
-        not_checked_out(git, root, &branch)?;
-        let head = git.fetch_pull_request(root, &remote, pr.number, None)?;
-        let behind = if git.branch_exists(root, &branch)? {
-            git.commits_between(root, &branch, &head)?
-        } else {
-            git.branch_create(root, &branch, &head, false)?;
-            git.follow_pull_request(root, &branch, &remote, pr.number)?;
-            0
-        };
-        return Ok(PreparedBranch {
-            branch,
-            behind,
-            fork: true,
-        });
-    }
-
-    let branch = pr.branch.clone();
-    // The name is the forge's, which is to say whoever opened the pull request chose it.
-    if !git.valid_branch_name(root, &branch)? {
-        return Err(IpcError::new(
-            "invalid_branch",
-            format!("\"{branch}\" is not a branch name git will take."),
-        ));
-    }
-    not_checked_out(git, root, &branch)?;
-    git.fetch_branch(root, &remote, &branch)?;
-    let tracking = format!("refs/remotes/{remote}/{branch}");
-    let behind = if git.branch_exists(root, &branch)? {
-        git.commits_between(root, &branch, &tracking)?
-    } else {
-        git.branch_create(root, &branch, &tracking, true)?;
-        0
-    };
-    Ok(PreparedBranch {
-        branch,
-        behind,
-        fork: false,
-    })
-}
-
-fn not_checked_out(git: &Git, root: &Path, branch: &str) -> IpcResult<()> {
-    let holder = git
-        .worktrees(root)?
-        .into_iter()
-        .find(|entry| !entry.prunable && entry.branch.as_deref() == Some(branch));
-    match holder {
-        Some(entry) => Err(IpcError::new(
-            "branch_checked_out",
-            format!(
-                "\"{branch}\" is already checked out at {}.",
-                entry.path.display()
-            ),
-        )),
-        None => Ok(()),
-    }
-}
-
-/// The remote the pull request's repository is: the one whose URL names the same owner and
-/// repository as the pull request's own. In a clone of a fork that is `upstream`, not `origin`
-/// — `gh` lists the parent's pull requests there, and only the parent has their branches. When
-/// no remote can be matched (a URL this cannot read), the one a push would go to.
-fn remote_of(git: &Git, root: &Path, pull_request_url: &str) -> IpcResult<Option<String>> {
-    let wanted = pull_request_url
-        .split_once("/pull/")
-        .and_then(|(repository, _)| parse_remote(repository));
-    if let Some(wanted) = wanted {
-        for remote in git.remotes(root)? {
-            let here = git
-                .remote_url(root, &remote)?
-                .as_deref()
-                .and_then(parse_remote);
-            if here.is_some_and(|here| {
-                here.owner.eq_ignore_ascii_case(&wanted.owner)
-                    && here.name.eq_ignore_ascii_case(&wanted.name)
-            }) {
-                return Ok(Some(remote));
-            }
-        }
-    }
-    Ok(git.push_remote(root)?)
 }
 
 #[cfg(test)]

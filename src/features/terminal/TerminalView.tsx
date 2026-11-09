@@ -29,6 +29,8 @@ interface Props {
   sessionId: SessionId;
   rendererOverride?: string | null;
   probe?: TerminalProbe;
+  /** It runs an agent, though no tab says so: the Floor Manager's terminal. */
+  agent?: boolean;
 }
 
 /**
@@ -36,7 +38,7 @@ interface Props {
  * and mounted again at will — on mount it receives a snapshot that repaints scrollback and
  * screen, then the live stream.
  */
-export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
+export function TerminalView({ sessionId, rendererOverride, probe, agent = false }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
@@ -44,6 +46,10 @@ export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
   useEffect(() => {
     probeRef.current = probe;
   }, [probe]);
+  const agentRef = useRef(agent);
+  useEffect(() => {
+    agentRef.current = agent;
+  }, [agent]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -103,6 +109,7 @@ export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
       }),
     );
     const isAgent = () =>
+      agentRef.current ||
       useTerminalStore.getState().tabs.some((t) => t.id === sessionId && t.recordId !== null);
 
     term.attachCustomKeyEventHandler((event) => {

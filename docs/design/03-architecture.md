@@ -706,6 +706,16 @@ remote ever talks to it directly. Instead:
   a start answers from a thread of its own, and an upload goes to the profile's `uploads` folder,
   outside every worktree ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)).
 
+## The Floor Manager (`crates/core/src/coordinator.rs`, `src-tauri/src/coordinator.rs`)
+
+One harness session with a `coordinator` label and no `workspace` label. It is started in
+`<data dir>/coordinator`, whose `AGENTS.md` and `CLAUDE.md` Yardsort rewrites at each start. Its
+environment adds `YARDSORT_DATA_DIR` for the profile, and puts the folder of the bundled `ys`
+first on `PATH`. It reaches the rest of Yardsort only through `ys`: no new IPC surface for the
+agent, and no output read. Everything keyed on a workspace leaves it out because it has none. The
+window draws it in a non-modal panel over the status bar's corner. See
+[37-floor-manager](37-floor-manager.md).
+
 ## Assist (optional, off by default)
 
 Where ordinary code cannot tell what a change _means_, Assist asks TypeSafe's **Jev** — a model

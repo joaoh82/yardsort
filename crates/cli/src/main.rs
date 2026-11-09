@@ -117,6 +117,9 @@ enum Command {
     /// What is waiting to be done in a project: its GitHub issues.
     #[command(subcommand)]
     Task(commands::task::Command),
+    /// Open pull requests across every project, and a workspace on one for reviewing it.
+    #[command(subcommand)]
+    Pr(commands::pr::Command),
     /// Named sequences of agent work, written in YAML: the built-in ones and yours.
     #[command(subcommand)]
     Workflow(commands::workflow::Command),
@@ -185,6 +188,9 @@ fn main() {
                 .and_then(|ys| commands::memory::run(&ys, command, &out)),
             Command::Task(command) => {
                 Yardsort::open(cli.data_dir).and_then(|ys| commands::task::run(&ys, command, &out))
+            }
+            Command::Pr(command) => {
+                Yardsort::open(cli.data_dir).and_then(|ys| commands::pr::run(&ys, command, &out))
             }
             Command::Schedule(command) => Yardsort::open(cli.data_dir)
                 .and_then(|ys| commands::schedule::run(&ys, command, &out)),
