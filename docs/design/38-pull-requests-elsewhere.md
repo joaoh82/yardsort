@@ -1,8 +1,9 @@
 # 38 — Pull requests in other repositories
 
-_Proposed 2026-11-09. Slices 1–3 are built — see [slice 1](#slice-1-what-shipped),
-[slice 2](#slice-2-what-shipped) and [slice 3](#slice-3-what-shipped). Slices 4–5 are to do;
-[M31](05-roadmap.md#m31--pull-requests-in-other-repositories) tracks them._
+_Proposed 2026-11-09. Slices 1–4 are built — see [slice 1](#slice-1-what-shipped),
+[slice 2](#slice-2-what-shipped), [slice 3](#slice-3-what-shipped) and
+[slice 4](#slice-4-what-shipped). Slice 5 is to do;
+[M31](05-roadmap.md#m31--pull-requests-in-other-repositories) tracks it._
 
 A project is one repository, and every pull request Yardsort shows is one of that repository's.
 Some projects are not used that way. A **parent repository** holds other repositories as
@@ -129,14 +130,15 @@ checkout as a working folder. Measured: 0.5 s for one pull request.
   Hovering lists them with the others under _Also opened from this workspace_.
 - **The session toolbar** offers them in its menu beside the workspace's own, labelled with the
   repository. Chosen, the badge shows it, and the menu has **View on GitHub**, **Copy PR link**,
-  **Refresh** and **Stop tracking**. Merging and resolving conflicts are not offered for one in
-  slice 1.
+  **Refresh** and **Stop tracking**, and since slice 4 the three ways to merge it, by its link.
+  Asking an agent to resolve its conflicts is not offered: that agent works in the project's
+  repository.
 - **The Pull requests view** lists each one under its workspace's project, with
   `owner/name` after the project's name, so the project filter finds it. The sidebar count
   includes the open ones. Its detail has **Go to workspace**, **Open on GitHub**, **Copy link**
   and **Stop tracking**, and a full **Summary** — description, checks with links, reviewers,
-  conversation — read by link. The reply box, **Code**, **Merge**, **Close** and **Reopen** come
-  in slice 4; until then **Code** says so and links to the diff on GitHub.
+  conversation — read by link. Since slice 4 it also has **Merge**, **Close**, **Reopen** and the
+  reply box, by its link, and **Code**, read in the project's nested clone of its repository.
 - **Track pull request…** is in the workspace's menu in the sidebar: a link, and **Track**. A
   refusal stays in the dialog.
 - **One that could not be read** is said so above the Pull requests view's rows, with **Retry**
@@ -197,10 +199,10 @@ note and `ys pr track` cover it.
 - **The diff.** **Code** fetches a pull request's commits into the project's repository, which
   has none of the other repository's history. Slice 4 fetches into the nested clone instead,
   when there is one in the project's checkout whose remote is that repository, and otherwise
-  links to GitHub.
+  links to GitHub. ✅
 - **Acting on it.** Merge, close, reopen and comments are `gh pr merge|close|reopen|comment`
   with the link in place of the number, the same checks as today (`--match-head-commit`, a
-  confirmation naming the repository). Slice 4.
+  confirmation naming the repository). Slice 4. ✅
 - **Code review.** _Request code review_ tells its reviewer it is in the pull request's
   worktree and to run `gh pr review <n>`. For a pull request elsewhere, the reviewer needs the
   nested clone — or a worktree of it — and the link. Slice 5 lets the workflow be run on a
@@ -218,8 +220,8 @@ note and `ys pr track` cover it.
    a GitHub MCP tool, the exception written into 09. See [slice 2](#slice-2-what-shipped).
 3. **Seen: the other adapters.** ✅ Codex, OpenCode, pi, OMP, Grok and Cursor, each from what it
    can see, recorded where the agent could be. See [slice 3](#slice-3-what-shipped).
-4. **Acting on them.** Merge, close, reopen and the reply box by link; **Code** from the nested
-   clone.
+4. **Acting on them.** ✅ Merge, close, reopen and the reply box by link; **Code** from the
+   nested clone. See [slice 4](#slice-4-what-shipped).
 5. **Code review on one.** The workflow on a tracked pull request, in the nested clone; review
    activity waited on by link.
 
@@ -398,6 +400,41 @@ vitest, played through their real handlers, handing on a likely call's command a
 nothing of any other; Grok's chat-history lookup, and its links handed on once through `import`;
 and the real `ys` binary as Cursor's, OpenCode's and pi's hook, then `ys pr tracked` showing it by
 `hook`. Not yet done: a recording of Grok, and the three systems' hands-on pass.
+
+## Slice 4: what shipped
+
+A tracked pull request is acted on as a project's own is, by its link instead of its number:
+
+- **Merge, Close, Reopen** in the Pull requests view's detail, and the three merges in the
+  session toolbar's menu: `tracked_pull_request_merge | close | reopen`, which read the pull
+  request afresh by its link first and refuse as the project's own do — one no longer open, a
+  draft, or a head that moved since the confirmation (`--match-head-commit`). Each confirmation
+  names it `owner/name#7`. `gh pr merge|close|reopen <url>`: `gh` takes the link and needs no
+  repository around it, so it runs in the project's checkout, or anywhere once that has gone.
+- **The reply box** in its Summary: `tracked_pull_request_comment`, which runs
+  `gh pr comment <url> --body-file -` with the words on standard input.
+- **Code**: `tracked_pull_request_changes` finds the project's **nested clone** of the pull
+  request's repository (`tracked::clone_of`: a folder directly in the checkout with a `.git` of
+  its own and a remote that is that repository, host included), fetches the pull request's
+  commits there into refs of Yardsort's own (`refs/yardsort/pull/<n>/…`) as a project's own are
+  fetched into its checkout — nothing checked out, no branch moved — and reads the diff between
+  them; `tracked_pull_request_diff` reads one file there. With no such clone, **Code** says so,
+  with a link to the diff on GitHub. The comments on its lines are read from its own repository,
+  named, on its own host (`tracked_pull_request_line_comments`, `gh api --hostname`). **Stop
+  tracking** deletes the refs when no workspace of the project follows it any more.
+- **Not offered for one elsewhere**: **Start workspace** (its repository is not a project),
+  asking an agent to resolve its conflicts (that agent works in the project's repository), and
+  **Note on lines…** (a note goes to the workspace's agent about the workspace's own pull
+  request, or onto lines by number). Slice 5 is about review on one.
+
+How it was checked: the by-link `gh` calls against a stand-in `gh` — the link in each command, the
+comment on standard input, line comments asked of the named repository on its host; the diff
+read in a real nested clone with the commits where a fetch puts them, nothing in the clone
+changed, and a missing clone refused with where to look instead; and the window through Testing
+Library — the actions offered and not, a close confirmed naming the repository and sent by link
+(a "no" sends nothing), a reply sent by link, **Code** failing without a clone and then reading
+the files, and a merge from the toolbar sent by link at the head shown. Not yet done: the three
+systems' hands-on pass.
 
 ## Documentation this touches
 

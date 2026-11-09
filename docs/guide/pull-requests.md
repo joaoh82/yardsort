@@ -47,9 +47,17 @@ project's. The sidebar's count includes the open ones.
 
 Its details show the same header and **Summary** — description, checks with their links,
 reviewers and conversation — read by its link. The actions are **Go to workspace**, **Stop
-tracking**, **Open on GitHub** and **Copy link**. **Merge**, **Close**, **Reopen**, the reply
-box and the **Code** tab are not there for one in another repository yet: **Code** says so and
-links to its diff on GitHub.
+tracking**, **Merge**, **Close** or **Reopen**, **Open on GitHub** and **Copy link**, and the
+Summary has the reply box. Each is done to it by its link, in its own repository, and each
+confirmation names it — _Close pull request demo/lib#7_ — so it is not taken for the project's
+#7. **Start workspace** is not offered: its repository is not a project.
+
+**Code** reads its diff in the project's **nested clone** of its repository — a folder directly
+in the project's checkout that is a clone of it — fetching its commits there as a project's own
+are fetched: into refs of Yardsort's own, with nothing checked out and no branch moved. The
+comments on its lines show beside them. Without such a clone **Code** says so, with a link to its
+diff on GitHub. **Note on lines…** is for a project's own pull requests. **Stop tracking** also
+deletes the commits fetched for it, once no workspace of the project follows it.
 
 When one cannot be read — a mistyped link, a repository your `gh` login cannot see, GitHub not
 answering — a line above the rows says so and why, with **Retry** and **Stop tracking**. One

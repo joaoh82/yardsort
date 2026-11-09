@@ -136,21 +136,6 @@ export function PullRequestPane({
         <div className="min-h-0 flex-1 overflow-y-auto p-4 select-text">
           <Summary row={row} now={now} />
         </div>
-      ) : row.tracked ? (
-        // Its commits are in another repository, which this project's checkout does not have.
-        <div className="min-h-0 flex-1 p-4 text-ink-muted">
-          <p>
-            This pull request is in {row.tracked.repo.owner}/{row.tracked.repo.name}, not in{" "}
-            {project.name}&rsquo;s repository, so its diff is not read here yet.
-          </p>
-          <button
-            type="button"
-            onClick={() => void openUrl(`${pr.url}/files`).catch(console.error)}
-            className="mt-3 text-ink underline hover:text-accent"
-          >
-            Its diff on GitHub <span aria-hidden>↗</span>
-          </button>
-        </div>
       ) : (
         // Keyed by the pull request: the file in view belongs to it, not to the next one.
         <div className="min-h-0 flex-1">
@@ -165,9 +150,7 @@ function Actions({ row }: { row: Row }) {
   const { pr, workspace } = row;
   const busy = usePullRequestsStore((s) => s.busy);
   const acting = busy === row.key;
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [copied, setCopied] = useState(false);
-  const mergeButton = useRef<HTMLButtonElement>(null);
   const target: Target = {
     key: row.key,
     projectId: row.project.id,
@@ -176,7 +159,6 @@ function Actions({ row }: { row: Row }) {
     tracked: row.tracked,
   };
   const store = usePullRequestsStore.getState();
-  const blocked = mergeBlocked(pr);
   const [untracking, setUntracking] = useState(false);
   const [untrackError, setUntrackError] = useState<string | null>(null);
 
@@ -213,6 +195,7 @@ function Actions({ row }: { row: Row }) {
         >
           Stop tracking
         </button>
+        <Lifecycle target={target} />
         <button
           type="button"
           onClick={() => void openUrl(pr.url).catch(console.error)}
@@ -266,6 +249,44 @@ function Actions({ row }: { row: Row }) {
         )
       )}
 
+      <Lifecycle target={target} />
+
+      <button
+        type="button"
+        onClick={() => void openUrl(pr.url).catch(console.error)}
+        className={`${button} ml-auto`}
+      >
+        Open on GitHub <span aria-hidden>↗</span>
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          void writeText(pr.url).then(
+            () => setCopied(true),
+            (reason: unknown) => console.error(reason),
+          )
+        }
+        className={button}
+      >
+        {copied ? "Copied" : "Copy link"}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Merge, Close and Reopen, as the pull request's state allows. A tracked one is acted on by its
+ * link, in its own repository; the confirmations name which.
+ */
+function Lifecycle({ target }: { target: Target }) {
+  const { pr } = target;
+  const busy = usePullRequestsStore((s) => s.busy);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const mergeButton = useRef<HTMLButtonElement>(null);
+  const store = usePullRequestsStore.getState();
+  const blocked = mergeBlocked(pr);
+  return (
+    <>
       {pr.state === "open" && (
         <>
           <button
@@ -318,26 +339,6 @@ function Actions({ row }: { row: Row }) {
           Reopen
         </button>
       )}
-
-      <button
-        type="button"
-        onClick={() => void openUrl(pr.url).catch(console.error)}
-        className={`${button} ml-auto`}
-      >
-        Open on GitHub <span aria-hidden>↗</span>
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          void writeText(pr.url).then(
-            () => setCopied(true),
-            (reason: unknown) => console.error(reason),
-          )
-        }
-        className={button}
-      >
-        {copied ? "Copied" : "Copy link"}
-      </button>
-    </div>
+    </>
   );
 }

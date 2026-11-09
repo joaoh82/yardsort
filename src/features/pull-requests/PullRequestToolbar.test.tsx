@@ -9,6 +9,7 @@ const core = vi.hoisted(() => ({
   workspaceConflictHelper: vi.fn(),
   workspaceResolveConflicts: vi.fn(),
   workspaceUntrackPullRequest: vi.fn(),
+  trackedPullRequestMerge: vi.fn(),
 }));
 const native = vi.hoisted(() => ({ confirm: vi.fn() }));
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
@@ -350,7 +351,7 @@ describe("a pull request tracked in another repository", () => {
     core.workspaceUntrackPullRequest.mockResolvedValue(undefined);
   });
 
-  it("is offered beside the workspace's own, named by its repository, and never merged from here", async () => {
+  it("is offered beside the workspace's own, named by its repository, and merged by its link", async () => {
     const user = setup();
     await user.click(screen.getByRole("button", { name: /Actions for pull request #85 — 1 more/ }));
     await user.click(screen.getByRole("menuitemradio", { name: /lib#7 open — Bump the client/ }));
@@ -359,10 +360,32 @@ describe("a pull request tracked in another repository", () => {
     ).toHaveTextContent("lib#7");
 
     await user.click(screen.getByRole("button", { name: /Actions for pull request demo\/lib#7/ }));
-    // Merging and conflicts go by number in the project's repository: not for one elsewhere.
-    expect(screen.queryByRole("menuitem", { name: "Squash and merge" })).not.toBeInTheDocument();
+    // Conflicts are an agent's, in the project's repository: not offered for one elsewhere.
+    expect(screen.queryByRole("menuitem", { name: /resolve conflicts/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: "View on GitHub" }));
     expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/demo/lib/pull/7");
+
+    // A "no" merges nothing; a yes merges it by its link, at the head shown, named by its
+    // repository — never by its number in this project's.
+    native.confirm.mockResolvedValue(false);
+    await user.click(screen.getByRole("button", { name: /Actions for pull request demo\/lib#7/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Squash and merge" }));
+    await waitFor(() => expect(native.confirm).toHaveBeenCalled());
+    expect(native.confirm.mock.calls[0]![0]).toContain("demo/lib#7");
+    expect(core.trackedPullRequestMerge).not.toHaveBeenCalled();
+    native.confirm.mockResolvedValue(true);
+    core.trackedPullRequestMerge.mockResolvedValue(undefined);
+    await user.click(screen.getByRole("button", { name: /Actions for pull request demo\/lib#7/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Squash and merge" }));
+    await waitFor(() =>
+      expect(core.trackedPullRequestMerge).toHaveBeenCalledWith(
+        "w-alpha-feature",
+        "t-7",
+        elsewhere.pullRequest!.details!.headOid,
+        "squash",
+      ),
+    );
+    expect(core.workspaceMergePullRequest).not.toHaveBeenCalled();
   });
 
   it("can stop being tracked, and the toolbar goes back to the workspace's own", async () => {

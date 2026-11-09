@@ -135,7 +135,7 @@ pub async fn pull_request_diff(
     .await
 }
 
-fn commit_id(text: &str) -> IpcResult<()> {
+pub(super) fn commit_id(text: &str) -> IpcResult<()> {
     if is_commit_id(text) {
         Ok(())
     } else {
@@ -469,7 +469,7 @@ fn no_longer(number: u32, what: &str) -> IpcError {
     )
 }
 
-fn closable(pr: &PullRequest) -> IpcResult<()> {
+pub(super) fn closable(pr: &PullRequest) -> IpcResult<()> {
     match pr.state {
         PullRequestState::Open => Ok(()),
         PullRequestState::Merged => Err(no_longer(pr.number, "already merged")),
@@ -477,7 +477,7 @@ fn closable(pr: &PullRequest) -> IpcResult<()> {
     }
 }
 
-fn reopenable(pr: &PullRequest) -> IpcResult<()> {
+pub(super) fn reopenable(pr: &PullRequest) -> IpcResult<()> {
     match pr.state {
         PullRequestState::Closed => Ok(()),
         PullRequestState::Merged => Err(no_longer(pr.number, "merged, and cannot be reopened")),

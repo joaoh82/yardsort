@@ -16,6 +16,12 @@ const core = vi.hoisted(() => ({
   projectPullRequests: vi.fn(),
   pullRequestSummary: vi.fn(),
   trackedPullRequestSummary: vi.fn(),
+  trackedPullRequestMerge: vi.fn(),
+  trackedPullRequestClose: vi.fn(),
+  trackedPullRequestReopen: vi.fn(),
+  trackedPullRequestComment: vi.fn(),
+  trackedPullRequestChanges: vi.fn(),
+  trackedPullRequestLineComments: vi.fn(),
   workspaceUntrackPullRequest: vi.fn(),
   pullRequestChanges: vi.fn(),
   pullRequestMerge: vi.fn(),
@@ -683,7 +689,7 @@ describe("a pull request a workspace tracks in another repository", () => {
     expect(screen.getAllByRole("button", { name: "feature" })).toHaveLength(2);
   });
 
-  it("reads its Summary by its link, and offers only what works for it", async () => {
+  it("reads its Summary by its link, and offers what works on one elsewhere", async () => {
     const user = show(withTracked());
     await user.click(row(/Bump the client/));
     const pane = screen.getByRole("region", { name: "Pull request #7" });
@@ -691,16 +697,80 @@ describe("a pull request a workspace tracks in another repository", () => {
     expect(core.trackedPullRequestSummary).toHaveBeenCalledWith(feature.id, "t-7", false);
     expect(core.pullRequestSummary).not.toHaveBeenCalled();
     expect(pane).toHaveTextContent("in demo/lib");
-    for (const name of [/^Merge/, /^Close$/, /^Reopen$/, /^Start workspace$/]) {
-      expect(within(pane).queryByRole("button", { name })).toBeNull();
-    }
-    expect(within(pane).queryByRole("form", { name: "Reply" })).toBeNull();
-    expect(within(pane).queryByLabelText("Your comment")).toBeNull();
+    // Its branch is in another repository: no workspace of this project can be started on it.
+    expect(within(pane).queryByRole("button", { name: /^Start workspace$/ })).toBeNull();
+    expect(within(pane).getByRole("button", { name: /^Merge/ })).toBeEnabled();
+    expect(within(pane).getByRole("button", { name: /^Close$/ })).toBeEnabled();
+  });
 
+  it("is closed by its link, after a confirmation that names its repository", async () => {
+    const user = show(withTracked());
+    await user.click(row(/Bump the client/));
+    const pane = screen.getByRole("region", { name: "Pull request #7" });
+    native.confirm.mockResolvedValue(false);
+    await user.click(within(pane).getByRole("button", { name: /^Close$/ }));
+    await waitFor(() => expect(native.confirm).toHaveBeenCalled());
+    expect(native.confirm.mock.calls[0]![0]).toContain("Close pull request demo/lib#7");
+    expect(core.trackedPullRequestClose).not.toHaveBeenCalled();
+
+    native.confirm.mockResolvedValue(true);
+    core.trackedPullRequestClose.mockResolvedValue(undefined);
+    await user.click(within(pane).getByRole("button", { name: /^Close$/ }));
+    await waitFor(() =>
+      expect(core.trackedPullRequestClose).toHaveBeenCalledWith(feature.id, "t-7"),
+    );
+    expect(core.pullRequestClose).not.toHaveBeenCalled();
+    expect(await within(pane).findByText("Closed demo/lib#7.")).toBeVisible();
+  });
+
+  it("is replied to by its link", async () => {
+    core.trackedPullRequestComment.mockResolvedValue(undefined);
+    const user = show(withTracked());
+    await user.click(row(/Bump the client/));
+    const pane = screen.getByRole("region", { name: "Pull request #7" });
+    await within(pane).findByText("Moves to the new client.");
+    const box = within(pane).getByLabelText("Your comment");
+    box.focus();
+    await user.keyboard("Looks right to me.");
+    await user.click(within(pane).getByRole("button", { name: "Comment" }));
+    await waitFor(() =>
+      expect(core.trackedPullRequestComment).toHaveBeenCalledWith(
+        feature.id,
+        "t-7",
+        "Looks right to me.",
+      ),
+    );
+  });
+
+  it("shows its diff from the project's nested clone, or says there is none", async () => {
+    core.trackedPullRequestLineComments.mockResolvedValue([]);
+    core.trackedPullRequestChanges.mockRejectedValueOnce({
+      code: "no_clone",
+      message: "This project's folder holds no clone of demo/lib to read the diff in.",
+    });
+    const user = show(withTracked());
+    await user.click(row(/Bump the client/));
+    const pane = screen.getByRole("region", { name: "Pull request #7" });
     await user.click(within(pane).getByRole("tab", { name: "Code" }));
-    expect(core.pullRequestChanges).not.toHaveBeenCalled();
-    await user.click(within(pane).getByRole("button", { name: /Its diff on GitHub/ }));
+    const failed = await within(pane).findByRole("alert");
+    expect(failed).toHaveTextContent("no clone of demo/lib");
+    await user.click(within(failed).getByRole("button", { name: /See the diff on GitHub/ }));
     expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/demo/lib/pull/7/files");
+
+    core.trackedPullRequestChanges.mockResolvedValue({
+      files: [
+        { path: "src/client.rs", oldPath: null, kind: "modified", additions: 3, deletions: 1 },
+      ],
+      baseOid: "b".repeat(40),
+      headOid: "a".repeat(40),
+    });
+    await user.click(within(failed).getByRole("button", { name: "Retry" }));
+    expect(await within(pane).findByRole("list", { name: "Changed files" })).toHaveTextContent(
+      "client.rs",
+    );
+    expect(core.trackedPullRequestChanges).toHaveBeenCalledWith(feature.id, "t-7");
+    expect(core.trackedPullRequestLineComments).toHaveBeenCalledWith(feature.id, "t-7");
+    expect(core.pullRequestChanges).not.toHaveBeenCalled();
   });
 
   it("says so when one could never be read, and offers to stop tracking it", async () => {

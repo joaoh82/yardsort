@@ -23,10 +23,17 @@ export interface Target {
   /** Who `gh` is logged in as, so a confirmation can say when the pull request is not yours. */
   viewer: string | null;
   /**
-   * Set for one a workspace tracks in another repository. It is read by its link; its number
-   * names nothing in `projectId`, so the actions that go by number are not offered for it.
+   * Set for one a workspace tracks in another repository. Everything done to it goes by its
+   * link, since its number names nothing in `projectId`, and its diff is read in the project's
+   * nested clone of its repository.
    */
   tracked?: TrackedPullRequest | null;
+}
+
+/** How a confirmation or a notice names it: `#7`, or `owner/name#7` for one elsewhere. */
+export function nameOf(target: Pick<Target, "pr" | "tracked">): string {
+  const { tracked, pr } = target;
+  return tracked ? `${tracked.repo.owner}/${tracked.repo.name}#${pr.number}` : `#${pr.number}`;
 }
 
 /** One pull request read in full, or the reading of it. */
@@ -248,7 +255,9 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
         },
       }));
       try {
-        const changes = await ipc.pullRequestChanges(target.projectId, target.pr.number);
+        const changes = target.tracked
+          ? await ipc.trackedPullRequestChanges(target.tracked.workspaceId, target.tracked.id)
+          : await ipc.pullRequestChanges(target.projectId, target.pr.number);
         if (askedChanges.get(key) === request) put({ changes, loading: false });
       } catch (error) {
         if (askedChanges.get(key) === request) put({ loading: false, error: errorMessage(error) });
@@ -274,7 +283,9 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
         },
       }));
       try {
-        const comments = await ipc.pullRequestLineComments(target.projectId, target.pr.number);
+        const comments = target.tracked
+          ? await ipc.trackedPullRequestLineComments(target.tracked.workspaceId, target.tracked.id)
+          : await ipc.pullRequestLineComments(target.projectId, target.pr.number);
         if (askedComments.get(key) === request) put({ comments, loading: false });
       } catch (error) {
         if (askedComments.get(key) === request) put({ loading: false, error: errorMessage(error) });
@@ -285,8 +296,12 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
       if (get().busy) return false;
       set({ busy: target.key, error: null, notice: null });
       try {
-        await ipc.pullRequestComment(target.projectId, target.pr.number, body);
-        set({ notice: `Commented on #${target.pr.number}.` });
+        if (target.tracked) {
+          await ipc.trackedPullRequestComment(target.tracked.workspaceId, target.tracked.id, body);
+        } else {
+          await ipc.pullRequestComment(target.projectId, target.pr.number, body);
+        }
+        set({ notice: `Commented on ${nameOf(target)}.` });
         return true;
       } catch (error) {
         set({ error: errorMessage(error) });
@@ -326,12 +341,17 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
       const head = pr.details?.headOid;
       if (!head) return;
       const confirmed = await native.confirm(
-        `${label} pull request #${pr.number}: ${pr.title}\n\n${whose(target)}\n\n${branches(pr)}\nCommit ${head.slice(0, 12)}\n\nGitHub may queue the merge if this branch requires it. No branch is deleted.`,
+        `${label} pull request ${nameOf(target)}: ${pr.title}\n\n${whose(target)}\n\n${branches(pr)}\nCommit ${head.slice(0, 12)}\n\nGitHub may queue the merge if this branch requires it. No branch is deleted.`,
         { title: "Merge pull request", okLabel: label },
       );
       if (!confirmed) return;
       await act(target, async () => {
-        await ipc.pullRequestMerge(target.projectId, pr.number, head, method);
+        if (target.tracked) {
+          const { workspaceId, id } = target.tracked;
+          await ipc.trackedPullRequestMerge(workspaceId, id, head, method);
+        } else {
+          await ipc.pullRequestMerge(target.projectId, pr.number, head, method);
+        }
         return "Merge request sent. GitHub may queue it; refresh to check its status.";
       });
     },
@@ -339,26 +359,34 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
     async close(target) {
       const { pr } = target;
       const confirmed = await native.confirm(
-        `Close pull request #${pr.number} without merging it?\n\n${pr.title}\n${branches(pr)}\n\n${whose(target)}\n\nIts branch is kept and nothing is posted on it. It can be reopened.`,
+        `Close pull request ${nameOf(target)} without merging it?\n\n${pr.title}\n${branches(pr)}\n\n${whose(target)}\n\nIts branch is kept and nothing is posted on it. It can be reopened.`,
         { title: "Close pull request", okLabel: "Close pull request" },
       );
       if (!confirmed) return;
       await act(target, async () => {
-        await ipc.pullRequestClose(target.projectId, pr.number);
-        return `Closed #${pr.number}.`;
+        if (target.tracked) {
+          await ipc.trackedPullRequestClose(target.tracked.workspaceId, target.tracked.id);
+        } else {
+          await ipc.pullRequestClose(target.projectId, pr.number);
+        }
+        return `Closed ${nameOf(target)}.`;
       });
     },
 
     async reopen(target) {
       const { pr } = target;
       const confirmed = await native.confirm(
-        `Reopen pull request #${pr.number}?\n\n${pr.title}\n${branches(pr)}\n\n${whose(target)}\n\nIts reviewers are told, and its checks may run again.`,
+        `Reopen pull request ${nameOf(target)}?\n\n${pr.title}\n${branches(pr)}\n\n${whose(target)}\n\nIts reviewers are told, and its checks may run again.`,
         { title: "Reopen pull request", okLabel: "Reopen" },
       );
       if (!confirmed) return;
       await act(target, async () => {
-        await ipc.pullRequestReopen(target.projectId, pr.number);
-        return `Reopened #${pr.number}.`;
+        if (target.tracked) {
+          await ipc.trackedPullRequestReopen(target.tracked.workspaceId, target.tracked.id);
+        } else {
+          await ipc.pullRequestReopen(target.projectId, pr.number);
+        }
+        return `Reopened ${nameOf(target)}.`;
       });
     },
 
