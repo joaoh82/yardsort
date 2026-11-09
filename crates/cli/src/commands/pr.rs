@@ -14,7 +14,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use serde::Serialize;
-use yardsort_core::forge::checkout::prepare_branch;
+use yardsort_core::forge::checkout::{self, prepare_branch};
 use yardsort_core::forge::{
     self, Checks, Gh, Mergeable, OpenPullRequests, PullRequest, PullRequestState, ReviewState,
 };
@@ -465,8 +465,9 @@ struct CheckedOut {
     url: String,
     /// A workspace already had the branch, and nothing was made.
     existing: bool,
-    /// Commits the pull request has that a branch already here does not.
-    behind: u32,
+    /// Commits the pull request has that the workspace's branch does not. For a workspace that
+    /// was already there it is fetched and counted again; `None` when that could not be done.
+    behind: Option<u32>,
     /// The pull request comes from a fork: the branch is `pr/<number>`.
     fork: bool,
 }
@@ -510,10 +511,21 @@ fn checkout(
             && !w.forgotten
             && w.branch.as_deref() == Some(branch.as_str())
     });
+    let git = ys.git()?;
     let (workspace, behind, existing) = match existing {
-        Some(workspace) => (workspace, 0, true),
+        // Left exactly as it is, but measured: a second review of a pull request that moved on
+        // would otherwise read old code without anyone knowing.
+        Some(workspace) => match checkout::behind(&git, root, &pr, &branch) {
+            Ok(behind) => (workspace, Some(behind), true),
+            Err(e) => {
+                eprintln!(
+                    "Could not check whether {} is behind #{number}: {}",
+                    workspace.name, e.message
+                );
+                (workspace, None, true)
+            }
+        },
         None => {
-            let git = ys.git()?;
             let prepared = prepare_branch(&git, root, &pr)?;
             let worktree_root = ys.worktree_root()?;
             let workspace = Workspaces {
@@ -524,7 +536,7 @@ fn checkout(
                 settings: &ys.settings.workspaces,
             }
             .open_branch(&project.id, &prepared.branch)?;
-            (workspace, prepared.behind, false)
+            (workspace, Some(prepared.behind), false)
         }
     };
     let made = CheckedOut {
@@ -547,11 +559,17 @@ fn checkout(
         }
         sayln!("  branch {}", made.branch.as_deref().unwrap_or("-"));
         sayln!("  path   {}", made.path);
-        if behind > 0 {
+        let stale = behind.unwrap_or(0);
+        if stale > 0 {
             sayln!(
-                "\nThe branch was already here and is {behind} commit{} behind the pull request. \
-                 It was left as it was.",
-                if behind == 1 { "" } else { "s" }
+                "\n{} is {stale} commit{} behind the pull request. It was left as it was: bring \
+                 it up to date before a review, or the review reads the old code.",
+                if existing {
+                    "The workspace"
+                } else {
+                    "The branch was already here and"
+                },
+                if stale == 1 { "" } else { "s" }
             );
         }
         if fork {

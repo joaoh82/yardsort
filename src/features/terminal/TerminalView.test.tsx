@@ -17,9 +17,15 @@ const fake = vi.hoisted(() => {
     selectAll: vi.fn(),
     mouseTrackingMode: "none",
     dragHandler: null as DragHandler | null,
+    // The webview tells every listener about every drop, as the real one does.
+    dragHandlers: [] as DragHandler[],
+    terminals: [] as unknown[],
     unlistenDrag: vi.fn(),
   };
   class Terminal {
+    constructor() {
+      state.terminals.push(this);
+    }
     cols = 80;
     rows = 24;
     options = {};
@@ -73,6 +79,7 @@ vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({
     onDragDropEvent: (handler: DragHandler) => {
       fake.state.dragHandler = handler;
+      fake.state.dragHandlers.push(handler);
       return Promise.resolve(fake.state.unlistenDrag);
     },
   }),
@@ -127,6 +134,8 @@ beforeEach(() => {
     }) as unknown as MediaQueryList;
   fake.state.keyHandler = null;
   fake.state.dragHandler = null;
+  fake.state.dragHandlers = [];
+  fake.state.terminals = [];
   fake.state.csi.clear();
   fake.state.selection = "";
   fake.state.mouseTrackingMode = "none";
@@ -191,6 +200,35 @@ describe("dropping files", () => {
       payload: { type: "drop", paths: ["/home/me/plan.md"], position: at(900, 100) },
     });
     expect(fake.state.paste).not.toHaveBeenCalled();
+  });
+
+  it("goes only to the terminal on top where two overlap, as the Floor Manager's does", async () => {
+    // The workspace's terminal fills the centre; the Floor Manager's floats over its corner.
+    const { container } = render(
+      <>
+        <TerminalView sessionId="s1" />
+        <TerminalView sessionId="coordinator" agent />
+      </>,
+    );
+    await vi.waitFor(() => expect(fake.state.dragHandlers).toHaveLength(2));
+    const behind = container.children[0] as HTMLElement;
+    const onTop = container.children[1] as HTMLElement;
+    document.elementFromPoint = vi.fn(() => onTop.firstElementChild ?? onTop);
+    try {
+      const drop = { type: "drop", paths: ["/home/me/plan.md"], position: at(700, 500) };
+      for (const handler of fake.state.dragHandlers) handler({ payload: drop });
+      expect(fake.state.paste).toHaveBeenCalledTimes(1);
+      expect(fake.state.paste.mock.contexts[0]).toBe(fake.state.terminals[1]);
+
+      // Over the panel's own header or welcome text, neither terminal is on top: no paste.
+      fake.state.paste.mockClear();
+      document.elementFromPoint = vi.fn(() => document.body);
+      for (const handler of fake.state.dragHandlers) handler({ payload: drop });
+      expect(fake.state.paste).not.toHaveBeenCalled();
+      expect(behind.dataset.drop).toBeUndefined();
+    } finally {
+      delete (document as { elementFromPoint?: unknown }).elementFromPoint;
+    }
   });
 
   it("stops listening when unmounted", async () => {

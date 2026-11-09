@@ -499,7 +499,10 @@ others are still listed. With `--json`, each pull request carries its `reviews`,
 it, as the view's [**Start workspace**](pull-requests.md#start-a-workspace-from-a-pull-request) does: no new branch, and no agent started. A branch that
 is already here is opened as it is, and it says how far behind it is. One from a fork is
 `pr/<number>`, following the pull request. If a workspace already has the branch, `checkout` says
-which and makes nothing. A merged or closed pull request is refused. Then
+which and makes nothing, but it still fetches the pull request and says how many commits the
+workspace is behind it, so a second review does not read old code unnoticed. The workspace is
+left as it is. With `--json`, `existing` is `true` and `behind` the count, or `null` when the
+remote could not be reached, with the reason on standard error. A merged or closed pull request is refused. Then
 `ys workflow run code-review --workspace <name>` has an agent review it. That does not work yet for
 a pull request from a fork, because the review finds a pull request by its branch name. It is how
 the [Floor Manager](floor-manager.md) reviews other people's pull requests.

@@ -60,6 +60,10 @@ One yes covers what you proposed, not what you think of next.
 
 `ys pr checkout` makes a workspace on the pull request's branch and starts no agent. It is still
 proposed first, because it makes a worktree. The review it is for is what starts the agent.
+Asked again for a pull request a workspace already has, it hands that workspace back and says
+how far behind the pull request it is (`behind` in `--json`; `null` when it could not tell). If
+it is behind or cannot tell, say so before proposing a review: the reviewer would read the old
+code. Bringing the workspace up to date is the user's, or an agent's in that workspace, not yours.
 
 To pick a workflow, read `ys workflow list --json` and `ys workflow show <id>`. Say which fits
 and why, or say that none does and start a plain workspace instead. `ys workflow run` and

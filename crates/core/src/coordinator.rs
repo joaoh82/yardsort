@@ -156,14 +156,19 @@ impl Launcher<'_> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::sync::Arc;
-    use std::time::{Duration, Instant};
 
     use super::*;
     use crate::env::EnvSource;
-    use crate::harness::HarnessOverride;
-    use crate::settings::ActivitySettings;
-    use crate::store::Store;
+
+    // Only the test that starts a real process in a real PTY needs these, and it runs on Unix.
+    #[cfg(unix)]
+    use {
+        crate::harness::HarnessOverride,
+        crate::settings::ActivitySettings,
+        crate::store::Store,
+        std::sync::Arc,
+        std::time::{Duration, Instant},
+    };
 
     fn env_with(vars: &[(&str, &str)]) -> ShellEnv {
         ShellEnv {

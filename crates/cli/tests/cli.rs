@@ -3990,6 +3990,65 @@ fn a_pull_request_is_checked_out_into_a_workspace_once() {
     let listed = fx.ys(&["workspace", "list", "--json"]).ok();
     let listed: serde_json::Value = serde_json::from_str(&listed).unwrap();
     assert_eq!(worktrees_in(&listed).len(), 1);
+    assert!(!again.contains("behind"), "{again}");
+
+    // The pull request moves on. The workspace is left as it is, and said to be behind, so a
+    // second review is not quietly run on the old code.
+    let before = git.run(&path, &["rev-parse", "HEAD"]).unwrap();
+    let pushed = git
+        .run(
+            &fx.repo,
+            &["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "One more"],
+        )
+        .unwrap();
+    git.run(
+        &fx.repo,
+        &[
+            "push",
+            "-q",
+            "origin",
+            &format!("{}:refs/heads/branch-13665", pushed.trim()),
+        ],
+    )
+    .unwrap();
+    let moved = prs
+        .ys(
+            None,
+            &["pr", "checkout", "13665", "--project", "Demo", "--json"],
+        )
+        .ok();
+    let moved: serde_json::Value = serde_json::from_str(&moved).unwrap();
+    assert_eq!(moved["existing"], true);
+    assert_eq!(moved["behind"], 1);
+    assert_eq!(git.run(&path, &["rev-parse", "HEAD"]).unwrap(), before);
+    let said = prs
+        .ys(None, &["pr", "checkout", "13665", "--project", "Demo"])
+        .ok();
+    assert!(
+        said.contains("The workspace is 1 commit behind the pull request"),
+        "{said}"
+    );
+
+    // With the remote out of reach the workspace is still handed back, and how far behind it is
+    // is said to be unknown rather than none.
+    let gone = remote.path().join("gone");
+    git.run(
+        &fx.repo,
+        &["remote", "set-url", "origin", &gone.to_string_lossy()],
+    )
+    .unwrap();
+    let unreachable = prs.ys(
+        None,
+        &["pr", "checkout", "13665", "--project", "Demo", "--json"],
+    );
+    let stderr = unreachable.stderr.clone();
+    let unreachable: serde_json::Value = serde_json::from_str(&unreachable.ok()).unwrap();
+    assert_eq!(unreachable["existing"], true);
+    assert_eq!(unreachable["behind"], serde_json::Value::Null);
+    assert!(
+        stderr.contains("Could not check whether branch-13665 is behind #13665"),
+        "{stderr}"
+    );
 
     let refused = prs
         .ys(None, &["pr", "checkout", "twelve", "--project", "Demo"])

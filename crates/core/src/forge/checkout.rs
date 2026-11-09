@@ -86,6 +86,29 @@ pub fn prepare_branch(git: &Git, root: &Path, pr: &PullRequest) -> IpcResult<Pre
     })
 }
 
+/// How many commits the pull request has that `branch` does not, fetched fresh. For a branch a
+/// workspace already has checked out: only remote-tracking refs and Yardsort's own pull request
+/// refs are written, so the branch and the worktree are left exactly as they are.
+pub fn behind(git: &Git, root: &Path, pr: &PullRequest, branch: &str) -> IpcResult<u32> {
+    let remote = remote_of(git, root, &pr.url)?.ok_or_else(|| {
+        IpcError::new(
+            "no_remote",
+            "This project has no remote to fetch the pull request from.",
+        )
+    })?;
+    let fork = pr
+        .details
+        .as_ref()
+        .is_some_and(|details| details.cross_repository);
+    let head = if fork {
+        git.fetch_pull_request(root, &remote, pr.number, None)?
+    } else {
+        git.fetch_branch(root, &remote, &pr.branch)?;
+        format!("refs/remotes/{remote}/{}", pr.branch)
+    };
+    Ok(git.commits_between(root, branch, &head)?)
+}
+
 fn not_checked_out(git: &Git, root: &Path, branch: &str) -> IpcResult<()> {
     let holder = git
         .worktrees(root)?
