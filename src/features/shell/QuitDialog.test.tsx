@@ -25,6 +25,7 @@ const tab = (id: string, title: string): TerminalTab => ({
   attention: false,
   toldAbout: null,
   toldAt: null,
+  busySince: null,
 });
 
 beforeEach(() => {

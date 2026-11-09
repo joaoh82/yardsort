@@ -833,6 +833,7 @@ mod tests {
                 state: pty_host::SessionState::Running,
                 has_output: false,
                 busy: false,
+                busy_ms: 0,
                 idle_ms: 0,
             };
             self.plans.lock().unwrap().push(plan);
@@ -882,6 +883,7 @@ mod tests {
                 state: pty_host::SessionState::Exited { exit: exit.clone() },
                 has_output: true,
                 busy: false,
+                busy_ms: 0,
                 idle_ms: 0,
             })
         }

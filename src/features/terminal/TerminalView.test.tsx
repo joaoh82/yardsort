@@ -110,6 +110,7 @@ const tab = (recordId: string | null): TerminalTab => ({
   attention: false,
   toldAbout: null,
   toldAt: null,
+  busySince: null,
 });
 
 const shiftEnter = () => {

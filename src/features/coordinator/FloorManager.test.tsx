@@ -48,6 +48,7 @@ const session = (id: string, running: boolean): SessionInfo => ({
   hasOutput: true,
   busy: false,
   idleMs: 0,
+  busyMs: 0,
 });
 
 const status = (current: SessionInfo | null, extra: Partial<CoordinatorStatus> = {}) => ({

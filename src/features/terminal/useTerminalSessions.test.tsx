@@ -29,6 +29,7 @@ function session(id: string, workspace: string): SessionInfo {
     hasOutput: true,
     busy: true,
     idleMs: 0,
+    busyMs: 0,
   };
 }
 

@@ -165,6 +165,11 @@ pub struct SessionInfo {
     pub has_output: bool,
     /// Producing output right now (see [`HostEvent::Busy`] / [`HostEvent::Quiet`]).
     pub busy: bool,
+    /// How long the current burst of output has lasted, in milliseconds (saturating); 0 while
+    /// quiet. A busy indicator counts up from it instead of animating. A daemon older than the
+    /// field sends none, which reads as a burst that has only just begun.
+    #[serde(default)]
+    pub busy_ms: u32,
     /// Milliseconds since the session last produced output (saturating). Drives "busy / waiting" indicators
     /// without anyone having to parse what the program printed.
     pub idle_ms: u32,

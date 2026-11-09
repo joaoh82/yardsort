@@ -70,6 +70,7 @@ beforeEach(() => {
     hasOutput: true,
     busy: false,
     idleMs: 0,
+    busyMs: 0,
   }));
   useSessionsStore.setState({ byWorkspace: {}, error: null });
   useTerminalStore.setState({ tabs: [], active: {}, error: null });
@@ -300,6 +301,7 @@ describe("starting an agent beside other conversations", () => {
       hasOutput: false,
       busy: false,
       idleMs: 0,
+      busyMs: 0,
     }));
     useHarnessStore.setState({
       harnesses: [harness("claude", { contextArgs: ["--append-system-prompt", "{context}"] })],

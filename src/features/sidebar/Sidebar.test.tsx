@@ -95,6 +95,7 @@ const shellIn = (workspace: string) => ({
   hasOutput: true,
   busy: false,
   idleMs: 0,
+  busyMs: 0,
 });
 
 async function renderSidebar(...names: string[]) {
@@ -816,6 +817,44 @@ describe("Sidebar", () => {
     expect(within(preview).getByText("No pull request found")).toBeVisible();
   });
 
+  it("shows how long a workspace has been busy, with nothing animating", async () => {
+    await renderWithWorktree();
+    const started = Date.now() - 125_000;
+    act(() => {
+      useTerminalStore.setState({
+        tabs: [
+          {
+            id: "t1",
+            workspaceId: "w-alpha-feature",
+            title: "claude",
+            recordId: "r1",
+            exit: null,
+            busy: true,
+            attention: false,
+            toldAbout: null,
+            toldAt: null,
+            busySince: started + 60_000,
+          },
+          {
+            id: "t2",
+            workspaceId: "w-alpha-feature",
+            title: "codex",
+            recordId: "r2",
+            exit: null,
+            busy: true,
+            attention: false,
+            toldAbout: null,
+            toldAt: null,
+            busySince: started,
+          },
+        ],
+      });
+    });
+    // The row counts from the burst that began first.
+    expect(within(rowButton("feature")).getByLabelText("busy for 2m")).toBeVisible();
+    expect(document.querySelector('[class*="animate-"]')).toBeNull();
+  });
+
   it("counts open harness tabs, shows names and activity, and switches to the chosen one", async () => {
     await renderWithWorktree();
     act(() => {
@@ -839,6 +878,7 @@ describe("Sidebar", () => {
             attention: false,
             toldAbout: null,
             toldAt: null,
+            busySince: null,
           },
           {
             id: "t2",
@@ -850,6 +890,7 @@ describe("Sidebar", () => {
             attention: true,
             toldAbout: null,
             toldAt: null,
+            busySince: null,
           },
           {
             id: "t3",
@@ -861,6 +902,7 @@ describe("Sidebar", () => {
             attention: false,
             toldAbout: null,
             toldAt: null,
+            busySince: null,
           },
         ],
       });
@@ -936,6 +978,7 @@ describe("Sidebar", () => {
       attention: false,
       toldAbout: null,
       toldAt: null,
+      busySince: null,
     };
     const row = () => within(screen.getByRole("treeitem", { name: "feature" }));
     const badge = (name: string) => row().queryByRole("img", { name });
@@ -1551,6 +1594,7 @@ describe("Sidebar", () => {
           attention: false,
           toldAbout: null,
           toldAt: null,
+          busySince: null,
         },
       ],
       active: { "w-alpha": "s-w-alpha" },

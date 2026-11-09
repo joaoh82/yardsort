@@ -9,6 +9,16 @@ export function summarise(tabs: { busy: boolean; exit: unknown }[]): Activity {
   return live.length > 0 ? "waiting" : "idle";
 }
 
+/** When the longest-running burst among `tabs` began, for one clock on a row; `null` if none. */
+export function busySinceOf(
+  tabs: { busy: boolean; busySince: number | null; exit: unknown }[],
+): number | null {
+  const starts = tabs
+    .filter((tab) => tab.busy && !tab.exit && tab.busySince !== null)
+    .map((tab) => tab.busySince as number);
+  return starts.length > 0 ? Math.min(...starts) : null;
+}
+
 /**
  * What a workspace's *harnesses* have got to, for the badge on its row in the sidebar. Shells are
  * left out: a prompt sitting there is not news, and a workspace whose agent has ended should not

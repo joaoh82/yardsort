@@ -6,7 +6,8 @@ import { recall, useProjectsStore } from "@/stores/projects";
 import { pullRequestsFor, usePublishStore } from "@/stores/publish";
 import { useTerminalStore } from "@/stores/terminals";
 import { archiveWorkspace, deleteWorkspace, enterWorkspace, restoreWorkspace } from "./actions";
-import { summarise } from "@/features/terminal/activity";
+import { busySinceOf, summarise } from "@/features/terminal/activity";
+import { BusyClock } from "@/features/terminal/BusyClock";
 import { HoverCard } from "@/lib/HoverCard";
 import { PullRequestDetails } from "@/features/pull-requests/PullRequestDetails";
 import { WorkspaceHarnesses } from "./WorkspaceHarnesses";
@@ -267,6 +268,7 @@ function WorkspaceNode({
   const [pr, ...otherPrs] = pullRequestsFor(found, workspace);
   const allTabs = useTerminalStore((s) => s.tabs);
   const tabs = allTabs.filter((tab) => tab.workspaceId === workspace.id);
+  const busySince = busySinceOf(tabs);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [forgetting, setForgetting] = useState(false);
@@ -425,6 +427,7 @@ function WorkspaceNode({
           <span className={`truncate ${workspace.missing ? "line-through" : ""}`}>
             {workspace.name}
           </span>
+          {busySince !== null && <BusyClock since={busySince} />}
           {(workspace.missing || unrestorable) && !disabled && (
             <span
               className="text-[11px] text-red-400"

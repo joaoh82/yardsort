@@ -30,6 +30,7 @@ function session(id: string, program: string, workspace: string | null = "ws", e
     hasOutput: true,
     busy: false,
     idleMs: 0,
+    busyMs: 0,
   } satisfies SessionInfo;
 }
 
@@ -43,6 +44,7 @@ const tab = (id: string, workspaceId = "ws", extra: Partial<TerminalTab> = {}): 
   attention: false,
   toldAbout: null,
   toldAt: null,
+  busySince: null,
   ...extra,
 });
 
@@ -152,6 +154,31 @@ describe("terminal store", () => {
     ]);
     await useTerminalStore.getState().hydrate();
     expect(useTerminalStore.getState().tabs[0]).toMatchObject({ recordId: "r1", busy: true });
+  });
+
+  it("times a burst of output from the core's count, then from the events", async () => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    try {
+      core.ptyList.mockResolvedValue([
+        { ...session("h1", "claude"), busy: true, busyMs: 90_000 },
+        { ...session("h2", "zsh"), busyMs: 0 },
+      ]);
+      await useTerminalStore.getState().hydrate();
+      const since = (id: string) =>
+        useTerminalStore.getState().tabs.find((t) => t.id === id)!.busySince;
+      expect(since("h1")).toBe(1_000_000 - 90_000);
+      expect(since("h2")).toBeNull();
+
+      vi.setSystemTime(2_000_000);
+      useTerminalStore.getState().markBusy("h2");
+      expect(since("h2")).toBe(2_000_000);
+      useTerminalStore.getState().markQuiet("h2", 1_000, true);
+      expect(since("h2")).toBeNull();
+      useTerminalStore.getState().markExited("h1", { code: 0, success: true, signal: null });
+      expect(since("h1")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("resuming swaps the ended terminal for a live one on the same conversation", async () => {

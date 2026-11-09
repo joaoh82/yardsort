@@ -134,7 +134,8 @@ unticked for now if you like; they can be added to a workspace later.
 - The **middle** is the agent's own terminal UI. Type to it exactly as you would anywhere else.
 - The **right** lists every file the agent has touched, updating live. Click one for the diff.
 - The **left** shows all your workspaces. Start another — in the same project or a different
-  one — and they run side by side. A pulsing dot means an agent is working. The harness pill counts
+  one — and they run side by side. A count beside a workspace's dot, such as **2m**, means an
+  agent has been working that long. The harness pill counts
   all open agent tabs, including finished ones; its amber tint means an agent is waiting for you.
   A **✓** means they have all finished successfully. Hover or keyboard-focus the pill to see each
   agent's name and activity, then select one to open its terminal.

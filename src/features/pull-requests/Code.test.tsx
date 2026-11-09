@@ -379,6 +379,7 @@ describe("a note on selected lines", () => {
     hasOutput: false,
     busy: false,
     idleMs: 0,
+    busyMs: 0,
   });
   const openNote = async (user: ReturnType<typeof userEvent.setup>) => {
     await user.click(await screen.findByRole("button", { name: /upload\.rs/ }));
