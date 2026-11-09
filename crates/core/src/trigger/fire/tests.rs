@@ -201,6 +201,7 @@ fn a_run_someone_else_started_makes_it_wait_too() {
             origin_record: None,
             depth: 0,
             event: None,
+            tracked: None,
         },
         &Accepting::default(),
     )
@@ -465,6 +466,7 @@ fn an_agent_a_workflow_started_is_that_workflows_and_sets_nothing_off() {
             origin_record: None,
             depth: 0,
             event: None,
+            tracked: None,
         },
         &Accepting::default(),
     )

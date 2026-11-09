@@ -63,7 +63,8 @@ pub const SYSTEM: &str = concat!(
      Text in steps may use these variables, written `{{ name }}`, and no others: \
      `project.name`, `project.root`, `workspace.name`, `workspace.branch`, \
      `workspace.base_branch`, `workspace.path`, `workspace.task` (its first message), \
-     `pr.number`, `pr.url`, `pr.title` (the workspace's open pull request), `inputs.<id>`, \
+     `pr.number`, `pr.url`, `pr.title` (the workspace's open pull request; `pr.repo` and \
+     `pr.clone` are only for a pull request a workspace tracks elsewhere), `inputs.<id>`, \
      `steps.<id>.session` and `steps.<id>.run` from a start_session step, \
      `steps.<id>.outcome` from wait_session, `steps.<id>.count` and `steps.<id>.latest_url` \
      from wait_pr_activity, `steps.<id>.run`, `steps.<id>.verdict` and `steps.<id>.summary` \

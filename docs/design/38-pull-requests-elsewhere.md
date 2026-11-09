@@ -1,9 +1,10 @@
 # 38 — Pull requests in other repositories
 
-_Proposed 2026-11-09. Slices 1–4 are built — see [slice 1](#slice-1-what-shipped),
-[slice 2](#slice-2-what-shipped), [slice 3](#slice-3-what-shipped) and
-[slice 4](#slice-4-what-shipped). Slice 5 is to do;
-[M31](05-roadmap.md#m31--pull-requests-in-other-repositories) tracks it._
+_Proposed 2026-11-09, and built the same day in five slices — see
+[slice 1](#slice-1-what-shipped), [slice 2](#slice-2-what-shipped),
+[slice 3](#slice-3-what-shipped), [slice 4](#slice-4-what-shipped) and
+[slice 5](#slice-5-what-shipped). [M31](05-roadmap.md#m31--pull-requests-in-other-repositories)
+tracks the hands-on pass on the three systems that is left._
 
 A project is one repository, and every pull request Yardsort shows is one of that repository's.
 Some projects are not used that way. A **parent repository** holds other repositories as
@@ -147,8 +148,8 @@ checkout as a working folder. Measured: 0.5 s for one pull request.
   no row to show it on; one read before keeps its row, with what was known then, and the line
   says that is what shows.
 
-Outcomes and workflows still see only the project's own. A workflow that waits on a review
-(`wait_pr_activity`) waits on the workspace's own pull request; slice 5 is the one about that.
+Outcomes see only the project's own. Workflows are about the workspace's own pull request,
+except one whose `context` is `tracked_pull_request`, started from a tracked one (slice 5).
 
 ## Telling the agent
 
@@ -207,7 +208,7 @@ note and `ys pr track` cover it.
   worktree and to run `gh pr review <n>`. For a pull request elsewhere, the reviewer needs the
   nested clone — or a worktree of it — and the link. Slice 5 lets the workflow be run on a
   tracked pull request, gives the reviewer the clone to work in, and points `wait_pr_activity`
-  at the link.
+  at the link. ✅
 - **Start workspace** is not offered: the repository is not a project. Adding it as one is
   what [24](24-repositories.md) is for.
 
@@ -222,8 +223,8 @@ note and `ys pr track` cover it.
    can see, recorded where the agent could be. See [slice 3](#slice-3-what-shipped).
 4. **Acting on them.** ✅ Merge, close, reopen and the reply box by link; **Code** from the
    nested clone. See [slice 4](#slice-4-what-shipped).
-5. **Code review on one.** The workflow on a tracked pull request, in the nested clone; review
-   activity waited on by link.
+5. **Code review on one.** ✅ The workflow on a tracked pull request, in the nested clone;
+   review activity waited on by link. See [slice 5](#slice-5-what-shipped).
 
 ## Tests
 
@@ -443,6 +444,48 @@ Library — the actions offered and not, a close confirmed naming the repository
 (a "no" sends nothing), a reply sent by link, **Code** failing without a clone and then reading
 the files, and a merge from the toolbar sent by link at the head shown. Not yet done: the three
 systems' hands-on pass.
+
+## Slice 5: what shipped
+
+**Request code review…** in a tracked pull request's details runs a new built-in workflow,
+**Request code review elsewhere** (`code-review-elsewhere`), on that pull request:
+
+- **A run about a tracked pull request.** A workflow's `trigger.context` may now be
+  `tracked_pull_request`. Such a run is queued with the pull request, read by its link by the
+  caller (`publish::tracked::for_a_run`) and open, in `Request::tracked`; it is refused without
+  one — `ys workflow run`, a schedule, a trigger — and a workspace workflow is refused one. The
+  Workflows view disables **Run…** and **Schedule…** for it, and the Schedules and Triggers
+  dialogs do not offer it. `pr.number`, `pr.url` and `pr.title` are that pull request's, and two
+  new variables say where it is: `pr.repo` (`owner/name`) and `pr.clone`, the project's nested
+  clone of it. The checker refuses both in a workspace workflow, where they would always be
+  empty. The run dialog, given the tracked pull request, offers only such workflows, and blocks
+  **Run** with the reason when the pull request cannot be used.
+- **The clone, when it is used.** A workflow whose steps use `pr.clone` is refused without the
+  project's nested clone of the repository (`runs::tracked_problem`); the built-in uses it, since
+  its reviewer runs the checks there. Any other problem finding the clone is said as itself.
+- **The reviewer** starts in the workspace like any other, and is told to read the diff with
+  `gh pr diff <link>`, to run the checks in a worktree of the clone of its own and remove it
+  afterwards, and to post with `gh pr review <link>`. The worktree is made with
+  `git worktree add --detach`, and the pull request checked out in it with
+  `gh pr checkout <link> --detach`: a linked worktree has its own `HEAD` and `FETCH_HEAD`, so
+  the clone's own checkout is left alone.
+- **Waited on by link, for a review.** `Hands::pr_posts` is given the run's `PrFacts`, and asks
+  `gh pr view <selector>` — the number for a workspace's own, the link for one elsewhere
+  (`PrFacts::selector`) — from the workspace's folder, or anywhere if that has gone. The
+  built-in waits for a review (`kind: review`), not any comment: the author, a bot or a person
+  may comment meanwhile.
+- **Told to the agent that opened it.** The tracked row's conversation is kept as
+  `Elsewhere::opened_by`; at the run's start, `session: origin` is that one if its terminal is
+  running, else the workspace's own agent, as for any run. The author's prompt names `gh api`'s
+  `--hostname` for a pull request off github.com.
+
+How it was checked: queueing in the core — the tracked one's facts and variables, the workspace's
+own not looked for, the refusals both ways, the selector; the workflow's file parsed with every
+variable it uses known; the by-link `pr view` against a stand-in `gh`; the run dialog through
+Testing Library — only the workflows about one offered, previewed and started with the tracked
+id, the agent that opened it named, and refused without a clone — and the button in the Pull
+requests view opening it. Not yet done: a real review run on a real tracked pull request, and the
+three systems' hands-on pass.
 
 ## Documentation this touches
 

@@ -58,7 +58,7 @@ impl Hands for Cancelling {
         None
     }
 
-    fn pr_posts(&self, _: &str, _: u32) -> PrAsk {
+    fn pr_posts(&self, _: &str, _: &crate::workflow::runs::PrFacts) -> PrAsk {
         unreachable!("this workflow waits on no pull request")
     }
 }
@@ -93,6 +93,7 @@ fn a_cancel_during_one_effect_stops_the_effects_after_it() {
             origin_record: None,
             depth: 0,
             event: None,
+            tracked: None,
         },
         &crate::workflow::runs::Accepting::default(),
     )
@@ -175,8 +176,8 @@ impl Hands for Forge {
         None
     }
 
-    fn pr_posts(&self, _: &str, number: u32) -> PrAsk {
-        assert_eq!(number, 7);
+    fn pr_posts(&self, _: &str, pr: &crate::workflow::runs::PrFacts) -> PrAsk {
+        assert_eq!(pr.number, 7);
         let (posts, asked, hold) = (
             Arc::clone(&self.posts),
             Arc::clone(&self.asked),
@@ -261,6 +262,7 @@ impl Profile {
                 origin_record: None,
                 depth: 0,
                 event: None,
+                tracked: None,
             },
             &look,
         )
@@ -476,7 +478,7 @@ impl Hands for NoHands {
     fn handoff(&self, _: &str) -> Option<String> {
         None
     }
-    fn pr_posts(&self, _: &str, _: u32) -> PrAsk {
+    fn pr_posts(&self, _: &str, _: &crate::workflow::runs::PrFacts) -> PrAsk {
         unreachable!("no pull request")
     }
 }
@@ -515,6 +517,7 @@ fn a_run_test_step_queues_a_run_marked_as_the_workflows_and_waits_for_it() {
             origin_record: None,
             depth: 0,
             event: None,
+            tracked: None,
         },
         &crate::workflow::runs::Accepting::default(),
     )
@@ -590,6 +593,7 @@ fn a_run_test_step_in_a_run_nobody_watches_fails_rather_than_wait_for_a_person()
                 origin_record: None,
                 depth: 0,
                 event: None,
+                tracked: None,
             },
             &crate::workflow::runs::Accepting::default(),
         )

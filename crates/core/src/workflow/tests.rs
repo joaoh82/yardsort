@@ -492,7 +492,7 @@ fn every_variable_names_something_that_exists() {
         ("{{ workspace.brnch }}", "`workspace` has no `brnch`"),
         (
             "{{ pr }}",
-            "`{{ pr }}` needs a field: `pr.number`, `pr.url`, `pr.title`.",
+            "`{{ pr }}` needs a field: `pr.number`, `pr.url`, `pr.title`, `pr.repo`, `pr.clone`.",
         ),
         ("{{ memory.entries }}", "`memory` is used whole"),
         (
@@ -505,6 +505,10 @@ fn every_variable_names_something_that_exists() {
         ),
         ("{{ steps.start }}", "write a step's result as"),
         ("{{ branch }}", "there is no `branch`. Variables start with"),
+        (
+            "{{ pr.clone }}",
+            "is for a pull request a workspace tracks in another",
+        ),
     ];
     for (variable, expected) in cases {
         let found = problem(&BASE.replace("prompt: Hello", &format!("prompt: \"{variable}\"")));
@@ -682,6 +686,7 @@ fn a_users_files_are_listed_beside_the_built_ins_by_name() {
             "Another",
             "Fix failing checks",
             "Request code review",
+            "Request code review elsewhere",
             "Review the branch",
             "Smoke test, then tell the agent"
         ]

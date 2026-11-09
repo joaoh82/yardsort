@@ -5,6 +5,7 @@ import {
   type Input,
   type RunPreview,
   type TestItem,
+  type TrackedPullRequest,
   type Workspace,
 } from "@/lib/ipc";
 import { useModalFocus } from "@/lib/useModalFocus";
@@ -22,6 +23,11 @@ interface Props {
   workflowId?: string;
   /** In this workspace; without it, the dialog asks which. */
   workspace?: Workspace;
+  /**
+   * On this pull request, which the workspace tracks in another repository: only the workflows
+   * about one (`context: tracked_pull_request`) are offered, and the run is about it.
+   */
+  tracked?: TrackedPullRequest;
   onClose: () => void;
   /** The run was queued: its id, and the workflow's. */
   onStarted?: (runId: string, workflowId: string) => void;
@@ -32,7 +38,7 @@ interface Props {
  * is checked again by the core when it is queued, exactly as `ys workflow run` does; what shows
  * here first is so the person can see what the run will find before asking for it.
  */
-export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }: Props) {
+export function RunWorkflowDialog({ workflowId, workspace, tracked, onClose, onStarted }: Props) {
   const titleId = useId();
   const dialogRef = useRef<HTMLFormElement>(null);
   useModalFocus(dialogRef);
@@ -66,7 +72,12 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose, busy]);
 
-  const runnable = items.filter((item) => item.problems.length === 0 && item.workflow);
+  // A workflow about a pull request elsewhere runs on one, from it; every other, in a workspace.
+  const context = tracked ? "tracked_pull_request" : "workspace";
+  const runnable = items.filter(
+    (item) =>
+      item.problems.length === 0 && item.workflow && item.workflow.trigger.context === context,
+  );
   const workflow = items.find((item) => item.id === chosenWorkflow)?.workflow ?? null;
   const inputs: Input[] = useMemo(() => workflow?.inputs ?? [], [workflow]);
   // Every input starts from its default. A required agent starts on the first one installed,
@@ -105,19 +116,20 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
   const answer = (id: string, value: string) =>
     setChosen((all) => ({ ...all, [chosenWorkflow]: { ...all[chosenWorkflow], [id]: value } }));
 
-  const previewKey = `${chosenWorkflow}|${chosenWorkspace}`;
+  const trackedId = tracked?.id ?? null;
+  const previewKey = `${chosenWorkflow}|${chosenWorkspace}|${trackedId ?? ""}`;
   const preview = previewed?.key === previewKey ? previewed.preview : null;
   useEffect(() => {
     if (!chosenWorkflow || !chosenWorkspace || !workflow) return;
     let current = true;
-    ipc.workflowPreview(chosenWorkflow, chosenWorkspace).then(
+    ipc.workflowPreview(chosenWorkflow, chosenWorkspace, trackedId).then(
       (found) => current && setPreviewed({ key: previewKey, preview: found }),
       (failed) => current && setError(errorMessage(failed)),
     );
     return () => {
       current = false;
     };
-  }, [chosenWorkflow, chosenWorkspace, workflow, previewKey]);
+  }, [chosenWorkflow, chosenWorkspace, trackedId, workflow, previewKey]);
 
   useEffect(() => {
     if (!needsTest || !chosenWorkspace) return;
@@ -154,7 +166,7 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
     setError(null);
     try {
       const given = Object.fromEntries(Object.entries(answers).filter(([, v]) => v.trim()));
-      const run = await ipc.workflowStart(chosenWorkflow, chosenWorkspace, given);
+      const run = await ipc.workflowStart(chosenWorkflow, chosenWorkspace, given, trackedId);
       onStarted?.(run, chosenWorkflow);
       onClose();
     } catch (failed) {
@@ -238,7 +250,8 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
               <p className="rounded border border-line bg-canvas/40 p-2.5 text-ink-muted">
                 On pull request{" "}
                 <span className="text-ink">
-                  #{preview.pullRequest.number} {preview.pullRequest.title}
+                  {preview.pullRequest.elsewhere ? preview.pullRequest.elsewhere.repo : ""}#
+                  {preview.pullRequest.number} {preview.pullRequest.title}
                 </span>
               </p>
             ) : (
@@ -255,8 +268,9 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
           )}
           {preview?.needsOrigin && (
             <p className="text-ink-faint">
-              When it is time, it tells the agent already running in this workspace, if there is
-              one.
+              {tracked
+                ? "When it is time, it tells the agent that opened the pull request, if it is known, or the one running in this workspace."
+                : "When it is time, it tells the agent already running in this workspace, if there is one."}
             </p>
           )}
           {error && (

@@ -78,6 +78,34 @@ pub struct PrFacts {
     pub number: u32,
     pub url: String,
     pub title: String,
+    /// Set when it is one the workspace tracks in another repository: asked about by its link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elsewhere: Option<Elsewhere>,
+}
+
+/// Where a tracked pull request is: its repository, and the project's nested clone of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Elsewhere {
+    /// `owner/name`.
+    pub repo: String,
+    /// The nested clone of it in the project's checkout, when there is one.
+    pub clone: Option<String>,
+    /// The conversation record that opened it, when known: `session: origin` is that one while
+    /// it runs, else the workspace's own agent, as for any run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opened_by: Option<String>,
+}
+
+impl PrFacts {
+    /// What `gh pr …` is given to name it: its number in the workspace's repository, or the
+    /// link to one elsewhere, which needs no repository around it.
+    pub fn selector(&self) -> String {
+        match &self.elsewhere {
+            Some(_) => self.url.clone(),
+            None => self.number.to_string(),
+        }
+    }
 }
 
 impl Facts {
@@ -102,6 +130,8 @@ impl Facts {
                 "number" => Some(pr.number.to_string()),
                 "url" => Some(pr.url.clone()),
                 "title" => Some(pr.title.clone()),
+                "repo" => pr.elsewhere.as_ref().map(|e| e.repo.clone()),
+                "clone" => pr.elsewhere.as_ref().and_then(|e| e.clone.clone()),
                 _ => None,
             },
             _ => None,
@@ -126,6 +156,9 @@ pub struct Request<'a> {
     pub depth: i64,
     /// What the event that asked for it left. See [`Facts::event`].
     pub event: Option<&'a BTreeMap<String, String>>,
+    /// The pull request a `tracked_pull_request` workflow is about, as the caller read it by its
+    /// link: one the workspace follows in another repository. `None` for every other run.
+    pub tracked: Option<&'a PrFacts>,
 }
 
 /// Queue a run and return its id.
@@ -182,7 +215,36 @@ pub fn queue(
         event: request.event.cloned().unwrap_or_default(),
         ..Facts::default()
     };
-    if needs_pull_request(workflow) {
+    let elsewhere = workflow.trigger.context == super::RunContext::TrackedPullRequest;
+    match (elsewhere, request.tracked) {
+        (true, Some(tracked)) => {
+            if let Some(problem) = tracked_problem(workflow, tracked) {
+                return Err(problem);
+            }
+            facts.pr = Some(tracked.clone());
+        }
+        (true, None) => {
+            return Err(IpcError::new(
+                "pull_request_missing",
+                format!(
+                    "`{}` is about a pull request a workspace tracks in another repository. Start \
+                     it from that pull request, in the Pull requests view.",
+                    workflow.id
+                ),
+            ))
+        }
+        (false, Some(_)) => {
+            return Err(IpcError::new(
+                "workflow_not_for_tracked",
+                format!(
+                    "`{}` is about the workspace's own pull request, not one it tracks elsewhere.",
+                    workflow.id
+                ),
+            ))
+        }
+        (false, None) => {}
+    }
+    if needs_pull_request(workflow) && !elsewhere {
         let found = look
             .pull_request(&workspace)
             .map_err(|why| IpcError::new("pull_request_unknown", why))?;
@@ -202,6 +264,7 @@ pub fn queue(
             number: pr.number,
             url: pr.url,
             title: pr.title,
+            elsewhere: None,
         });
     }
 
@@ -353,6 +416,28 @@ pub fn variables(workflow: &Workflow) -> std::collections::BTreeSet<String> {
 
 /// Whether a run of `workflow` needs the workspace's pull request: it waits for activity on it,
 /// or names it in a `{{ pr.… }}`.
+/// Why a run of `workflow` on the tracked pull request `pr` cannot go ahead, if it cannot: one
+/// whose steps use `pr.clone` works in the project's nested clone of it, and there is none.
+pub fn tracked_problem(workflow: &Workflow, pr: &PrFacts) -> Option<IpcError> {
+    let uses_clone = workflow.steps.iter().any(|step| {
+        texts(&step.action)
+            .iter()
+            .flat_map(|text| template::placeholders(text))
+            .any(|var| var.path.iter().map(String::as_str).eq(["pr", "clone"]))
+    });
+    let elsewhere = pr.elsewhere.as_ref()?;
+    (uses_clone && elsewhere.clone.is_none()).then(|| {
+        IpcError::new(
+            "no_clone",
+            format!(
+                "`{}` works in the project's clone of {}, and this project's folder holds none. \
+                 Clone it there first.",
+                workflow.id, elsewhere.repo
+            ),
+        )
+    })
+}
+
 pub fn needs_pull_request(workflow: &Workflow) -> bool {
     workflow.steps.iter().any(|step| {
         matches!(step.action, Action::WaitPrActivity { .. })

@@ -1,0 +1,81 @@
+# Built into Yardsort. To change it, duplicate it: a file in your workflows folder with the same
+# id is used instead of this one, and removing that file brings this one back.
+id: code-review-elsewhere
+name: Request code review elsewhere
+description: >
+  A second agent reviews a pull request this workspace tracks in another repository — one of
+  the project's nested clones — and posts its review on GitHub. When the review is there, you
+  are told, and so is the agent that opened the pull request.
+version: 1
+
+trigger:
+  kind: manual
+  context: tracked_pull_request
+
+inputs:
+  - id: reviewer
+    kind: harness
+    label: Who reviews
+    required: true
+  - id: focus
+    kind: text
+    label: Anything to look at in particular
+
+steps:
+  - id: review
+    action: start_session
+    harness: "{{ inputs.reviewer }}"
+    prompt: |
+      Review pull request {{ pr.repo }}#{{ pr.number }} ({{ pr.url }}), "{{ pr.title }}". It is
+      in {{ pr.repo }}, not in this project's repository: this project's folder keeps a clone of
+      it at `{{ pr.clone }}`. Another agent opened it from this workspace. Its task was:
+
+      {{ workspace.task }}
+
+      {{ inputs.focus }}
+
+      Read the whole diff with `gh pr diff {{ pr.url }}`. To run its checks, give yourself a
+      worktree of that clone and check the pull request out there — `git -C {{ pr.clone }}
+      worktree add --detach <a new folder outside it>`, then, in that folder,
+      `gh pr checkout {{ pr.url }} --detach` — run the checks, and remove the worktree with
+      `git -C {{ pr.clone }} worktree remove <that folder>` when you are done. Leave the clone's
+      own checkout as it is, and do not edit, commit or push anything.
+
+      When you are done, post your review on the pull request with `gh pr review {{ pr.url }}`
+      — approve, comment or request changes — and put each finding that is about particular
+      lines on those lines. Say what is wrong, why, and how you know. GitHub does not let the
+      author of a pull request approve it or request changes on it; if you are posting as its
+      author, post the same review with `--comment`. Then stop.
+
+  - id: settled
+    action: wait_session
+    needs: [review]
+    session: "{{ steps.review.session }}"
+    until: settled
+    timeout: 2h
+
+  # A review, not any comment: the author, a bot or a person may comment on it meanwhile.
+  - id: posted
+    action: wait_pr_activity
+    needs: [settled]
+    kind: review
+    timeout: 15m
+
+  - id: tell_user
+    action: notify
+    needs: [posted]
+    title: "Review posted on {{ pr.repo }}#{{ pr.number }}"
+    body: "{{ inputs.reviewer }} reviewed it. The pull request has it."
+
+  - id: tell_author
+    action: send_to_session
+    needs: [posted]
+    session: origin
+    timeout: 1h
+    prompt: |
+      Pull request {{ pr.repo }}#{{ pr.number }} has a new review from another agent
+      ({{ steps.posted.latest_url }}). Read it with `gh pr view {{ pr.url }} --comments` and the
+      review comments with `gh api repos/{{ pr.repo }}/pulls/{{ pr.number }}/comments`, adding
+      `--hostname` and the host in its link when that is not github.com. Fix what
+      is right in `{{ pr.clone }}`, where its branch is, push, and answer each comment saying
+      what you did or why you did not.

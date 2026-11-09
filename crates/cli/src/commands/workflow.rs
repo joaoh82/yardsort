@@ -225,6 +225,7 @@ fn start_run(
             origin_record: None,
             depth: 0,
             event: None,
+            tracked: None,
         },
         &Looking(ys),
     )?;

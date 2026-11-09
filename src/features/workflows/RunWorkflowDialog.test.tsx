@@ -103,7 +103,7 @@ describe("RunWorkflowDialog", () => {
     );
     expect(screen.getByRole("heading", { name: "Run “Request code review”" })).toBeInTheDocument();
     expect(await screen.findByText("#7 Fix the login")).toBeInTheDocument();
-    expect(core.workflowPreview).toHaveBeenCalledWith("code-review", fixLogin.id);
+    expect(core.workflowPreview).toHaveBeenCalledWith("code-review", fixLogin.id, null);
     expect(
       screen.getByText(/tells the agent already running in this workspace/),
     ).toBeInTheDocument();
@@ -116,10 +116,12 @@ describe("RunWorkflowDialog", () => {
     await user.type(screen.getByRole("textbox", { name: "Anything to look at" }), "the SQL");
     await user.click(screen.getByRole("button", { name: "Run" }));
 
-    expect(core.workflowStart).toHaveBeenCalledWith("code-review", fixLogin.id, {
-      reviewer: "codex",
-      focus: "the SQL",
-    });
+    expect(core.workflowStart).toHaveBeenCalledWith(
+      "code-review",
+      fixLogin.id,
+      { reviewer: "codex", focus: "the SQL" },
+      null,
+    );
     await waitFor(() => expect(onStarted).toHaveBeenCalledWith("run-1", "code-review"));
     expect(onClose).toHaveBeenCalled();
   });
@@ -154,7 +156,12 @@ describe("RunWorkflowDialog", () => {
     const run = screen.getByRole("button", { name: "Run" });
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
-    expect(core.workflowStart).toHaveBeenCalledWith("code-review", fixLogin.id, { depth: "safe" });
+    expect(core.workflowStart).toHaveBeenCalledWith(
+      "code-review",
+      fixLogin.id,
+      { depth: "safe" },
+      null,
+    );
   });
 
   it("picks a smoke test for a `test` input from the workspace's runnable tests", async () => {
@@ -209,7 +216,12 @@ describe("RunWorkflowDialog", () => {
     const run = screen.getByRole("button", { name: "Run" });
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
-    expect(core.workflowStart).toHaveBeenCalledWith("code-review", fixLogin.id, { suite: "login" });
+    expect(core.workflowStart).toHaveBeenCalledWith(
+      "code-review",
+      fixLogin.id,
+      { suite: "login" },
+      null,
+    );
   });
 
   it("revalidates the test pick when the workspace changes", async () => {
@@ -297,7 +309,7 @@ describe("RunWorkflowDialog", () => {
     const run = screen.getByRole("button", { name: "Run" });
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
-    expect(core.workflowStart).toHaveBeenCalledWith("smoke", beta.id, { suite: "health" });
+    expect(core.workflowStart).toHaveBeenCalledWith("smoke", beta.id, { suite: "health" }, null);
   });
 
   it("says what the run will render as nothing, and still lets it run", async () => {
@@ -352,5 +364,90 @@ describe("RunWorkflowDialog", () => {
     await user.click(screen.getByRole("button", { name: "Run" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("already running in `fix-login`");
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("RunWorkflowDialog on a pull request elsewhere", () => {
+  const elsewhere: WorkflowItem = {
+    ...review,
+    id: "code-review-elsewhere",
+    name: "Request code review elsewhere",
+    workflow: {
+      ...review.workflow!,
+      id: "code-review-elsewhere",
+      name: "Request code review elsewhere",
+      trigger: { kind: "manual", context: "tracked_pull_request" },
+    },
+  };
+  const tracked = {
+    id: "t-7",
+    workspaceId: fixLogin.id,
+    sessionId: null,
+    repo: { host: "github.com", owner: "demo", name: "lib", kind: "github" as const },
+    number: 7,
+    url: "https://github.com/demo/lib/pull/7",
+    trackedBy: "hook",
+    pullRequest: null,
+    problem: null,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    core.testList.mockResolvedValue([]);
+    useWorkflowStore.setState({ items: [review, elsewhere], loaded: true });
+    useHarnessStore.setState({ loaded: true, harnesses: [harness("claude")] });
+    useProjectsStore.setState({
+      projects: [{ ...project("app"), workspaces: [...project("app").workspaces, fixLogin] }],
+    });
+  });
+
+  it("runs on that pull request, read by its link, and offers only workflows about one", async () => {
+    core.workflowPreview.mockResolvedValue({
+      ...withPr,
+      pullRequest: {
+        number: 7,
+        url: tracked.url,
+        title: "Bump the client",
+        elsewhere: { repo: "demo/lib", clone: "/code/app/lib" },
+      },
+    });
+    core.workflowStart.mockResolvedValue("run-2");
+    const user = userEvent.setup();
+    render(<RunWorkflowDialog workspace={fixLogin} tracked={tracked} onClose={() => {}} />);
+    const picker = screen.getByRole("combobox", { name: "Workflow" });
+    const offered = [...picker.querySelectorAll("option")].map((o) => o.textContent);
+    expect(offered).toEqual(["Choose…", "Request code review elsewhere"]);
+    await user.selectOptions(picker, "code-review-elsewhere");
+    expect(await screen.findByText(/demo\/lib#\s*7 Bump the client/)).toBeInTheDocument();
+    expect(core.workflowPreview).toHaveBeenCalledWith("code-review-elsewhere", fixLogin.id, "t-7");
+    expect(screen.getByText(/tells the agent that opened the pull request/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    await waitFor(() =>
+      expect(core.workflowStart).toHaveBeenCalledWith(
+        "code-review-elsewhere",
+        fixLogin.id,
+        { reviewer: "claude" },
+        "t-7",
+      ),
+    );
+  });
+
+  it("says why it cannot run without the project's clone of the repository", async () => {
+    core.workflowPreview.mockResolvedValue({
+      ...withPr,
+      pullRequest: null,
+      pullRequestProblem:
+        "This project's folder holds no clone of demo/lib for a reviewer to run its checks in.",
+    });
+    render(
+      <RunWorkflowDialog
+        workflowId="code-review-elsewhere"
+        workspace={fixLogin}
+        tracked={tracked}
+        onClose={() => {}}
+      />,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("no clone of demo/lib");
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 });

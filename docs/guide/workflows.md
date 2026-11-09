@@ -74,11 +74,16 @@ own, never in one of your projects; a repository because some agents will not ru
 
 ## Where workflows come from
 
-- **Built in.** Yardsort ships with five. **Request code review** (`code-review`): a second
+- **Built in.** Yardsort ships with six. **Request code review** (`code-review`): a second
   agent, one you pick, reviews the workspace's pull request in the same worktree and posts its
   review on GitHub with `gh`. When the review is on the pull request, you get a notification, and
   the agent that wrote the pull request is told once it is not busy. See
-  [Requesting a code review](#requesting-a-code-review). **Smoke test, then tell the agent**
+  [Requesting a code review](#requesting-a-code-review). **Request code review elsewhere**
+  (`code-review-elsewhere`) does the same for a pull request the workspace
+  [tracks in another repository](commits-and-pull-requests.md#pull-requests-in-other-repositories),
+  and is started from that pull request: see
+  [A pull request in another repository](#a-pull-request-in-another-repository).
+  **Smoke test, then tell the agent**
   (`smoke-then-tell`): it runs one of the workspace's [smoke tests](smoke-tests.md) and tells the
   workspace's own agent how it went — the verdict, and if it failed, which step broke. Three more
   are made for [triggers](triggers.md#ready-made-triggers), and can be run by hand too:
@@ -270,17 +275,40 @@ told to post its review as comments.
 
 To change the prompts or the timeouts, `ys workflow copy code-review` and edit your copy.
 
+### A pull request in another repository
+
+A pull request the workspace tracks in one of the project's nested clones has **Request code
+review…** in its details in the [Pull requests view](pull-requests.md#pull-requests-in-other-repositories).
+It runs **Request code review elsewhere** (`code-review-elsewhere`) on that pull request, read by
+its link:
+
+1. The reviewer starts in the workspace, as a new tab, told the pull request, its repository and
+   where the project keeps the clone of it. It reads the diff with `gh pr diff <link>`, runs the
+   checks in a worktree of the clone of its own — `git worktree add` and `gh pr checkout`
+   there, removed afterwards — leaving the clone's own checkout as it is, and posts its review
+   with `gh pr review <link>`.
+2. When the review is on GitHub — asked about by its link — you get a notification.
+3. The agent that opened the pull request is told, if Yardsort knows which conversation that was
+   (it does when the pull request was seen being opened, or tracked from that conversation with
+   `ys pr track`), else the one running in the workspace; it is asked to fix what is right in the
+   clone, push, and answer each comment.
+
+It needs the clone: without one in the project's folder, the dialog says so and does not start.
+It is offered only on a pull request elsewhere: the Workflows view does not run or schedule it,
+and triggers do not offer it. A workflow of your own can be about a pull request elsewhere too,
+with `context: tracked_pull_request`; `pr.repo` and `pr.clone` are refused in any other.
+
 ## The file
 
-| Key           | What it is                                                                                                               |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `id`          | Lowercase letters, digits and `-`, like `fix-ci`. Name the file after it.                                                |
-| `name`        | What the workflow is called in lists.                                                                                    |
-| `description` | Optional. One or two sentences.                                                                                          |
-| `version`     | `1`. A file with a later version is listed but not run, and says to update Yardsort.                                     |
-| `trigger`     | `kind: manual`: you start it. Optional `context: workspace`, the default and the only one: a run is about one workspace. |
-| `inputs`      | Optional. What you are asked before a run starts.                                                                        |
-| `steps`       | At least one.                                                                                                            |
+| Key           | What it is                                                                                                                                                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`          | Lowercase letters, digits and `-`, like `fix-ci`. Name the file after it.                                                                                                                                                             |
+| `name`        | What the workflow is called in lists.                                                                                                                                                                                                 |
+| `description` | Optional. One or two sentences.                                                                                                                                                                                                       |
+| `version`     | `1`. A file with a later version is listed but not run, and says to update Yardsort.                                                                                                                                                  |
+| `trigger`     | `kind: manual`: you start it. Optional `context`: `workspace`, the default — a run is about one workspace — or `tracked_pull_request`, about a pull request a workspace tracks in another repository, started from that pull request. |
+| `inputs`      | Optional. What you are asked before a run starts.                                                                                                                                                                                     |
+| `steps`       | At least one.                                                                                                                                                                                                                         |
 
 Keys a workflow does not have are mistakes, not ignored. A misspelt `promt:` is reported, not
 silently skipped.
@@ -330,7 +358,7 @@ nothing else: no filters, no expressions. Anything else is reported where it is 
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `project.name`, `project.root`                                                                                                                                       | The project, and the folder of its own checkout.                                                                                                                                                                                                                                                                                                                  |
 | `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task`                                                                    | The workspace the run is about. `task` is the first message it was started with. In the project's own checkout, `branch` is whatever git has checked out, and `base_branch` the repository's default branch, unless that is the branch itself.                                                                                                                    |
-| `pr.number`, `pr.url`, `pr.title`                                                                                                                                    | The open pull request for the workspace's branch, found when the run is queued.                                                                                                                                                                                                                                                                                   |
+| `pr.number`, `pr.url`, `pr.title`, `pr.repo`, `pr.clone`                                                                                                             | The open pull request for the workspace's branch, found when the run is queued. For a `tracked_pull_request` workflow, the one it is about, read by its link, with `pr.repo` its repository (`owner/name`) and `pr.clone` the project's nested clone of it; both are empty for a workspace's own.                                                                 |
 | `inputs.<id>`                                                                                                                                                        | What was given for that input.                                                                                                                                                                                                                                                                                                                                    |
 | `steps.<id>.<field>`                                                                                                                                                 | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`. The step must be among this step's `needs`.                                                                                                                 |
 | `memory`                                                                                                                                                             | The project's [memory](memory.md): its approved entries, cited, when the project shares it and has any. Empty otherwise. It never carries the request to propose new entries that an agent you start yourself gets. An agent's first message gets the memory after it anyway; put `{{ memory }}` in a `start_session` prompt to have it there instead, not twice. |

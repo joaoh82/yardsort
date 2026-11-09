@@ -985,11 +985,16 @@ export const ipc = {
     unwrap(commands.workflowRuns(workflowId, limit)),
   workflowRunSteps: (runId: string) => unwrap(commands.workflowRunSteps(runId)),
   /** What a run would find: the pull request, and whether it needs one. */
-  workflowPreview: (workflowId: string, workspaceId: string) =>
-    unwrap(commands.workflowPreview(workflowId, workspaceId)),
+  workflowPreview: (workflowId: string, workspaceId: string, trackedId: string | null = null) =>
+    unwrap(commands.workflowPreview(workflowId, workspaceId, trackedId)),
   /** Start a run; its id back. Rejects with what is wrong, as `ys workflow run` does. */
-  workflowStart: (workflowId: string, workspaceId: string, inputs: Record<string, string>) =>
-    unwrap(commands.workflowStart(workflowId, workspaceId, inputs)),
+  /** `trackedId`: run it on a pull request the workspace tracks in another repository. */
+  workflowStart: (
+    workflowId: string,
+    workspaceId: string,
+    inputs: Record<string, string>,
+    trackedId: string | null = null,
+  ) => unwrap(commands.workflowStart(workflowId, workspaceId, inputs, trackedId)),
   workflowCancel: (runId: string) => unwrap(commands.workflowCancel(runId)),
   /** A model writes a workflow from a description, through Drafting; checked, never saved. */
   workflowDescribe: (description: string): Promise<Described> =>

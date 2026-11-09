@@ -183,18 +183,26 @@ impl Hands for AppHands<'_> {
         Some(handoff::render(&facts))
     }
 
-    fn pr_posts(&self, workspace_id: &str, number: u32) -> PrAsk {
-        // Found here, quickly; `gh` itself runs in the job, on the driver's forge thread.
-        let found = crate::changes::commands::workspace(self.state, workspace_id)
-            .map_err(|error| error.message)
-            .and_then(|(_, root)| {
-                Gh::find(&self.state.env())
-                    .map(|gh| (gh, root))
-                    .ok_or_else(|| "The GitHub CLI (`gh`) is not on your PATH.".to_owned())
+    fn pr_posts(&self, workspace_id: &str, pr: &yardsort_core::workflow::runs::PrFacts) -> PrAsk {
+        // Found here, quickly; `gh` itself runs in the job, on the driver's forge thread. A link
+        // needs no repository around it: one elsewhere is asked about from anywhere, should the
+        // workspace's folder have gone.
+        let folder = crate::changes::commands::workspace(self.state, workspace_id)
+            .map(|(_, root)| root)
+            .or_else(|error| match pr.elsewhere {
+                Some(_) => Ok(std::env::temp_dir()),
+                None => Err(error),
             });
+        let found = folder.map_err(|error| error.message).and_then(|root| {
+            Gh::find(&self.state.env())
+                .map(|gh| (gh, root))
+                .ok_or_else(|| "The GitHub CLI (`gh`) is not on your PATH.".to_owned())
+        });
+        // The workspace's own by its number, one elsewhere by its link.
+        let selector = pr.selector();
         Box::new(move || {
             let (gh, root) = found?;
-            gh.pr_posts(&root, number, driver::FORGE_LIMIT)
+            gh.pr_posts_of(&root, &selector, driver::FORGE_LIMIT)
                 .map_err(|error| error.to_string())
         })
     }

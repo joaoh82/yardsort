@@ -147,7 +147,11 @@ export function TriggerDialog(props: Props) {
     target === "workflow"
       ? (workflows.find((item) => item.id === targetId)?.workflow ?? null)
       : null;
-  const runnableWorkflows = workflows.filter((item) => item.problems.length === 0 && item.workflow);
+  // One about a pull request elsewhere is started from that pull request, never on its own.
+  const runnableWorkflows = workflows.filter(
+    (item) =>
+      item.problems.length === 0 && item.workflow && item.workflow.trigger.context === "workspace",
+  );
 
   // The workspace's tests are wanted for a test trigger, for a workflow's `test` input, and for
   // the `test.finished` filter.

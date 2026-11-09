@@ -169,7 +169,11 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
     useProjectsStore.getState().openWorkflow(null);
   };
 
-  const runnable = !isNew && !dirty && problems.length === 0 && !!item?.workflow;
+  // One about a pull request elsewhere is started from that pull request, never from here.
+  const elsewhere = item?.workflow?.trigger.context === "tracked_pull_request";
+  const runnable = !isNew && !dirty && problems.length === 0 && !!item?.workflow && !elsewhere;
+  const fromThePullRequest =
+    "Run it from a pull request a workspace tracks in another repository, in the Pull requests view";
 
   return (
     <section aria-label={`Workflow ${name}`} className="flex h-full min-h-0 flex-col">
@@ -235,7 +239,9 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
                   ? "Save first"
                   : problems.length
                     ? "Fix its problems first"
-                    : "Run it at a set time, or again and again"
+                    : elsewhere
+                      ? fromThePullRequest
+                      : "Run it at a set time, or again and again"
               }
               onClick={() => setScheduling(true)}
             >
@@ -247,7 +253,15 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
               type="button"
               className={primary}
               disabled={!runnable}
-              title={dirty ? "Save first" : problems.length ? "Fix its problems first" : undefined}
+              title={
+                dirty
+                  ? "Save first"
+                  : problems.length
+                    ? "Fix its problems first"
+                    : elsewhere
+                      ? fromThePullRequest
+                      : undefined
+              }
               onClick={() => setRunning(true)}
             >
               Run…

@@ -253,6 +253,7 @@ fn ask_for_run(
                     origin_record: None,
                     depth: 0,
                     event: None,
+                    tracked: None,
                 },
                 look,
             )

@@ -43,11 +43,12 @@ pub trait Hands {
     fn notify(&self, title: &str, body: Option<&str>) -> Result<(), String>;
     /// The workspace's handoff packet, as `ys workspace handoff` prints it.
     fn handoff(&self, workspace_id: &str) -> Option<String>;
-    /// A job that asks the forge for the reviews and comments on the workspace's pull request
-    /// `number`. Called on the driver's thread, so it must return at once: the job it returns is
-    /// what does the asking, on a thread of its own, and must give up by itself — the app's
-    /// stops `gh` after [`FORGE_LIMIT`].
-    fn pr_posts(&self, workspace_id: &str, number: u32) -> PrAsk;
+    /// A job that asks the forge for the reviews and comments on the run's pull request `pr`:
+    /// the workspace's own by its number, or one it tracks elsewhere by its link
+    /// ([`super::runs::PrFacts::selector`]). Called on the driver's thread, so it must return at
+    /// once: the job it returns is what does the asking, on a thread of its own, and must give
+    /// up by itself — the app's stops `gh` after [`FORGE_LIMIT`].
+    fn pr_posts(&self, workspace_id: &str, pr: &super::runs::PrFacts) -> PrAsk;
 }
 
 /// Asking the forge, as a job for a thread of its own.
@@ -269,10 +270,19 @@ fn move_on(
         // The workspace's own agent is whichever was newest when the run began: found now,
         // before the run has started any of its own for it to be mistaken for.
         if runs::needs_origin(&workflow) {
-            facts.origin = match facts.origin_record.as_deref() {
+            let opened_by = facts
+                .pr
+                .as_ref()
+                .and_then(|pr| pr.elsewhere.as_ref())
+                .and_then(|elsewhere| elsewhere.opened_by.clone());
+            facts.origin = match (facts.origin_record.as_deref(), opened_by.as_deref()) {
                 // Asked for on behalf of one agent: that one, or none when it is not running.
-                Some(record) => live_terminal(host, &place.workspace.id, record),
-                None => origin_session(store, host, &place.workspace.id),
+                (Some(record), _) => live_terminal(host, &place.workspace.id, record),
+                // About a pull request elsewhere: the agent that opened it while it runs, else
+                // the workspace's, which may well be the one working on it now.
+                (None, Some(record)) => live_terminal(host, &place.workspace.id, record)
+                    .or_else(|| origin_session(store, host, &place.workspace.id)),
+                (None, None) => origin_session(store, host, &place.workspace.id),
             };
         }
         if !store.start_workflow_run(&run.id, Some(&facts.to_json()))? {
@@ -591,9 +601,9 @@ impl World for Seen<'_> {
     }
 
     fn pr_activity(&self, kind: PrActivity) -> Option<PrSeen> {
-        let number = self.facts.pr.as_ref()?.number;
+        let pr = self.facts.pr.as_ref()?;
         let posts = self.driver.pr_posts(self.run_id, || {
-            self.hands.pr_posts(&self.place.workspace.id, number)
+            self.hands.pr_posts(&self.place.workspace.id, pr)
         })?;
         // The forge keeps whole seconds; a post in the second the run started counts.
         let since = self.started_at - self.started_at.rem_euclid(1000);
