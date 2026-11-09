@@ -7,18 +7,24 @@
 //! lets only host devices register hosts, and only device tickets reach other hosts. Either can be
 //! signed in or out without the other.
 //!
-//! **What it is let do is the host's person's to say.** It asks only to watch ([`ASKED`]); the
-//! person at that host approves at their own screen or terminal. Nothing here approves anything.
+//! **What it is let do is the host's person's to say.** It asks to watch and to type ([`ASKED`]),
+//! as a phone does; the person at that host approves at their own screen or terminal, and may let
+//! it only watch. Nothing here approves anything.
 //!
 //! **One link per host it may reach**, kept open while the process runs and opened again, waiting
 //! longer each time, when it drops. Through each, what the host shows is read again when its
 //! activity moves and every [`REREAD_EVERY`], and kept in memory for the window to show,
 //! with the link's state: online, connecting, or offline since when. What was last read stays shown
 //! while the host is away, said to be from then. Nothing a host sends is written to disk here.
+//!
+//! **A terminal is watched through the same link** ([`terminal`]): attached, attached again after
+//! the link drops, and typed into only once its person here takes control.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+pub mod terminal;
 
 use remote_client::channel::Followed;
 use remote_client::{Channel, Client, Session};
@@ -34,12 +40,14 @@ use yardsort_core::store::{RemoteComputerRow, Store};
 
 use crate::account::{failed, now_ms, refused_here, Failure, Result};
 
-/// What this computer asks a host for: to watch, nothing it could type with.
-pub const ASKED: [Scope; 4] = [
+/// What this computer asks a host for: all it uses, as a phone asks. The host's person may let it
+/// only watch.
+pub const ASKED: [Scope; 5] = [
     Scope::WorkspaceRead,
     Scope::ActivityRead,
     Scope::MemoryRead,
     Scope::TerminalRead,
+    Scope::TerminalControl,
 ];
 /// How often what a host shows is read again, when its activity has not moved.
 pub const REREAD_EVERY: Duration = Duration::from_secs(20);
@@ -97,12 +105,21 @@ struct Known {
 
 struct HostLink {
     view: Arc<Mutex<HostView>>,
+    /// The channel while it is open, for the terminals watched through it.
+    channel: Open,
     task: tokio::task::JoinHandle<()>,
 }
+
+/// The channel to a host while it is open, for the terminals watched through it to wait on.
+type Open = tokio::sync::watch::Sender<Option<Arc<Channel>>>;
 
 impl Drop for HostLink {
     fn drop(&mut self) {
         self.task.abort();
+        // A terminal watched through it holds it too: it closes now, and nothing opens another.
+        if let Some(channel) = self.channel.send_replace(None) {
+            channel.close();
+        }
     }
 }
 
@@ -307,12 +324,18 @@ pub async fn refresh<H: ComputerHome>(home: &Arc<H>) -> Result<()> {
                         link: Link::Connecting,
                         shown: None,
                     }));
+                    let channel = Open::new(None);
                     let task = tokio::spawn(watch(
                         Arc::clone(home),
                         slot.key().clone(),
                         Arc::clone(&view),
+                        channel.clone(),
                     ));
-                    slot.insert(HostLink { view, task });
+                    slot.insert(HostLink {
+                        view,
+                        channel,
+                        task,
+                    });
                 }
             }
             drop(known);
@@ -424,14 +447,22 @@ fn newest_per_host(mut grants: Vec<GrantSummary>) -> Vec<GrantSummary> {
 // --- a host's link -------------------------------------------------------------------------------
 
 /// Keep a link to `host` for as long as this task runs.
-async fn watch<H: ComputerHome>(home: Arc<H>, host: HostId, view: Arc<Mutex<HostView>>) {
+async fn watch<H: ComputerHome>(
+    home: Arc<H>,
+    host: HostId,
+    view: Arc<Mutex<HostView>>,
+    open: Open,
+) {
     let mut backoff = FIRST_BACKOFF;
     loop {
         set_link(home.as_ref(), &view, Link::Connecting);
         let began = Instant::now();
-        let why = match reach(&home, &host, &view).await {
+        let why = match reach(&home, &host, &view, &open).await {
             Ok(why) | Err(why) => why,
         };
+        if let Some(channel) = open.send_replace(None) {
+            channel.close();
+        }
         set_link(
             home.as_ref(),
             &view,
@@ -462,6 +493,7 @@ async fn reach<H: ComputerHome>(
     home: &Arc<H>,
     host: &HostId,
     view: &Mutex<HostView>,
+    open: &Open,
 ) -> std::result::Result<String, String> {
     let (client, access) = signed_in(home.as_ref()).await.map_err(|f| f.message)?;
     let channel = match Channel::open(&client, &access, host, &home.client_name()).await {
@@ -480,6 +512,8 @@ async fn reach<H: ComputerHome>(
             });
         }
     };
+    let channel = Arc::new(channel);
+    open.send_replace(Some(Arc::clone(&channel)));
     set_link(home.as_ref(), view, Link::Online);
     let follows = channel
         .host()

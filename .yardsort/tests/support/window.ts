@@ -247,14 +247,83 @@ switch (doing) {
     });
     console.log("saw: the workspace smoke and its shell");
     const buttons = await page(
-      `[...document.querySelectorAll(${JSON.stringify(`${view} button`)})].map((b) => b.textContent.trim()).join(",")`,
+      `[...document.querySelectorAll(${JSON.stringify(`${view} button`)})].map((b) => b.textContent.trim()).filter((t) => t !== "Watch").join(",")`,
     );
-    if (buttons !== "Close") throw new Error(`It offers more than Close: ${String(buttons)}`);
-    console.log("saw: nothing to press but Close");
+    if (buttons !== "Close")
+      throw new Error(`It offers more than Close and Watch: ${String(buttons)}`);
+    console.log("saw: nothing to press but Close and Watch");
     const changes = await textOf(`[data-navigation="Changes"]`);
     if (!changes.includes("Changes and files are not shown for another computer"))
       throw new Error(`The Changes panel shows: ${changes}`);
     console.log("saw: no Changes panel for it");
+    break;
+  }
+  case "watches": {
+    // Here the last argument is the host's name. Its one shell opens, watched, at its size there.
+    const name = runDir as string;
+    const row = `aside[aria-label="Projects"] section[aria-label="Other computers"]`;
+    await until(`${name} online in the sidebar`, async () =>
+      (await textOf(row)).includes("online"),
+    );
+    await page(clicked("Done"));
+    await page(`document.querySelector(${JSON.stringify(`${row} button`)})?.click()`);
+    const view = `section[aria-label="${name}, another computer"]`;
+    try {
+      await until("its shell, to watch", () => page(clicked("Watch")));
+    } catch (error) {
+      console.log(`its page said: ${await textOf(view)}`);
+      console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
+      throw error;
+    }
+    await until("the terminal", () => page(`Boolean(document.querySelector(".xterm"))`));
+    console.log(`saw: the shell on ${name}, watched`);
+    await until("who has control", async () =>
+      /has control\./.test(await textOf(`[aria-label="Control"]`)),
+    );
+    console.log(`saw: ${await textOf(`[aria-label="Control"]`)}`);
+    if (await page(clicked("Release control")))
+      throw new Error("It had control before it was asked for.");
+    break;
+  }
+  case "takes-control-and-types": {
+    // Here the last argument is the line to type.
+    const line = runDir as string;
+    await click("Take control");
+    await until("control", async () =>
+      (await textOf(`[aria-label="Control"]`)).includes("This computer has control."),
+    );
+    console.log("saw: This computer has control.");
+    // As the keyboard does: xterm reads its hidden field.
+    const typed = await page(`(() => {
+      const field = document.querySelector(".xterm-helper-textarea");
+      if (!field) return false;
+      field.focus();
+      field.dispatchEvent(new InputEvent("input", { data: ${JSON.stringify(`${line}
+`)}, inputType: "insertText", bubbles: true }));
+      return true;
+    })()`);
+    if (!typed) throw new Error("No terminal to type into.");
+    console.log(`typed: ${line}`);
+    break;
+  }
+  case "lost-control": {
+    // Here the last argument is who took it.
+    const who = runDir as string;
+    await expectToSee(`${who} took control.`);
+    // The phone's step has ended by now, and its control with it, so either may be said.
+    const status = await until("who has it", async () => {
+      const said = await textOf(`[aria-label="Control"]`);
+      return said.includes(`${who} has control.`) || said.includes("Nobody has control.")
+        ? said
+        : "";
+    });
+    console.log(`saw: ${status}`);
+    await until("Take control offered again", () =>
+      page(
+        `[...document.querySelectorAll("button")].some((b) => b.textContent.trim() === "Take control")`,
+      ),
+    );
+    console.log("saw: Take control, offered again");
     break;
   }
   default:

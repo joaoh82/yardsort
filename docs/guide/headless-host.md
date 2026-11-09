@@ -200,8 +200,8 @@ more than one project, it then asks which ones it may reach, all of them if you 
 Nothing is let in without your answer.
 
 The device can be a phone, or the desktop app on another computer, signed in under **Settings → Remote →
-Other computers** ([Reaching another computer](remote.md#reaching-another-computer)). The app asks only
-to watch, so `pair` asks only **allow viewing** or **deny**.
+Other computers** ([Reaching another computer](remote.md#reaching-another-computer)). The app asks to
+watch and to type, as a phone does, and `pair` asks the same three questions.
 
 `pair` is refused from any terminal Yardsort started, and from anything an agent runs: the host checks
 who is at the other end of its socket, and refuses a process that carries a launched session's

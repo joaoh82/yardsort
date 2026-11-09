@@ -129,6 +129,8 @@ import {
   type OtherHost,
   type OtherHostView,
   type OtherLink,
+  type RemoteController,
+  type RemoteTerminalSeen,
   type OtherPairing,
   type OtherSession,
   type OtherTerminal,
@@ -304,6 +306,8 @@ export type {
   OtherHostView,
   OtherLink,
   OtherPairing,
+  RemoteController,
+  RemoteTerminalSeen,
   OtherSession,
   OtherTerminal,
   OtherWorkspace,
@@ -797,6 +801,38 @@ export const ipc = {
   otherComputersPair: (code: string) => unwrap(commands.otherComputersPair(code)),
   otherComputersForget: (grantId: string) => unwrap(commands.otherComputersForget(grantId)),
   otherHost: (hostId: string) => unwrap(commands.otherHost(hostId)),
+  /**
+   * Watch a terminal on another computer. Its bytes and what else it shows come in order on one
+   * channel, told apart by their first byte (`src-tauri/src/remote_terminal.rs`). Resolves to the
+   * number the other calls take, until `remoteTerminalClose`.
+   */
+  remoteTerminalOpen(
+    hostId: string,
+    terminalId: string,
+    onOutput: (bytes: Uint8Array) => void,
+    onSeen: (seen: RemoteTerminalSeen) => void,
+  ): Promise<number> {
+    const channel = new Channel<ArrayBuffer>();
+    const text = new TextDecoder();
+    channel.onmessage = (buffer) => {
+      const message = new Uint8Array(buffer);
+      if (message[0] === 0) onOutput(message.subarray(1));
+      else onSeen(JSON.parse(text.decode(message.subarray(1))) as RemoteTerminalSeen);
+    };
+    return unwrap(
+      commands.remoteTerminalOpen(hostId, terminalId, channel as unknown as Channel<number[]>),
+    );
+  },
+  /** Stop watching; control, if held, goes back to that computer. */
+  remoteTerminalClose: (id: number) => done(commands.remoteTerminalClose(id)),
+  /** Ask for control; the answer comes as `held` or `notHeld` on its channel. */
+  remoteTerminalTakeControl: (id: number) => done(commands.remoteTerminalTakeControl(id)),
+  remoteTerminalRelease: (id: number) => done(commands.remoteTerminalRelease(id)),
+  /** Type, while control is held; nothing is sent otherwise. */
+  remoteTerminalWrite: (id: number, data: string) => done(commands.remoteTerminalWrite(id, data)),
+  /** Fit it to the view, while control is held. */
+  remoteTerminalResize: (id: number, size: TermSize) =>
+    done(commands.remoteTerminalResize(id, size)),
   /** The list, a host's link or what one shows changed. */
   onOtherComputersChanged: (handler: () => void) =>
     events.otherComputersChanged.listen(() => handler()),

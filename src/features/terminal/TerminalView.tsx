@@ -6,14 +6,15 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { isDragOver } from "@/lib/dragPosition";
-import { ipc, type SessionId } from "@/lib/ipc";
+import type { SessionId, TermSize } from "@/lib/ipc";
 import { isMac, isModKey, isWindows, shortcutKey } from "@/lib/platform";
 import { useTerminalStore } from "@/stores/terminals";
 import { ContextMenu } from "@/features/sidebar/ContextMenu";
 import { clipboardKey, droppedPathsText, shiftEnterInput } from "./input";
 import { attachRenderer, rendererPreference, type RendererKind } from "./renderer";
+import { localSource, type TerminalSource } from "./source";
 import { darkTheme, FONT_FAMILY, lightTheme } from "./theme";
 import { createInputWriter } from "./writer";
 
@@ -39,6 +40,31 @@ interface Props {
  * screen, then the live stream.
  */
 export function TerminalView({ sessionId, rendererOverride, probe, agent = false }: Props) {
+  const source = useMemo(() => localSource(sessionId, agent), [sessionId, agent]);
+  return <TerminalSurface source={source} rendererOverride={rendererOverride} probe={probe} />;
+}
+
+interface SurfaceProps {
+  source: TerminalSource;
+  rendererOverride?: string | null;
+  probe?: TerminalProbe;
+  /**
+   * Whether the view sets the terminal's size by fitting it, or follows the size the source says.
+   * A local PTY always fits; another computer's terminal fits only while this one has control.
+   */
+  fits?: boolean;
+  /** Whether typing goes to the source. Without it, keys, pastes and drops go nowhere. */
+  typing?: boolean;
+}
+
+/** The terminal itself, drawing whatever `source` sends and typing into it. */
+export function TerminalSurface({
+  source,
+  rendererOverride,
+  probe,
+  fits = true,
+  typing = true,
+}: SurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
@@ -46,10 +72,18 @@ export function TerminalView({ sessionId, rendererOverride, probe, agent = false
   useEffect(() => {
     probeRef.current = probe;
   }, [probe]);
-  const agentRef = useRef(agent);
+  const fitsRef = useRef(fits);
+  /** Fit now, or follow the source's size again: set by the effect below once it is mounted. */
+  const refitRef = useRef<(() => void) | null>(null);
   useEffect(() => {
-    agentRef.current = agent;
-  }, [agent]);
+    fitsRef.current = fits;
+    refitRef.current?.();
+  }, [fits]);
+  const typingRef = useRef(typing);
+  useEffect(() => {
+    typingRef.current = typing;
+    if (termRef.current) termRef.current.options.disableStdin = !typing;
+  }, [typing]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -65,6 +99,7 @@ export function TerminalView({ sessionId, rendererOverride, probe, agent = false
       macOptionIsMeta: true,
       scrollback: 10_000,
       theme: prefersLight.matches ? lightTheme : darkTheme,
+      disableStdin: !typingRef.current,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -94,7 +129,7 @@ export function TerminalView({ sessionId, rendererOverride, probe, agent = false
     let disposed = false;
 
     // --- input -------------------------------------------------------------------------------
-    const write = createInputWriter((data) => ipc.ptyWrite(sessionId, data));
+    const write = createInputWriter((data) => source.write(data));
     const onData = term.onData(write);
 
     // Shift+Enter has no encoding older than the kitty keyboard protocol. A program that queries
@@ -108,11 +143,11 @@ export function TerminalView({ sessionId, rendererOverride, probe, agent = false
         return false;
       }),
     );
-    const isAgent = () =>
-      agentRef.current ||
-      useTerminalStore.getState().tabs.some((t) => t.id === sessionId && t.recordId !== null);
+    const isAgent = () => source.isAgent();
 
     term.attachCustomKeyEventHandler((event) => {
+      // Watching only: the keys are this window's, and nothing goes to the terminal.
+      if (!typingRef.current) return true;
       const newline = shiftEnterInput(event, speaksCsiU || isAgent());
       if (newline !== null) {
         write(newline);
@@ -165,7 +200,7 @@ export function TerminalView({ sessionId, rendererOverride, probe, agent = false
         const over = isOver(payload.position);
         if (payload.type !== "drop") return setHover(over);
         setHover(false);
-        if (!over || payload.paths.length === 0) return;
+        if (!over || payload.paths.length === 0 || !typingRef.current) return;
         term.paste(droppedPathsText(payload.paths, isWindows));
         term.focus();
       })
@@ -176,32 +211,59 @@ export function TerminalView({ sessionId, rendererOverride, probe, agent = false
 
     // --- size --------------------------------------------------------------------------------
     const currentSize = () => ({ cols: term.cols, rows: term.rows });
+    // A resize the view made by following the source is not sent back to it.
     const onResize = term.onResize((size) => {
-      useTerminalStore.getState().setLastSize(size);
-      void ipc.ptyResize(sessionId, size).catch(console.error);
+      if (fitsRef.current) void source.resize(size).catch(console.error);
     });
+    // A hidden or collapsed container has no size; fitting to it would shrink the PTY to
+    // nothing and make the program reflow for no reason.
+    const fitToView = () => {
+      if (container.clientWidth > 0 && container.clientHeight > 0) fit.fit();
+    };
+    let followed: TermSize | null = null;
+    const follow = (size: TermSize) => {
+      followed = size;
+      if (!fitsRef.current && (term.cols !== size.cols || term.rows !== size.rows)) {
+        term.resize(size.cols, size.rows);
+      }
+    };
+    refitRef.current = () => {
+      if (!fitsRef.current) {
+        if (followed) follow(followed);
+        return;
+      }
+      fitToView();
+      // Fitting changes nothing when the size already fits; the source is told all the same.
+      void source.resize(currentSize()).catch(console.error);
+    };
     let frame = 0;
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        // A hidden or collapsed container has no size; fitting to it would shrink the PTY to
-        // nothing and make the program reflow for no reason.
-        if (container.clientWidth > 0 && container.clientHeight > 0) fit.fit();
+        if (fitsRef.current) fitToView();
       });
     });
 
     // --- attach ------------------------------------------------------------------------------
-    let attachment: number | null = null;
+    let stop: (() => void) | null = null;
     void (async () => {
       fit.fit();
-      // Size the PTY first so the snapshot is rendered for exactly this many cells.
-      await ipc.ptyResize(sessionId, currentSize());
-      const id = await ipc.ptyAttach(sessionId, (bytes) => {
-        if (disposed) return;
-        term.write(bytes, () => probeRef.current?.onOutput?.(bytes.byteLength));
+      const stopping = await source.attach(currentSize(), {
+        output(bytes) {
+          if (disposed) return;
+          term.write(bytes, () => probeRef.current?.onOutput?.(bytes.byteLength));
+        },
+        reset(size) {
+          if (disposed) return;
+          term.reset();
+          follow(size);
+        },
+        size(size) {
+          if (!disposed) follow(size);
+        },
       });
-      if (disposed) return void ipc.ptyDetach(sessionId, id).catch(() => {});
-      attachment = id;
+      if (disposed) return stopping();
+      stop = stopping;
       observer.observe(container);
       term.focus();
     })().catch((error) => {
@@ -218,12 +280,15 @@ export function TerminalView({ sessionId, rendererOverride, probe, agent = false
       onData.dispose();
       onResize.dispose();
       onRender.dispose();
-      if (attachment !== null) void ipc.ptyDetach(sessionId, attachment).catch(() => {});
+      stop?.();
+      refitRef.current = null;
       termRef.current = null;
       setMenu(null);
       term.dispose();
     };
-  }, [sessionId, rendererOverride]);
+    // A source is known by its key: a new object for the same terminal is the same view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source.key, rendererOverride]);
 
   // Right-click offers Copy and Paste, unless the program reads the mouse itself (an agent's
   // TUI, vim); Shift+right-click opens the menu anyway, as Shift+drag still selects.

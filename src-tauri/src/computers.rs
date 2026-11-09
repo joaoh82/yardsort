@@ -36,7 +36,7 @@ pub struct ComputersState {
     signing_in: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
-struct AppComputer(AppHandle);
+pub(crate) struct AppComputer(AppHandle);
 
 impl ComputerHome for AppComputer {
     fn computer(&self) -> &Computer {
@@ -72,7 +72,7 @@ fn platform_name() -> &'static str {
     }
 }
 
-fn home(app: &AppHandle) -> Arc<AppComputer> {
+pub(crate) fn home(app: &AppHandle) -> Arc<AppComputer> {
     Arc::new(AppComputer(app.clone()))
 }
 
@@ -153,6 +153,8 @@ pub struct OtherHostView {
     pub host_id: String,
     pub name: String,
     pub link: OtherLink,
+    /// Whether that computer lets this one type into its terminals, once it takes control.
+    pub may_type: bool,
     /// When it was last read; `None` until it has been.
     pub read_at: Option<f64>,
     pub platform: Option<String>,
@@ -191,6 +193,8 @@ pub struct OtherSession {
     /// `starting`, `busy`, `quiet` or `exited`, while its terminal is there; `ended` otherwise.
     pub state: String,
     pub started_at: f64,
+    /// Its terminal there, to watch; `None` once it has ended.
+    pub terminal: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -258,6 +262,7 @@ fn view(host_id: &str, name: String, view: HostView) -> OtherHostView {
             host_id: host_id.to_owned(),
             name,
             link: link(&view.link),
+            may_type: false,
             read_at: None,
             platform: None,
             app_version: None,
@@ -286,9 +291,11 @@ fn view(host_id: &str, name: String, view: HostView) -> OtherHostView {
                 harness: s.harness,
                 state: s
                     .terminal
+                    .as_ref()
                     .map_or("ended", |t| activity_name(t.activity))
                     .to_owned(),
                 started_at: s.started_at as f64,
+                terminal: s.terminal.map(|t| t.id.to_string()),
             })
             .collect();
         let terminals = page
@@ -342,6 +349,7 @@ fn view(host_id: &str, name: String, view: HostView) -> OtherHostView {
         host_id: host_id.to_owned(),
         name: shown.host.name.clone(),
         link: link(&view.link),
+        may_type: false,
         read_at: Some(shown.read_at_ms as f64),
         platform: Some(platform_label(shown.host.platform).to_owned()),
         app_version: Some(shown.host.app_version),
@@ -506,10 +514,16 @@ pub async fn other_host(app: AppHandle, host_id: String) -> IpcResult<Option<Oth
         return Ok(None);
     };
     let (hosts, _) = computer::paired(&home);
-    let name = hosts
+    let grant = hosts
         .into_iter()
         .find(|p| p.grant.host.as_str() == host_id)
-        .map(|p| p.grant.host_name)
-        .unwrap_or_default();
-    Ok(Some(view(&host_id, name, found)))
+        .map(|p| p.grant);
+    let may_type = grant
+        .as_ref()
+        .is_some_and(|g| g.scopes.contains(&remote_proto::Scope::TerminalControl));
+    let name = grant.map(|g| g.host_name).unwrap_or_default();
+    Ok(Some(OtherHostView {
+        may_type,
+        ..view(&host_id, name, found)
+    }))
 }

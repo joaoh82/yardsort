@@ -1011,6 +1011,11 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       client, a device of its own, paired by a host's code under Settings → Remote → Other
       computers; and the hosts it reaches in the sidebar, each opening read-only with its name across
       the top. Its local smoke test passed.
+      Slice 5 was built on 2026-11-09 ([35 §14](35-remote-r4-r5.md#14--what-the-fifth-slice-adds)):
+      the terminal view behind a source interface; another computer's terminal watched, resumed
+      after a drop, and typed into once **Take control** is pressed, losing it to the person there
+      or a phone with the window saying who. Its local smoke test passed, and so did the owner's
+      run, R5's gate check 1: the iPhone and this computer on one agent on the box, through staging.
       Slice 12 was added on 2026-11-08 at the owner's request: the slim image and a full one, with
       toolchains, `gh` and the harnesses whose licence allows it, published to the GitHub Container
       Registry on each release beside the tarballs; the other harnesses installed by the operator

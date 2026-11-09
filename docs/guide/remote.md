@@ -10,7 +10,8 @@ screen, such as a server you reach over SSH, can be a host too: see
 [A computer with no screen](headless-host.md). A phone that may
 type can also start a new workspace or another agent, and give an agent a picture. The agents keep
 running on this computer whatever happens to the connection. This computer can also reach another one
-the same way, read-only for now: see [Reaching another computer](#reaching-another-computer).
+the same way, watch its terminals and type into them: see
+[Reaching another computer](#reaching-another-computer).
 
 Neither end listens for connections: this computer and your phone each reach out to the server.
 
@@ -81,24 +82,38 @@ drag. A program on its alternate screen, as a full-screen program uses, has no h
 ## Reaching another computer
 
 The desktop app can reach another computer running Yardsort too, as your phone does: one with the app
-and Remote on, or one with no screen running [`yardsort-host`](headless-host.md). For now it shows that
-computer's workspaces, agents and activity, and does not open its terminals or type into them.
+and Remote on, or one with no screen running [`yardsort-host`](headless-host.md). It shows that
+computer's workspaces, agents and activity, opens its terminals to watch, and types into one once you
+take control of it. It does not start work there yet.
 
 1. In **Settings → Remote**, under **Other computers**, give the server the other computer is signed in
    to and a name for this one, then press **Sign in to reach other computers**, which opens your
    browser. The server is filled in for you when this computer is a host on one.
 2. On the other computer, show a code: **Pair a device** in its **Settings → Remote**, or
    `yardsort-host pair` on one with no screen.
-3. Type the code under **Pairing code** here and press **Pair**. The other computer's person is asked
-   there, and lets this one watch or refuses. Until then the pairing says _waiting for its answer_.
+3. Type the code under **Pairing code** here and press **Pair**. This computer asks to watch and to
+   type, as a phone does. The other computer's person is asked there, and lets it watch, watch and
+   type, or refuses. Until then the pairing says _waiting for its answer_.
 
 Once let in, the other computer is listed under **Other computers** in the sidebar, below your projects,
 by its name: _online_, _connecting_, or _offline_ since when. Click it to open its page in the middle of
 the window, with its name across the top. It lists each of its projects' workspaces with their branches,
 the agents in each with what they are doing, the workspace's other terminals, and its recent activity,
-and updates as it changes. Nothing on that page acts on either computer: there is no Changes panel, no
-Git action and no file for another computer's workspace, and nothing of it is mixed into your own
-projects. While the other computer is away, the page keeps what it last showed, and says when that was.
+and updates as it changes. There is no Changes panel, no Git action and no file for another computer's
+workspace, and nothing of it is mixed into your own projects. While the other computer is away, the page
+keeps what it last showed, and says when that was.
+
+**Its terminals.** Press **Watch** beside an agent or a terminal to open its terminal there, with **Back** to the computer's
+page. It shows what that terminal shows, at its size on that computer, and says who has control: nobody,
+the person at that computer, or a device by its name. Watching takes nothing, and what you type goes
+nowhere. Press **Take control** to type into it: the terminal then fits this window, and the person at
+that computer sees who has it. **Release control** hands it back, and so does going **Back**. Control is
+taken only by pressing; if the person at that computer types, or a phone takes control, this window says
+who took it and offers **Take control** again. A computer that lets this one only watch offers no
+**Take control**, and says so; to change that, **Forget** it under **Pairings**, pair again, and let it
+type there. If the connection drops, the terminal is watched again by itself once the other computer
+is back, from where it was, and control has to be taken again. Something typed as it dropped may not
+have arrived, and the window says so: nothing is sent twice.
 
 **This is a device of its own.** Signing in here makes a second device at the server, apart from this
 computer as a host: turning Remote on or off above leaves it signed in, and **Sign out** under Other

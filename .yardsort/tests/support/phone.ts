@@ -3,10 +3,12 @@
 //
 //   bun .yardsort/tests/support/phone.ts <run dir> ask | reaches <name> | must-pair-again <name> | spend-sign-in
 //     | starts <name>
-//   bun .yardsort/tests/support/phone.ts <run dir> type <name> <line> <expected>
+//   bun .yardsort/tests/support/phone.ts <run dir> type | take-over <name> <line> <expected>
+//   bun .yardsort/tests/support/phone.ts <run dir> sees <name> <expected>
 //
 // `type` takes control of the one session running on the computer, types the line and a return,
-// and waits for the expected text in what the terminal prints.
+// and waits for the expected text in what the terminal prints. `take-over` does the same while
+// another device has control, and keeps it. `sees` only watches, for the expected text.
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -93,6 +95,18 @@ async function reach(phone: Session, host: HostId): Promise<Channel> {
   }
 }
 
+/** The terminal of the one session running on the computer. */
+async function theRunningTerminal(channel: Channel) {
+  const page = await channel.workspaces();
+  const running = [];
+  for (const workspace of page.workspaces.filter((w) => w.runningSessions > 0)) {
+    const sessions = await channel.sessions({ workspace: workspace.id });
+    for (const s of sessions.sessions) if (s.process === "running" && s.terminal) running.push(s);
+  }
+  if (running.length !== 1) throw new Error(`${running.length} sessions running, not one.`);
+  return running[0].terminal!.id;
+}
+
 switch (doing) {
   case "ask": {
     const code = normalizeCode(readFileSync(join(dir, "pairing-code"), "utf8"));
@@ -158,17 +172,29 @@ switch (doing) {
     channel.close();
     break;
   }
-  case "type": {
+  case "sees": {
+    // Here `line` is what to see.
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    const terminal = await theRunningTerminal(channel);
+    let printed = "";
+    const decoder = new TextDecoder();
+    const attachment = await channel.attach(terminal, {
+      output: (bytes) => (printed += decoder.decode(bytes, { stream: true })),
+    });
+    for (let tries = 0; tries < 300 && !printed.includes(line); tries++) await Bun.sleep(100);
+    if (!printed.includes(line)) throw new Error(`Not on the screen: ${line}\n${printed}`);
+    console.log(`saw: ${line}`);
+    await attachment.detach();
+    channel.close();
+    break;
+  }
+  case "type":
+  case "take-over": {
     const phone = await session();
     const host = await theComputer(phone);
     const channel = await reach(phone, host);
-    const page = await channel.workspaces();
-    const running = [];
-    for (const workspace of page.workspaces.filter((w) => w.runningSessions > 0)) {
-      const sessions = await channel.sessions({ workspace: workspace.id });
-      for (const s of sessions.sessions) if (s.process === "running" && s.terminal) running.push(s);
-    }
-    if (running.length !== 1) throw new Error(`${running.length} sessions running, not one.`);
+    const running = [{ terminal: { id: await theRunningTerminal(channel) } }];
     let printed = "";
     let typedAt = -1;
     let seen!: () => void;
@@ -181,7 +207,9 @@ switch (doing) {
         if (typedAt >= 0 && printed.slice(typedAt).includes(expected)) seen();
       },
     });
-    const control = await channel.acquire(running[0].terminal!.id);
+    const control = await channel.acquire(running[0].terminal!.id, {
+      takeOver: doing === "take-over",
+    });
     typedAt = printed.length;
     await control.input(`${line}\r`);
     const late = setTimeout(() => {
@@ -192,7 +220,8 @@ switch (doing) {
     await appeared;
     clearTimeout(late);
     console.log(`read back: ${expected}`);
-    await control.release();
+    // Taken over, it is kept: the other device is to see who has it.
+    if (doing === "type") await control.release();
     await attachment.detach();
     channel.close();
     break;

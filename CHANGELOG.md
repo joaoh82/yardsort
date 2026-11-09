@@ -19,8 +19,13 @@ has the downloads and the full commit lists.
   host, and pair it by the code another computer shows, from its own Settings → Remote or
   `yardsort-host pair`. Once let in there, the other computer shows under **Other computers** in the
   sidebar, online or offline since when, and opens to its workspaces, agents and recent activity,
-  named across the top, with no Changes panel or Git action. Watching and typing into its terminals
-  come next. See [Reaching another computer](docs/guide/remote.md#reaching-another-computer).
+  named across the top, with no Changes panel or Git action. See
+  [Reaching another computer](docs/guide/remote.md#reaching-another-computer).
+- **Watch another computer's terminals from the desktop app, and type into them.** On that
+  computer's page, **Watch** opens an agent's terminal, or a shell's, at its size there, showing who has control.
+  **Take control** lets you type into it, fitted to your window, until you release it or the person
+  there or a phone takes it; the window says who did. Pairing from the desktop now asks to watch and
+  to type, as a phone does, and the other computer's person can still let it only watch.
 - **The Floor Manager: one agent that sees every project.** **Floor Manager** in the bottom
   bar's lower-right corner, or **Mod+J**, opens a panel with an agent you pick, started in a
   folder of its own and told how to use `ys`. Ask it what projects there are and what is

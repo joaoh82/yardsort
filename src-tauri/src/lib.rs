@@ -20,6 +20,7 @@ mod preflight;
 mod publish;
 mod quit;
 mod remote;
+mod remote_terminal;
 mod schedules;
 mod sessions;
 mod smoke;
@@ -167,6 +168,12 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             computers::other_computers_pair,
             computers::other_computers_forget,
             computers::other_host,
+            remote_terminal::remote_terminal_open,
+            remote_terminal::remote_terminal_close,
+            remote_terminal::remote_terminal_take_control,
+            remote_terminal::remote_terminal_release,
+            remote_terminal::remote_terminal_write,
+            remote_terminal::remote_terminal_resize,
             activity::workspace_fork,
             memory::memory_get,
             memory::memory_write,
@@ -281,6 +288,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             remote::RemotePairingRequested,
             computers::OtherComputersChanged
         ])
+        // Sent as JSON inside a remote terminal's byte stream, so no command names it.
+        .typ::<remote_terminal::RemoteTerminalSeen>()
 }
 
 /// Release builds never write bindings: there is no source tree next to an installed app.
