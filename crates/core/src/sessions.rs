@@ -510,7 +510,17 @@ mod tests {
                     builtin: Some(false),
                     command: Some(command.into()),
                     prompt_args: Some(vec![flag.into(), "{prompt}".into()]),
-                    resume_args: Some(vec![flag.into(), "exit 7".into()]),
+                    // Lingering, then 7: a resume settles its record at once should the program
+                    // have exited already, which an instant `exit 7` on a busy machine sometimes
+                    // has — and the record is then rightly ended before a test can see it run.
+                    resume_args: Some(vec![
+                        flag.into(),
+                        if cfg!(windows) {
+                            "ping -n 3 127.0.0.1 >nul & exit 7".into()
+                        } else {
+                            "sleep 2; exit 7".into()
+                        },
+                    ]),
                     session_id_mode: Some(SessionIdMode::Assigned),
                     ..Default::default()
                 }],

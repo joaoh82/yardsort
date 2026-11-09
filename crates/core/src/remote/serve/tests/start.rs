@@ -24,7 +24,16 @@ fn shell_harness() -> HarnessOverride {
         builtin: Some(false),
         command: Some(command.into()),
         prompt_args: Some(vec![flag.into(), "{prompt}".into()]),
-        resume_args: Some(vec![flag.into(), "echo resumed-{session_id}".into()]),
+        // It lingers after saying so: a resume settles its record at once should the program
+        // have exited already, which on a busy machine an instant `echo` sometimes has.
+        resume_args: Some(vec![
+            flag.into(),
+            if cfg!(windows) {
+                "echo resumed-{session_id} & ping -n 3 127.0.0.1 >nul".into()
+            } else {
+                "echo resumed-{session_id}; sleep 2".into()
+            },
+        ]),
         session_id_mode: Some(SessionIdMode::Assigned),
         ..Default::default()
     }
