@@ -669,6 +669,12 @@ export const ipc = {
   /** Stop following one. Only Yardsort's note of it goes; the pull request is left as it is. */
   workspaceUntrackPullRequest: (workspaceId: string, id: string) =>
     unwrap(commands.workspaceUntrackPullRequest(workspaceId, id)),
+  /**
+   * Read a project's tracked pull requests afresh on its next look — only the one at `url` when
+   * given — merged and closed ones too, which a poll leaves for ten minutes: for **Refresh**.
+   */
+  trackedPullRequestsForget: (projectId: string, url: string | null = null) =>
+    done(commands.trackedPullRequestsForget(projectId, url)),
   /** A tracked pull request in full, read by its link. */
   trackedPullRequestSummary: (workspaceId: string, id: string, refresh = false) =>
     unwrap(commands.trackedPullRequestSummary(workspaceId, id, refresh)),

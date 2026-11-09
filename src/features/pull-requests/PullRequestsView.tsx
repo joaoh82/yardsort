@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import type { Project, ProjectPullRequests } from "@/lib/ipc";
+import { ipc, type Project, type ProjectPullRequests } from "@/lib/ipc";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { untrackPullRequest, usePublishStore } from "@/stores/publish";
 import { usePullRequestsStore } from "@/stores/pullRequests";
@@ -102,7 +102,14 @@ export function PullRequestsView() {
     setRefreshing(true);
     try {
       const { loadProject } = usePublishStore.getState();
-      await Promise.all(ids.map((id) => loadProject(id, true, true)));
+      // Someone asked: pull requests elsewhere that were merged or closed are read again too,
+      // which the minute's own look leaves for a while.
+      await Promise.all(
+        ids.map(async (id) => {
+          await ipc.trackedPullRequestsForget(id, null).catch(console.error);
+          await loadProject(id, true, true);
+        }),
+      );
     } finally {
       setRefreshing(false);
     }

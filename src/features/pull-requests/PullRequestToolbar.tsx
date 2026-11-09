@@ -200,6 +200,8 @@ export function PullRequestToolbar({
                   label: "Refresh pull request",
                   onSelect: () =>
                     void action(async () => {
+                      // A merged or closed one elsewhere is otherwise kept for a while.
+                      if (tracked) await ipc.trackedPullRequestsForget(projectId, tracked.url);
                       await usePublishStore.getState().loadProject(projectId, true);
                       const answer = usePublishStore.getState().byProject[projectId];
                       const problem = tracked

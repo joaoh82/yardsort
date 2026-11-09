@@ -10,6 +10,7 @@ const core = vi.hoisted(() => ({
   workspaceResolveConflicts: vi.fn(),
   workspaceUntrackPullRequest: vi.fn(),
   trackedPullRequestMerge: vi.fn(),
+  trackedPullRequestsForget: vi.fn(),
 }));
 const native = vi.hoisted(() => ({ confirm: vi.fn() }));
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
@@ -71,6 +72,7 @@ beforeEach(() => {
   usePublishStore.setState({ workspaceId: null, state: null, byProject: { alpha: found() } });
   core.projectPullRequests.mockResolvedValue(found());
   core.workspaceMergePullRequest.mockResolvedValue(undefined);
+  core.trackedPullRequestsForget.mockResolvedValue(undefined);
   opener.openUrl.mockResolvedValue(undefined);
   clipboard.writeText.mockResolvedValue(undefined);
 });
@@ -386,6 +388,23 @@ describe("a pull request tracked in another repository", () => {
       ),
     );
     expect(core.workspaceMergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("is read again when refreshed by hand, merged or closed as it may be", async () => {
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: /Actions for pull request #85 — 1 more/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /lib#7/ }));
+    await user.click(screen.getByRole("button", { name: /Actions for pull request demo\/lib#7/ }));
+    core.projectPullRequests.mockClear();
+    await user.click(screen.getByRole("menuitem", { name: "Refresh pull request" }));
+    await waitFor(() => expect(core.projectPullRequests).toHaveBeenCalled());
+    expect(core.trackedPullRequestsForget).toHaveBeenCalledWith(
+      "alpha",
+      "https://github.com/demo/lib/pull/7",
+    );
+    expect(core.trackedPullRequestsForget.mock.invocationCallOrder[0]).toBeLessThan(
+      core.projectPullRequests.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("can stop being tracked, and the toolbar goes back to the workspace's own", async () => {

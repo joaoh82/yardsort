@@ -18,6 +18,7 @@ const core = vi.hoisted(() => ({
   pullRequestSummary: vi.fn(),
   trackedPullRequestSummary: vi.fn(),
   trackedPullRequestMerge: vi.fn(),
+  trackedPullRequestsForget: vi.fn(),
   trackedPullRequestClose: vi.fn(),
   trackedPullRequestReopen: vi.fn(),
   trackedPullRequestComment: vi.fn(),
@@ -133,6 +134,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   localStorage.clear();
   core.uiStateSave.mockResolvedValue(undefined);
+  core.trackedPullRequestsForget.mockResolvedValue(undefined);
   core.projectPullRequests.mockImplementation(async (id: string) => answers()[id]);
   core.pullRequestSummary.mockImplementation(async (id: string, number: number) =>
     pullRequestSummary(answers()[id]!.pullRequests.find((pr) => pr.number === number)!),
@@ -398,6 +400,9 @@ describe("when there is nothing to show, or not everything", () => {
     await waitFor(() => expect(core.projectPullRequests).toHaveBeenCalledTimes(2));
     expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true);
     expect(core.projectPullRequests).toHaveBeenCalledWith(beta.id, true, true);
+    // Someone asked: pull requests elsewhere are read again too, merged and closed ones as well.
+    expect(core.trackedPullRequestsForget).toHaveBeenCalledWith(alpha.id, null);
+    expect(core.trackedPullRequestsForget).toHaveBeenCalledWith(beta.id, null);
   });
 });
 

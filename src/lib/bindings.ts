@@ -127,6 +127,13 @@ export const commands = {
 	 */
 	trackedPullRequestSummary: (workspaceId: string, id: string, refresh: boolean) => typedError<PullRequestSummary, IpcError>(__TAURI_INVOKE("tracked_pull_request_summary", { workspaceId, id, refresh })),
 	/**
+	 *  Read a project's tracked pull requests afresh on the next look — only the one at `url`, when
+	 *  given — and their summaries: someone pressed **Refresh**. A merged or closed one is otherwise
+	 *  reused for [`FINAL_FOR`] whatever a look's `refresh` says, since the window's own poll asks
+	 *  with `refresh` every minute and a final one rarely moves; a person asking is the exception.
+	 */
+	trackedPullRequestsForget: (projectId: string, url: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("tracked_pull_requests_forget", { projectId, url })),
+	/**
 	 *  Merge a tracked pull request, as [`super::pull_requests::pull_request_merge`] merges a
 	 *  project's own: only if it is still open, not a draft, and at the head the user confirmed.
 	 *  Never deletes a branch, never bypasses a protection.

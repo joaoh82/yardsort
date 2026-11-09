@@ -3,6 +3,13 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Refresh reads a merged or closed pull request elsewhere again.** **Refresh** in the Pull
+  requests view and **Refresh pull request** in the session toolbar now read a tracked pull
+  request that was merged or closed at once; before, it stayed as it was for up to ten minutes,
+  which is still how long the window's own look leaves one.
+
 ## 0.24.0
 
 - **`ys session resume` and `ys session fork`.** Continue an agent's conversation from the command

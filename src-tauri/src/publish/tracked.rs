@@ -314,6 +314,34 @@ fn forget_commits(state: &AppState, workspace_id: &str, row: &TrackedPullRequest
     }
 }
 
+/// Read a project's tracked pull requests afresh on the next look — only the one at `url`, when
+/// given — and their summaries: someone pressed **Refresh**. A merged or closed one is otherwise
+/// reused for [`FINAL_FOR`] whatever a look's `refresh` says, since the window's own poll asks
+/// with `refresh` every minute and a final one rarely moves; a person asking is the exception.
+#[tauri::command]
+#[specta::specta]
+pub async fn tracked_pull_requests_forget(
+    app: AppHandle,
+    project_id: String,
+    url: Option<String>,
+) -> IpcResult<()> {
+    blocking(app, move |state| {
+        forget_in(&state.store, &state.forge, &project_id, url.as_deref())
+    })
+    .await
+}
+
+/// [`tracked_pull_requests_forget`] without the app around it.
+fn forget_in(store: &Store, forge: &Forge, project_id: &str, url: Option<&str>) -> IpcResult<()> {
+    for row in store.tracked_pull_requests_in_project(project_id)? {
+        if url.is_none_or(|url| url == row.url) {
+            forge.forget_tracked(&row.url);
+            forge.forget(&summary_key(&row.url));
+        }
+    }
+    Ok(())
+}
+
 /// A tracked pull request in full, as [`super::pull_requests::pull_request_summary`] reads a
 /// project's own: by its link.
 #[tauri::command]
@@ -785,6 +813,69 @@ mod tests {
         forge.forget_tracked("https://github.com/o/lib/pull/8");
         forge.tracked(&rows, false, read);
         assert_eq!(asked.load(Ordering::Relaxed), 4, "forgotten: asked again");
+    }
+
+    /// **Refresh** reads a merged one again at once — the whole project's, or only the one
+    /// asked about — where the window's own minute-by-minute look leaves it for ten minutes.
+    #[test]
+    fn refresh_reads_a_merged_one_again_and_only_the_one_asked_about() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("yardsort.db")).unwrap();
+        let project = store.add_project("parent", "/code/parent").unwrap();
+        let ws = store
+            .add_worktree(&project.id, "fix", "/wt/fix", Some("ys/fix"), Some("main"))
+            .unwrap();
+        for number in [7, 8] {
+            store
+                .track_pull_request(&crate::store::NewTrackedPullRequest {
+                    workspace_id: &ws.id,
+                    session_id: None,
+                    repo: "github.com/o/lib",
+                    number,
+                    url: &format!("https://github.com/o/lib/pull/{number}"),
+                    tracked_by: "cli",
+                })
+                .unwrap();
+        }
+        let rows = store.tracked_pull_requests(&ws.id).unwrap();
+        let forge = Forge::default();
+        let asked = AtomicUsize::new(0);
+        let read = |url: &str| {
+            asked.fetch_add(1, Ordering::Relaxed);
+            Ok(pr(number_of(url), PullRequestState::Merged))
+        };
+        forge.tracked(&rows, false, read);
+        forge.tracked(&rows, true, read);
+        assert_eq!(
+            asked.load(Ordering::Relaxed),
+            2,
+            "the poll leaves merged ones alone"
+        );
+
+        forget_then(
+            &store,
+            &forge,
+            &project.id,
+            Some("https://github.com/o/lib/pull/8"),
+        );
+        forge.tracked(&rows, true, read);
+        assert_eq!(
+            asked.load(Ordering::Relaxed),
+            3,
+            "the one asked about, alone"
+        );
+
+        forget_then(&store, &forge, &project.id, None);
+        forge.tracked(&rows, true, read);
+        assert_eq!(
+            asked.load(Ordering::Relaxed),
+            5,
+            "every one of the project's"
+        );
+    }
+
+    fn forget_then(store: &Store, forge: &Forge, project_id: &str, url: Option<&str>) {
+        forget_in(store, forge, project_id, url).unwrap();
     }
 
     #[test]
