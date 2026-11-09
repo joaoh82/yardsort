@@ -1670,6 +1670,30 @@ mod tests {
         assert!(inbox.entries().unwrap().is_empty());
     }
 
+    /// Recordings name their files after what was recorded, and a tool's name can hold what
+    /// Windows refuses in a path (Cursor's `MCP:…`) — which fails the checkout itself there.
+    #[test]
+    fn every_fixture_can_be_checked_out_on_windows() {
+        fn walk(dir: &Path, bad: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                if name.contains(['<', '>', ':', '"', '|', '?', '*', '\\']) {
+                    bad.push(path.display().to_string());
+                }
+                if path.is_dir() {
+                    walk(&path, bad);
+                }
+            }
+        }
+        let mut bad = Vec::new();
+        walk(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures"),
+            &mut bad,
+        );
+        assert!(bad.is_empty(), "{bad:#?}");
+    }
+
     #[test]
     fn a_pull_request_an_agent_created_is_handed_on_once() {
         let dir = tempfile::tempdir().unwrap();

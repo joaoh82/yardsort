@@ -113,6 +113,8 @@ for name in sorted(os.listdir(raw)):
     tool = d.get("tool_name")
     if tool:
         label += f"-{tool}"
+    # A tool's name can hold what Windows will not have in a file name (Cursor's `MCP:…`).
+    label = re.sub(r'[<>:"/\\|?*]', "-", label)
     with open(os.path.join(out, f"{n:02d}-{label}.json"), "w") as f:
         f.write(redact(json.dumps(trim(d), indent=1)) + "\n")
 print(f"wrote {n} hook fixtures")
