@@ -9,12 +9,17 @@ has the downloads and the full commit lists.
   reads and waits for you to approve, reject, or request changes. The steps that need
   it do not start until you approve. A rejection stops the run, and it is not an
   approval. Requesting changes needs a note, stops the run for now, and keeps that
-  note as an artifact named `changes-<step>` for a later revision. You decide on the
-  run in the app, or with `ys workflow approve`, `ys workflow reject` and
-  `ys workflow request-changes`. The Floor Manager cannot. A decision is recorded
-  once, with who, when and the note, and one on a finished run is refused. Yardsort
-  tells you when a run starts waiting, unless the schedule or trigger says `never`.
-  A run that is waiting when you quit is still waiting when you open it again.
+  note as an artifact named `changes-<step>` for a later revision. You decide in the
+  app, or from a terminal Yardsort did not start, with `ys workflow approve`,
+  `reject` and `request-changes`. Those need the one-time code shown on the run and
+  in the notification. `ys workflow runs` does not print it. Five wrong codes stop
+  `ys` until the app shows a new one. A session Yardsort started cannot decide. The
+  Floor Manager cannot either. This is not a sandbox: a process running as you that
+  writes the database directly is not stopped. A decision is recorded once, with who,
+  when and the note, and one on a finished run is refused. Yardsort tells you when a
+  run starts waiting, unless the schedule or trigger says `never`. A run that is
+  waiting when you quit is still waiting when you open it again. The code in that
+  notification works until the app shows a new one.
   Waiting for a GitHub review is not this. A file written before this still loads.
   See [An approval](docs/guide/workflows.md#an-approval).
 - **A workflow step can hand a named document to the next step.** `produces` names what a step

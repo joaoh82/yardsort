@@ -10,6 +10,7 @@
 //! `docs/design/21-workflows.md`.
 
 pub mod artifact;
+pub mod code;
 pub mod describe;
 pub mod driver;
 pub mod engine;
@@ -53,6 +54,13 @@ pub fn approval_refusal(
         ApprovalWrite::FeedbackRequired => "Say what should change.".to_owned(),
         ApprovalWrite::NotADecision => {
             "That is not a decision. Use approved, rejected, or changes requested.".to_owned()
+        }
+        ApprovalWrite::NoCode => {
+            "There is no code for this step. Open Yardsort to be shown one.".to_owned()
+        }
+        ApprovalWrite::WrongCode => "That code is not the one Yardsort showed you.".to_owned(),
+        ApprovalWrite::CodeLocked => {
+            "Too many wrong codes. Open Yardsort to be shown a new one.".to_owned()
         }
     };
     Some(message)

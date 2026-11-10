@@ -72,6 +72,9 @@ pub enum Command {
         /// A note stored with the decision.
         #[arg(long)]
         feedback: Option<String>,
+        /// The code Yardsort showed you. Not printed by `ys workflow runs`.
+        #[arg(long)]
+        code: Option<String>,
     },
     /// Reject a step that is waiting for you. The run stops. This is not an approval.
     Reject {
@@ -82,6 +85,9 @@ pub enum Command {
         /// A note stored with the decision.
         #[arg(long)]
         feedback: Option<String>,
+        /// The code Yardsort showed you. Not printed by `ys workflow runs`.
+        #[arg(long)]
+        code: Option<String>,
     },
     /// Ask for changes on a step that is waiting for you. The run stops, and the note is kept
     /// for a later revision. `--feedback` is required.
@@ -93,6 +99,9 @@ pub enum Command {
         /// What should change. Required.
         #[arg(long)]
         feedback: Option<String>,
+        /// The code Yardsort showed you. Not printed by `ys workflow runs`.
+        #[arg(long)]
+        code: Option<String>,
     },
     /// Check a workflow file. Prints each problem with its line and column; exits 1 if there
     /// are any. Needs no Yardsort profile, so it works anywhere.
@@ -152,22 +161,41 @@ pub fn run(data_dir: Option<PathBuf>, command: Command, out: &Output) -> Result<
             run,
             step,
             feedback,
+            code,
         } => {
             let ys = Yardsort::open(data_dir)?;
-            decide(&ys, &run, &step, "approved", feedback.as_deref(), out)
+            decide(
+                &ys,
+                &run,
+                &step,
+                "approved",
+                feedback.as_deref(),
+                code.as_deref(),
+                out,
+            )
         }
         Command::Reject {
             run,
             step,
             feedback,
+            code,
         } => {
             let ys = Yardsort::open(data_dir)?;
-            decide(&ys, &run, &step, "rejected", feedback.as_deref(), out)
+            decide(
+                &ys,
+                &run,
+                &step,
+                "rejected",
+                feedback.as_deref(),
+                code.as_deref(),
+                out,
+            )
         }
         Command::RequestChanges {
             run,
             step,
             feedback,
+            code,
         } => {
             let ys = Yardsort::open(data_dir)?;
             decide(
@@ -176,6 +204,7 @@ pub fn run(data_dir: Option<PathBuf>, command: Command, out: &Output) -> Result<
                 &step,
                 "changes_requested",
                 feedback.as_deref(),
+                code.as_deref(),
                 out,
             )
         }
@@ -679,10 +708,10 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                 if !artifacts.is_empty() {
                     sayln!("  Artifacts: {artifacts}");
                 }
-                let id = memory::short_id(&run.id);
-                sayln!("  ys workflow approve {id} {step}");
-                sayln!("  ys workflow reject {id} {step}");
-                sayln!("  ys workflow request-changes {id} {step} --feedback \"...\"");
+                sayln!(
+                    "  Decide in Yardsort, or with `ys workflow approve`, `reject` or \
+                     `request-changes` and the code it showed you."
+                );
             }
         }
         if !decision_lines.is_empty() {
@@ -717,14 +746,23 @@ fn decide(
     step: &str,
     decision: &str,
     feedback: Option<&str>,
+    code: Option<&str>,
     out: &Output,
 ) -> Result<(), Failure> {
+    if let Some(why) = launched_here() {
+        return Err(Failure::new(why));
+    }
+    let Some(code) = code.map(str::trim).filter(|text| !text.is_empty()) else {
+        return Err(Failure::new(
+            "Say the code Yardsort showed you, with --code.",
+        ));
+    };
     let run = find_run(ys, wanted)?;
     let feedback = feedback.map(str::trim).filter(|text| !text.is_empty());
     let actor = cli_actor();
-    let written = ys
-        .store
-        .record_workflow_approval(&run.id, step, decision, feedback, &actor)?;
+    let written =
+        ys.store
+            .record_workflow_approval(&run.id, step, decision, feedback, &actor, Some(code))?;
     if let Some(message) = workflow::approval_refusal(&written, memory::short_id(&run.id), step) {
         return Err(Failure::new(message));
     }
@@ -748,6 +786,26 @@ fn decide(
         || {
             sayln!("{word} `{step}` on run {}.", memory::short_id(&run.id));
         },
+    )
+}
+
+/// A session Yardsort started, or the Floor Manager, must not decide. Unsetting one variable
+/// is not enough: any of these means this process was launched from inside Yardsort.
+fn launched_here() -> Option<&'static str> {
+    const NAMES: &[&str] = &[
+        yardsort_core::coordinator::ENV,
+        yardsort_core::activity::RUN_ENV,
+        yardsort_core::activity::WORKSPACE_ENV,
+        yardsort_core::activity::RECORD_ENV,
+    ];
+    let inside = NAMES.iter().any(|name| {
+        std::env::var(name)
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty())
+    });
+    inside.then_some(
+        "This ys is running inside a session Yardsort started, so it cannot decide an \
+         approval. Decide in the app, or from a terminal Yardsort did not start.",
     )
 }
 

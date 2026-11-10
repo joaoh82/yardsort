@@ -599,7 +599,7 @@ export const commands = {
 	 *  Record an approval. The driver applies it on its next tick. Only the person at this
 	 *  window calls this. The Floor Manager's `ys` is refused before it can.
 	 */
-	workflowDecide: (runId: string, stepId: string, decision: string, feedback: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("workflow_decide", { runId, stepId, decision, feedback })),
+	workflowDecide: (runId: string, stepId: string, decision: ApprovalDecision, feedback: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("workflow_decide", { runId, stepId, decision, feedback })),
 	/**
 	 *  Have a model write a workflow from `description`, through Drafting: the agent the user has
 	 *  in its non-interactive mode, or their Anthropic key. The answer is checked as a typed file
@@ -4090,6 +4090,8 @@ export type WorkflowStepRun = {
 	artifacts: WorkflowArtifact[],
 	/**  Named documents this step reads, from earlier steps. An approval shows these. */
 	consumed: WorkflowArtifact[],
+	/**  The one-time code for a waiting approval. Shown only in this window. Absent otherwise. */
+	approvalCode: string | null,
 };
 
 /**  Workflow writing has its own harness preference; commit and PR writers stay workspace-based. */

@@ -667,17 +667,31 @@ step with no outcome and does not halt a step that does not need it.
 
 The decision is written to `workflow_approval_decisions` (migration `0031`, index 30)
 before the engine applies it, so it survives a restart and is visible to `ys` at once.
-The row is who, when, the decision and the feedback. It is not deleted when the engine
-applies it. It is deleted only when that step starts again from pending. A second
+The row is who, when, the decision and the feedback, plus a salt and a slow hash of
+the one-time code and a count of wrong tries. The code itself is not stored. The row
+is inserted when the step starts waiting, with the decision still null, and filled in
+when someone decides. It is not deleted when the engine applies it. It is deleted
+only when that step starts again from pending, which issues a new code. A second
 decision is refused, and so is one on a run that is not running, or on a step that is
-not an `approve` step waiting. Requesting changes requires feedback. The driver then
-stores an artifact named `changes-<step id>` (source `decision`) even though the step
-failed, so a later revision can consume it.
+not an `approve` step waiting. Requesting changes requires feedback. The
+`changes-<step id>` artifact (source `decision`) is written in the same database
+change as the step's move to failed, so a later revision can consume it. An artifact
+name starting with `changes-` is refused at parse time.
 
-You decide in the app, or with `ys workflow approve`, `reject` and `request-changes`
-from your own terminal. The Floor Manager's `ys` is `Action::Deny` at every permission,
-including trusted and ask. Waiting for a GitHub review is `wait_pr_activity`, and it
-is not a gate.
+A timeout moves the step to failed only when no decision has been recorded
+(`NOT EXISTS` a row whose decision is set). A code row with no decision yet does not
+block the timeout. If the timeout lands first, `ys` is told the step is not waiting.
+
+You decide in the app, which passes no code, or with `ys workflow approve`, `reject`
+and `request-changes` from a terminal Yardsort did not start. Those commands require
+`--code`. The code is shown in the window and in the waiting notification, and nowhere
+else: not in `ys workflow runs`, `--json`, the step note, outputs or a log. Five wrong
+codes lock the terminal until the app shows a new one. `ys` also refuses when any of
+`YARDSORT_COORDINATOR`, `YARDSORT_RUN_ID`, `YARDSORT_WORKSPACE_ID` or
+`YARDSORT_SESSION_RECORD_ID` is set. The Floor Manager's `ys` is `Action::Deny` at
+every permission, including trusted and ask. This is not a sandbox. A process running
+as the same user that writes SQLite directly is not stopped. Waiting for a GitHub
+review is `wait_pr_activity`, and it is not a gate.
 
 What this leaves for later, and does not do: a durable wait that resumes safely across
 a remote disconnect (the pending row already survives an ordinary restart), a branch
@@ -704,7 +718,10 @@ again. The pending marker stays in the step's outputs, so the capture runs again
 when the action would not succeed a second time, such as a notification. A step that was
 still doing its own work fails instead, so it does not happen twice. A capture that then
 fails drops the marker. A transcript read stays off the driver thread. The same read is
-reused on the next tick, and the step fails only after about 20 seconds.
+reused on the next tick, and the step fails only after about 20 seconds. The read is
+keyed by the run and the step, so a finished read is not handed to a later step. A job
+older than that limit is dropped on the next look and is not started again. The text
+is capped inside the read, before it is sent back.
 An effect that finishes in the driver, such as a notification, a started session or a paste,
 stores its artifacts in that same change, before the step is marked succeeded.
 
@@ -719,8 +736,9 @@ checked again, so `notes.md` pointing at `.env` is still a secret. A component c
 or ending in a dot or a space, is refused. A secret-looking path is refused when it is written
 literally, and again when a variable in it is filled in. The body is cut at 32000 characters,
 and the stored copy says it was cut. Control characters other than newline and tab are dropped
-before that, and so are bidirectional overrides (U+202A through U+202E and U+2066 through
-U+2069) and zero-width characters. An empty body fails the step, so the next phase does not start with a blank
+before that, and so are bidirectional controls (U+202A through U+202E, U+2066 through
+U+2069, and the bidi marks), U+200B, U+2060 and U+FEFF. U+200C and U+200D stay.
+An empty body fails the step, so the next phase does not start with a blank
 handoff.
 
 A re-run replaces that step's rows only after the new bodies have been read. A failed attempt

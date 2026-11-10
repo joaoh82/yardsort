@@ -141,25 +141,67 @@ struct TranscriptJob {
     rx: Receiver<Result<Option<String>, String>>,
 }
 
-type TranscriptKey = (String, String, bool);
+/// One read belongs to one step of one run. A later step does not pick up an earlier result.
+type TranscriptKey = (String, String, String, bool);
 
 fn transcript_jobs() -> &'static Mutex<HashMap<TranscriptKey, TranscriptJob>> {
     static JOBS: OnceLock<Mutex<HashMap<TranscriptKey, TranscriptJob>>> = OnceLock::new();
     JOBS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Peek at the read for this session. The first call starts one thread. Later calls reuse it.
-/// After [`TRANSCRIPT_LIMIT`] the step fails and that thread is left to finish on its own.
+fn approval_codes() -> &'static Mutex<HashMap<(String, String), String>> {
+    static CODES: OnceLock<Mutex<HashMap<(String, String), String>>> = OnceLock::new();
+    CODES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub(crate) fn remember_approval_code(run_id: &str, step_id: &str, code: &str) {
+    approval_codes()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert((run_id.to_owned(), step_id.to_owned()), code.to_owned());
+}
+
+pub(crate) fn approval_code_for(run_id: &str, step_id: &str) -> Option<String> {
+    approval_codes()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&(run_id.to_owned(), step_id.to_owned()))
+        .cloned()
+}
+
+/// Peek at the read for this step. The first call starts one thread. Later calls reuse it.
+/// A job older than [`TRANSCRIPT_LIMIT`] is dropped and the step fails. A new thread is not
+/// started in its place, or the step would wait forever. Finished jobs of other steps stay
+/// out of this key.
 fn poll_transcript(
     handle: &AppHandle,
+    run_id: &str,
+    step_id: &str,
     workspace_id: &str,
     record: &str,
     raw: bool,
 ) -> Result<Conversation, String> {
-    let key = (workspace_id.to_owned(), record.to_owned(), raw);
+    let key = (
+        run_id.to_owned(),
+        step_id.to_owned(),
+        record.to_owned(),
+        raw,
+    );
     let mut jobs = transcript_jobs()
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
+    let stale: Vec<TranscriptKey> = jobs
+        .iter()
+        .filter(|(_, job)| job.started.elapsed() >= TRANSCRIPT_LIMIT)
+        .map(|(key, _)| key.clone())
+        .collect();
+    let this_was_stale = stale.iter().any(|old| old == &key);
+    for old in stale {
+        jobs.remove(&old);
+    }
+    if this_was_stale {
+        return Err("Reading that conversation took too long, so it was not copied.".into());
+    }
     if !jobs.contains_key(&key) {
         let (tx, rx) = mpsc::channel();
         let handle = handle.clone();
@@ -168,7 +210,9 @@ fn poll_transcript(
         let spawned = std::thread::Builder::new()
             .name("artifact-transcript".into())
             .spawn(move || {
-                let _ = tx.send(read_transcript(&handle, &workspace_id, &record, raw));
+                let result = read_transcript(&handle, &workspace_id, &record, raw)
+                    .map(|text| text.map(|text| yardsort_core::workflow::artifact::cap(&text).0));
+                let _ = tx.send(result);
             });
         if let Err(error) = spawned {
             return Err(format!(
@@ -188,6 +232,9 @@ fn poll_transcript(
     drop(jobs);
     let wait = TRANSCRIPT_PEEK.saturating_sub(started.elapsed());
     match job.rx.recv_timeout(wait) {
+        Ok(_) if started.elapsed() >= TRANSCRIPT_LIMIT => {
+            Err("Reading that conversation took too long, so it was not copied.".into())
+        }
         Ok(result) => result.map(Conversation::Ready),
         Err(RecvTimeoutError::Timeout) if started.elapsed() >= TRANSCRIPT_LIMIT => {
             Err("Reading that conversation took too long, so it was not copied.".into())
@@ -291,11 +338,17 @@ impl Hands for AppHands<'_> {
         Some(handoff::render(&facts))
     }
 
+    fn approval_code(&self, run_id: &str, step_id: &str, code: &str) {
+        remember_approval_code(run_id, step_id, code);
+    }
+
     fn conversation(
         &self,
         workspace_id: &str,
         pty_id: &str,
         raw: bool,
+        run_id: &str,
+        step_id: &str,
     ) -> Result<Conversation, String> {
         use yardsort_core::launch::RECORD_LABEL;
         // The terminal id is not the session record. The record is what the transcript is filed
@@ -313,7 +366,7 @@ impl Hands for AppHands<'_> {
         // Reading a transcript walks the harness's files. That stays off this thread, which is
         // also what moves every other run on. One read per session is reused until it finishes
         // or it has had TRANSCRIPT_LIMIT. A second call does not start a second thread.
-        poll_transcript(self.handle, workspace_id, &record, raw)
+        poll_transcript(self.handle, run_id, step_id, workspace_id, &record, raw)
     }
 
     fn pr_posts(&self, workspace_id: &str, pr: &yardsort_core::workflow::runs::PrFacts) -> PrAsk {

@@ -58,15 +58,22 @@ pub trait Hands {
     /// turn's own text. Without it, the budgeted digest. [`Conversation::Ready`]`(None)` when
     /// that session has no conversation to copy. [`Conversation::Later`] when the read has not
     /// finished: the driver asks again on the next tick and does not fail the step. The default
-    /// is none, so a driver test that never asks is unchanged.
+    /// is none, so a driver test that never asks is unchanged. `run_id` and `step_id` keep one
+    /// read from being reused by a later step.
     fn conversation(
         &self,
         _workspace_id: &str,
         _pty_id: &str,
         _raw: bool,
+        _run_id: &str,
+        _step_id: &str,
     ) -> Result<Conversation, String> {
         Ok(Conversation::Ready(None))
     }
+
+    /// Remember the one-time code so the window can show it. The default forgets it. Do not
+    /// write the code to a log, a note, or a step's outputs.
+    fn approval_code(&self, _run_id: &str, _step_id: &str, _code: &str) {}
 }
 
 /// How far a transcript read got. A slow read must not fail the step, and must not be started
@@ -549,16 +556,41 @@ enum Outcome {
 }
 
 fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResult<bool> {
-    let moved = store.move_workflow_step(
-        run_id,
-        &change.step,
-        &change.from,
-        change.to,
-        change.outputs.as_deref(),
-        change.note.as_deref(),
-        change.outcome.as_deref(),
-        change.clear_outcome,
-    )?;
+    let moved = if let Some(artifacts) = changes_artifacts(store, run_id, change)? {
+        store.finish_step_with_artifacts(
+            run_id,
+            &change.step,
+            &change.from,
+            change.to,
+            &artifacts,
+            change.outputs.as_deref(),
+            change.note.as_deref(),
+            change.outcome.as_deref(),
+            change.clear_outcome,
+        )?
+    } else if change.keep_decision {
+        store.move_workflow_step_unless_decided(
+            run_id,
+            &change.step,
+            &change.from,
+            change.to,
+            change.outputs.as_deref(),
+            change.note.as_deref(),
+            change.outcome.as_deref(),
+            change.clear_outcome,
+        )?
+    } else {
+        store.move_workflow_step(
+            run_id,
+            &change.step,
+            &change.from,
+            change.to,
+            change.outputs.as_deref(),
+            change.note.as_deref(),
+            change.outcome.as_deref(),
+            change.clear_outcome,
+        )?
+    };
     if moved {
         driver.touch();
     }
@@ -841,7 +873,13 @@ impl Capture<'_> {
                 })?;
                 let text = match self
                     .hands
-                    .conversation(&self.place.workspace.id, &pty, *raw)
+                    .conversation(
+                        &self.place.workspace.id,
+                        &pty,
+                        *raw,
+                        self.run_id,
+                        &self.step.id,
+                    )
                     .map_err(failed)?
                 {
                     Conversation::Later => return Err(CaptureMiss::Later),
@@ -1031,8 +1069,9 @@ impl World for Seen<'_> {
     }
 }
 
-/// Tell the person, once, when an approval step starts waiting, and store the artifact a
-/// request for changes leaves. A notification that cannot be shown does not fail the step.
+/// Tell the person, once, when an approval step starts waiting, and hand the window the
+/// one-time code. A notification that cannot be shown does not fail the step. The code is
+/// not written into the step. The request-for-changes artifact is stored with the step's move.
 fn follow_approval(
     store: &Store,
     hands: &dyn Hands,
@@ -1043,6 +1082,14 @@ fn follow_approval(
     let step = workflow.steps.iter().find(|step| step.id == change.step);
     let approve = step.is_some_and(|step| matches!(step.action, super::Action::Approve { .. }));
     if approve && change.to == StepStatus::Waiting && change.from.contains(&StepStatus::Pending) {
+        // The code is shown once, here and in the window. It is not written into the step.
+        let code = store
+            .begin_approval_code(&run.id, &change.step)
+            .ok()
+            .flatten();
+        if let Some(code) = &code {
+            hands.approval_code(&run.id, &change.step, code);
+        }
         // A lookup error is told anyway: missing a notice is worse than an extra one.
         let tell = store.tell_workflow_approval(&run.id).unwrap_or(true);
         if tell {
@@ -1052,30 +1099,33 @@ fn follow_approval(
                 .and_then(|raw| engine::parse_outputs(raw).get("prompt").cloned());
             let _ = hands.notify(
                 "Waiting for your approval",
-                Some(&approval_body(run, &change.step, prompt.as_deref())),
+                Some(&approval_body(
+                    run,
+                    &change.step,
+                    prompt.as_deref(),
+                    code.as_deref(),
+                )),
             );
-        }
-    }
-    if change.to == StepStatus::Failed {
-        if let Some(feedback) = changes_feedback(change.outcome.as_deref()) {
-            leave_changes(
-                store,
-                step,
-                &run.id,
-                &change.step,
-                change.outputs.as_deref(),
-                &feedback,
-            )?;
         }
     }
     Ok(())
 }
 
-fn approval_body(run: &WorkflowRunRow, step: &str, prompt: Option<&str>) -> String {
+fn approval_body(
+    run: &WorkflowRunRow,
+    step: &str,
+    prompt: Option<&str>,
+    code: Option<&str>,
+) -> String {
     let mut body = format!(
         "{} in {} is waiting on `{}`.",
         run.workflow_name, run.workspace_name, step
     );
+    if let Some(code) = code {
+        body.push_str(" Your code is ");
+        body.push_str(code);
+        body.push('.');
+    }
     if let Some(line) = prompt
         .and_then(|text| text.lines().next())
         .map(str::trim)
@@ -1097,19 +1147,34 @@ fn changes_feedback(outcome: Option<&str>) -> Option<String> {
     }
 }
 
-/// Store `changes-<step>` and any non-empty output the step declared, even though the step
-/// failed. A later revision reads the artifact by name. Empty feedback becomes a sentence,
-/// so the artifact is never blank.
-fn leave_changes(
+/// The artifacts a request for changes stores, in the same transaction as the step's move.
+/// `None` when this move is not that decision. Empty feedback becomes a sentence, so the
+/// artifact is never blank.
+fn changes_artifacts(
     store: &Store,
-    step: Option<&super::Step>,
     run_id: &str,
-    step_id: &str,
-    outputs_json: Option<&str>,
-    feedback: &str,
-) -> IpcResult<()> {
-    let outputs = outputs_json.map(engine::parse_outputs).unwrap_or_default();
-    let changes_name = artifact::changes_artifact_name(step_id);
+    change: &Move,
+) -> IpcResult<Option<Vec<NewWorkflowArtifact>>> {
+    let Some(feedback) = changes_feedback(change.outcome.as_deref()) else {
+        return Ok(None);
+    };
+    let definition = store
+        .workflow_run(run_id)?
+        .map(|run| run.definition)
+        .unwrap_or_default();
+    let step = super::parse(&definition).ok().and_then(|workflow| {
+        workflow
+            .steps
+            .into_iter()
+            .find(|step| step.id == change.step)
+    });
+    let outputs = change
+        .outputs
+        .as_deref()
+        .map(engine::parse_outputs)
+        .unwrap_or_default();
+    let changes_name = artifact::changes_artifact_name(&change.step);
+    let mut saved = Vec::new();
     if let Some(step) = step {
         for decl in &step.produces {
             let ArtifactSource::Output { field } = &decl.source else {
@@ -1124,38 +1189,30 @@ fn leave_changes(
             let Ok((body, truncated)) = artifact::require_text(&decl.name, text.clone()) else {
                 continue;
             };
-            store.upsert_workflow_artifact(
-                run_id,
-                step_id,
-                &NewWorkflowArtifact {
-                    name: decl.name.clone(),
-                    source: "output".into(),
-                    detail: Some(field.clone()),
-                    body,
-                    truncated,
-                },
-            )?;
+            saved.push(NewWorkflowArtifact {
+                name: decl.name.clone(),
+                source: "output".into(),
+                detail: Some(field.clone()),
+                body,
+                truncated,
+            });
         }
     }
     let body = if feedback.trim().is_empty() {
         "Changes requested.".to_owned()
     } else {
-        feedback.to_owned()
+        feedback
     };
     let (body, truncated) = artifact::require_text(&changes_name, body)
         .unwrap_or(("Changes requested.".to_owned(), false));
-    store.upsert_workflow_artifact(
-        run_id,
-        step_id,
-        &NewWorkflowArtifact {
-            name: changes_name,
-            source: "decision".into(),
-            detail: Some("changes_requested".into()),
-            body,
-            truncated,
-        },
-    )?;
-    Ok(())
+    saved.push(NewWorkflowArtifact {
+        name: changes_name,
+        source: "decision".into(),
+        detail: Some("changes_requested".into()),
+        body,
+        truncated,
+    });
+    Ok(Some(saved))
 }
 
 /// The workspace's newest live harness session: the conversation records newest first, matched

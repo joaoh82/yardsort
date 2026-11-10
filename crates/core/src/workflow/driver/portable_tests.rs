@@ -1154,7 +1154,14 @@ impl Hands for Filed {
         unreachable!("this workflow waits on no pull request")
     }
 
-    fn conversation(&self, _: &str, _: &str, _: bool) -> Result<Conversation, String> {
+    fn conversation(
+        &self,
+        _: &str,
+        _: &str,
+        _: bool,
+        _: &str,
+        _: &str,
+    ) -> Result<Conversation, String> {
         panic!("a file artifact must not read a conversation");
     }
 }
@@ -1196,7 +1203,14 @@ impl Hands for Talks {
         unreachable!("this workflow waits on no pull request")
     }
 
-    fn conversation(&self, _: &str, pty: &str, raw: bool) -> Result<Conversation, String> {
+    fn conversation(
+        &self,
+        _: &str,
+        pty: &str,
+        raw: bool,
+        _: &str,
+        _: &str,
+    ) -> Result<Conversation, String> {
         self.asked.lock().unwrap().push((pty.to_owned(), raw));
         Ok(Conversation::Ready(Some(
             if raw { "RAW TEXT" } else { "DIGEST" }.into(),
@@ -1493,13 +1507,13 @@ fn approving_continues_and_the_next_step_does_not_start_while_it_waits() {
     assert_eq!(step(&store, &run, "next").status, "pending");
     assert_eq!(
         store
-            .record_workflow_approval(&run, "sign-off", "approved", Some("ship it"), "ada")
+            .record_workflow_approval(&run, "sign-off", "approved", Some("ship it"), "ada", None)
             .unwrap(),
         crate::store::ApprovalWrite::Recorded
     );
     assert_eq!(
         store
-            .record_workflow_approval(&run, "sign-off", "rejected", Some("no"), "ada")
+            .record_workflow_approval(&run, "sign-off", "rejected", Some("no"), "ada", None)
             .unwrap(),
         crate::store::ApprovalWrite::AlreadyDecided
     );
@@ -1527,7 +1541,7 @@ fn rejecting_stops_the_run_and_a_request_for_changes_is_stored_apart_from_it() {
     tick(&store, &hands);
     assert_eq!(
         store
-            .record_workflow_approval(&run, "sign-off", "changes_requested", None, "ada")
+            .record_workflow_approval(&run, "sign-off", "changes_requested", None, "ada", None)
             .unwrap(),
         crate::store::ApprovalWrite::FeedbackRequired
     );
@@ -1539,6 +1553,7 @@ fn rejecting_stops_the_run_and_a_request_for_changes_is_stored_apart_from_it() {
             "changes_requested",
             Some("split the migration"),
             "ada",
+            None,
         )
         .unwrap();
     tick(&store, &hands);
@@ -1568,7 +1583,7 @@ fn a_decision_on_a_finished_run_is_refused() {
     tick(&store, &hands);
     assert!(store.cancel_workflow_run(&run, "Cancelled.").unwrap());
     let refused = store
-        .record_workflow_approval(&run, "sign-off", "approved", None, "ada")
+        .record_workflow_approval(&run, "sign-off", "approved", None, "ada", None)
         .unwrap();
     assert!(
         matches!(refused, crate::store::ApprovalWrite::RunEnded { .. }),
@@ -1709,7 +1724,14 @@ impl Hands for SlowTalk {
         unreachable!("this workflow waits on no pull request")
     }
 
-    fn conversation(&self, _: &str, _: &str, _: bool) -> Result<Conversation, String> {
+    fn conversation(
+        &self,
+        _: &str,
+        _: &str,
+        _: bool,
+        _: &str,
+        _: &str,
+    ) -> Result<Conversation, String> {
         let mut calls = self.calls.lock().unwrap();
         *calls += 1;
         if *calls == 1 {

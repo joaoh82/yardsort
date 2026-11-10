@@ -198,6 +198,8 @@ pub struct Move {
     /// This step is a gate whose verdict failed. The run skips every step that has not
     /// finished, in this same plan, and ends failed.
     pub halt: bool,
+    /// An approval timeout. The move applies only when nobody has recorded a decision.
+    pub keep_decision: bool,
 }
 
 /// Something only the driver can do. Each belongs to a step the plan has just moved to
@@ -537,6 +539,7 @@ pub fn recover(rows: &[WorkflowStepRow]) -> Vec<Move> {
                     outcome: row.outcome.clone(),
                     clear_outcome: false,
                     halt: false,
+                    keep_decision: false,
                 };
             }
             Move {
@@ -548,6 +551,7 @@ pub fn recover(rows: &[WorkflowStepRow]) -> Vec<Move> {
                 outcome: None,
                 clear_outcome: false,
                 halt: false,
+                keep_decision: false,
             }
         })
         .collect()
@@ -592,6 +596,7 @@ pub fn react(
         outcome: Some(serde_json::to_string(outcome).unwrap_or_else(|_| "{}".to_owned())),
         clear_outcome: false,
         halt: stop,
+        keep_decision: false,
     }
 }
 
@@ -622,6 +627,7 @@ pub fn recorded(
         outcome,
         clear_outcome: false,
         halt: false,
+        keep_decision: false,
     }
 }
 
@@ -636,6 +642,7 @@ pub fn done(step: &str, outputs: &Outputs) -> Move {
         outcome: None,
         clear_outcome: false,
         halt: false,
+        keep_decision: false,
     }
 }
 
@@ -651,6 +658,7 @@ pub fn queued(step: &str, outputs: &Outputs) -> Move {
         outcome: None,
         clear_outcome: false,
         halt: false,
+        keep_decision: false,
     }
 }
 
@@ -665,6 +673,7 @@ pub fn skipped(step: &str, why: &str) -> Move {
         outcome: None,
         clear_outcome: false,
         halt: false,
+        keep_decision: false,
     }
 }
 
@@ -687,6 +696,7 @@ pub fn still_reading(
         outcome,
         clear_outcome: false,
         halt: false,
+        keep_decision: false,
     }
 }
 
@@ -702,6 +712,7 @@ pub fn not_yet(step: &str) -> Move {
         outcome: None,
         clear_outcome: false,
         halt: false,
+        keep_decision: false,
     }
 }
 
@@ -716,6 +727,7 @@ pub fn failed(step: &str, why: &str) -> Move {
         outcome: None,
         clear_outcome: false,
         halt: false,
+        keep_decision: false,
     }
 }
 
@@ -1029,11 +1041,15 @@ fn wait(
             if let Some(recorded) = world.approval(id) {
                 Some(approval_move(step, recorded))
             } else if timed_out(timeout_secs) {
-                Some(fail(
+                // A decision recorded after this plan was built, but before the move is
+                // applied, must win. The store refuses this move when a decision exists.
+                let mut change = fail(
                     id,
                     StepStatus::Waiting,
                     &format!("Timed out after {}.", duration(timeout_secs.unwrap_or(0))),
-                ))
+                );
+                change.keep_decision = true;
+                Some(change)
             } else {
                 None
             }
@@ -1095,6 +1111,7 @@ fn resume_capture(
         outcome,
         clear_outcome: false,
         halt: false,
+        keep_decision: false,
     }
 }
 
@@ -1126,6 +1143,7 @@ fn hold_for_artifacts(step: &super::Step, change: Move, effects: &mut Vec<Effect
         outputs: Some(serde_json::to_string(&marked).unwrap_or_else(|_| "{}".to_owned())),
         clear_outcome,
         halt: false,
+        keep_decision: false,
         ..change
     }
 }
@@ -1177,6 +1195,7 @@ fn to(step: &str, from: StepStatus, to: StepStatus) -> Move {
         outcome: None,
         clear_outcome: false,
         halt: false,
+        keep_decision: false,
     }
 }
 

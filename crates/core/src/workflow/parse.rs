@@ -539,6 +539,16 @@ impl Checker<'_> {
                     );
                     continue;
                 }
+                if name.starts_with("changes-") {
+                    self.problem(
+                        &item.value.name.referenced,
+                        format!(
+                            "`{name}` is reserved. A request for changes stores \
+                             `changes-<step>` itself."
+                        ),
+                    );
+                    continue;
+                }
                 if let Some(other) = map.get(name) {
                     self.problem(
                         &item.value.name.referenced,

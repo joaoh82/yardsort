@@ -90,9 +90,16 @@ This is not a sandbox. The Floor Manager runs as you. A shell command that is no
 `gh`, an editor) is outside the gate, unless the agent's own permission prompts block it.
 Unsetting `YARDSORT_COORDINATOR`, writing the answer file in the profile's
 `coordinator/confirm` folder, editing `settings.toml` so the level is `trusted`, or pointing
-`ys --data-dir` at a profile you made up, also gets around it. Those are the same kind of limit
-as any agent you start in a workspace. The harness's own prompts are a second line, useful, and
-not the one this setting is.
+`ys --data-dir` at a profile you made up, also gets around the permission check. Those are
+the same kind of limit as any agent you start in a workspace. The harness's own prompts are
+a second line, useful, and not the one this setting is.
+
+An approval has a second check. `ys` refuses to decide when any of `YARDSORT_COORDINATOR`,
+`YARDSORT_RUN_ID`, `YARDSORT_WORKSPACE_ID` or `YARDSORT_SESSION_RECORD_ID` is set, which a
+session Yardsort started has. Dropping only the coordinator marker is not enough. A terminal
+that is allowed still needs the one-time code shown in the app and in the notification.
+Five wrong codes stop `ys` until the app shows a new one. A process running as you that
+writes the database directly is not stopped.
 
 The dialog does not run the command. It records yes or no, and the `ys` that is waiting is the
 one that runs it.

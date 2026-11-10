@@ -421,6 +421,7 @@ describe("WorkflowView", () => {
             truncated: false,
           },
         ],
+        approvalCode: "ABCD2345",
       },
     ]);
     core.workflowDecide.mockResolvedValue(undefined);
@@ -430,6 +431,7 @@ describe("WorkflowView", () => {
       .setup()
       .click(await within(runs).findByRole("button", { name: "Run in fix-login, running" }));
     expect(await within(runs).findByText("Waiting for your approval")).toBeInTheDocument();
+    expect(within(runs).getByText(/ABCD2345/)).toBeInTheDocument();
     expect(within(runs).getByText("To review plan")).toBeInTheDocument();
     expect(within(runs).getByText("Split the migration.")).toBeInTheDocument();
     expect(within(runs).getByRole("button", { name: "Request changes" })).toBeDisabled();

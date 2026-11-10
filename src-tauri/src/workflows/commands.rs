@@ -11,7 +11,7 @@ use tauri::AppHandle;
 use tauri_specta::Event;
 use yardsort_core::forge::{Gh, PullRequest};
 use yardsort_core::store::{WorkflowArtifactRow, WorkflowRunRow, WorkflowStepRow, WorkspaceRow};
-use yardsort_core::workflow::engine::StepOutcome;
+use yardsort_core::workflow::engine::{ApprovalDecision, StepOutcome};
 use yardsort_core::workflow::runs::{self, Facts, Look, PrFacts};
 use yardsort_core::workflow::{self, Entry, Problem, Workflow};
 
@@ -85,6 +85,8 @@ pub struct WorkflowStepRun {
     pub artifacts: Vec<WorkflowArtifact>,
     /// Named documents this step reads, from earlier steps. An approval shows these.
     pub consumed: Vec<WorkflowArtifact>,
+    /// The one-time code for a waiting approval. Shown only in this window. Absent otherwise.
+    pub approval_code: Option<String>,
 }
 
 /// A named document stored on a run, as the run view shows it.
@@ -150,6 +152,7 @@ fn step_from(
     row: WorkflowStepRow,
     artifacts: &[WorkflowArtifactRow],
     consumes: &[String],
+    approval_code: Option<String>,
 ) -> WorkflowStepRun {
     WorkflowStepRun {
         outputs: serde_json::from_str(&row.outputs).unwrap_or_default(),
@@ -173,7 +176,27 @@ fn step_from(
             .filter_map(|name| artifacts.iter().find(|artifact| &artifact.name == name))
             .map(artifact_from)
             .collect(),
+        approval_code,
     }
+}
+
+/// The code the window shows for a waiting approval. A locked code, or a code from before this
+/// process started, is replaced so the window shows a new one. The plain code is not stored.
+fn shown_approval_code(
+    store: &yardsort_core::store::Store,
+    run_id: &str,
+    step_id: &str,
+) -> IpcResult<Option<String>> {
+    let locked = store.approval_code_locked(run_id, step_id)?;
+    let remembered = super::approval_code_for(run_id, step_id);
+    let has_row = store.approval_code_row(run_id, step_id)?;
+    if locked || (has_row && remembered.is_none()) {
+        if let Some(code) = store.begin_approval_code(run_id, step_id)? {
+            super::remember_approval_code(run_id, step_id, &code);
+            return Ok(Some(code));
+        }
+    }
+    Ok(remembered)
 }
 
 fn changed(app: &AppHandle) {
@@ -296,7 +319,7 @@ pub async fn workflow_run_steps(app: AppHandle, run_id: String) -> IpcResult<Vec
             .ok()
             .map(|workflow| workflow.steps)
             .unwrap_or_default();
-        Ok(state
+        state
             .store
             .workflow_steps(&run_id)?
             .into_iter()
@@ -306,9 +329,14 @@ pub async fn workflow_run_steps(app: AppHandle, run_id: String) -> IpcResult<Vec
                     .find(|step| step.id == row.step_id)
                     .map(|step| step.consumes.as_slice())
                     .unwrap_or(&[]);
-                step_from(row, &artifacts, names)
+                let approval_code = if row.action == "approve" && row.status == "waiting" {
+                    shown_approval_code(&state.store, &run_id, &row.step_id)?
+                } else {
+                    None
+                };
+                Ok(step_from(row, &artifacts, names, approval_code))
             })
-            .collect())
+            .collect()
     })
     .await
 }
@@ -504,7 +532,7 @@ pub async fn workflow_decide(
     app: AppHandle,
     run_id: String,
     step_id: String,
-    decision: String,
+    decision: ApprovalDecision,
     feedback: Option<String>,
 ) -> IpcResult<()> {
     blocking(app.clone(), move |state| {
@@ -512,9 +540,14 @@ pub async fn workflow_decide(
             .as_deref()
             .map(str::trim)
             .filter(|text| !text.is_empty());
-        let written = state
-            .store
-            .record_workflow_approval(&run_id, &step_id, &decision, feedback, "app")?;
+        let written = state.store.record_workflow_approval(
+            &run_id,
+            &step_id,
+            decision.as_str(),
+            feedback,
+            "app",
+            None,
+        )?;
         if let Some(message) = workflow::approval_refusal(&written, &run_id, &step_id) {
             return Err(IpcError::new("approval_refused", message));
         }

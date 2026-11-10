@@ -2749,20 +2749,51 @@ fn an_approval_is_shown_and_decided_without_the_app_open() {
             false,
         )
         .unwrap());
+    let code = store
+        .begin_approval_code(id, "sign-off")
+        .unwrap()
+        .expect("a waiting approval gets a code");
     drop(store);
 
-    let shown: serde_json::Value =
-        serde_json::from_str(&fx.ys(&["workflow", "runs", "--run", id, "--json"]).ok()).unwrap();
+    let json = fx.ys(&["workflow", "runs", "--run", id, "--json"]).ok();
+    assert!(
+        !json.contains(&code),
+        "the code must not be in --json: {json}"
+    );
+    let shown: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(shown["pendingApprovals"][0]["step"], "sign-off");
     assert_eq!(shown["pendingApprovals"][0]["prompt"], "Ship this?");
     assert_eq!(shown["pendingApprovals"][0]["artifacts"][0], "plan");
     assert!(shown["decisions"].as_array().unwrap().is_empty());
     let text = fx.ys(&["workflow", "runs", "--run", id]).ok();
     assert!(text.contains("Waiting for your approval"), "{text}");
-    assert!(text.contains("ys workflow approve"), "{text}");
+    assert!(
+        !text.contains(&code),
+        "the code must not be printed: {text}"
+    );
+    assert!(!text.contains("--code"), "{text}");
+
+    let no_code = fx
+        .ys(&[
+            "workflow",
+            "approve",
+            id,
+            "sign-off",
+            "--feedback",
+            "ship it",
+        ])
+        .failed();
+    assert!(no_code.contains("--code"), "{no_code}");
 
     let missing = fx
-        .ys(&["workflow", "request-changes", id, "sign-off"])
+        .ys(&[
+            "workflow",
+            "request-changes",
+            id,
+            "sign-off",
+            "--code",
+            &code,
+        ])
         .failed();
     assert!(missing.contains("Say what should change"), "{missing}");
 
@@ -2774,16 +2805,106 @@ fn an_approval_is_shown_and_decided_without_the_app_open() {
             "sign-off",
             "--feedback",
             "ship it",
+            "--code",
+            &code,
         ])
         .ok();
     assert!(decided.contains("Approved"), "{decided}");
+    assert!(!decided.contains(&code), "{decided}");
     let after: serde_json::Value =
         serde_json::from_str(&fx.ys(&["workflow", "runs", "--run", id, "--json"]).ok()).unwrap();
     assert!(after["pendingApprovals"].as_array().unwrap().is_empty());
     assert_eq!(after["decisions"][0]["decision"], "approved");
     assert_eq!(after["decisions"][0]["feedback"], "ship it");
-    let twice = fx.ys(&["workflow", "reject", id, "sign-off"]).failed();
+    let twice = fx
+        .ys(&["workflow", "reject", id, "sign-off", "--code", &code])
+        .failed();
     assert!(twice.contains("already has a decision"), "{twice}");
+}
+
+#[test]
+fn a_session_yardsort_started_cannot_decide_an_approval() {
+    let fx = Fixture::new();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args(["--data-dir", &fx.data_dir.to_string_lossy()])
+        .args(["workflow", "approve", "run", "step", "--code", "ABCDEFGH"])
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env("YARDSORT_NO_DAEMON", "1")
+        .env(yardsort_core::activity::RECORD_ENV, "rec-1")
+        .env_remove(yardsort_core::coordinator::ENV);
+    let output = command.output().expect("ys should run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("cannot decide"),
+        "a spawned session must be refused: {stderr}"
+    );
+    assert!(!stderr.contains("not open"), "{stderr}");
+}
+
+#[test]
+fn a_wrong_approval_code_locks_after_five_tries() {
+    use yardsort_core::store::{NewWorkflowRun, StepStatus};
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let project = store.projects().unwrap().into_iter().next().unwrap();
+    let path = fx.worktree_root.join("fix-login");
+    std::fs::create_dir_all(&path).unwrap();
+    let workspace = store
+        .add_worktree(
+            &project.id,
+            "fix-login",
+            &path.to_string_lossy(),
+            Some("fix"),
+            Some("main"),
+        )
+        .unwrap();
+    let id = "run-approval-2";
+    store
+        .queue_workflow_run(&NewWorkflowRun {
+            id,
+            workflow_id: "sign-off",
+            workflow_name: "Sign off",
+            definition: SIGN_OFF,
+            project_id: &project.id,
+            workspace_id: &workspace.id,
+            workspace_name: &workspace.name,
+            inputs: "{}",
+            context: "{}",
+            requested_by: "cli",
+            steps: &[("sign-off", "approve")],
+        })
+        .unwrap();
+    assert!(store.start_workflow_run(id, None).unwrap());
+    assert!(store
+        .move_workflow_step(
+            id,
+            "sign-off",
+            &[StepStatus::Pending],
+            StepStatus::Waiting,
+            None,
+            Some("Waiting for your approval."),
+            None,
+            false,
+        )
+        .unwrap());
+    let code = store.begin_approval_code(id, "sign-off").unwrap().unwrap();
+    drop(store);
+    for _ in 0..4 {
+        let wrong = fx
+            .ys(&["workflow", "approve", id, "sign-off", "--code", "WRONG123"])
+            .failed();
+        assert!(wrong.contains("not the one"), "{wrong}");
+    }
+    let locked = fx
+        .ys(&["workflow", "approve", id, "sign-off", "--code", "WRONG123"])
+        .failed();
+    assert!(locked.contains("Too many wrong codes"), "{locked}");
+    let still = fx
+        .ys(&["workflow", "approve", id, "sign-off", "--code", &code])
+        .failed();
+    assert!(still.contains("Too many wrong codes"), "{still}");
 }
 
 #[test]

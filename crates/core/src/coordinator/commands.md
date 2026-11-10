@@ -24,7 +24,7 @@ To pick a workflow, read `ys workflow list --json` and `ys workflow show <id>`. 
 and why, or say that none does and offer a plain workspace instead. `ys workflow run` and
 `ys test run` only work while Yardsort is open, which it is while you are. Deciding an
 approval (`ys workflow approve`, `ys workflow reject`, `ys workflow request-changes`) is not
-yours. See Never.
+yours, including when the coordinator marker is unset. See Never.
 
 **Running in the cloud.** Yardsort does not run agents in the cloud. Every workspace and every
 agent you start runs on this computer. If the user asks for a cloud run, say so plainly and offer

@@ -209,9 +209,9 @@ quiet or ends. To follow it:
 ```sh
 ys workflow runs                  # every run, newest first
 ys workflow runs --run 3f2a9c1e   # one run, its steps, artifacts, and any approval
-ys workflow approve 3f2a9c1e sign-off --feedback "ship it"
-ys workflow reject 3f2a9c1e sign-off
-ys workflow request-changes 3f2a9c1e sign-off --feedback "split the migration"
+ys workflow approve 3f2a9c1e sign-off --code <code> --feedback "ship it"
+ys workflow reject 3f2a9c1e sign-off --code <code>
+ys workflow request-changes 3f2a9c1e sign-off --code <code> --feedback "split the migration"
 ys workflow cancel 3f2a9c1e       # stop it
 ```
 
@@ -309,20 +309,37 @@ a request for changes stops the run. The note is kept as an artifact named
 leaves `decision` and `feedback` for a later step to read as
 `{{ steps.<id>.decision }}` and `{{ steps.<id>.feedback }}`.
 
-You decide on the run in the app, or from your own terminal. Yardsort does not have to
-be open for `ys` to record the decision. The run applies it the next time it is open.
+You decide in the app, which needs no code, or from a terminal Yardsort did not start.
+`ys workflow approve`, `reject` and `request-changes` need `--code`. The code is about
+eight characters. Yardsort shows it on the run, and in the notification that says the
+run is waiting. `ys workflow runs` does not print it, and neither does `--json`. A
+wrong code is refused. After five wrong codes, `ys` stops until the app shows a new
+one. Yardsort does not have to be open for a correct code to be recorded. The run
+applies it the next time it is open. After you quit, the code in the notification
+still works until the app shows a new one.
 
 ```sh
-ys workflow approve 3f2a9c1e sign-off --feedback "ship it"
-ys workflow reject 3f2a9c1e sign-off
-ys workflow request-changes 3f2a9c1e sign-off --feedback "split the migration"
+ys workflow approve 3f2a9c1e sign-off --code <code> --feedback "ship it"
+ys workflow reject 3f2a9c1e sign-off --code <code>
+ys workflow request-changes 3f2a9c1e sign-off --code <code> --feedback "split the migration"
 ```
 
-The Floor Manager cannot decide. Those three commands are refused at every permission.
+`<code>` is the one Yardsort showed you. It is not printed by `ys workflow runs`.
+
+A session Yardsort started cannot decide, even if it drops `YARDSORT_COORDINATOR`.
+`ys` refuses when any of `YARDSORT_COORDINATOR`, `YARDSORT_RUN_ID`,
+`YARDSORT_WORKSPACE_ID` or `YARDSORT_SESSION_RECORD_ID` is set. The Floor Manager is
+refused at every permission as well. This is not a sandbox. A process running as you
+that writes the database directly is not stopped.
+
 A decision is recorded once. A second one is refused, and so is one on a run that has
-already ended. `ys workflow runs --run <id>` shows a step that is still waiting, the
-artifacts it reads, and those commands. It also shows a decision once it is recorded:
-who, when, and the note. `--json` includes `pendingApprovals` and `decisions`.
+already ended. `ys workflow runs --run <id>` shows a step that is still waiting and
+the artifacts it reads. It does not print a command that includes the code. It also
+shows a decision once it is recorded: who, when, and the note. `--json` includes
+`pendingApprovals` and `decisions`.
+
+An artifact name that starts with `changes-` is reserved. The request writes
+`changes-<step id>` itself.
 
 A schedule or a trigger whose notify is not `never` tells you when a run starts waiting
 for approval. So does a run you started yourself, and a schedule you started by hand.
@@ -499,7 +516,8 @@ resolves outside it or onto a secret. A name that looks like a secret is refused
 and `.envrc`, a key or a credential file, `.ssh`, `.git`, `.kube`, `.docker`, `secrets.*`,
 and a `.tfvars` file. A name with a colon, or one that ends in a dot or a space, is refused.
 Control characters in a body are dropped, except newlines and tabs, and so are
-bidirectional overrides and zero-width characters. The text is cut at 32000
+bidirectional controls, U+200B, U+2060 and U+FEFF. U+200C and U+200D stay, because
+they are part of words in some languages. The text is cut at 32000
 characters, and the stored copy says so. A transcript is copied only when the step says
 `from: transcript`. It is the same digest Yardsort uses elsewhere, not the terminal
 scrollback, and not tool output. `raw: true` keeps each turn's own text in full, still

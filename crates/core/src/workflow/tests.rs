@@ -369,6 +369,15 @@ fn an_approval_is_a_gate_and_a_pull_request_wait_is_not() {
 }
 
 #[test]
+fn a_changes_prefix_is_reserved_for_the_request_artifact() {
+    let found = problem(&with_steps(
+        "  - id: sign-off\n    action: approve\n    produces:\n      - name: changes-sign-off\n        text: notes\n",
+    ));
+    assert!(found.contains("is reserved"), "{found}");
+    assert!(found.contains("changes-sign-off"), "{found}");
+}
+
+#[test]
 fn gate_on_another_action_is_named_as_misplaced() {
     let found = problem(&with_steps(
         "  - id: go\n    action: notify\n    title: Hi\n    gate: true\n",

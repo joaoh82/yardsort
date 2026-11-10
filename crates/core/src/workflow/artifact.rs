@@ -50,17 +50,18 @@ pub fn require_text(name: &str, text: String) -> Result<(String, bool), String> 
     Ok((body, truncated))
 }
 
-/// Drop C0 and C1 controls, bidi overrides and zero-width characters. Newline and tab stay,
-/// so a document keeps its lines.
+/// Drop C0 and C1 controls, bidi controls, U+200B, U+2060 and U+FEFF. Newline and tab stay,
+/// and so do U+200C and U+200D, which are part of words in some languages.
 pub(crate) fn strip_controls(text: &str) -> String {
     text.chars().filter(|ch| !is_hidden(*ch)).collect()
 }
 
 /// A character that must not be stored in an artifact or a decision.
 ///
-/// Controls other than newline and tab, bidi overrides and isolates (`U+202A`–`U+202E`,
-/// `U+2066`–`U+2069`), bidi marks, and zero-width characters. Left in, a control can close a
-/// paste and a bidi override can reverse the text a person reads before they approve it.
+/// Controls other than newline and tab, bidi overrides and isolates (U+202A through U+202E,
+/// U+2066 through U+2069), bidi marks, U+200B, U+2060 and U+FEFF. U+200C and U+200D stay.
+/// Left in, a control can close a paste and a bidi override can reverse the text a person
+/// reads before they approve it.
 fn is_hidden(ch: char) -> bool {
     if ch == '\n' || ch == '\t' {
         return false;
@@ -70,10 +71,7 @@ fn is_hidden(ch: char) -> bool {
         || (0x80..=0x9F).contains(&code)
         || (0x202A..=0x202E).contains(&code)
         || (0x2066..=0x2069).contains(&code)
-        || matches!(
-            code,
-            0x200B | 0x200C | 0x200D | 0x200E | 0x200F | 0x061C | 0x2060 | 0xFEFF
-        )
+        || matches!(code, 0x200B | 0x200E | 0x200F | 0x061C | 0x2060 | 0xFEFF)
 }
 
 /// Who decided, with controls and bidi marks removed, kept short. Empty becomes `cli`.
@@ -425,19 +423,29 @@ mod tests {
         assert!(error.contains("secret"), "{error}");
     }
 
-    /// The same case on Windows. Creating a symlink needs a privilege many CI accounts do not
-    /// have, and then the test skips rather than failing the build.
+    /// The same case on Windows. A directory junction needs no privilege, so this runs on CI
+    /// and fails if the junction cannot be created. The written path is not itself a secret
+    /// name; the resolved path is, under `.ssh`.
     #[cfg(windows)]
     #[test]
     fn a_link_to_a_secret_file_is_not_read_on_windows() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::write(root.path().join(".env"), "TOKEN=1").unwrap();
-        let link = root.path().join("notes.md");
-        if let Err(error) = std::os::windows::fs::symlink_file(root.path().join(".env"), &link) {
-            eprintln!("skipping: cannot create a symlink ({error})");
-            return;
-        }
-        let error = read_file(root.path(), "notes.md").unwrap_err();
+        let secret = root.path().join(".ssh");
+        std::fs::create_dir(&secret).unwrap();
+        std::fs::write(secret.join("readme.txt"), "KEY").unwrap();
+        let link = root.path().join("notes");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&secret)
+            .output()
+            .expect("cmd should run");
+        assert!(
+            made.status.success(),
+            "junction was not created: {}",
+            String::from_utf8_lossy(&made.stderr)
+        );
+        let error = read_file(root.path(), "notes/readme.txt").unwrap_err();
         assert!(error.contains("secret"), "{error}");
     }
 
@@ -450,6 +458,8 @@ mod tests {
         .unwrap();
         assert!(!truncated);
         assert_eq!(text, "be kind\n\tlineabcx");
+        let (kept, _) = require_text("spec", "na\u{200C}me\u{200D}s".into()).unwrap();
+        assert_eq!(kept, "na\u{200C}me\u{200D}s");
         let error = require_text("spec", "\u{0001}\r".into()).unwrap_err();
         assert!(error.contains("empty"), "{error}");
     }

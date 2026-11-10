@@ -229,6 +229,11 @@ function ApprovalBox({
   return (
     <div className="mt-1 flex flex-col gap-1 pl-1">
       <span className="text-[11px] text-ink-muted">Waiting for your approval</span>
+      {step.approvalCode ? (
+        <span className="text-[11px] text-ink select-text">
+          Code {step.approvalCode}. A terminal needs this. This window does not.
+        </span>
+      ) : null}
       {consumed.map((artifact) => (
         <span key={artifact.name} className="flex flex-col gap-0.5">
           <span className="text-[11px] text-ink-muted">
