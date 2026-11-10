@@ -40,6 +40,7 @@ pub const SYSTEM: &str = concat!(
      `options`), `label`, `required` (default false), `default`.\n\
      - `steps`: a list of at least one. Each has `id` (a lowercase name), `action`, optional \
      `needs` (the step ids that must succeed first; steps whose needs are met run together), \
+     optional `produces` and `consumes` (named documents handed from one step to a later one), \
      and the action's own keys, and no others:\n\
        - `start_session`: `harness` (an agent id like `claude`, or exactly \
      `\"{{ inputs.<id> }}\"` for an input of kind harness), `prompt` (the agent's first \
@@ -71,8 +72,18 @@ pub const SYSTEM: &str = concat!(
      `steps.<id>.outcome` from wait_session, `steps.<id>.count` and `steps.<id>.latest_url` \
      from wait_pr_activity, `steps.<id>.run`, `steps.<id>.verdict` and `steps.<id>.summary` \
      from run_test, `memory` (the project's notes for agents), `handoff` (what \
-     happened in the workspace so far). No filters, no expressions. A prompt that uses the \
-     pull request or `session: origin` needs the workspace to have one when the run starts.\n\n\
+     happened in the workspace so far), `artifacts.<name>` (a named document an earlier step \
+     produced; this step must list that name under `consumes`). No filters, no expressions. A \
+     prompt that uses the pull request or `session: origin` needs the workspace to have one \
+     when the run starts.\n\n\
+     `produces` is a list. Each item has `name` and where the text comes from when the step \
+     succeeds: `path` for a file in the workspace, `text` for text written here, `field` for \
+     one field this step leaves (such as `summary`), or `from: transcript` with `session` and \
+     optional `raw: true`. The step that produces a name must be in the consumer's `needs`. A \
+     `start_session` or `send_to_session` that consumes an artifact and does not place \
+     `{{ artifacts.<name> }}` in its own prompt is given the text under a heading. Use \
+     `from: transcript` only when the person asked for the conversation. Put a file on the \
+     step that finishes the work, usually `wait_session`, so the file exists when it is read.\n\n\
      Keep it small: the fewest steps that do what was asked, a `wait_session` after each \
      `start_session` whose finish matters, and a `notify` at the end so the person knows. \
      Write prompts to an agent as clear instructions, in the second person, saying what to do \
@@ -178,6 +189,8 @@ mod tests {
             "wait_pr_activity",
             "notify",
             "gate: true",
+            "artifacts.<name>",
+            "consumes",
             "{{ steps.<id>.session }}",
             "workspace.base_branch",
             "no code fences",

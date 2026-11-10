@@ -302,6 +302,15 @@ describe("WorkflowView", () => {
         outputs: {},
         note: "no way",
         outcome: null,
+        artifacts: [
+          {
+            name: "spec",
+            source: "file",
+            detail: "SPEC.md",
+            body: "Be kind.",
+            truncated: false,
+          },
+        ],
       },
     ]);
     // A schedule started this run: the list says so, and the open run says which.
@@ -321,6 +330,8 @@ describe("WorkflowView", () => {
     expect(await within(runs).findByText("no way")).toHaveClass("whitespace-pre-wrap");
     expect(within(runs).getByText("Step `tell` failed: no way")).toHaveClass("whitespace-pre-wrap");
     expect(within(runs).getByText("Notify you")).toBeInTheDocument();
+    expect(within(runs).getByText("Artifact spec")).toBeInTheDocument();
+    expect(within(runs).getByText("Be kind.")).toBeInTheDocument();
     expect(within(runs).getByText("Scheduled · Nightly")).toBeInTheDocument();
     expect(within(runs).getByText("Triggered · Address reviews")).toBeInTheDocument();
     expect(core.workflowRunSteps).toHaveBeenCalledWith("run-1");
@@ -355,6 +366,7 @@ describe("WorkflowView", () => {
         outputs: {},
         note: "told it",
         outcome: null,
+        artifacts: [],
       },
     ]);
     // Open run, on a trigger's history.

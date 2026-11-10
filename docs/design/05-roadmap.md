@@ -723,6 +723,8 @@ Proposed in [21-workflows](21-workflows.md), after an eight-question design pass
   the smoke test fails, skipping the steps still going and cancelling a smoke test they were
   waiting on. The run names the first line of the report; the step keeps the rest. Recorded in
   [21 § test verdict gates](21-workflows.md#test-verdict-gates).
+- A step can hand a named document to a later step. The run keeps it, and the next agent
+  receives it. Recorded in [21 § named artifacts](21-workflows.md#named-artifacts).
 
 _Exit:_ the code-review workflow runs against a real pull request on all three platforms from the
 window and from `ys`; a busy agent is never written to; every validation error has a failing

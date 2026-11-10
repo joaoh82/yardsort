@@ -183,6 +183,44 @@ impl Hands for AppHands<'_> {
         Some(handoff::render(&facts))
     }
 
+    fn conversation(
+        &self,
+        workspace_id: &str,
+        pty_id: &str,
+        raw: bool,
+    ) -> Result<Option<String>, String> {
+        use yardsort_core::activity::digest;
+        use yardsort_core::launch::RECORD_LABEL;
+        use yardsort_core::workflow::artifact;
+        // The terminal id is not the session record. The record is what the transcript is filed
+        // under. Tool output is not in those turns, and this does not read the terminal scrollback.
+        let record = self
+            .state
+            .host
+            .list()
+            .into_iter()
+            .find(|session| session.id.0 == pty_id)
+            .and_then(|session| session.labels.get(RECORD_LABEL).cloned());
+        let Some(record) = record else {
+            return Ok(None);
+        };
+        let workspace = self
+            .state
+            .store
+            .workspace(workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "The workspace is gone.".to_owned())?;
+        let conversations = digest::gather(
+            &self.state.store,
+            &workspace,
+            None,
+            &crate::conversations::sources(self.state),
+            crate::conversations::now(),
+        )
+        .map_err(|error| error.to_string())?;
+        artifact::conversation_text(&conversations, &record, raw)
+    }
+
     fn pr_posts(&self, workspace_id: &str, pr: &yardsort_core::workflow::runs::PrFacts) -> PrAsk {
         // Found here, quickly; `gh` itself runs in the job, on the driver's forge thread. A link
         // needs no repository around it: one elsewhere is asked about from anywhere, should the

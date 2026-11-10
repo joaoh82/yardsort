@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use super::*;
 use crate::workflow::{parse, PrActivity};
@@ -41,6 +41,9 @@ struct Fake {
     posts: Vec<PrActivity>,
     /// Smoke test runs by id, as `run_test` would see them.
     test_runs: HashMap<String, TestRun>,
+    /// Named artifacts already stored for this run. A consumer reads these at render time,
+    /// so replacing a value is what a re-run looks like.
+    artifacts: BTreeMap<String, String>,
 }
 
 impl World for Fake {
@@ -51,6 +54,11 @@ impl World for Fake {
         self.sessions.get(pty_id).copied().unwrap_or_default()
     }
     fn var(&self, path: &[String]) -> Option<String> {
+        if let [namespace, name] = path {
+            if namespace == "artifacts" {
+                return self.artifacts.get(name).cloned();
+            }
+        }
         match path.join(".").as_str() {
             "workspace.branch" => Some("fix-login".to_owned()),
             "pr.number" => Some("42".to_owned()),
@@ -115,6 +123,7 @@ impl Run {
                 origin: None,
                 posts: Vec::new(),
                 test_runs: HashMap::new(),
+                artifacts: BTreeMap::new(),
             },
             finished: None,
         }
@@ -1185,4 +1194,107 @@ fn a_run_test_step_times_out_if_the_run_never_ends() {
     run.advance();
     assert_eq!(run.status("smoke"), "failed");
     assert!(run.note("smoke").unwrap().contains("did not end within"));
+}
+
+const HANDOFF: &str = r#"id: hand
+name: Hand
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: draft
+    action: wait_session
+    session: origin
+    produces:
+      - name: spec
+        path: SPEC.md
+  - id: plan
+    action: notify
+    needs: [draft]
+    consumes: [spec]
+    title: "Plan {{ artifacts.spec }}"
+  - id: send
+    action: send_to_session
+    needs: [draft]
+    session: origin
+    consumes: [spec]
+    prompt: "Use the spec."
+"#;
+
+#[test]
+fn a_producing_step_waits_to_finish_and_the_next_step_reads_the_latest_body() {
+    let mut run = Run::from(HANDOFF);
+    run.world.origin = Some("pty-1".into());
+    run.session(
+        "pty-1",
+        SessionFacts {
+            alive: true,
+            busy: false,
+            settled_at: None,
+        },
+    );
+    assert!(run.advance().is_empty());
+    assert_eq!(run.status("draft"), "waiting");
+
+    run.session(
+        "pty-1",
+        SessionFacts {
+            alive: true,
+            busy: false,
+            settled_at: Some(run.world.now),
+        },
+    );
+    let effects = run.advance();
+    assert!(
+        effects
+            .iter()
+            .all(|effect| matches!(effect, Effect::Capture { .. })),
+        "the consumer must not start before the artifact is stored: {effects:?}"
+    );
+    assert_eq!(run.status("draft"), "running");
+    assert_eq!(run.status("plan"), "pending");
+    let Effect::Capture {
+        outputs,
+        note,
+        outcome,
+        ..
+    } = effects.last().unwrap()
+    else {
+        panic!("expected a capture");
+    };
+    assert!(run.apply(&recorded("draft", outputs, note.clone(), outcome.clone())));
+    run.world.artifacts.insert("spec".into(), "Be kind.".into());
+
+    let effects = run.advance();
+    let title = effects.iter().find_map(|effect| match effect {
+        Effect::Notify { title, .. } => Some(title.as_str()),
+        _ => None,
+    });
+    assert_eq!(title, Some("Plan Be kind."));
+    let text = effects.iter().find_map(|effect| match effect {
+        Effect::Paste { text, .. } => Some(text.as_str()),
+        _ => None,
+    });
+    assert_eq!(
+        text,
+        Some("Use the spec.\n\n## Artifact: spec\n\nBe kind."),
+        "a prompt that does not place the artifact is given it once"
+    );
+
+    run.world
+        .artifacts
+        .insert("spec".into(), "Be stricter.".into());
+    let plan = run
+        .rows
+        .iter_mut()
+        .find(|row| row.step_id == "plan")
+        .unwrap();
+    plan.status = "pending".into();
+    plan.ended_at = None;
+    let effects = run.advance();
+    let title = effects.iter().find_map(|effect| match effect {
+        Effect::Notify { title, .. } => Some(title.clone()),
+        _ => None,
+    });
+    assert_eq!(title.as_deref(), Some("Plan Be stricter."));
 }

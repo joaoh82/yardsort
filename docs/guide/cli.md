@@ -583,7 +583,7 @@ ys workflow copy code-review     # your own copy to edit, used instead of the bu
 ys workflow validate fix-ci.yaml # each problem as file:line:column: message; exit 1 if any
 ys workflow validate -           # the same, reading the file from standard input
 ys workflow run ping --workspace fix-login --input note=hi   # queue a run; Yardsort must be open
-ys workflow runs                 # runs, newest first; --run <id> shows one step by step
+ys workflow runs                 # runs, newest first; --run <id> shows steps and artifacts
 ys workflow cancel 3f2a9c1e      # stop a run; agents it started keep running
 ```
 

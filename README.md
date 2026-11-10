@@ -391,6 +391,8 @@ step names the steps it needs, so the ones that need nothing of each other run s
 Yardsort checks every name and every `{{ variable }}` before it runs anything, and names the line
 and column of each mistake. A `run_test` step marked `gate: true` stops the run when the smoke
 test fails, skips the steps still going, cancels a smoke test they were waiting on, and says why.
+A step can also hand a named document, such as a spec or a test report, to the step after it.
+The next agent receives that text, and the run keeps it so you can read what was passed on.
 
 ![Workflows: the built-in code review as a chart, with its file and its runs beside it](docs/images/workflows.png)
 

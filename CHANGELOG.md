@@ -5,6 +5,14 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **A workflow step can hand a named document to the next step.** `produces` names what a step
+  leaves when it succeeds, and a later step `consumes` it by name. The next agent receives that
+  text, and the run keeps it so you can read what was passed on, in the app and in
+  `ys workflow runs --run <id>`. A file, a short text, or a field the step already leaves is
+  copied. A conversation is copied only when the step asks, and then as a digest unless it asks
+  for the turns themselves. Secret-looking paths are refused, and a long document is cut short.
+  A step that succeeds again replaces what it left. A file written before this still loads. See
+  [Artifacts](docs/guide/workflows.md#artifacts).
 - **Floor Manager permission is a setting, and `ys` enforces it.** Settings → General chooses
   read only, ask first (the default) or trusted. The next `ys` command the Floor Manager runs
   follows it. Ask first waits for **Allow** in the window, even when the panel is closed, and
@@ -24,8 +32,8 @@ has the downloads and the full commit lists.
   on is cancelled. The run names the step and the first line of the report. The step keeps
   the full report. You see both in the app and in `ys workflow runs --run <id>`. A schedule
   or trigger that tells you when a run fails sends that line. When there is more to read, it
-  says to open Yardsort for the report. Without `gate`, a failed test still lets the workflow continue, as it does
-  today. A file written before this still loads. See
+  says to open Yardsort for the report. Without `gate`, a failed test still lets the workflow
+  continue, as it does today. A file written before this still loads. See
   [Workflows](docs/guide/workflows.md#a-test-that-must-pass).
 
 ## 0.25.0

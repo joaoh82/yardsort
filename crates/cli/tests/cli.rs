@@ -2636,6 +2636,55 @@ fn a_run_is_queued_followed_and_cancelled_while_the_app_holds_its_lock() {
 }
 
 #[test]
+fn a_run_shows_the_artifacts_it_handed_on() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .expect("nobody else holds it");
+    let json = fx
+        .ys(&["workflow", "run", "ping", "--workspace", name, "--json"])
+        .ok();
+    let queued: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let run = queued["run"].as_str().unwrap();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    store
+        .replace_step_artifacts(
+            run,
+            "tell",
+            &[yardsort_core::store::NewWorkflowArtifact {
+                name: "spec".into(),
+                source: "file".into(),
+                detail: Some("SPEC.md".into()),
+                body: "Be kind.".into(),
+                truncated: false,
+            }],
+        )
+        .unwrap();
+    drop(store);
+
+    let listed = fx.ys(&["workflow", "runs"]).ok();
+    assert!(!listed.contains("Be kind."), "{listed}");
+    let text = fx.ys(&["workflow", "runs", "--run", &run[..8]]).ok();
+    assert!(text.contains("Artifacts"), "{text}");
+    assert!(text.contains("spec from tell"), "{text}");
+    assert!(text.contains("Be kind."), "{text}");
+    let shown: serde_json::Value = serde_json::from_str(
+        &fx.ys(&["workflow", "runs", "--run", &run[..8], "--json"])
+            .ok(),
+    )
+    .unwrap();
+    assert_eq!(shown["artifacts"][0]["name"], "spec");
+    assert_eq!(shown["artifacts"][0]["stepId"], "tell");
+    assert_eq!(shown["artifacts"][0]["source"], "file");
+    assert_eq!(shown["artifacts"][0]["detail"], "SPEC.md");
+    assert_eq!(shown["artifacts"][0]["body"], "Be kind.");
+    assert_eq!(shown["artifacts"][0]["truncated"], false);
+}
+
+#[test]
 fn a_run_inside_a_workspace_needs_no_name_and_bad_inputs_are_refused() {
     let fx = Fixture::new();
     write_workflow(&fx, "ping.yaml", PING);

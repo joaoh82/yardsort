@@ -137,6 +137,21 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                               {step.note}
                             </span>
                           )}
+                          {step.artifacts.map((artifact) => (
+                            <span key={artifact.name} className="mt-1 flex flex-col gap-0.5 pl-1">
+                              <span className="text-[11px] text-ink-muted">
+                                Artifact {artifact.name}
+                                {artifact.truncated ? " (cut short)" : ""}
+                              </span>
+                              <span className="font-mono text-[10px] text-ink-faint">
+                                {artifact.source}
+                                {artifact.detail ? ` ${artifact.detail}` : ""}
+                              </span>
+                              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-[11px] text-ink select-text">
+                                {artifact.body}
+                              </pre>
+                            </span>
+                          ))}
                         </li>
                       ))}
                     </ol>

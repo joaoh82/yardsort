@@ -255,7 +255,10 @@ export function Ideas() {
             <code className={code}>{"{{ variable }}"}</code> is checked before anything runs, with
             the line and column of each mistake. A <code className={code}>run_test</code> step
             marked <code className={code}>gate: true</code> stops the run when the smoke test fails,
-            skips the steps still going, cancels a smoke test they were waiting on, and says why.
+            skips the steps still going, cancels a smoke test they were waiting on, and says why. A
+            step can also hand a named document, such as a spec or a test report, to the step after
+            it. The next agent receives that text, and the run keeps it so you can read what was
+            passed on.
           </p>
           <p>
             <strong className={strong}>Workflows</strong>, above Projects, lists the built-in ones
