@@ -16,6 +16,7 @@ pub mod driver;
 pub mod engine;
 mod parse;
 pub mod runs;
+pub mod waits;
 
 /// Shared with smoke tests: `{{ variables }}` are written the same way in both.
 pub use crate::template;

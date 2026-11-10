@@ -85,6 +85,7 @@ const settings: SettingsInfo = {
   editorCommand: null,
   notifyWhenQuiet: true,
   checkForUpdates: true,
+  approvalCodeInNotification: true,
   workspaces: { worktreeRoot: null, branchPrefix: "ys" },
   defaultWorktreeRoot: "/home/me/yardsort",
   worktreeRootOverride: null,
@@ -463,6 +464,7 @@ describe("Settings", () => {
       editorCommand: "zed",
       notifyWhenQuiet: true,
       checkForUpdates: true,
+      approvalCodeInNotification: true,
     });
 
     await user.clear(editor);

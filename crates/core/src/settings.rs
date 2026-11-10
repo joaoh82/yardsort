@@ -32,6 +32,9 @@ pub struct Settings {
     /// How much the Floor Manager may do through `ys`. See [`FloorManagerSettings`].
     #[serde(skip_serializing_if = "FloorManagerSettings::is_default")]
     pub floor_manager: FloorManagerSettings,
+    /// Workflow notices. See [`WorkflowSettings`].
+    #[serde(skip_serializing_if = "WorkflowSettings::is_default")]
+    pub workflows: WorkflowSettings,
     /// Overrides of built-in harnesses, and whole custom ones. See [`HarnessOverride`].
     #[serde(rename = "harness", skip_serializing_if = "Vec::is_empty")]
     pub harnesses: Vec<HarnessOverride>,
@@ -142,6 +145,36 @@ impl FloorManagerSettings {
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
+}
+
+/// Whether a workflow notification includes the one-time approval code.
+///
+/// Left unset, the code is included on macOS and Windows and left out on Linux. A
+/// notification on Linux is readable by other programs on the computer through D-Bus, so
+/// the default there says to open Yardsort for the code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct WorkflowSettings {
+    /// `None` uses [`default_show_approval_code`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_code_in_notification: Option<bool>,
+}
+
+impl WorkflowSettings {
+    fn is_default(&self) -> bool {
+        self.approval_code_in_notification.is_none()
+    }
+
+    /// Whether the waiting notification should contain the code.
+    pub fn show_approval_code(&self) -> bool {
+        self.approval_code_in_notification
+            .unwrap_or_else(default_show_approval_code)
+    }
+}
+
+/// The platform default: included everywhere except Linux.
+pub fn default_show_approval_code() -> bool {
+    !cfg!(target_os = "linux")
 }
 
 /// Assist: small judgments by TypeSafe's Jev model. Each feature sends something off the machine,

@@ -22,6 +22,9 @@ yardsort-core = { path = "../core" }
 pty-host = { path = "../pty-host", features = ["specta"] }
 pty-ipc = { path = "../pty-ipc" }
 clap = { version = "4", features = ["derive"] }
+# The approval code is read from the terminal with echo off. `--code` on the command line
+# is the fallback, and it warns, because that form lands in shell history and `ps`.
+rpassword = "7"
 # Raw mode, terminal size and the Windows console's VT modes. Only those: input is forwarded to
 # the session as raw bytes, never as crossterm's parsed key events, which would lose mouse
 # reporting, bracketed paste and anything it does not model.

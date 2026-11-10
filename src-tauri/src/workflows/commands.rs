@@ -7,7 +7,8 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 use specta::Type;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
+use tauri_plugin_notification::NotificationExt;
 use tauri_specta::Event;
 use yardsort_core::forge::{Gh, PullRequest};
 use yardsort_core::store::{WorkflowArtifactRow, WorkflowRunRow, WorkflowStepRow, WorkspaceRow};
@@ -65,6 +66,8 @@ pub struct WorkflowRun {
     pub created_at: f64,
     pub started_at: Option<f64>,
     pub ended_at: Option<f64>,
+    /// Why this run is blocked on a person, as in `your approval`. Absent when it is not.
+    pub blocked_on: Option<String>,
 }
 
 /// One step of a run.
@@ -85,8 +88,11 @@ pub struct WorkflowStepRun {
     pub artifacts: Vec<WorkflowArtifact>,
     /// Named documents this step reads, from earlier steps. An approval shows these.
     pub consumed: Vec<WorkflowArtifact>,
-    /// The one-time code for a waiting approval. Shown only in this window. Absent otherwise.
+    /// The one-time code for a waiting approval. Shown only in this window. Absent when this
+    /// process does not hold one. Listing a run does not issue a code.
     pub approval_code: Option<String>,
+    /// A terminal has tried too many wrong codes. A new code comes from Show a new code.
+    pub approval_locked: bool,
 }
 
 /// A named document stored on a run, as the run view shows it.
@@ -135,6 +141,7 @@ fn run_from(row: WorkflowRunRow) -> WorkflowRun {
         created_at: row.created_at as f64,
         started_at: row.started_at.map(|t| t as f64),
         ended_at: row.ended_at.map(|t| t as f64),
+        blocked_on: None,
     }
 }
 
@@ -153,6 +160,7 @@ fn step_from(
     artifacts: &[WorkflowArtifactRow],
     consumes: &[String],
     approval_code: Option<String>,
+    approval_locked: bool,
 ) -> WorkflowStepRun {
     WorkflowStepRun {
         outputs: serde_json::from_str(&row.outputs).unwrap_or_default(),
@@ -177,26 +185,37 @@ fn step_from(
             .map(artifact_from)
             .collect(),
         approval_code,
+        approval_locked,
     }
 }
 
-/// The code the window shows for a waiting approval. A locked code, or a code from before this
-/// process started, is replaced so the window shows a new one. The plain code is not stored.
+/// A run waiting on a person, as the sidebar lists it. The same rows a later phone reads.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowWait {
+    pub run_id: String,
+    pub step_id: String,
+    pub workflow_id: String,
+    pub workflow_name: String,
+    pub workspace_name: String,
+    pub kind: String,
+    pub blocked_on: String,
+    pub action_needed: String,
+    pub prompt: Option<String>,
+    /// `Blocked: waiting for your approval.`
+    pub blocked_line: String,
+}
+
+/// The code this process already holds, and whether a terminal is locked out. Listing does
+/// not issue a code: a restart replaces a lost one from the driver, and Show a new code is
+/// the only other way.
 fn shown_approval_code(
     store: &yardsort_core::store::Store,
     run_id: &str,
     step_id: &str,
-) -> IpcResult<Option<String>> {
+) -> IpcResult<(Option<String>, bool)> {
     let locked = store.approval_code_locked(run_id, step_id)?;
-    let remembered = super::approval_code_for(run_id, step_id);
-    let has_row = store.approval_code_row(run_id, step_id)?;
-    if locked || (has_row && remembered.is_none()) {
-        if let Some(code) = store.begin_approval_code(run_id, step_id)? {
-            super::remember_approval_code(run_id, step_id, &code);
-            return Ok(Some(code));
-        }
-    }
-    Ok(remembered)
+    Ok((super::approval_code_for(run_id, step_id), locked))
 }
 
 fn changed(app: &AppHandle) {
@@ -299,7 +318,17 @@ pub async fn workflow_runs(
             Some(id) => state.store.workflow_runs_of(id, limit as usize)?,
             None => state.store.workflow_runs(None, limit as usize)?,
         };
-        Ok(rows.into_iter().map(run_from).collect())
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let blocked_on = workflow::waits::waiting_on(&state.store, &row.id)
+                    .ok()
+                    .flatten();
+                let mut run = run_from(row);
+                run.blocked_on = blocked_on;
+                run
+            })
+            .collect())
     })
     .await
 }
@@ -329,12 +358,19 @@ pub async fn workflow_run_steps(app: AppHandle, run_id: String) -> IpcResult<Vec
                     .find(|step| step.id == row.step_id)
                     .map(|step| step.consumes.as_slice())
                     .unwrap_or(&[]);
-                let approval_code = if row.action == "approve" && row.status == "waiting" {
-                    shown_approval_code(&state.store, &run_id, &row.step_id)?
-                } else {
-                    None
-                };
-                Ok(step_from(row, &artifacts, names, approval_code))
+                let (approval_code, approval_locked) =
+                    if row.action == "approve" && row.status == "waiting" {
+                        shown_approval_code(&state.store, &run_id, &row.step_id)?
+                    } else {
+                        (None, false)
+                    };
+                Ok(step_from(
+                    row,
+                    &artifacts,
+                    names,
+                    approval_code,
+                    approval_locked,
+                ))
             })
             .collect()
     })
@@ -559,6 +595,126 @@ pub async fn workflow_decide(
     }
     changed(&app);
     Ok(())
+}
+
+/// Runs waiting on a person, across every workflow. The sidebar's list. A later phone
+/// reads the same rows through the core. This command does not decide anything.
+#[tauri::command]
+#[specta::specta]
+pub async fn workflow_open_waits(app: AppHandle) -> IpcResult<Vec<WorkflowWait>> {
+    blocking(app, |state| {
+        Ok(workflow::waits::list_open(&state.store)?
+            .into_iter()
+            .map(|wait| WorkflowWait {
+                blocked_line: wait.blocked_line(),
+                run_id: wait.run_id,
+                step_id: wait.step_id,
+                workflow_id: wait.workflow_id,
+                workflow_name: wait.workflow_name,
+                workspace_name: wait.workspace_name,
+                kind: wait.kind,
+                blocked_on: wait.blocked_on,
+                action_needed: wait.action_needed,
+                prompt: wait.prompt,
+            })
+            .collect())
+    })
+    .await
+}
+
+/// Issue a new one-time code for a waiting approval, and say so. Listing the run does not
+/// do this. A restart does, because the plain code was only in memory. The code is returned
+/// for this window and is not written down.
+#[tauri::command]
+#[specta::specta]
+pub async fn workflow_show_approval_code(
+    app: AppHandle,
+    run_id: String,
+    step_id: String,
+) -> IpcResult<String> {
+    let handle = app.clone();
+    let issued = blocking(app.clone(), move |state| {
+        issue_approval_code(state, &handle, &run_id, &step_id)
+    })
+    .await?;
+    if issued.tell {
+        let _ = app
+            .notification()
+            .builder()
+            .title(issued.title)
+            .body(&issued.body)
+            .show();
+    }
+    changed(&app);
+    Ok(issued.code)
+}
+
+struct IssuedCode {
+    code: String,
+    title: String,
+    body: String,
+    tell: bool,
+}
+
+fn issue_approval_code(
+    state: &AppState,
+    app: &AppHandle,
+    run_id: &str,
+    step_id: &str,
+) -> IpcResult<IssuedCode> {
+    let Some(run) = state.store.workflow_run(run_id)? else {
+        return Err(IpcError::new("run_not_found", "That run is not there."));
+    };
+    let (code, had) = if let Some(driver) = app.try_state::<super::Driver>() {
+        driver
+            .issue_approval_code(&state.store, run_id, step_id)?
+            .ok_or_else(|| IpcError::new("approval_decided", "This step already has a decision."))?
+    } else {
+        let had = state.store.approval_code_row(run_id, step_id)?;
+        let code = state
+            .store
+            .begin_approval_code(run_id, step_id)?
+            .ok_or_else(|| {
+                IpcError::new("approval_decided", "This step already has a decision.")
+            })?;
+        (code, had)
+    };
+    super::remember_approval_code(run_id, step_id, &code);
+    let prompt = state
+        .store
+        .workflow_steps(run_id)?
+        .into_iter()
+        .find(|step| step.step_id == step_id)
+        .and_then(|step| {
+            yardsort_core::workflow::engine::parse_outputs(&step.outputs)
+                .get("prompt")
+                .cloned()
+        });
+    let include = state.settings.get().workflows.show_approval_code();
+    let replaced = had;
+    let title = if replaced {
+        workflow::waits::TITLE_REPLACED
+    } else {
+        workflow::waits::TITLE_WAITING
+    };
+    let body = workflow::waits::notice_body(
+        &run.workflow_name,
+        &run.workspace_name,
+        step_id,
+        prompt.as_deref(),
+        include.then_some(code.as_ref()),
+        replaced,
+    );
+    if !had {
+        state.store.mark_workflow_wait_notified(run_id, step_id)?;
+    }
+    let tell = state.store.tell_workflow_approval(run_id).unwrap_or(true);
+    Ok(IssuedCode {
+        code,
+        title: title.to_owned(),
+        body,
+        tell,
+    })
 }
 
 /// Cancel a run. Agents it started keep running.

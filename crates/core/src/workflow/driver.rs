@@ -74,6 +74,27 @@ pub trait Hands {
     /// Remember the one-time code so the window can show it. The default forgets it. Do not
     /// write the code to a log, a note, or a step's outputs.
     fn approval_code(&self, _run_id: &str, _step_id: &str, _code: &str) {}
+
+    /// Whether the waiting notification may contain the one-time code. The default follows
+    /// the platform: included on macOS and Windows, left out on Linux, where other programs
+    /// can read a notification on D-Bus. The app reads the setting and overrides this.
+    fn include_approval_code(&self) -> bool {
+        crate::settings::default_show_approval_code()
+    }
+}
+
+/// Where a test stops a tick, as if the process died after that commit. Production leaves
+/// this at [`StopAfter::Never`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopAfter {
+    Never,
+    /// The decision is on the step and the wait is applied. Artifacts are not written yet,
+    /// and the next step has not started.
+    AfterDecisionApplied,
+    /// The decision's artifacts are written. The next step has not started.
+    AfterArtifactsWritten,
+    /// The next step has been claimed (`running`) and its effect has not been carried out.
+    AfterNextClaim,
 }
 
 /// How far a transcript read got. A slow read must not fail the step, and must not be started
@@ -118,6 +139,12 @@ pub struct Driver {
     /// The runs that were active at the last tick. One that is gone since was ended from
     /// outside — `ys workflow cancel` — which is a change too.
     active: Mutex<HashSet<String>>,
+    /// One-time codes this process has issued. A restart has none, which is how a lost code
+    /// is replaced once. Listing a run does not write here.
+    codes: Mutex<HashMap<(String, String), String>>,
+    /// A test asks the tick to die after one commit. Production stays at [`StopAfter::Never`].
+    stop: Mutex<StopAfter>,
+    halt: std::sync::atomic::AtomicBool,
 }
 
 impl Default for Driver {
@@ -137,7 +164,70 @@ impl Driver {
             forge_every_ms: i64::try_from(forge_every.as_millis()).unwrap_or(i64::MAX),
             touched: std::sync::atomic::AtomicBool::new(false),
             active: Mutex::new(HashSet::new()),
+            codes: Mutex::new(HashMap::new()),
+            stop: Mutex::new(StopAfter::Never),
+            halt: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Remember a code the window just showed, so this process does not replace it on the
+    /// next look. The plain code stays in memory only.
+    pub fn note_approval_code(&self, run_id: &str, step_id: &str, code: &str) {
+        self.codes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert((run_id.to_owned(), step_id.to_owned()), code.to_owned());
+    }
+
+    /// Issue a code and remember it while holding the code lock. A restart and Show a new
+    /// code then cannot each store a hash the other does not know. `force` replaces a code
+    /// this process already holds. Nothing when the step is already decided, or when
+    /// `force` is false and this process already holds the code. The bool is whether a
+    /// code row existed before this issue.
+    pub fn issue_approval_code(
+        &self,
+        store: &Store,
+        run_id: &str,
+        step_id: &str,
+        force: bool,
+    ) -> crate::store::StoreResult<Option<(String, bool)>> {
+        let mut codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = (run_id.to_owned(), step_id.to_owned());
+        if !force && codes.contains_key(&key) {
+            return Ok(None);
+        }
+        let had = store.approval_code_row(run_id, step_id)?;
+        let Some(code) = store.begin_approval_code(run_id, step_id)? else {
+            return Ok(None);
+        };
+        codes.insert(key, code.clone());
+        Ok(Some((code, had)))
+    }
+
+    fn forget_code(&self, run_id: &str, step_id: &str) {
+        self.codes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&(run_id.to_owned(), step_id.to_owned()));
+    }
+
+    /// Die after `when`. Tests use this to leave the database as a crash would.
+    #[cfg(test)]
+    fn testing_stop_after(&self, when: StopAfter) {
+        *self.stop.lock().unwrap_or_else(PoisonError::into_inner) = when;
+        self.halt.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn halt_now(&self) -> bool {
+        self.halt.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn arm_halt(&self, when: StopAfter) -> bool {
+        let armed = *self.stop.lock().unwrap_or_else(PoisonError::into_inner) == when;
+        if armed {
+            self.halt.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        armed
     }
 
     /// Take in a host event. True when it could move a run on — a quiet or an exit — so the
@@ -334,8 +424,15 @@ fn move_on(
     {
         for change in engine::recover(&store.workflow_steps(&run.id)?) {
             apply(driver, store, &run.id, &change)?;
+            if driver.halt_now() {
+                return Ok(());
+            }
         }
+        // A code this process does not hold is replaced once, here, and the person is told.
+        // A decision already recorded is left for the engine to apply, and is not replaced.
+        resume_human_waits(driver, store, hands, &workflow, run)?;
     }
+    repair_decision_artifacts(store, &run.id)?;
     let inputs: Inputs = serde_json::from_str(&run.inputs).unwrap_or_default();
 
     // Sessions typed to during this tick. The host marks a session busy only once output comes
@@ -373,9 +470,14 @@ fn move_on(
                 // pending, so a decision recorded for this attempt cannot be deleted by the clear.
                 if change.clear_outcome && change.from.contains(&StepStatus::Pending) {
                     store.clear_workflow_approval(&run.id, &change.step)?;
+                    store.clear_workflow_wait(&run.id, &change.step)?;
+                    driver.forget_code(&run.id, &change.step);
                 }
                 if apply(driver, store, &run.id, change)? {
-                    follow_approval(store, hands, &workflow, run, change)?;
+                    if driver.halt_now() {
+                        return Ok(());
+                    }
+                    follow_approval(driver, store, hands, &workflow, run, change)?;
                 }
             }
         }
@@ -404,6 +506,11 @@ fn move_on(
                     return Ok(()); // Cancelled: nothing more of this run happens.
                 }
                 continue; // The step moved on without us.
+            }
+            // The claim is committed and the effect has not run. A crash here leaves the step
+            // running, and the next start fails it rather than doing the effect twice.
+            if driver.arm_halt(StopAfter::AfterNextClaim) {
+                return Ok(());
             }
             if let Effect::Capture {
                 outputs,
@@ -556,19 +663,36 @@ enum Outcome {
 }
 
 fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResult<bool> {
-    let moved = if let Some(artifacts) = changes_artifacts(store, run_id, change)? {
-        store.finish_step_with_artifacts(
+    // A person's decision is committed before its artifacts, and the wait is marked applied
+    // in that same change. A crash between the two is repaired by writing the artifacts
+    // again. The step is no longer waiting, so the decision is not applied a second time.
+    if is_applied_decision(change) {
+        let moved = store.move_workflow_step_applying_wait(
             run_id,
             &change.step,
             &change.from,
             change.to,
-            &artifacts,
             change.outputs.as_deref(),
             change.note.as_deref(),
             change.outcome.as_deref(),
             change.clear_outcome,
-        )?
-    } else if change.keep_decision {
+        )?;
+        if !moved {
+            return Ok(false);
+        }
+        driver.touch();
+        if driver.arm_halt(StopAfter::AfterDecisionApplied) {
+            return Ok(true);
+        }
+        if let Some(artifacts) = changes_artifacts(store, run_id, change)? {
+            store.upsert_workflow_artifacts(run_id, &change.step, &artifacts)?;
+        }
+        if driver.arm_halt(StopAfter::AfterArtifactsWritten) {
+            return Ok(true);
+        }
+        return Ok(true);
+    }
+    let moved = if change.keep_decision {
         store.move_workflow_step_unless_decided(
             run_id,
             &change.step,
@@ -1069,46 +1193,160 @@ impl World for Seen<'_> {
     }
 }
 
-/// Tell the person, once, when an approval step starts waiting, and hand the window the
-/// one-time code. A notification that cannot be shown does not fail the step. The code is
-/// not written into the step. The request-for-changes artifact is stored with the step's move.
+fn is_applied_decision(change: &Move) -> bool {
+    change.outcome.as_deref().is_some_and(|raw| {
+        serde_json::from_str::<StepOutcome>(raw)
+            .ok()
+            .is_some_and(|outcome| outcome.decision.is_some())
+    })
+}
+
+/// Open the wait and issue the first code when an approval starts waiting. A notification
+/// that cannot be shown does not fail the step. The code is not written into the step.
 fn follow_approval(
+    driver: &Driver,
     store: &Store,
     hands: &dyn Hands,
     workflow: &super::Workflow,
     run: &WorkflowRunRow,
     change: &Move,
 ) -> IpcResult<()> {
-    let step = workflow.steps.iter().find(|step| step.id == change.step);
-    let approve = step.is_some_and(|step| matches!(step.action, super::Action::Approve { .. }));
-    if approve && change.to == StepStatus::Waiting && change.from.contains(&StepStatus::Pending) {
-        // The code is shown once, here and in the window. It is not written into the step.
-        let code = store
-            .begin_approval_code(&run.id, &change.step)
-            .ok()
-            .flatten();
-        if let Some(code) = &code {
-            hands.approval_code(&run.id, &change.step, code);
+    let Some(step) = workflow.steps.iter().find(|step| step.id == change.step) else {
+        return Ok(());
+    };
+    let approve = matches!(step.action, super::Action::Approve { .. });
+    if !(approve && change.to == StepStatus::Waiting && change.from.contains(&StepStatus::Pending))
+    {
+        return Ok(());
+    }
+    let prompt = change
+        .outputs
+        .as_deref()
+        .and_then(|raw| engine::parse_outputs(raw).get("prompt").cloned());
+    open_approval_wait(store, run, step, prompt.as_deref())?;
+    let Some((code, _)) = driver.issue_approval_code(store, &run.id, &step.id, false)? else {
+        return Ok(());
+    };
+    hands.approval_code(&run.id, &step.id, &code);
+    let told = store
+        .workflow_wait(&run.id, &step.id)?
+        .and_then(|wait| wait.notified_at)
+        .is_some();
+    // A lookup error is told anyway: missing a notice is worse than an extra one.
+    let tell = store.tell_workflow_approval(&run.id).unwrap_or(true);
+    if tell && !told {
+        let _ = hands.notify(
+            super::waits::TITLE_WAITING,
+            Some(&approval_body(
+                run,
+                &step.id,
+                prompt.as_deref(),
+                shown_code(hands, Some(&code)),
+                false,
+            )),
+        );
+        store.mark_workflow_wait_notified(&run.id, &step.id)?;
+    }
+    Ok(())
+}
+
+/// The first look after this process started. A waiting approval whose code is not in memory
+/// is given a new one, because the old plaintext died with the last process, and the person
+/// is told. A decision already recorded is not given a code and is not told again: the engine
+/// applies that decision once.
+fn resume_human_waits(
+    driver: &Driver,
+    store: &Store,
+    hands: &dyn Hands,
+    workflow: &super::Workflow,
+    run: &WorkflowRunRow,
+) -> IpcResult<()> {
+    let steps = store.workflow_steps(&run.id)?;
+    for step in &workflow.steps {
+        if !matches!(step.action, super::Action::Approve { .. }) {
+            continue;
         }
-        // A lookup error is told anyway: missing a notice is worse than an extra one.
+        let Some(row) = steps.iter().find(|row| row.step_id == step.id) else {
+            continue;
+        };
+        if row.status != StepStatus::Waiting.as_str() {
+            continue;
+        }
+        let prompt = engine::parse_outputs(&row.outputs).get("prompt").cloned();
+        open_approval_wait(store, run, step, prompt.as_deref())?;
+        if store.workflow_approval(&run.id, &step.id)?.is_some() {
+            continue;
+        }
+        let Some((code, had)) = driver.issue_approval_code(store, &run.id, &step.id, false)? else {
+            continue;
+        };
+        hands.approval_code(&run.id, &step.id, &code);
         let tell = store.tell_workflow_approval(&run.id).unwrap_or(true);
-        if tell {
-            let prompt = change
-                .outputs
-                .as_deref()
-                .and_then(|raw| engine::parse_outputs(raw).get("prompt").cloned());
+        if !tell {
+            continue;
+        }
+        let told = store
+            .workflow_wait(&run.id, &step.id)?
+            .and_then(|wait| wait.notified_at)
+            .is_some();
+        if had {
             let _ = hands.notify(
-                "Waiting for your approval",
+                super::waits::TITLE_REPLACED,
                 Some(&approval_body(
                     run,
-                    &change.step,
+                    &step.id,
                     prompt.as_deref(),
-                    code.as_deref(),
+                    shown_code(hands, Some(&code)),
+                    true,
                 )),
             );
+        } else if !told {
+            let _ = hands.notify(
+                super::waits::TITLE_WAITING,
+                Some(&approval_body(
+                    run,
+                    &step.id,
+                    prompt.as_deref(),
+                    shown_code(hands, Some(&code)),
+                    false,
+                )),
+            );
+            store.mark_workflow_wait_notified(&run.id, &step.id)?;
         }
     }
     Ok(())
+}
+
+fn open_approval_wait(
+    store: &Store,
+    run: &WorkflowRunRow,
+    step: &super::Step,
+    prompt: Option<&str>,
+) -> IpcResult<()> {
+    let phase = super::waits::Phase {
+        workflow_id: run.workflow_id.clone(),
+        workflow_name: run.workflow_name.clone(),
+        workspace_name: run.workspace_name.clone(),
+        step_id: step.id.clone(),
+        action: "approve".to_owned(),
+    };
+    let refs = serde_json::to_string(&step.consumes).unwrap_or_else(|_| "[]".to_owned());
+    store.open_workflow_wait(
+        &run.id,
+        &step.id,
+        super::waits::KIND_APPROVAL,
+        super::waits::BLOCKED_APPROVAL,
+        super::waits::ACTION_APPROVAL,
+        prompt,
+        &refs,
+        &phase.to_json(),
+    )?;
+    Ok(())
+}
+
+/// The code to put in a notification, or none when the setting leaves it out.
+fn shown_code<'a>(hands: &'a dyn Hands, code: Option<&'a str>) -> Option<&'a str> {
+    code.filter(|_| hands.include_approval_code())
 }
 
 fn approval_body(
@@ -1116,25 +1354,47 @@ fn approval_body(
     step: &str,
     prompt: Option<&str>,
     code: Option<&str>,
+    replaced: bool,
 ) -> String {
-    let mut body = format!(
-        "{} in {} is waiting on `{}`.",
-        run.workflow_name, run.workspace_name, step
-    );
-    if let Some(code) = code {
-        body.push_str(" Your code is ");
-        body.push_str(code);
-        body.push('.');
+    super::waits::notice_body(
+        &run.workflow_name,
+        &run.workspace_name,
+        step,
+        prompt,
+        code,
+        replaced,
+    )
+}
+
+/// Write a request-for-changes artifact that a crash dropped after the step had already
+/// moved. A second call finds the artifact and writes nothing.
+fn repair_decision_artifacts(store: &Store, run_id: &str) -> IpcResult<()> {
+    let steps = store.workflow_steps(run_id)?;
+    let saved = store.workflow_artifacts(run_id)?;
+    for step in &steps {
+        if changes_feedback(step.outcome.as_deref()).is_none() {
+            continue;
+        }
+        let name = artifact::changes_artifact_name(&step.step_id);
+        if saved.iter().any(|row| row.name == name) {
+            continue;
+        }
+        let change = Move {
+            step: step.step_id.clone(),
+            from: vec![StepStatus::Waiting],
+            to: StepStatus::Failed,
+            outputs: Some(step.outputs.clone()),
+            note: step.note.clone(),
+            outcome: step.outcome.clone(),
+            clear_outcome: false,
+            halt: false,
+            keep_decision: false,
+        };
+        if let Some(artifacts) = changes_artifacts(store, run_id, &change)? {
+            store.upsert_workflow_artifacts(run_id, &step.step_id, &artifacts)?;
+        }
     }
-    if let Some(line) = prompt
-        .and_then(|text| text.lines().next())
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-    {
-        body.push(' ');
-        body.push_str(line);
-    }
-    body
+    Ok(())
 }
 
 /// The feedback on a request for changes, when this move is that decision.
@@ -1147,7 +1407,7 @@ fn changes_feedback(outcome: Option<&str>) -> Option<String> {
     }
 }
 
-/// The artifacts a request for changes stores, in the same transaction as the step's move.
+/// The artifacts a request for changes stores, written after the step has moved.
 /// `None` when this move is not that decision. Empty feedback becomes a sentence, so the
 /// artifact is never blank.
 fn changes_artifacts(

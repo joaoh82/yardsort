@@ -120,6 +120,7 @@ import {
   type WorkflowCheck,
   type WorkflowRun,
   type WorkflowStepRun,
+  type WorkflowWait,
   type RunPreview,
   type Workflow,
   type Step,
@@ -247,6 +248,7 @@ export type {
   WorkflowCheck,
   WorkflowRun,
   WorkflowStepRun,
+  WorkflowWait,
   RunPreview,
   Workflow,
   Step,
@@ -515,12 +517,14 @@ export const ipc = {
     editorCommand: string | null;
     notifyWhenQuiet: boolean;
     checkForUpdates: boolean;
+    approvalCodeInNotification: boolean;
   }) =>
     unwrap(
       commands.settingsSaveGeneral(
         general.editorCommand,
         general.notifyWhenQuiet,
         general.checkForUpdates,
+        general.approvalCodeInNotification,
       ),
     ),
 
@@ -1040,6 +1044,11 @@ export const ipc = {
     decision: ApprovalDecision,
     feedback: string | null,
   ) => unwrap(commands.workflowDecide(runId, stepId, decision, feedback)),
+  /** Runs waiting on the person, across every workflow. */
+  workflowWaits: () => unwrap(commands.workflowOpenWaits()),
+  /** Issue a new approval code and tell the person. Listing a run does not do this. */
+  workflowShowApprovalCode: (runId: string, stepId: string) =>
+    unwrap(commands.workflowShowApprovalCode(runId, stepId)),
   /** A model writes a workflow from a description, through Drafting; checked, never saved. */
   workflowDescribe: (description: string): Promise<Described> =>
     unwrap(commands.workflowDescribe(description)),

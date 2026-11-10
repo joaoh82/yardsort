@@ -72,8 +72,10 @@ pub enum Command {
         /// A note stored with the decision.
         #[arg(long)]
         feedback: Option<String>,
-        /// The code Yardsort showed you. Not printed by `ys workflow runs`.
-        #[arg(long)]
+        /// The code Yardsort showed you. Leave this out to type it with echo off. `-` reads
+        /// one line from standard input. Passing the code here puts it in your shell history
+        /// and in the process list. Not printed by `ys workflow runs`.
+        #[arg(long, value_name = "CODE")]
         code: Option<String>,
     },
     /// Reject a step that is waiting for you. The run stops. This is not an approval.
@@ -85,8 +87,10 @@ pub enum Command {
         /// A note stored with the decision.
         #[arg(long)]
         feedback: Option<String>,
-        /// The code Yardsort showed you. Not printed by `ys workflow runs`.
-        #[arg(long)]
+        /// The code Yardsort showed you. Leave this out to type it with echo off. `-` reads
+        /// one line from standard input. Passing the code here puts it in your shell history
+        /// and in the process list. Not printed by `ys workflow runs`.
+        #[arg(long, value_name = "CODE")]
         code: Option<String>,
     },
     /// Ask for changes on a step that is waiting for you. The run stops, and the note is kept
@@ -99,8 +103,10 @@ pub enum Command {
         /// What should change. Required.
         #[arg(long)]
         feedback: Option<String>,
-        /// The code Yardsort showed you. Not printed by `ys workflow runs`.
-        #[arg(long)]
+        /// The code Yardsort showed you. Leave this out to type it with echo off. `-` reads
+        /// one line from standard input. Passing the code here puts it in your shell history
+        /// and in the process list. Not printed by `ys workflow runs`.
+        #[arg(long, value_name = "CODE")]
         code: Option<String>,
     },
     /// Check a workflow file. Prints each problem with its line and column; exits 1 if there
@@ -434,6 +440,9 @@ struct RunListed {
     started_at: Option<i64>,
     ended_at: Option<i64>,
     error: Option<String>,
+    /// Why the run is blocked on a person, as in "your approval". Absent when it is not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    waiting_on: Option<String>,
 }
 
 impl From<&WorkflowRunRow> for RunListed {
@@ -448,6 +457,7 @@ impl From<&WorkflowRunRow> for RunListed {
             started_at: run.started_at,
             ended_at: run.ended_at,
             error: run.error.clone(),
+            waiting_on: None,
         }
     }
 }
@@ -458,7 +468,16 @@ fn runs(ys: &Yardsort, workspace: Option<&str>, limit: usize, out: &Output) -> R
         None => None,
     };
     let rows = ys.store.workflow_runs(workspace_id.as_deref(), limit)?;
-    let listed: Vec<RunListed> = rows.iter().map(RunListed::from).collect();
+    let listed: Vec<RunListed> = rows
+        .iter()
+        .map(|run| {
+            let mut listed = RunListed::from(run);
+            listed.waiting_on = workflow::waits::waiting_on(&ys.store, &run.id)
+                .ok()
+                .flatten();
+            listed
+        })
+        .collect();
     out.emit(&listed, || {
         if listed.is_empty() {
             sayln!("No workflow runs yet.");
@@ -469,6 +488,7 @@ fn runs(ys: &Yardsort, workspace: Option<&str>, limit: usize, out: &Output) -> R
             "WORKFLOW".to_owned(),
             "WORKSPACE".to_owned(),
             "STATUS".to_owned(),
+            "WAITING ON".to_owned(),
             "ASKED".to_owned(),
         ]];
         lines.extend(listed.iter().map(|run| {
@@ -477,6 +497,7 @@ fn runs(ys: &Yardsort, workspace: Option<&str>, limit: usize, out: &Output) -> R
                 run.workflow.clone(),
                 run.workspace.clone(),
                 run.status.clone(),
+                run.waiting_on.clone().unwrap_or_default(),
                 when(run.created_at),
             ]
         }));
@@ -596,8 +617,12 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
             )
         })
         .collect();
+    let mut listed = RunListed::from(&run);
+    listed.waiting_on = workflow::waits::waiting_on(&ys.store, &run.id)
+        .ok()
+        .flatten();
     let shown = Shown {
-        run: RunListed::from(&run),
+        run: listed,
         inputs: serde_json::from_str(&run.inputs).unwrap_or_default(),
         steps: steps
             .iter()
@@ -699,7 +724,7 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
         }
         if !pending_lines.is_empty() {
             sayln!();
-            sayln!("Waiting for your approval");
+            sayln!("Blocked: waiting for your approval.");
             for (step, prompt, artifacts) in &pending_lines {
                 sayln!("  {step}");
                 if let Some(prompt) = prompt {
@@ -708,9 +733,10 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                 if !artifacts.is_empty() {
                     sayln!("  Artifacts: {artifacts}");
                 }
+                sayln!("  Approve, reject, or request changes.");
                 sayln!(
                     "  Decide in Yardsort, or with `ys workflow approve`, `reject` or \
-                     `request-changes` and the code it showed you."
+                     `request-changes` and the code Yardsort showed you."
                 );
             }
         }
@@ -752,17 +778,18 @@ fn decide(
     if let Some(why) = launched_here() {
         return Err(Failure::new(why));
     }
-    let Some(code) = code.map(str::trim).filter(|text| !text.is_empty()) else {
-        return Err(Failure::new(
-            "Say the code Yardsort showed you, with --code.",
-        ));
-    };
+    let code = read_decision_code(code)?;
     let run = find_run(ys, wanted)?;
     let feedback = feedback.map(str::trim).filter(|text| !text.is_empty());
     let actor = cli_actor();
-    let written =
-        ys.store
-            .record_workflow_approval(&run.id, step, decision, feedback, &actor, Some(code))?;
+    let written = ys.store.record_workflow_approval(
+        &run.id,
+        step,
+        decision,
+        feedback,
+        &actor,
+        Some(&code),
+    )?;
     if let Some(message) = workflow::approval_refusal(&written, memory::short_id(&run.id), step) {
         return Err(Failure::new(message));
     }
@@ -787,6 +814,56 @@ fn decide(
             sayln!("{word} `{step}` on run {}.", memory::short_id(&run.id));
         },
     )
+}
+
+/// The code for a decision. Left out, it is typed at the terminal with echo off. `-` reads
+/// one line from standard input. Anything else was passed on the command line, which keeps
+/// the code in shell history and in the process list, so that form warns.
+fn read_decision_code(code: Option<&str>) -> Result<String, Failure> {
+    match code.map(str::trim).filter(|text| !text.is_empty()) {
+        None => prompt_decision_code(),
+        Some("-") => stdin_decision_code(),
+        Some(given) => {
+            eprintln!(
+                "warning: --code puts the approval code in your shell history and in the \
+                 process list. Leave --code out, or pass --code - and the code on standard \
+                 input."
+            );
+            Ok(given.to_owned())
+        }
+    }
+}
+
+fn prompt_decision_code() -> Result<String, Failure> {
+    match rpassword::prompt_password("Approval code: ") {
+        Ok(code) => {
+            let code = code.trim().to_owned();
+            if code.is_empty() {
+                Err(Failure::new("Say the code Yardsort showed you."))
+            } else {
+                Ok(code)
+            }
+        }
+        Err(_) => Err(Failure::new(
+            "No terminal to ask for the code. Leave --code out in a terminal, or pass \
+             --code - and the code on standard input.",
+        )),
+    }
+}
+
+fn stdin_decision_code() -> Result<String, Failure> {
+    let mut raw = String::new();
+    std::io::stdin()
+        .read_to_string(&mut raw)
+        .map_err(|error| Failure::new(error.to_string()))?;
+    let code = raw.lines().next().unwrap_or("").trim().to_owned();
+    if code.is_empty() {
+        Err(Failure::new(
+            "Say the code Yardsort showed you on standard input.",
+        ))
+    } else {
+        Ok(code)
+    }
 }
 
 /// A session Yardsort started, or the Floor Manager, must not decide. Unsetting one variable

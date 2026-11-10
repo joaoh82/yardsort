@@ -10,8 +10,14 @@ use sha2::Sha256;
 /// How many wrong codes `ys` accepts before it stops until the app shows a new one.
 pub const ATTEMPT_LIMIT: i64 = 5;
 
-/// PBKDF2-HMAC-SHA256 rounds. A short code has to be slow to test from the stored hash.
-const ROUNDS: u32 = 100_000;
+/// PBKDF2-HMAC-SHA256 rounds for a code issued now. A short code has to be slow to test
+/// from the stored hash.
+pub const ROUNDS: u32 = 600_000;
+
+/// Rounds used before this. A hash stored at this count still verifies. None of those
+/// codes shipped in a release. The column default is this, so a row written before the
+/// rounds were recorded verifies too.
+pub const LEGACY_ROUNDS: u32 = 100_000;
 
 const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
@@ -25,11 +31,20 @@ pub fn issue() -> (String, Vec<u8>, Vec<u8>) {
     (code, salt, hash)
 }
 
-/// Whether `code` is the one `salt` and `hash` were made from. Letter case does not matter.
-pub fn matches(code: &str, salt: &[u8], hash: &[u8]) -> bool {
+/// Whether `code` is the one `salt` and `hash` were made from, at `rounds`. Letter case
+/// does not matter. `rounds` of 0 is the legacy count.
+pub fn matches(code: &str, salt: &[u8], hash: &[u8], rounds: u32) -> bool {
     let canonical = code.trim().to_ascii_uppercase();
-    let got = derive(canonical.as_bytes(), salt);
+    let got = digest(canonical.as_bytes(), salt, rounds);
     constant_eq(&got, hash)
+}
+
+/// The hash to store for `code` at `rounds`. Tests use this to build a legacy row.
+pub fn digest(code: &[u8], salt: &[u8], rounds: u32) -> [u8; 32] {
+    let rounds = if rounds == 0 { LEGACY_ROUNDS } else { rounds };
+    let mut out = [0u8; 32];
+    pbkdf2(code, salt, rounds, &mut out);
+    out
 }
 
 fn encode(bytes: &[u8]) -> String {
@@ -46,20 +61,18 @@ fn encode(bytes: &[u8]) -> String {
 }
 
 fn derive(code: &[u8], salt: &[u8]) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    pbkdf2(code, salt, &mut out);
-    out
+    digest(code, salt, ROUNDS)
 }
 
 /// PBKDF2-HMAC-SHA256, one block. `out` is 32 bytes, the hash length.
-fn pbkdf2(password: &[u8], salt: &[u8], out: &mut [u8; 32]) {
+fn pbkdf2(password: &[u8], salt: &[u8], rounds: u32, out: &mut [u8; 32]) {
     type HmacSha256 = hmac::Hmac<Sha256>;
     let mut mac = HmacSha256::new_from_slice(password).expect("hmac accepts a key of any length");
     mac.update(salt);
     mac.update(&1u32.to_be_bytes());
     let mut u = mac.finalize().into_bytes();
     let mut mixed = u;
-    for _ in 1..ROUNDS {
+    for _ in 1..rounds {
         let mut mac =
             HmacSha256::new_from_slice(password).expect("hmac accepts a key of any length");
         mac.update(&u);
@@ -90,11 +103,21 @@ mod tests {
     fn the_code_matches_only_itself_and_its_hash_is_not_the_code() {
         let (code, salt, hash) = issue();
         assert_eq!(code.len(), 8);
-        assert!(matches(&code, &salt, &hash));
-        assert!(matches(&code.to_ascii_lowercase(), &salt, &hash));
-        assert!(!matches("AAAAAAAA", &salt, &hash) || code == "AAAAAAAA");
+        assert!(matches(&code, &salt, &hash, ROUNDS));
+        assert!(matches(&code.to_ascii_lowercase(), &salt, &hash, ROUNDS));
+        assert!(!matches("AAAAAAAA", &salt, &hash, ROUNDS) || code == "AAAAAAAA");
+        assert!(!matches(&code, &salt, &hash, LEGACY_ROUNDS));
         assert_ne!(hash, code.as_bytes());
         let (other, _, _) = issue();
         assert_ne!(code, other);
+    }
+
+    #[test]
+    fn a_hash_made_at_the_old_round_count_still_matches() {
+        let salt = b"old-salt";
+        let hash = digest(b"ABCD2345", salt, LEGACY_ROUNDS);
+        assert!(matches("abcd2345", salt, &hash, LEGACY_ROUNDS));
+        assert!(!matches("abcd2345", salt, &hash, ROUNDS));
+        assert!(matches("abcd2345", salt, &hash, 0));
     }
 }
