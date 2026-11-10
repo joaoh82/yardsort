@@ -70,6 +70,9 @@ pub struct SettingsInfo {
     pub show_usage_in_sidebar: bool,
     /// How much the Floor Manager may do through `ys`.
     pub floor_manager: yardsort_core::coordinator::FloorManagerLevel,
+    /// Whether a waiting approval's notification includes the one-time code. The platform
+    /// default is included on macOS and Windows, and left out on Linux.
+    pub approval_code_in_notification: bool,
 }
 
 /// The activity switches, as Settings → General shows them. See `crate::activity`.
@@ -295,6 +298,7 @@ pub(crate) fn settings_info(state: &AppState) -> IpcResult<SettingsInfo> {
         file_path: state.settings.path().to_string_lossy().into_owned(),
         problem: state.settings.problem(),
         floor_manager: settings.floor_manager.level,
+        approval_code_in_notification: settings.workflows.show_approval_code(),
     })
 }
 
@@ -586,17 +590,23 @@ pub async fn settings_save_general(
     editor_command: Option<String>,
     notify_when_quiet: bool,
     check_for_updates: bool,
+    approval_code_in_notification: bool,
 ) -> IpcResult<SettingsInfo> {
     blocking(app, move |state| {
         let editor = editor_command
             .map(|command| command.trim().to_owned())
             .filter(|command| !command.is_empty());
+        // The platform default is stored as nothing, so the file stays clean.
+        let code_notice = (approval_code_in_notification
+            != yardsort_core::settings::default_show_approval_code())
+        .then_some(approval_code_in_notification);
         state
             .settings
             .update(|settings| {
                 settings.general.editor_command = editor;
                 settings.general.notify_when_quiet = notify_when_quiet;
                 settings.general.check_for_updates = check_for_updates;
+                settings.workflows.approval_code_in_notification = code_notice;
             })
             .map_err(save_failed)?;
         settings_info(state)

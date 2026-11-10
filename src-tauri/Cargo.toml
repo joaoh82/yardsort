@@ -23,7 +23,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
-yardsort-core = { path = "../crates/core" }
+yardsort-core = { path = "../crates/core", features = ["desktop-window"] }
 pty-host = { path = "../crates/pty-host", features = ["specta"] }
 pty-ipc = { path = "../crates/pty-ipc" }
 # Remote: this computer as a host on a Yardsort server (src/remote.rs).
@@ -71,4 +71,4 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_Wind
 [dev-dependencies]
 tempfile = "3"
 # The core's git fixtures, for the tests of the modules that stayed here.
-yardsort-core = { path = "../crates/core", features = ["testing"] }
+yardsort-core = { path = "../crates/core", features = ["testing", "desktop-window"] }

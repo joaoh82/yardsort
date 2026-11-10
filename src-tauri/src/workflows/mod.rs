@@ -68,6 +68,17 @@ impl Driver {
         }
     }
 
+    /// Issue a replacement code and remember it, so the next tick does not issue another.
+    pub fn issue_approval_code(
+        &self,
+        store: &yardsort_core::store::Store,
+        run_id: &str,
+        step_id: &str,
+    ) -> yardsort_core::store::StoreResult<Option<(String, bool)>> {
+        self.driver
+            .issue_approval_code(store, run_id, step_id, true)
+    }
+
     /// Look at the runs now rather than at the next tick: one was just queued, say.
     pub fn wake(&self) {
         let _ = self
@@ -340,6 +351,10 @@ impl Hands for AppHands<'_> {
 
     fn approval_code(&self, run_id: &str, step_id: &str, code: &str) {
         remember_approval_code(run_id, step_id, code);
+    }
+
+    fn include_approval_code(&self) -> bool {
+        self.state.settings.get().workflows.show_approval_code()
     }
 
     fn conversation(

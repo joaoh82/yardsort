@@ -310,21 +310,37 @@ leaves `decision` and `feedback` for a later step to read as
 `{{ steps.<id>.decision }}` and `{{ steps.<id>.feedback }}`.
 
 You decide in the app, which needs no code, or from a terminal Yardsort did not start.
-`ys workflow approve`, `reject` and `request-changes` need `--code`. The code is about
-eight characters. Yardsort shows it on the run, and in the notification that says the
-run is waiting. `ys workflow runs` does not print it, and neither does `--json`. A
-wrong code is refused. After five wrong codes, `ys` stops until the app shows a new
-one. Yardsort does not have to be open for a correct code to be recorded. The run
-applies it the next time it is open. After you quit, the code in the notification
-still works until the app shows a new one.
+Leave `--code` out and `ys` asks at the terminal without echoing the code. That prompt
+needs a real console. On Windows that is cmd, PowerShell, or Windows Terminal. Git Bash
+and mintty have no console for it: pass `--code -` and pipe the code in. With no
+terminal at all, `ys` fails at once and says to do that, instead of waiting. `--code -`
+reads one line from standard input. Passing the code as `--code <code>` still works,
+and `ys` warns, because that form stays in your shell history and in the process list.
+The code is about eight characters. Yardsort shows it on the run. The notification
+includes it unless Settings → General leaves it out, which is the default on Linux.
+The notice then says to open Yardsort for the code. `ys workflow runs` does not print
+the code, and neither does `--json`. A wrong code is refused. After five wrong codes,
+`ys` stops until you press **Show a new code** in the window. Opening Yardsort again
+does not clear those wrong tries. Listing the run does not issue a code. Opening
+Yardsort replaces a code that was only in memory, and sends
+a new notification, unless the schedule or trigger says `never`. Yardsort does not
+have to be open for a correct code to be recorded. The run applies it once the next
+time it is open, and does not apply it again.
 
 ```sh
-ys workflow approve 3f2a9c1e sign-off --code <code> --feedback "ship it"
-ys workflow reject 3f2a9c1e sign-off --code <code>
-ys workflow request-changes 3f2a9c1e sign-off --code <code> --feedback "split the migration"
+ys workflow approve 3f2a9c1e sign-off --feedback "ship it"
+ys workflow reject 3f2a9c1e sign-off
+ys workflow request-changes 3f2a9c1e sign-off --feedback "split the migration"
 ```
 
-`<code>` is the one Yardsort showed you. It is not printed by `ys workflow runs`.
+Each of those asks for the code. To pass it without a prompt:
+
+```sh
+ys workflow approve 3f2a9c1e sign-off --code - --feedback "ship it"
+```
+
+and type the code on standard input. The code is the one Yardsort showed you. It is
+not printed by `ys workflow runs`.
 
 A session Yardsort started cannot decide, even if it drops `YARDSORT_COORDINATOR`.
 `ys` refuses when any of `YARDSORT_COORDINATOR`, `YARDSORT_RUN_ID`,
@@ -333,10 +349,12 @@ refused at every permission as well. This is not a sandbox. A process running as
 that writes the database directly is not stopped.
 
 A decision is recorded once. A second one is refused, and so is one on a run that has
-already ended. `ys workflow runs --run <id>` shows a step that is still waiting and
-the artifacts it reads. It does not print a command that includes the code. It also
+already ended. The run says `Blocked: waiting for your approval.` and what to do.
+The sidebar lists every run waiting on you. `ys workflow runs` has a WAITING ON
+column. `ys workflow runs --run <id>` shows a step that is still waiting and the
+artifacts it reads. It does not print a command that includes the code. It also
 shows a decision once it is recorded: who, when, and the note. `--json` includes
-`pendingApprovals` and `decisions`.
+`waitingOn`, `pendingApprovals` and `decisions`.
 
 An artifact name that starts with `changes-` is reserved. The request writes
 `changes-<step id>` itself.
@@ -357,9 +375,14 @@ change has no approval step, and it keeps running as it did.
 you would any other.
 
 **If Yardsort quits during a run,** the run carries on when you open it again. A step that was
-waiting keeps waiting. A step Yardsort was in the middle of, such as starting an agent, fails
-saying so rather than being done twice. An agent that settled while Yardsort was closed is only
-noticed if its harness reported the finished turn.
+waiting keeps waiting, and a gate is not approved or skipped. A decision you recorded while it
+was closed is applied once. A step Yardsort was in the middle of, such as starting an agent,
+fails saying so rather than being done twice. A notification already sent is not sent again,
+and an artifact already written is not written again. A request for changes writes its
+artifact in the same change as the decision, so a restart does not write it later. The
+one-time approval code is replaced, because it was only in memory, and you are told. Wrong
+tries are kept: five of them stay locked until **Show a new code**. An agent that settled while Yardsort was
+closed is only noticed if its harness reported the finished turn.
 
 ## Requesting a code review
 

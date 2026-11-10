@@ -12,6 +12,8 @@ const core = vi.hoisted(() => ({
   workflowRuns: vi.fn(),
   workflowRunSteps: vi.fn(),
   workflowDecide: vi.fn(),
+  workflowShowApprovalCode: vi.fn(),
+  workflowWaits: vi.fn(),
   workflowWriterStatus: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
@@ -106,6 +108,7 @@ describe("WorkflowView", () => {
     core.workflowCheck.mockImplementation(async (text: string) => valid(text));
     core.workflowRuns.mockResolvedValue([]);
     core.workflowList.mockResolvedValue([]);
+    core.workflowWaits.mockResolvedValue([]);
     core.workflowWriterStatus.mockResolvedValue({
       harnessId: null,
       status: {
@@ -399,6 +402,7 @@ describe("WorkflowView", () => {
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
+        blockedOn: "your approval",
       },
     ]);
     core.workflowRunSteps.mockResolvedValue([
@@ -422,19 +426,31 @@ describe("WorkflowView", () => {
           },
         ],
         approvalCode: "ABCD2345",
+        approvalLocked: false,
       },
     ]);
     core.workflowDecide.mockResolvedValue(undefined);
+    core.workflowList.mockResolvedValue([item("demo", { kind: "builtIn" })]);
     render(<WorkflowView workflowId="demo" />);
     const runs = await screen.findByRole("region", { name: "Runs" });
     await userEvent
       .setup()
       .click(await within(runs).findByRole("button", { name: "Run in fix-login, running" }));
-    expect(await within(runs).findByText("Waiting for your approval")).toBeInTheDocument();
+    expect(
+      (await within(runs).findAllByText("Blocked: waiting for your approval.")).length,
+    ).toBeGreaterThan(0);
     expect(within(runs).getByText(/ABCD2345/)).toBeInTheDocument();
     expect(within(runs).getByText("To review plan")).toBeInTheDocument();
     expect(within(runs).getByText("Split the migration.")).toBeInTheDocument();
     expect(within(runs).getByRole("button", { name: "Request changes" })).toBeDisabled();
+    core.workflowShowApprovalCode.mockResolvedValue("ZXCV2345");
+    await userEvent.setup().click(within(runs).getByRole("button", { name: "Show a new code" }));
+    await waitFor(() =>
+      expect(core.workflowShowApprovalCode).toHaveBeenCalledWith("run-1", "sign-off"),
+    );
+    await waitFor(() =>
+      expect(within(runs).getByRole("button", { name: "Approve" })).toBeEnabled(),
+    );
     await userEvent.setup().click(within(runs).getByRole("button", { name: "Approve" }));
     expect(core.workflowDecide).toHaveBeenCalledWith("run-1", "sign-off", "approved", null);
   });

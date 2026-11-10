@@ -41,6 +41,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0029_workflow_step_outcome.sql"),
     include_str!("../migrations/0030_workflow_artifacts.sql"),
     include_str!("../migrations/0031_workflow_approval_decisions.sql"),
+    include_str!("../migrations/0032_workflow_human_waits.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -497,6 +498,8 @@ pub enum ApprovalWrite {
     WrongCode,
     /// Too many wrong codes. The app has to show a new one.
     CodeLocked,
+    /// The stored round count is not one this build will run. The row is left as it is.
+    CodeUnusable,
 }
 
 /// A decision stored for one approval step, before the engine has applied it.
@@ -507,6 +510,52 @@ pub struct WorkflowApproval {
     pub feedback: Option<String>,
     pub actor: String,
     pub decided_at: i64,
+}
+
+/// A human wait, joined to its run. `artifact_refs` and `phase` are JSON text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowWaitRow {
+    pub run_id: String,
+    pub step_id: String,
+    pub kind: String,
+    pub blocked_on: String,
+    pub action_needed: String,
+    pub prompt: Option<String>,
+    pub artifact_refs: String,
+    pub phase: String,
+    pub answer: Option<String>,
+    pub actor: Option<String>,
+    pub answered_at: Option<i64>,
+    pub applied_at: Option<i64>,
+    pub notified_at: Option<i64>,
+    pub created_at: i64,
+    pub workflow_id: String,
+    pub workflow_name: String,
+    pub workspace_name: String,
+    pub run_status: String,
+}
+
+fn workflow_wait_from(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowWaitRow> {
+    Ok(WorkflowWaitRow {
+        run_id: row.get(0)?,
+        step_id: row.get(1)?,
+        kind: row.get(2)?,
+        blocked_on: row.get(3)?,
+        action_needed: row.get(4)?,
+        prompt: row.get(5)?,
+        artifact_refs: row.get(6)?,
+        phase: row.get(7)?,
+        answer: row.get(8)?,
+        actor: row.get(9)?,
+        answered_at: row.get(10)?,
+        applied_at: row.get(11)?,
+        notified_at: row.get(12)?,
+        created_at: row.get(13)?,
+        workflow_id: row.get(14)?,
+        workflow_name: row.get(15)?,
+        workspace_name: row.get(16)?,
+        run_status: row.get(17)?,
+    })
 }
 
 /// An artifact about to be stored. The body is already capped.
@@ -687,6 +736,37 @@ fn upgrade(conn: &mut Connection, migrations: &[&str], path: Option<&Path>) -> S
     )?;
     tx.commit()?;
     Ok(())
+}
+
+struct ApprovalChallenge {
+    decision: Option<String>,
+    salt: Vec<u8>,
+    hash: Vec<u8>,
+    attempts: i64,
+    rounds: i64,
+}
+
+fn approval_challenge(
+    conn: &Connection,
+    run_id: &str,
+    step_id: &str,
+) -> StoreResult<Option<ApprovalChallenge>> {
+    Ok(conn
+        .query_row(
+            "SELECT decision, code_salt, code_hash, attempts, code_rounds
+             FROM workflow_approval_decisions WHERE run_id = ?1 AND step_id = ?2",
+            params![run_id, step_id],
+            |row| {
+                Ok(ApprovalChallenge {
+                    decision: row.get(0)?,
+                    salt: row.get(1)?,
+                    hash: row.get(2)?,
+                    attempts: row.get(3)?,
+                    rounds: row.get(4)?,
+                })
+            },
+        )
+        .optional()?)
 }
 
 impl Store {
@@ -2444,10 +2524,13 @@ impl Store {
     /// is an approval, and it is waiting. A second decision does not replace the first. The
     /// engine reads the row on a later tick. Nothing here moves the step.
     ///
-    /// `code` is what a terminal presented. `None` is the app, which does not need one. A
-    /// terminal with no issued code, a wrong code, or five wrong codes already, is refused.
+    /// `code` is what a terminal presented. `None` is the desktop window, and only
+    /// `workflow::waits::decide_in_window` passes that. A terminal with no issued
+    /// code, a wrong code, a round count this build will not run, or five wrong codes
+    /// already, is refused. The slow check runs before the write transaction. The write
+    /// then checks that the attempt count and the decision are still what the check saw.
     #[allow(clippy::too_many_arguments)]
-    pub fn record_workflow_approval(
+    pub(crate) fn record_workflow_approval(
         &self,
         run_id: &str,
         step_id: &str,
@@ -2472,6 +2555,15 @@ impl Store {
             return Ok(ApprovalWrite::FeedbackRequired);
         }
         let actor = crate::workflow::artifact::actor_name(actor);
+        // Hash outside the write. A wrong code is counted in its own short transaction.
+        let expected_attempts = if let Some(code) = code {
+            match self.check_presented_code(run_id, step_id, code)? {
+                Ok(attempts) => Some(attempts),
+                Err(refusal) => return Ok(refusal),
+            }
+        } else {
+            None
+        };
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let run: Option<(String,)> = tx
@@ -2503,47 +2595,16 @@ impl Store {
         if step_status != "waiting" {
             return Ok(ApprovalWrite::NotWaiting);
         }
-        struct Challenge {
-            decision: Option<String>,
-            salt: Vec<u8>,
-            hash: Vec<u8>,
-            attempts: i64,
-        }
-        let existing: Option<Challenge> = tx
-            .query_row(
-                "SELECT decision, code_salt, code_hash, attempts
-                 FROM workflow_approval_decisions WHERE run_id = ?1 AND step_id = ?2",
-                params![run_id, step_id],
-                |row| {
-                    Ok(Challenge {
-                        decision: row.get(0)?,
-                        salt: row.get(1)?,
-                        hash: row.get(2)?,
-                        attempts: row.get(3)?,
-                    })
-                },
-            )
-            .optional()?;
+        let existing = approval_challenge(&tx, run_id, step_id)?;
         if existing.as_ref().is_some_and(|row| row.decision.is_some()) {
             return Ok(ApprovalWrite::AlreadyDecided);
         }
-        // A terminal must present the code. The app does not: the person is already there.
-        if let Some(code) = code {
+        if let Some(expected) = expected_attempts {
             let Some(row) = existing.as_ref() else {
                 return Ok(ApprovalWrite::NoCode);
             };
-            let attempts = row.attempts;
-            if attempts >= crate::workflow::code::ATTEMPT_LIMIT {
-                return Ok(ApprovalWrite::CodeLocked);
-            }
-            if !crate::workflow::code::matches(code, &row.salt, &row.hash) {
-                tx.execute(
-                    "UPDATE workflow_approval_decisions SET attempts = attempts + 1
-                     WHERE run_id = ?1 AND step_id = ?2 AND decision IS NULL",
-                    params![run_id, step_id],
-                )?;
-                tx.commit()?;
-                return Ok(if attempts + 1 >= crate::workflow::code::ATTEMPT_LIMIT {
+            if row.attempts != expected {
+                return Ok(if row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
                     ApprovalWrite::CodeLocked
                 } else {
                     ApprovalWrite::WrongCode
@@ -2551,7 +2612,14 @@ impl Store {
             }
         }
         let now = now_ms();
-        let written = if existing.is_some() {
+        let written = if let Some(expected) = expected_attempts {
+            tx.execute(
+                "UPDATE workflow_approval_decisions
+                 SET decision = ?3, feedback = ?4, actor = ?5, decided_at = ?6
+                 WHERE run_id = ?1 AND step_id = ?2 AND decision IS NULL AND attempts = ?7",
+                params![run_id, step_id, decision, feedback, actor, now, expected],
+            )?
+        } else if existing.is_some() {
             tx.execute(
                 "UPDATE workflow_approval_decisions
                  SET decision = ?3, feedback = ?4, actor = ?5, decided_at = ?6
@@ -2567,29 +2635,146 @@ impl Store {
             )?
         };
         if written == 0 {
+            let again = approval_challenge(&tx, run_id, step_id)?;
+            if again
+                .as_ref()
+                .is_some_and(|row| row.attempts >= crate::workflow::code::ATTEMPT_LIMIT)
+            {
+                return Ok(ApprovalWrite::CodeLocked);
+            }
             return Ok(ApprovalWrite::AlreadyDecided);
         }
         tx.commit()?;
         Ok(ApprovalWrite::Recorded)
     }
 
+    /// Record a decision from a terminal or a remote caller. The code is required.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_terminal_approval(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        decision: &str,
+        feedback: Option<&str>,
+        actor: &str,
+        code: &str,
+    ) -> StoreResult<ApprovalWrite> {
+        self.record_workflow_approval(run_id, step_id, decision, feedback, actor, Some(code))
+    }
+
+    /// Check a presented code before any decision is written. A wrong code increments the
+    /// attempt count in its own transaction, and only while that count is still what was read.
+    fn check_presented_code(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        code: &str,
+    ) -> StoreResult<Result<i64, ApprovalWrite>> {
+        let Some(row) = approval_challenge(&self.conn(), run_id, step_id)? else {
+            return Ok(Err(ApprovalWrite::NoCode));
+        };
+        if row.decision.is_some() {
+            return Ok(Err(ApprovalWrite::AlreadyDecided));
+        }
+        if row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
+            return Ok(Err(ApprovalWrite::CodeLocked));
+        }
+        let Some(rounds) = u32::try_from(row.rounds)
+            .ok()
+            .filter(|&count| crate::workflow::code::known_rounds(count))
+        else {
+            return Ok(Err(ApprovalWrite::CodeUnusable));
+        };
+        if !crate::workflow::code::matches(code, &row.salt, &row.hash, rounds) {
+            return Ok(Err(self.note_wrong_code(run_id, step_id, row.attempts)?));
+        }
+        Ok(Ok(row.attempts))
+    }
+
+    /// Count one wrong code, unless the row changed since it was read.
+    fn note_wrong_code(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        seen: i64,
+    ) -> StoreResult<ApprovalWrite> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let Some(row) = approval_challenge(&tx, run_id, step_id)? else {
+            return Ok(ApprovalWrite::NoCode);
+        };
+        if row.decision.is_some() {
+            return Ok(ApprovalWrite::AlreadyDecided);
+        }
+        if row.attempts != seen || row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
+            return Ok(if row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
+                ApprovalWrite::CodeLocked
+            } else {
+                ApprovalWrite::WrongCode
+            });
+        }
+        let updated = tx.execute(
+            "UPDATE workflow_approval_decisions SET attempts = attempts + 1
+             WHERE run_id = ?1 AND step_id = ?2 AND decision IS NULL AND attempts = ?3",
+            params![run_id, step_id, seen],
+        )?;
+        if updated == 0 {
+            return Ok(ApprovalWrite::AlreadyDecided);
+        }
+        tx.commit()?;
+        Ok(if seen + 1 >= crate::workflow::code::ATTEMPT_LIMIT {
+            ApprovalWrite::CodeLocked
+        } else {
+            ApprovalWrite::WrongCode
+        })
+    }
+
     /// Issue the one-time code for an approval that has not been decided. The plain code is
     /// returned once. The row keeps only the salt and the hash, and the attempt count goes
     /// back to zero. A step that already has a decision is left alone and this returns nothing.
+    /// Show a new code uses this. A restart reissue uses [`Self::save_approval_code`] and
+    /// keeps the attempt count.
     pub fn begin_approval_code(&self, run_id: &str, step_id: &str) -> StoreResult<Option<String>> {
         let (code, salt, hash) = crate::workflow::code::issue();
+        self.save_approval_code(run_id, step_id, &code, &salt, &hash, true)
+    }
+
+    /// Store a code that was already hashed. `reset_attempts` is Show a new code. A restart
+    /// reissue passes false, so five wrong codes stay locked until that button.
+    pub(crate) fn save_approval_code(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        code: &str,
+        salt: &[u8],
+        hash: &[u8],
+        reset_attempts: bool,
+    ) -> StoreResult<Option<String>> {
+        let rounds = i64::from(crate::workflow::code::ROUNDS);
         let changed = self.conn().execute(
             "INSERT INTO workflow_approval_decisions
-             (run_id, step_id, code_salt, code_hash, attempts)
-             VALUES (?1, ?2, ?3, ?4, 0)
+             (run_id, step_id, code_salt, code_hash, code_rounds, attempts)
+             VALUES (?1, ?2, ?3, ?4, ?5, 0)
              ON CONFLICT (run_id, step_id) DO UPDATE SET
                code_salt = excluded.code_salt,
                code_hash = excluded.code_hash,
-               attempts = 0
+               code_rounds = excluded.code_rounds,
+               attempts = CASE WHEN ?6 THEN 0 ELSE workflow_approval_decisions.attempts END
              WHERE workflow_approval_decisions.decision IS NULL",
-            params![run_id, step_id, salt, hash],
+            params![
+                run_id,
+                step_id,
+                salt,
+                hash,
+                rounds,
+                i64::from(reset_attempts)
+            ],
         )?;
-        Ok(if changed == 0 { None } else { Some(code) })
+        Ok(if changed == 0 {
+            None
+        } else {
+            Some(code.to_owned())
+        })
     }
 
     /// Wrong codes from a terminal have reached the limit, and nobody has decided yet.
@@ -2657,6 +2842,182 @@ impl Store {
             return Ok(notify != "never");
         }
         Ok(true)
+    }
+
+    /// Open a human wait. A row that is already there is left as it is, so a restart does not
+    /// clear `notified_at` or `applied_at`. False when the row was already there.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_workflow_wait(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        kind: &str,
+        blocked_on: &str,
+        action_needed: &str,
+        prompt: Option<&str>,
+        artifact_refs: &str,
+        phase: &str,
+    ) -> StoreResult<bool> {
+        let written = self.conn().execute(
+            "INSERT OR IGNORE INTO workflow_waits
+             (run_id, step_id, kind, blocked_on, action_needed, prompt, artifact_refs, phase,
+              created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                run_id,
+                step_id,
+                kind,
+                blocked_on,
+                action_needed,
+                prompt,
+                artifact_refs,
+                phase,
+                now_ms(),
+            ],
+        )?;
+        Ok(written > 0)
+    }
+
+    /// Drop a step's wait. A step that starts again calls this, with its decision.
+    pub fn clear_workflow_wait(&self, run_id: &str, step_id: &str) -> StoreResult<()> {
+        self.conn().execute(
+            "DELETE FROM workflow_waits WHERE run_id = ?1 AND step_id = ?2",
+            params![run_id, step_id],
+        )?;
+        Ok(())
+    }
+
+    /// Note that the waiting notification was sent. Once: a second call changes nothing.
+    pub fn mark_workflow_wait_notified(&self, run_id: &str, step_id: &str) -> StoreResult<bool> {
+        Ok(self.conn().execute(
+            "UPDATE workflow_waits SET notified_at = ?3
+             WHERE run_id = ?1 AND step_id = ?2 AND notified_at IS NULL",
+            params![run_id, step_id, now_ms()],
+        )? > 0)
+    }
+
+    /// The wait on one step, if one was opened.
+    pub fn workflow_wait(
+        &self,
+        run_id: &str,
+        step_id: &str,
+    ) -> StoreResult<Option<WorkflowWaitRow>> {
+        let rows = self.workflow_wait_rows(
+            "WHERE w.run_id = ?1 AND w.step_id = ?2",
+            params![run_id, step_id],
+        )?;
+        Ok(rows.into_iter().next())
+    }
+
+    /// Waits the engine has not applied, on runs that are still running. Newest first.
+    pub fn workflow_waits_unapplied(&self) -> StoreResult<Vec<WorkflowWaitRow>> {
+        self.workflow_wait_rows(
+            "WHERE w.applied_at IS NULL AND r.status = 'running'
+             ORDER BY w.created_at, w.step_id",
+            params![],
+        )
+    }
+
+    fn workflow_wait_rows(
+        &self,
+        tail: &str,
+        values: impl rusqlite::Params,
+    ) -> StoreResult<Vec<WorkflowWaitRow>> {
+        let sql = format!(
+            "SELECT w.run_id, w.step_id, w.kind, w.blocked_on, w.action_needed, w.prompt,
+                    w.artifact_refs, w.phase, w.answer, w.actor, w.answered_at, w.applied_at,
+                    w.notified_at, w.created_at, r.workflow_id, r.workflow_name, r.workspace_name,
+                    r.status
+             FROM workflow_waits w
+             JOIN workflow_runs r ON r.id = w.run_id
+             {tail}"
+        );
+        let conn = self.conn();
+        let mut statement = conn.prepare(&sql)?;
+        let rows = statement
+            .query_map(values, workflow_wait_from)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Store a clarification's answer. The row must be a question that has not been answered
+    /// and has not been applied, on a run that is still running. Does not move the step.
+    pub fn answer_workflow_wait(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        text: &str,
+        actor: &str,
+    ) -> StoreResult<crate::workflow::waits::AnswerWrite> {
+        use crate::workflow::waits::AnswerWrite;
+        let (body, _) = crate::workflow::artifact::cap(text);
+        let answer = body.trim().to_owned();
+        if answer.is_empty() {
+            return Ok(AnswerWrite::Missing);
+        }
+        let actor = crate::workflow::artifact::actor_name(actor);
+        let written = self.conn().execute(
+            "UPDATE workflow_waits SET answer = ?3, actor = ?4, answered_at = ?5
+             WHERE run_id = ?1 AND step_id = ?2 AND kind = 'question'
+               AND answer IS NULL AND applied_at IS NULL
+               AND EXISTS (SELECT 1 FROM workflow_runs WHERE id = ?1 AND status = 'running')",
+            params![run_id, step_id, answer, actor, now_ms()],
+        )?;
+        if written > 0 {
+            return Ok(AnswerWrite::Recorded);
+        }
+        let kind: Option<String> = self
+            .conn()
+            .query_row(
+                "SELECT kind FROM workflow_waits WHERE run_id = ?1 AND step_id = ?2",
+                params![run_id, step_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(match kind.as_deref() {
+            Some("question") => AnswerWrite::AlreadyAnswered,
+            Some(_) => AnswerWrite::NotAQuestion,
+            None => AnswerWrite::Missing,
+        })
+    }
+
+    /// Replace these artifacts in one change. A second call with the same names updates the
+    /// bodies, so a repair after a crash does not leave two copies.
+    pub fn upsert_workflow_artifacts(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        artifacts: &[NewWorkflowArtifact],
+    ) -> StoreResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let now = now_ms();
+        for artifact in artifacts {
+            tx.execute(
+                "INSERT INTO workflow_artifacts
+                 (run_id, name, step_id, source, detail, body, truncated, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(run_id, name) DO UPDATE SET
+                   step_id = excluded.step_id,
+                   source = excluded.source,
+                   detail = excluded.detail,
+                   body = excluded.body,
+                   truncated = excluded.truncated,
+                   updated_at = excluded.updated_at",
+                params![
+                    run_id,
+                    artifact.name,
+                    step_id,
+                    artifact.source,
+                    artifact.detail,
+                    artifact.body,
+                    i64::from(artifact.truncated),
+                    now,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Store `artifacts` and move the step, or change neither. The move is taken only while the
@@ -2840,6 +3201,87 @@ impl Store {
             .conn()
             .execute(&sql, rusqlite::params_from_iter(values))?
             > 0)
+    }
+
+    /// Move a step, mark its human wait applied, and write the decision's artifacts, or do
+    /// none of those. They are one change, so a crash cannot apply the decision twice, forget
+    /// that it was applied, or leave the `changes-<step>` artifact missing. A wait row that
+    /// is not there yet does not block the move: a run from before waits still moves.
+    #[allow(clippy::too_many_arguments)]
+    pub fn move_workflow_step_applying_wait(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        from: &[StepStatus],
+        to: StepStatus,
+        outputs: Option<&str>,
+        note: Option<&str>,
+        outcome: Option<&str>,
+        clear_outcome: bool,
+        artifacts: &[NewWorkflowArtifact],
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let now = now_ms();
+        let marks = from.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "UPDATE workflow_step_runs
+             SET status = ?1,
+                 started_at = CASE WHEN ?2 THEN started_at ELSE COALESCE(started_at, ?3) END,
+                 ended_at = CASE WHEN ?2 THEN ?3 ELSE ended_at END,
+                 outputs = COALESCE(?4, outputs),
+                 note = COALESCE(?5, note),
+                 outcome = CASE WHEN ?6 THEN NULL ELSE COALESCE(?7, outcome) END
+             WHERE run_id = ?8 AND step_id = ?9 AND status IN ({marks})
+               AND EXISTS (SELECT 1 FROM workflow_runs WHERE id = ?8 AND status = 'running')"
+        );
+        let mut values: Vec<rusqlite::types::Value> = vec![
+            to.as_str().to_owned().into(),
+            i64::from(to.is_final()).into(),
+            now.into(),
+            outputs.map(str::to_owned).into(),
+            note.map(str::to_owned).into(),
+            i64::from(clear_outcome).into(),
+            outcome.map(str::to_owned).into(),
+            run_id.to_owned().into(),
+            step_id.to_owned().into(),
+        ];
+        values.extend(from.iter().map(|status| status.as_str().to_owned().into()));
+        let moved = tx.execute(&sql, rusqlite::params_from_iter(values))? > 0;
+        if !moved {
+            return Ok(false);
+        }
+        tx.execute(
+            "UPDATE workflow_waits SET applied_at = ?3
+             WHERE run_id = ?1 AND step_id = ?2 AND applied_at IS NULL",
+            params![run_id, step_id, now],
+        )?;
+        for artifact in artifacts {
+            tx.execute(
+                "INSERT INTO workflow_artifacts
+                 (run_id, name, step_id, source, detail, body, truncated, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(run_id, name) DO UPDATE SET
+                   step_id = excluded.step_id,
+                   source = excluded.source,
+                   detail = excluded.detail,
+                   body = excluded.body,
+                   truncated = excluded.truncated,
+                   updated_at = excluded.updated_at",
+                params![
+                    run_id,
+                    artifact.name,
+                    step_id,
+                    artifact.source,
+                    artifact.detail,
+                    artifact.body,
+                    i64::from(artifact.truncated),
+                    now,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(true)
     }
 
     /// A running run ends as `succeeded` or `failed`. False when it was not running any more.
@@ -4014,7 +4456,7 @@ steps:
         {
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[30].contains("CREATE TABLE workflow_approval_decisions"));
-            assert_eq!(MIGRATIONS.len(), 31);
+            assert_eq!(MIGRATIONS.len(), 32);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -4069,6 +4511,231 @@ steps:
                 .unwrap(),
             ApprovalWrite::RunEnded { .. }
         ));
+    }
+
+    /// 0032 is index 31. A database that already has approval decisions still opens. The
+    /// rounds column arrives at the old count, and there is no wait until one is opened.
+    #[test]
+    fn a_run_saved_before_human_waits_still_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("yardsort.db");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            assert!(MIGRATIONS[31].contains("CREATE TABLE workflow_waits"));
+            assert!(MIGRATIONS[31].contains("code_rounds"));
+            assert_eq!(MIGRATIONS.len(), 32);
+            upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
+            conn.execute(
+                "INSERT INTO workflow_runs
+                 (id, workflow_id, workflow_name, definition, workspace_name, inputs, status,
+                  requested_by, created_at)
+                 VALUES ('run-old', 'demo', 'Demo', 'id: demo\n', 'fix', '{}', 'running', 'cli', 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO workflow_step_runs
+                 (run_id, step_id, position, action, status)
+                 VALUES ('run-old', 'sign-off', 0, 'approve', 'waiting')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO workflow_approval_decisions
+                 (run_id, step_id, code_salt, code_hash)
+                 VALUES ('run-old', 'sign-off', X'01', X'02')",
+                [],
+            )
+            .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        assert_eq!(
+            store.workflow_run("run-old").unwrap().unwrap().status,
+            "running"
+        );
+        let rounds: i64 = store
+            .conn()
+            .query_row(
+                "SELECT code_rounds FROM workflow_approval_decisions
+                 WHERE run_id = 'run-old' AND step_id = 'sign-off'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(rounds, i64::from(crate::workflow::code::LEGACY_ROUNDS));
+        assert!(store.workflow_waits_unapplied().unwrap().is_empty());
+        assert!(store
+            .open_workflow_wait(
+                "run-old",
+                "sign-off",
+                "approval",
+                "your approval",
+                "Approve, reject, or request changes.",
+                None,
+                "[]",
+                "{}",
+            )
+            .unwrap());
+        assert_eq!(store.workflow_waits_unapplied().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_code_hashed_at_the_old_round_count_still_decides() {
+        let store = Store::in_memory();
+        waiting_approval(&store, "run-1");
+        let salt = b"legacy-salt-bytes";
+        let hash =
+            crate::workflow::code::digest(b"ABCD2345", salt, crate::workflow::code::LEGACY_ROUNDS)
+                .expect("legacy rounds");
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_approval_decisions
+                 (run_id, step_id, code_salt, code_hash, code_rounds, attempts)
+                 VALUES ('run-1', 'sign-off', ?1, ?2, ?3, 0)",
+                params![
+                    salt.to_vec(),
+                    hash.to_vec(),
+                    i64::from(crate::workflow::code::LEGACY_ROUNDS)
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .record_workflow_approval(
+                    "run-1",
+                    "sign-off",
+                    "approved",
+                    None,
+                    "ada",
+                    Some("abcd2345"),
+                )
+                .unwrap(),
+            ApprovalWrite::Recorded
+        );
+    }
+
+    #[test]
+    fn a_round_count_other_than_the_two_known_ones_is_refused() {
+        let store = Store::in_memory();
+        waiting_approval(&store, "run-1");
+        for rounds in [0_i64, 1] {
+            store
+                .conn()
+                .execute("DELETE FROM workflow_approval_decisions", [])
+                .unwrap();
+            store
+                .conn()
+                .execute(
+                    "INSERT INTO workflow_approval_decisions
+                     (run_id, step_id, code_salt, code_hash, code_rounds, attempts)
+                     VALUES ('run-1', 'sign-off', X'11', X'22', ?1, 0)",
+                    params![rounds],
+                )
+                .unwrap();
+            assert_eq!(
+                store
+                    .record_workflow_approval(
+                        "run-1",
+                        "sign-off",
+                        "approved",
+                        None,
+                        "ada",
+                        Some("ABCD2345"),
+                    )
+                    .unwrap(),
+                ApprovalWrite::CodeUnusable
+            );
+            let attempts: i64 = store
+                .conn()
+                .query_row(
+                    "SELECT attempts FROM workflow_approval_decisions WHERE run_id = 'run-1'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(attempts, 0, "rounds {rounds} must not burn a try");
+        }
+    }
+
+    #[test]
+    fn a_reissue_keeps_wrong_tries_until_a_new_code_is_asked_for() {
+        let store = Store::in_memory();
+        waiting_approval(&store, "run-1");
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_approval_decisions
+                 (run_id, step_id, code_salt, code_hash, code_rounds, attempts)
+                 VALUES ('run-1', 'sign-off', X'00', X'00', ?1, 5)",
+                params![i64::from(crate::workflow::code::ROUNDS)],
+            )
+            .unwrap();
+        let (code, salt, hash) = crate::workflow::code::issue();
+        assert!(store
+            .save_approval_code("run-1", "sign-off", &code, &salt, &hash, false)
+            .unwrap()
+            .is_some());
+        assert!(store.approval_code_locked("run-1", "sign-off").unwrap());
+        let attempts = |store: &Store| -> i64 {
+            store
+                .conn()
+                .query_row(
+                    "SELECT attempts FROM workflow_approval_decisions WHERE run_id = 'run-1'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(attempts(&store), 5);
+        assert!(store
+            .save_approval_code("run-1", "sign-off", &code, &salt, &hash, true)
+            .unwrap()
+            .is_some());
+        assert_eq!(attempts(&store), 0);
+        assert!(!store.approval_code_locked("run-1", "sign-off").unwrap());
+    }
+
+    #[test]
+    fn a_clarification_lives_on_the_same_wait_until_it_is_answered() {
+        let store = Store::in_memory();
+        waiting_approval(&store, "run-1");
+        assert!(store
+            .open_workflow_wait(
+                "run-1",
+                "ask",
+                crate::workflow::waits::KIND_QUESTION,
+                crate::workflow::waits::BLOCKED_QUESTION,
+                crate::workflow::waits::ACTION_QUESTION,
+                Some("Which name?"),
+                "[\"plan\"]",
+                "{\"stepId\":\"ask\"}",
+            )
+            .unwrap());
+        let open = crate::workflow::waits::list_open(&store).unwrap();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].blocked_on, "your answer");
+        assert_eq!(open[0].blocked_line(), "Blocked: waiting for your answer.");
+        assert_eq!(open[0].prompt.as_deref(), Some("Which name?"));
+        assert_eq!(open[0].artifact_refs, vec!["plan".to_owned()]);
+        assert_eq!(
+            crate::workflow::waits::answer(&store, "run-1", "ask", "  ", "ada").unwrap(),
+            crate::workflow::waits::AnswerWrite::Missing
+        );
+        assert_eq!(
+            crate::workflow::waits::answer(&store, "run-1", "ask", "Ship it", "ada").unwrap(),
+            crate::workflow::waits::AnswerWrite::Recorded
+        );
+        assert!(crate::workflow::waits::list_open(&store)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            crate::workflow::waits::answer(&store, "run-1", "ask", "Again", "ada").unwrap(),
+            crate::workflow::waits::AnswerWrite::AlreadyAnswered
+        );
+        let kept = store.workflow_wait("run-1", "ask").unwrap().unwrap();
+        assert_eq!(kept.answer.as_deref(), Some("Ship it"));
+        assert!(kept.applied_at.is_none());
     }
 
     fn waiting_approval(store: &Store, run_id: &str) {

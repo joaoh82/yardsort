@@ -60,7 +60,7 @@ export const commands = {
 	harnessTest: (def: HarnessDef, size: TermSize) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("harness_test", { def, size })),
 	settingsGet: () => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_get")),
 	settingsSaveWorkspaces: (workspaces: WorkspaceSettingsDto) => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_save_workspaces", { workspaces })),
-	settingsSaveGeneral: (editorCommand: string | null, notifyWhenQuiet: boolean, checkForUpdates: boolean) => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_save_general", { editorCommand, notifyWhenQuiet, checkForUpdates })),
+	settingsSaveGeneral: (editorCommand: string | null, notifyWhenQuiet: boolean, checkForUpdates: boolean, approvalCodeInNotification: boolean) => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_save_general", { editorCommand, notifyWhenQuiet, checkForUpdates, approvalCodeInNotification })),
 	/**
 	 *  The Floor Manager's permission. The next `ys` command it runs follows this. Its instructions
 	 *  are rewritten now when its folder exists; a running one reads them the next time it starts.
@@ -600,6 +600,17 @@ export const commands = {
 	 *  window calls this. The Floor Manager's `ys` is refused before it can.
 	 */
 	workflowDecide: (runId: string, stepId: string, decision: ApprovalDecision, feedback: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("workflow_decide", { runId, stepId, decision, feedback })),
+	/**
+	 *  Runs waiting on a person, across every workflow. The sidebar's list. A later phone
+	 *  reads the same rows through the core. This command does not decide anything.
+	 */
+	workflowOpenWaits: () => typedError<WorkflowWait[], IpcError>(__TAURI_INVOKE("workflow_open_waits")),
+	/**
+	 *  Issue a new one-time code for a waiting approval, and say so. Listing the run does not
+	 *  do this. A restart does, because the plain code was only in memory. The code is returned
+	 *  for this window and is not written down.
+	 */
+	workflowShowApprovalCode: (runId: string, stepId: string) => typedError<string, IpcError>(__TAURI_INVOKE("workflow_show_approval_code", { runId, stepId })),
 	/**
 	 *  Have a model write a workflow from `description`, through Drafting: the agent the user has
 	 *  in its non-interactive mode, or their Anthropic key. The answer is checked as a typed file
@@ -3161,6 +3172,11 @@ export type SettingsInfo_Deserialize = {
 	showUsageInSidebar: boolean,
 	/**  How much the Floor Manager may do through `ys`. */
 	floorManager: FloorManagerLevel_Deserialize,
+	/**
+	 *  Whether a waiting approval's notification includes the one-time code. The platform
+	 *  default is included on macOS and Windows, and left out on Linux.
+	 */
+	approvalCodeInNotification: boolean,
 };
 
 export type SettingsInfo_Serialize = {
@@ -3180,6 +3196,11 @@ export type SettingsInfo_Serialize = {
 	showUsageInSidebar: boolean,
 	/**  How much the Floor Manager may do through `ys`. */
 	floorManager: FloorManagerLevel_Serialize,
+	/**
+	 *  Whether a waiting approval's notification includes the one-time code. The platform
+	 *  default is included on macOS and Windows, and left out on Linux.
+	 */
+	approvalCodeInNotification: boolean,
 };
 
 /**  Where a workflow came from. */
@@ -4047,6 +4068,8 @@ export type WorkflowRun_Deserialize = {
 	createdAt: number | null,
 	startedAt: number | null,
 	endedAt: number | null,
+	/**  Why this run is blocked on a person, as in `your approval`. Absent when it is not. */
+	blockedOn: string | null,
 };
 
 /**  One run, as the view lists it. */
@@ -4066,6 +4089,8 @@ export type WorkflowRun_Serialize = {
 	createdAt: number | null,
 	startedAt: number | null,
 	endedAt: number | null,
+	/**  Why this run is blocked on a person, as in `your approval`. Absent when it is not. */
+	blockedOn: string | null,
 };
 
 /**
@@ -4090,9 +4115,32 @@ export type WorkflowStepRun = {
 	artifacts: WorkflowArtifact[],
 	/**  Named documents this step reads, from earlier steps. An approval shows these. */
 	consumed: WorkflowArtifact[],
-	/**  The one-time code for a waiting approval. Shown only in this window. Absent otherwise. */
+	/**
+	 *  The one-time code for a waiting approval. Shown only in this window. Absent when this
+	 *  process does not hold one. Listing a run does not issue a code.
+	 */
 	approvalCode: string | null,
+	/**  A terminal has tried too many wrong codes. A new code comes from Show a new code. */
+	approvalLocked: boolean,
 };
+
+/**  A run waiting on a person, as the sidebar lists it. The same rows a later phone reads. */
+export type WorkflowWait = {
+	runId: string,
+	stepId: string,
+	workflowId: string,
+	workflowName: string,
+	workspaceName: string,
+	kind: WorkflowWaitKind,
+	blockedOn: string,
+	actionNeeded: string,
+	prompt: string | null,
+	/**  `Blocked: waiting for your approval.` */
+	blockedLine: string,
+};
+
+/**  `approval` or `question`. A clarification uses the same wait row. */
+export type WorkflowWaitKind = "approval" | "question";
 
 /**  Workflow writing has its own harness preference; commit and PR writers stay workspace-based. */
 export type WorkflowWriterStatus = {

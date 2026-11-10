@@ -675,7 +675,7 @@ only when that step starts again from pending, which issues a new code. A second
 decision is refused, and so is one on a run that is not running, or on a step that is
 not an `approve` step waiting. Requesting changes requires feedback. The
 `changes-<step id>` artifact (source `decision`) is written in the same database
-change as the step's move to failed, so a later revision can consume it. An artifact
+change as the step move and the wait's `applied_at`. An artifact
 name starting with `changes-` is refused at parse time.
 
 A timeout moves the step to failed only when no decision has been recorded
@@ -683,20 +683,78 @@ A timeout moves the step to failed only when no decision has been recorded
 block the timeout. If the timeout lands first, `ys` is told the step is not waiting.
 
 You decide in the app, which passes no code, or with `ys workflow approve`, `reject`
-and `request-changes` from a terminal Yardsort did not start. Those commands require
-`--code`. The code is shown in the window and in the waiting notification, and nowhere
-else: not in `ys workflow runs`, `--json`, the step note, outputs or a log. Five wrong
-codes lock the terminal until the app shows a new one. `ys` also refuses when any of
+and `request-changes` from a terminal Yardsort did not start. Leave `--code` out and
+`ys` reads it from the terminal with echo off (`rpassword`), and only when both
+standard input and standard error are terminals. Otherwise it fails at once and
+says to pass `--code -` and pipe the code in. On Windows that prompt needs a real
+console: cmd, PowerShell, or Windows Terminal. Git Bash and mintty do not, so
+those use `--code -`. `--code -` reads one line from standard input and strips a
+leading byte-order mark before trimming. A code passed in argv warns on stderr,
+because it lands in shell history and in the process list. The code is shown in
+the window. The waiting notification includes it unless `workflows.approval_code_in_notification`
+is false. Unset, that follows the platform: included on macOS and Windows, omitted
+on Linux, where a notification is readable on D-Bus. The omitted form says to open
+Yardsort for the code. The code is nowhere else: not in `ys workflow runs`,
+`--json`, the step note, outputs or a log. New hashes use 600000 PBKDF2 rounds.
+`code_rounds` on the decision row (default 100000, from before this column) is
+what a check uses, so an older hash still verifies. Any other stored count,
+including 0 or 1, is refused and does not burn a try. The check runs before the
+write transaction, which then writes only if the attempt count and the decision
+are still what the check saw. Five wrong codes lock the terminal. That count
+survives a restart: opening the app replaces the code, because the plaintext was
+only in memory, and it does not reset the count. **Show a new code** does reset
+it, and is the only thing that does. Either replacement sends a notification
+when the run would be told. Listing a run does not issue a new code. The
+setting that leaves the code out of the notification is not a lock. A process
+running as the same user can edit `settings.toml` and set
+`[workflows] approval_code_in_notification` back on, and the next notification
+includes the code.
+`ys` also refuses when any of
 `YARDSORT_COORDINATOR`, `YARDSORT_RUN_ID`, `YARDSORT_WORKSPACE_ID` or
 `YARDSORT_SESSION_RECORD_ID` is set. The Floor Manager's `ys` is `Action::Deny` at
 every permission, including trusted and ask. This is not a sandbox. A process running
 as the same user that writes SQLite directly is not stopped. Waiting for a GitHub
 review is `wait_pr_activity`, and it is not a gate.
 
-What this leaves for later, and does not do: a durable wait that resumes safely across
-a remote disconnect (the pending row already survives an ordinary restart), a branch
-that switches on the verdict or on `changes_requested`, a question mid-run, and
-controls from a phone. Those read the same outcome and the same failed run error.
+## Human waits
+
+Migration `0032_workflow_human_waits` is index 31. It adds `workflow_waits` and
+`code_rounds` on `workflow_approval_decisions`. A database from before it still
+opens. Old runs keep working.
+
+`workflow_waits` is why a run is blocked and what the person must do. An approval
+opens a row when the step starts waiting: `kind` `approval`, `blocked_on`
+`your approval`, the prompt, the artifact names it reads, and a phase object
+(workflow, workspace, step, action). `notified_at` is set when the waiting
+notification is sent, so a restart does not send it again. `applied_at` is set
+in the same change as the engine applying the decision. A restart applies a
+decision whose `applied_at` is still null exactly once, and does not approve a
+gate that has no decision.
+
+A clarification uses the same row, `kind` `question`, the question in `prompt`
+and the reply in `answer`. This build has no question step. `answer` stores the
+reply and does not move a step. A later question step reads this row. It does
+not add a table.
+
+`workflow::waits::list_open` and `decide_with_code` are the boundary a phone or a
+remote crate calls. They read and write this database. A remote caller must use
+`decide_with_code`, which always takes the one-time code. The window calls
+`decide_in_window` with a `DesktopWindow` token. Only the app enables the
+`desktop-window` feature, so a remote crate cannot construct that token. This
+build adds no remote route, no protocol message and no phone screen. A decision
+recorded while the app was closed is not in `list_open`: the person has done
+their part, and the engine applies it.
+
+The step move, `applied_at`, and the decision's artifacts are one change. The
+driver can stop after that change, or after the next step is claimed and before
+its effect runs. The next start does not write the artifact again, and it fails
+a step that was claimed and not carried out, so a notification or a session is
+not started twice.
+
+What this leaves for later, and does not do: a branch that switches on the
+verdict or on `changes_requested`, a question step that asks mid-run, and
+notifications and controls from a phone. Those read this wait, this outcome
+and the same failed run error. The phone does not get a decision route here.
 
 ## Named artifacts
 

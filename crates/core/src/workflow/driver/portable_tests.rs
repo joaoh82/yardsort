@@ -1787,3 +1787,291 @@ steps:
 fn recover_is_a_no_op(store: &Store, run: &str) -> bool {
     crate::workflow::engine::recover(&store.workflow_steps(run).unwrap()).is_empty()
 }
+
+fn notice_count(hands: &Filed, title: &str) -> usize {
+    hands
+        .sent
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|sent| sent.as_str() == title)
+        .count()
+}
+
+fn tick_until(store: &Store, hands: &dyn Hands, when: StopAfter) {
+    let host = PtyHost::new(Arc::new(|_| {}));
+    let driver = Driver::default();
+    driver.testing_stop_after(when);
+    driver.tick(store, &host, hands, &git()).unwrap();
+}
+
+/// A fresh process, with no code in memory, must not approve a gate or start the next step.
+#[test]
+fn a_restart_while_an_approval_is_waiting_does_not_skip_the_gate() {
+    let (_dir, store, run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "sign-off").status, "waiting");
+    assert_eq!(notice_count(&hands, "Waiting for your approval"), 1);
+    let open = crate::workflow::waits::list_open(&store).unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(
+        open[0].blocked_line(),
+        "Blocked: waiting for your approval."
+    );
+    assert_eq!(
+        open[0].action_needed,
+        "Approve, reject, or request changes."
+    );
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "sign-off").status, "waiting");
+    assert_eq!(step(&store, &run, "next").status, "pending");
+    assert_eq!(store.workflow_run(&run).unwrap().unwrap().status, "running");
+    assert_eq!(notice_count(&hands, "Waiting for your approval"), 1);
+    assert_eq!(notice_count(&hands, "Approval code replaced"), 1);
+    assert_eq!(notice_count(&hands, "Go"), 0);
+    assert!(step(&store, &run, "sign-off").outcome.is_none());
+}
+
+/// A decision written while nothing was ticking is applied once, and the next effect once.
+#[test]
+fn a_decision_recorded_while_the_app_was_closed_is_applied_once() {
+    let (_dir, store, run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    assert_eq!(
+        store
+            .record_workflow_approval(&run, "sign-off", "approved", Some("ship it"), "ada", None)
+            .unwrap(),
+        crate::store::ApprovalWrite::Recorded
+    );
+    assert_eq!(step(&store, &run, "sign-off").status, "waiting");
+    assert!(crate::workflow::waits::list_open(&store)
+        .unwrap()
+        .is_empty());
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "sign-off").status, "succeeded");
+    assert_eq!(step(&store, &run, "next").status, "succeeded");
+    assert_eq!(notice_count(&hands, "Go"), 1);
+    assert_eq!(notice_count(&hands, "Waiting for your approval"), 1);
+    assert_eq!(notice_count(&hands, "Approval code replaced"), 0);
+    tick(&store, &hands);
+    assert_eq!(notice_count(&hands, "Go"), 1);
+    let outcome: serde_json::Value =
+        serde_json::from_str(step(&store, &run, "sign-off").outcome.unwrap().as_str()).unwrap();
+    assert_eq!(outcome["decision"], "approved");
+    assert_eq!(outcome["actor"], "ada");
+}
+
+#[test]
+fn a_crash_after_the_decision_is_applied_does_not_start_the_next_effect() {
+    let (_dir, store, run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    store
+        .record_workflow_approval(&run, "sign-off", "approved", Some("ship it"), "ada", None)
+        .unwrap();
+    tick_until(&store, &hands, StopAfter::AfterDecisionApplied);
+    assert_eq!(step(&store, &run, "sign-off").status, "succeeded");
+    assert_eq!(step(&store, &run, "next").status, "pending");
+    assert!(store
+        .workflow_wait(&run, "sign-off")
+        .unwrap()
+        .unwrap()
+        .applied_at
+        .is_some());
+    assert_eq!(notice_count(&hands, "Go"), 0);
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "next").status, "succeeded");
+    assert_eq!(notice_count(&hands, "Go"), 1);
+    tick(&store, &hands);
+    assert_eq!(notice_count(&hands, "Go"), 1);
+    assert_eq!(
+        store
+            .workflow_artifacts(&run)
+            .unwrap()
+            .iter()
+            .filter(|row| row.name == "plan")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn a_decision_and_its_artifact_are_one_change_and_a_restart_does_not_write_it_again() {
+    let (_dir, store, run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    store
+        .record_workflow_approval(
+            &run,
+            "sign-off",
+            "changes_requested",
+            Some("split the migration"),
+            "ada",
+            None,
+        )
+        .unwrap();
+    tick_until(&store, &hands, StopAfter::AfterDecisionApplied);
+    assert_eq!(step(&store, &run, "sign-off").status, "failed");
+    assert_eq!(step(&store, &run, "next").status, "pending");
+    let saved = store.workflow_artifacts(&run).unwrap();
+    let changes: Vec<_> = saved
+        .iter()
+        .filter(|row| row.name == "changes-sign-off")
+        .collect();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].body, "split the migration");
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "next").status, "skipped");
+    assert_eq!(store.workflow_run(&run).unwrap().unwrap().status, "failed");
+    assert_eq!(notice_count(&hands, "Go"), 0);
+    tick(&store, &hands);
+    assert_eq!(
+        store
+            .workflow_artifacts(&run)
+            .unwrap()
+            .iter()
+            .filter(|row| row.name == "changes-sign-off")
+            .count(),
+        1
+    );
+    assert_eq!(notice_count(&hands, "Go"), 0);
+}
+
+#[test]
+fn a_crash_after_the_next_step_is_claimed_does_not_fire_it() {
+    let (_dir, store, run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    store
+        .record_workflow_approval(&run, "sign-off", "approved", Some("ship it"), "ada", None)
+        .unwrap();
+    tick_until(&store, &hands, StopAfter::AfterNextClaim);
+    assert_eq!(step(&store, &run, "next").status, "running");
+    assert_eq!(notice_count(&hands, "Go"), 0);
+    let outcome: serde_json::Value =
+        serde_json::from_str(step(&store, &run, "sign-off").outcome.unwrap().as_str()).unwrap();
+    assert_eq!(outcome["decision"], "approved");
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "next").status, "failed");
+    assert_eq!(
+        step(&store, &run, "next").note.as_deref(),
+        Some("Yardsort stopped while this step was running.")
+    );
+    assert_eq!(notice_count(&hands, "Go"), 0);
+    let kept: serde_json::Value =
+        serde_json::from_str(step(&store, &run, "sign-off").outcome.unwrap().as_str()).unwrap();
+    assert_eq!(kept["decision"], "approved");
+    assert_eq!(
+        store
+            .workflow_artifacts(&run)
+            .unwrap()
+            .iter()
+            .filter(|row| row.name == "plan")
+            .count(),
+        1
+    );
+    tick(&store, &hands);
+    assert_eq!(notice_count(&hands, "Go"), 0);
+}
+
+/// Remembers the notification body and whether the code was offered.
+struct CodeNotice {
+    sent: Mutex<Vec<(String, String)>>,
+    code: Mutex<Option<String>>,
+    show: bool,
+}
+
+impl Hands for CodeNotice {
+    fn start(&self, _: &str, _: HarnessRequest) -> Result<SessionInfo, String> {
+        unreachable!("this workflow starts no agent")
+    }
+
+    fn notify(&self, title: &str, body: Option<&str>) -> Result<(), String> {
+        self.sent
+            .lock()
+            .unwrap()
+            .push((title.to_owned(), body.unwrap_or("").to_owned()));
+        Ok(())
+    }
+
+    fn handoff(&self, _: &str) -> Option<String> {
+        None
+    }
+
+    fn pr_posts(&self, _: &str, _: &crate::workflow::runs::PrFacts) -> PrAsk {
+        unreachable!("this workflow waits on no pull request")
+    }
+
+    fn include_approval_code(&self) -> bool {
+        self.show
+    }
+
+    fn approval_code(&self, _: &str, _: &str, code: &str) {
+        *self.code.lock().unwrap() = Some(code.to_owned());
+    }
+}
+
+#[test]
+fn the_waiting_notice_can_leave_the_code_out() {
+    let (_dir, store, _run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
+    let hidden = CodeNotice {
+        sent: Mutex::new(Vec::new()),
+        code: Mutex::new(None),
+        show: false,
+    };
+    tick(&store, &hidden);
+    let body = hidden
+        .sent
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|notice| notice.0 == "Waiting for your approval")
+        .expect("told")
+        .1
+        .clone();
+    let code = hidden
+        .code
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("a code was issued");
+    assert!(body.contains("Open Yardsort for the code."));
+    assert!(!body.contains(&code));
+
+    let (_dir, store, _run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
+    let shown = CodeNotice {
+        sent: Mutex::new(Vec::new()),
+        code: Mutex::new(None),
+        show: true,
+    };
+    tick(&store, &shown);
+    let body = shown
+        .sent
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|notice| notice.0 == "Waiting for your approval")
+        .expect("told")
+        .1
+        .clone();
+    let code = shown
+        .code
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("a code was issued");
+    assert!(body.contains(&format!("Your code is {code}.")));
+    assert!(!body.contains("Open Yardsort for the code."));
+}

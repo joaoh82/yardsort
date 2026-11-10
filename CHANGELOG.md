@@ -5,6 +5,24 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **A workflow that is waiting on you stays waiting across a restart.** The run view
+  says `Blocked: waiting for your approval.` and what to do. The sidebar lists every
+  run waiting on you. `ys workflow runs` has a WAITING ON column, and `--run` and
+  `--json` say the same. A decision recorded while Yardsort was closed is applied
+  once when it opens again. A restart does not approve a gate, start a step twice,
+  send the waiting notification again, or write an artifact twice. The one-time code
+  lives only in memory, so opening the app replaces it and sends a new notification.
+  Listing a run does not. **Show a new code** in the window does, and sends one too.
+  Leave `--code` out and `ys` asks at the terminal without echoing, when you have a
+  real console. On Windows that is cmd, PowerShell, or Windows Terminal. Git Bash
+  and mintty use `--code -`. With no terminal, `ys` fails at once and tells you to
+  pass `--code -` and pipe the code in. `--code -` reads one line from standard
+  input. Passing the code on the command line warns, because it stays in shell
+  history and in the process list. Five wrong codes stay locked across a restart
+  until **Show a new code**. Settings → General can leave the code out of the
+  notification. That is the default on Linux, where other programs can read a
+  notification; the notice then says to open Yardsort for the code. A file written
+  before this still loads.
 - **A workflow can wait for your approval.** An `approve` step shows the artifacts it
   reads and waits for you to approve, reject, or request changes. The steps that need
   it do not start until you approve. A rejection stops the run, and it is not an
@@ -18,8 +36,7 @@ has the downloads and the full commit lists.
   writes the database directly is not stopped. A decision is recorded once, with who,
   when and the note, and one on a finished run is refused. Yardsort tells you when a
   run starts waiting, unless the schedule or trigger says `never`. A run that is
-  waiting when you quit is still waiting when you open it again. The code in that
-  notification works until the app shows a new one.
+  waiting when you quit is still waiting when you open it again.
   Waiting for a GitHub review is not this. A file written before this still loads.
   See [An approval](docs/guide/workflows.md#an-approval).
 - **A workflow step can hand a named document to the next step.** `produces` names what a step

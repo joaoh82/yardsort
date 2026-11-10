@@ -16,6 +16,7 @@ pub mod driver;
 pub mod engine;
 mod parse;
 pub mod runs;
+pub mod waits;
 
 /// Shared with smoke tests: `{{ variables }}` are written the same way in both.
 pub use crate::template;
@@ -61,6 +62,9 @@ pub fn approval_refusal(
         ApprovalWrite::WrongCode => "That code is not the one Yardsort showed you.".to_owned(),
         ApprovalWrite::CodeLocked => {
             "Too many wrong codes. Open Yardsort to be shown a new one.".to_owned()
+        }
+        ApprovalWrite::CodeUnusable => {
+            "That code cannot be checked. Open Yardsort to be shown a new one.".to_owned()
         }
     };
     Some(message)

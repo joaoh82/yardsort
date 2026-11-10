@@ -118,6 +118,7 @@ export function GeneralSettings() {
   const [editor, setEditor] = useState("");
   const [notify, setNotify] = useState(true);
   const [autoCheck, setAutoCheck] = useState(true);
+  const [codeInNotice, setCodeInNotice] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [levelError, setLevelError] = useState<string | null>(null);
   const [savingLevel, setSavingLevel] = useState(false);
@@ -128,6 +129,7 @@ export function GeneralSettings() {
     setEditor(next.editorCommand ?? "");
     setNotify(next.notifyWhenQuiet);
     setAutoCheck(next.checkForUpdates);
+    setCodeInNotice(next.approvalCodeInNotification);
     useAppStore.setState({
       notifyWhenQuiet: next.notifyWhenQuiet,
       checkForUpdates: next.checkForUpdates,
@@ -141,7 +143,8 @@ export function GeneralSettings() {
   const dirty =
     editor.trim() !== (info.editorCommand ?? "") ||
     notify !== info.notifyWhenQuiet ||
-    autoCheck !== info.checkForUpdates;
+    autoCheck !== info.checkForUpdates ||
+    codeInNotice !== info.approvalCodeInNotification;
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -152,6 +155,7 @@ export function GeneralSettings() {
           editorCommand: editor.trim() || null,
           notifyWhenQuiet: notify,
           checkForUpdates: autoCheck,
+          approvalCodeInNotification: codeInNotice,
         }),
       );
       setSaved(true);
@@ -213,6 +217,25 @@ export function GeneralSettings() {
           <span className="block text-ink-faint">
             A desktop notification when an agent that worked for a while goes quiet and Yardsort is
             not the window you are looking at.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={codeInNotice}
+          onChange={(e) => {
+            setCodeInNotice(e.target.checked);
+            setSaved(false);
+          }}
+          className="mt-0.5 accent-(--color-accent)"
+        />
+        <span>
+          Include the approval code in notifications
+          <span className="block text-ink-faint">
+            On by default on macOS and Windows. Off by default on Linux, because other programs can
+            read a notification. When this is off, the notification says to open Yardsort for the
+            code.
           </span>
         </span>
       </label>

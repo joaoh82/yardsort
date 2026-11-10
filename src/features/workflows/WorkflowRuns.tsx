@@ -77,6 +77,11 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                     {run.status}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{run.workspaceName}</span>
+                  {run.blockedOn && (
+                    <span className="shrink-0 text-[11px] text-amber-300">
+                      Blocked: waiting for {run.blockedOn}.
+                    </span>
+                  )}
                   {scheduled && (
                     <span
                       title={`Started by the schedule “${scheduled.scheduleName}”`}
@@ -109,6 +114,9 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                       <p className="mb-1.5 text-ink-muted">
                         Pull request #{run.pullRequest.number} {run.pullRequest.title}
                       </p>
+                    )}
+                    {run.blockedOn && (
+                      <p className="mb-1.5 text-amber-300">Blocked: waiting for {run.blockedOn}.</p>
                     )}
                     {run.error && (
                       <p className="mb-1.5 whitespace-pre-wrap text-red-400 select-text">
@@ -226,12 +234,35 @@ function ApprovalBox({
     }
   }
 
+  async function showCode() {
+    onError(null);
+    setBusy(true);
+    try {
+      await ipc.workflowShowApprovalCode(runId, step.stepId);
+      await onDone();
+    } catch (failed) {
+      onError(errorMessage(failed));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="mt-1 flex flex-col gap-1 pl-1">
-      <span className="text-[11px] text-ink-muted">Waiting for your approval</span>
+      <span className="text-[11px] text-amber-300">Blocked: waiting for your approval.</span>
+      <span className="text-[11px] text-ink-muted">Approve, reject, or request changes.</span>
       {step.approvalCode ? (
         <span className="text-[11px] text-ink select-text">
           Code {step.approvalCode}. A terminal needs this. This window does not.
+        </span>
+      ) : (
+        <span className="text-[11px] text-ink-muted">
+          The code is not in this window yet. Show a new code to use a terminal.
+        </span>
+      )}
+      {step.approvalLocked ? (
+        <span className="text-[11px] text-ink-muted">
+          Too many wrong codes. Show a new code to use a terminal again.
         </span>
       ) : null}
       {consumed.map((artifact) => (
@@ -277,6 +308,14 @@ function ApprovalBox({
           onClick={() => void decide("changes_requested")}
         >
           Request changes
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          onClick={() => void showCode()}
+        >
+          Show a new code
         </button>
       </span>
     </div>

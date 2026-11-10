@@ -6,6 +6,7 @@ import {
   type WorkflowItem,
   type WorkflowRun,
   type WorkflowStepRun,
+  type WorkflowWait,
 } from "@/lib/ipc";
 
 /** The id the view uses for a workflow not saved yet. */
@@ -14,6 +15,8 @@ export const NEW_WORKFLOW = ":new";
 interface WorkflowsState {
   /** Every workflow, built in and the user's, as the core lists them. */
   items: WorkflowItem[];
+  /** Runs waiting on the person, across every workflow. */
+  waits: WorkflowWait[];
   loaded: boolean;
   /** Runs of each workflow whose runs were asked for, newest first. */
   runs: Record<string, WorkflowRun[] | undefined>;
@@ -49,6 +52,7 @@ interface WorkflowsState {
 
 export const useWorkflowStore = create<WorkflowsState>((set, get) => ({
   items: [],
+  waits: [],
   loaded: false,
   runs: {},
   steps: {},
@@ -60,7 +64,8 @@ export const useWorkflowStore = create<WorkflowsState>((set, get) => ({
   async load() {
     if (!hasCore()) return;
     try {
-      set({ items: await ipc.workflowList(), loaded: true });
+      const [items, waits] = await Promise.all([ipc.workflowList(), ipc.workflowWaits()]);
+      set({ items, waits, loaded: true });
     } catch (error) {
       set({ error: errorMessage(error), loaded: true });
     }
@@ -89,7 +94,7 @@ export const useWorkflowStore = create<WorkflowsState>((set, get) => ({
   async refresh() {
     const { loaded, runs, steps, load, loadRuns, loadSteps } = get();
     await Promise.all([
-      loaded ? load() : Promise.resolve(),
+      loaded ? load() : ipc.workflowWaits().then((waits) => set({ waits })),
       ...Object.keys(runs).map((id) => loadRuns(id)),
       ...Object.keys(steps).map((id) => loadSteps(id)),
     ]);
