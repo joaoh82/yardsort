@@ -213,6 +213,13 @@ impl Run {
                 }
                 self.world.approvals.remove(id);
             }
+            let reset: std::collections::BTreeSet<&str> =
+                steps.iter().map(String::as_str).collect();
+            // A note from an earlier pass must not be handed out again. The version a
+            // real run keeps is the store's; this map is only the body a consumer reads.
+            self.world.artifacts.retain(|name, _| {
+                crate::workflow::artifact::feedback_step(name).is_none_or(|id| !reset.contains(id))
+            });
             if let Some(copy) = feedback {
                 self.world.artifacts.insert(copy.name, copy.body);
             }
@@ -247,6 +254,11 @@ impl Run {
             row.outcome = None;
         } else if let Some(outcome) = &change.outcome {
             row.outcome = Some(outcome.clone());
+        }
+        if let Some(copy) = &change.feedback {
+            self.world
+                .artifacts
+                .insert(copy.name.clone(), copy.body.clone());
         }
         true
     }
@@ -1912,4 +1924,264 @@ fn a_failed_verification_returns_to_implementation_and_keeps_the_approval() {
         .get("failure-verify")
         .is_some_and(|body| body.contains("the button is missing")));
     assert!(run.finished.is_none());
+}
+
+#[test]
+fn a_forward_failure_hands_the_report_to_the_next_step() {
+    let source = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: verify
+    action: run_test
+    test: login
+    on:
+      passed: stop
+      failed: report
+  - id: report
+    needs: [verify]
+    action: start_session
+    harness: claude
+    consumes: [failure-verify]
+"#;
+    let mut run = Run::from(source);
+    run.advance();
+    assert!(run.apply(&queued(
+        "verify",
+        &Outputs::from([("run".to_owned(), "tr-1".to_owned())])
+    )));
+    run.world.test_runs.insert(
+        "tr-1".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "login: the button is missing".into(),
+        },
+    );
+    let effects = run.advance();
+    assert_eq!(run.status("verify"), "succeeded");
+    assert_eq!(run.status("report"), "running");
+    let prompt = effects.iter().find_map(|effect| match effect {
+        Effect::Start { step, prompt, .. } if step == "report" => prompt.clone(),
+        _ => None,
+    });
+    assert!(
+        prompt.as_deref().unwrap().contains("the button is missing"),
+        "the next step was started without the report: {prompt:?}"
+    );
+    assert!(run
+        .world
+        .artifacts
+        .get("failure-verify")
+        .is_some_and(|body| body.contains("the button is missing")));
+}
+
+#[test]
+fn an_earlier_failure_is_not_handed_out_after_a_later_rewind() {
+    let source = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: plan
+    action: notify
+    title: Plan
+  - id: implement
+    needs: [plan]
+    action: start_session
+    harness: claude
+    consumes: [failure-verify]
+  - id: verify
+    needs: [implement]
+    action: run_test
+    test: login
+    on:
+      passed: sign-off
+      failed: implement
+    max_attempts: 3
+  - id: sign-off
+    needs: [verify]
+    action: approve
+    prompt: Look
+    on:
+      approved: stop
+      rejected: stop
+      changes_requested: plan
+    max_attempts: 3
+"#;
+    let mut run = Run::from(source);
+    run.advance();
+    finish_notify(&mut run, "plan");
+    run.advance();
+    finish_notify(&mut run, "implement");
+    run.advance();
+    assert!(run.apply(&queued(
+        "verify",
+        &Outputs::from([("run".to_owned(), "tr-1".to_owned())])
+    )));
+    run.world.test_runs.insert(
+        "tr-1".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "login: the button is missing".into(),
+        },
+    );
+    run.advance();
+    assert!(run
+        .world
+        .artifacts
+        .get("failure-verify")
+        .is_some_and(|body| body.contains("the button is missing")));
+    let again = run.advance();
+    let prompt = again.iter().find_map(|effect| match effect {
+        Effect::Start { step, prompt, .. } if step == "implement" => prompt.clone(),
+        _ => None,
+    });
+    assert!(
+        prompt.as_deref().unwrap().contains("the button is missing"),
+        "the step being run again should still see this failure: {prompt:?}"
+    );
+    finish_notify(&mut run, "implement");
+    run.advance();
+    assert!(run.apply(&queued(
+        "verify",
+        &Outputs::from([("run".to_owned(), "tr-2".to_owned())])
+    )));
+    run.world.test_runs.insert(
+        "tr-2".into(),
+        TestRun {
+            status: "passed".into(),
+            summary: "ok".into(),
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("sign-off"), "waiting");
+    run.world.approvals.insert(
+        "sign-off".into(),
+        decided(ApprovalDecision::ChangesRequested, Some("rename it")),
+    );
+    run.advance();
+    assert!(
+        !run.world.artifacts.contains_key("failure-verify"),
+        "the old report was handed out again: {:?}",
+        run.world.artifacts
+    );
+    assert_eq!(
+        run.world
+            .artifacts
+            .get("changes-sign-off")
+            .map(String::as_str),
+        Some("rename it")
+    );
+    run.advance();
+    finish_notify(&mut run, "plan");
+    let restarted = run.advance();
+    let prompt = restarted.iter().find_map(|effect| match effect {
+        Effect::Start { step, prompt, .. } if step == "implement" => prompt.clone(),
+        _ => None,
+    });
+    assert!(
+        prompt
+            .as_deref()
+            .is_none_or(|text| !text.contains("the button is missing")),
+        "implement was given the old report: {prompt:?}"
+    );
+}
+
+#[test]
+fn two_parallel_verdicts_do_not_rewind_when_the_run_halts() {
+    let source = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: prep
+    action: notify
+    title: Prep
+  - id: left
+    needs: [prep]
+    action: run_test
+    test: left
+    on:
+      passed: stop
+      failed: stop
+  - id: right
+    needs: [prep]
+    action: run_test
+    test: right
+    on:
+      passed: stop
+      failed: prep
+    max_attempts: 3
+"#;
+    let mut halted = Run::from(source);
+    halted.advance();
+    finish_notify(&mut halted, "prep");
+    halted.advance();
+    assert!(halted.apply(&queued(
+        "left",
+        &Outputs::from([("run".to_owned(), "left-run".to_owned())])
+    )));
+    assert!(halted.apply(&queued(
+        "right",
+        &Outputs::from([("run".to_owned(), "right-run".to_owned())])
+    )));
+    halted.world.test_runs.insert(
+        "left-run".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "left broke".into(),
+        },
+    );
+    halted.world.test_runs.insert(
+        "right-run".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "right broke".into(),
+        },
+    );
+    halted.advance();
+    assert_eq!(halted.status("left"), "failed");
+    assert_eq!(halted.status("right"), "skipped");
+    assert_eq!(halted.status("prep"), "succeeded");
+    assert_eq!(attempts(&halted, "prep"), 1);
+    assert!(matches!(halted.finished, Some(Finish::Failed(_))));
+    assert!(halted.rows.iter().all(|row| row.status != "pending"));
+
+    let mut stopped = Run::from(source);
+    stopped.advance();
+    finish_notify(&mut stopped, "prep");
+    stopped.advance();
+    assert!(stopped.apply(&queued(
+        "left",
+        &Outputs::from([("run".to_owned(), "left-run".to_owned())])
+    )));
+    assert!(stopped.apply(&queued(
+        "right",
+        &Outputs::from([("run".to_owned(), "right-run".to_owned())])
+    )));
+    stopped.world.test_runs.insert(
+        "left-run".into(),
+        TestRun {
+            status: "passed".into(),
+            summary: "ok".into(),
+        },
+    );
+    stopped.world.test_runs.insert(
+        "right-run".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "right broke".into(),
+        },
+    );
+    stopped.advance();
+    assert_eq!(stopped.status("left"), "succeeded");
+    assert_eq!(stopped.status("right"), "skipped");
+    assert_eq!(stopped.status("prep"), "succeeded");
+    assert_eq!(attempts(&stopped, "prep"), 1);
+    assert!(matches!(stopped.finished, Some(Finish::Succeeded)));
+    assert!(stopped.rows.iter().all(|row| row.status != "pending"));
 }

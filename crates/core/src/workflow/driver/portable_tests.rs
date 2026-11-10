@@ -2075,3 +2075,185 @@ fn the_waiting_notice_can_leave_the_code_out() {
     assert!(body.contains(&format!("Your code is {code}.")));
     assert!(!body.contains("Open Yardsort for the code."));
 }
+
+/// Remembers every one-time code the driver issues, in order.
+struct Codes {
+    sent: Mutex<Vec<String>>,
+    codes: Mutex<Vec<String>>,
+}
+
+impl Hands for Codes {
+    fn start(&self, _: &str, _: HarnessRequest) -> Result<SessionInfo, String> {
+        unreachable!("this workflow starts no agent")
+    }
+
+    fn notify(&self, title: &str, _: Option<&str>) -> Result<(), String> {
+        self.sent.lock().unwrap().push(title.to_owned());
+        Ok(())
+    }
+
+    fn handoff(&self, _: &str) -> Option<String> {
+        None
+    }
+
+    fn pr_posts(&self, _: &str, _: &crate::workflow::runs::PrFacts) -> PrAsk {
+        unreachable!("this workflow waits on no pull request")
+    }
+
+    fn approval_code(&self, _: &str, _: &str, code: &str) {
+        self.codes.lock().unwrap().push(code.to_owned());
+    }
+}
+
+const LOOP_APPROVAL: &str = r#"id: loop
+name: Loop
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: plan
+    action: notify
+    title: Plan
+  - id: sign-off
+    needs: [plan]
+    action: approve
+    prompt: Look again.
+    on:
+      approved: done
+      rejected: stop
+      changes_requested: plan
+    max_attempts: 3
+  - id: done
+    needs: [sign-off]
+    action: notify
+    title: Done
+"#;
+
+#[test]
+fn a_loop_through_an_approval_needs_a_new_code_and_applies_the_rewind_once() {
+    let (_dir, store, run, _worktree) = queue_folder(LOOP_APPROVAL, "loop", &BTreeMap::new());
+    let hands = Codes {
+        sent: Mutex::new(Vec::new()),
+        codes: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "sign-off").status, "waiting");
+    assert_eq!(step(&store, &run, "sign-off").attempts, 1);
+    let first = hands.codes.lock().unwrap()[0].clone();
+    assert_eq!(
+        crate::workflow::waits::decide_with_code(
+            &store,
+            &run,
+            "sign-off",
+            "changes_requested",
+            Some("split the migration"),
+            "ada",
+            &first,
+        )
+        .unwrap(),
+        crate::store::ApprovalWrite::Recorded
+    );
+
+    // The plan exists and the decision is stored. The process dies before the rewind is applied.
+    tick_until(&store, &hands, StopAfter::BeforeRewindApplied);
+    assert_eq!(step(&store, &run, "sign-off").status, "waiting");
+    assert_eq!(step(&store, &run, "plan").status, "succeeded");
+    assert_eq!(step(&store, &run, "sign-off").attempts, 1);
+    assert!(store.workflow_approval(&run, "sign-off").unwrap().is_some());
+    assert!(store.workflow_artifacts(&run).unwrap().is_empty());
+
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "plan").status, "pending");
+    assert_eq!(step(&store, &run, "sign-off").status, "pending");
+    assert_eq!(step(&store, &run, "sign-off").attempts, 1);
+    assert!(store.workflow_approval(&run, "sign-off").unwrap().is_none());
+    let saved = store.workflow_artifacts(&run).unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].name, "changes-sign-off");
+    assert_eq!(saved[0].body, "split the migration");
+    let history = store.archived_approvals(&run, "sign-off").unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].decision, "changes_requested");
+    assert_eq!(history[0].actor, "ada");
+    assert_eq!(history[0].feedback.as_deref(), Some("split the migration"));
+
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "plan").status, "succeeded");
+    assert_eq!(step(&store, &run, "sign-off").status, "waiting");
+    assert_eq!(step(&store, &run, "sign-off").attempts, 2);
+    assert_eq!(hands.codes.lock().unwrap().len(), 2);
+    let second = hands.codes.lock().unwrap()[1].clone();
+    assert_ne!(first, second);
+    assert_eq!(
+        store.archived_approvals(&run, "sign-off").unwrap().len(),
+        1,
+        "the rewind was applied again"
+    );
+    assert_eq!(
+        crate::workflow::waits::decide_with_code(
+            &store, &run, "sign-off", "approved", None, "ada", &first,
+        )
+        .unwrap(),
+        crate::store::ApprovalWrite::WrongCode
+    );
+    assert_eq!(
+        crate::workflow::waits::decide_with_code(
+            &store, &run, "sign-off", "approved", None, "ada", &second,
+        )
+        .unwrap(),
+        crate::store::ApprovalWrite::Recorded
+    );
+}
+
+#[test]
+fn a_rewind_cancels_the_smoke_test_a_parallel_step_is_still_running() {
+    let yaml = r#"id: gate
+name: Gate
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: implement
+    action: notify
+    title: Build
+  - id: verify
+    needs: [implement]
+    action: run_test
+    test: demo
+    on:
+      passed: stop
+      failed: implement
+    max_attempts: 3
+  - id: side
+    needs: [implement]
+    action: run_test
+    test: other
+"#;
+    let (dir, store, run, _, _) = queued_workflow(yaml);
+    std::fs::write(
+        crate::smoke::dir(&dir.path().join("wt")).join("other.yaml"),
+        OTHER_SMOKE,
+    )
+    .unwrap();
+    let hands = Told {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    let verify_run = step_test_id(&store, &run, "verify");
+    let side_run = step_test_id(&store, &run, "side");
+    finish_one(&store, &verify_run, "failed", Some("the button is missing"));
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "implement").status, "pending");
+    assert_eq!(step(&store, &run, "side").status, "pending");
+    assert_eq!(step(&store, &run, "verify").status, "pending");
+    let cancelled = store.test_run(&side_run).unwrap().unwrap();
+    assert_eq!(cancelled.status, "cancelled");
+    assert_eq!(
+        cancelled.error.as_deref(),
+        Some("The workflow is running this step again.")
+    );
+    assert_eq!(
+        store.test_run(&verify_run).unwrap().unwrap().status,
+        "failed"
+    );
+}

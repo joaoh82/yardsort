@@ -296,6 +296,13 @@ fn step_ids_are_names_and_unique() {
         found.starts_with("12:9: `Start` cannot be a step's id."),
         "{found}"
     );
+    let reserved = problem(&with_steps(
+        "  - id: stop\n    action: notify\n    title: Hi\n",
+    ));
+    assert!(
+        reserved.contains("`stop` cannot be a step's id"),
+        "{reserved}"
+    );
     let found = problem(&with_steps(
         "  - id: start\n    action: notify\n    title: Hi\n",
     ));
@@ -1326,6 +1333,40 @@ fn a_branch_must_name_every_outcome_and_only_those() {
     assert!(
         notify.contains("`on` is not something a `notify` step takes"),
         "{notify}"
+    );
+}
+
+#[test]
+fn a_forward_failure_may_be_consumed() {
+    let source = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: verify
+    action: run_test
+    test: login
+    on:
+      passed: stop
+      failed: report
+  - id: report
+    needs: [verify]
+    action: notify
+    title: Report
+    consumes: [failure-verify]
+"#;
+    let workflow = parse(source).unwrap();
+    assert_eq!(
+        workflow.steps[1].consumes,
+        vec!["failure-verify".to_owned()]
+    );
+    let refused = problems(&source.replace("failed: report", "failed: stop"));
+    assert!(
+        refused.iter().any(|line| line.contains(
+            "Step `verify` does not route `failed` back to `report`, so `failure-verify` is never written"
+        )),
+        "{refused:?}"
     );
 }
 

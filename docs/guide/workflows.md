@@ -398,7 +398,8 @@ step id or `stop`. Yardsort does not branch on the text of a note or a report.
 
 `approved` goes on to `implement`. `changes_requested` runs `plan` again and gives it the
 note as `changes-sign-off`. `rejected` stops the run. A failed `verify` runs `implement`
-again and gives it `failure-verify`, the report. A pass goes on to `ship`.
+again and gives it `failure-verify`, the report. A failed route that goes forward leaves
+`failure-<step>` for the step it goes to. A pass goes on to `ship`.
 
 Leave `on` out and the step behaves as before: a failed gate stops the run, and a success
 lets every step that needs this one start.
@@ -409,8 +410,9 @@ that needs this one, or an earlier step this one needs, or `stop`. A step that n
 can reach is refused when the file is checked, and so is a loop with no `max_attempts`.
 
 `max_attempts` counts every entry, including the first. It is at least 2 and at most 10.
-The count is stored on the step. Quitting and opening Yardsort again does not add one
-and does not start the count over. When the limit is reached the run stops, names the
+The count is stored on the step. An inner loop's `max_attempts` counts entries across
+outer loops, because the count is never reset. Quitting and opening Yardsort again does
+not add one and does not start the count over. When the limit is reached the run stops, names the
 outcome and the limit, and says to start a new run. You see that on the run in the app
 and in `ys workflow runs`.
 

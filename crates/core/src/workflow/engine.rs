@@ -210,6 +210,9 @@ pub struct Move {
     /// Set these steps back to pending. Applied once, and only while this step's attempt
     /// count is still `seen`.
     pub rewind: Option<Rewind>,
+    /// A note this step leaves for a later step, on a route that does not loop. A loop
+    /// carries its note on [`Rewind::feedback`] instead, in the same change as the rewind.
+    pub feedback: Option<FeedbackCopy>,
 }
 
 /// A loop back to an earlier step. The driver applies it in one change.
@@ -335,6 +338,9 @@ pub fn advance(
             Some((row.step_id.clone(), parsed))
         })
         .collect();
+    // Notes a forward route leaves during this plan. A later step in the same plan reads
+    // them. The driver stores the same note when it applies the move.
+    let mut handed: BTreeMap<String, String> = BTreeMap::new();
 
     // Steps are visited in file order until a pass changes nothing, which is at most one pass
     // per step: a step can only be unblocked by one before it in the graph. A loop stops the
@@ -347,7 +353,16 @@ pub fn advance(
             let Some(&current) = status.get(id) else {
                 continue;
             };
-            let lookup = |path: &[String]| value(path, inputs, &outputs, world);
+            let lookup = |path: &[String]| {
+                if let [namespace, name] = path {
+                    if namespace == "artifacts" {
+                        if let Some(body) = handed.get(name) {
+                            return Some(body.clone());
+                        }
+                    }
+                }
+                value(path, inputs, &outputs, world)
+            };
             let session_of = |reference: &SessionRef| match reference {
                 SessionRef::Step(from) => outputs
                     .get(from.as_str())
@@ -417,6 +432,11 @@ pub fn advance(
             };
             if let Some(change) = moved {
                 let change = hold_for_artifacts(step, change, &mut plan.effects);
+                if change.rewind.is_none() {
+                    if let Some(copy) = &change.feedback {
+                        handed.insert(copy.name.clone(), copy.body.clone());
+                    }
+                }
                 if change.rewind.is_some() {
                     if let Some(text) = change.outcome.as_deref() {
                         if let Ok(parsed) = serde_json::from_str(text) {
@@ -539,6 +559,11 @@ fn halt_the_run(plan: &mut Plan, workflow: &Workflow, status: &mut BTreeMap<&str
             existing.outcome = None;
             existing.clear_outcome = true;
             existing.halt = false;
+            // A rewind or a `stop` on this same move must not still be applied. The run is
+            // ending, and sending steps back to pending would leave them unfinished.
+            existing.rewind = None;
+            existing.stop = false;
+            existing.feedback = None;
         } else {
             plan.moves.push(skip(id, current, &why));
         }
@@ -634,6 +659,7 @@ pub fn recover(rows: &[WorkflowStepRow]) -> Vec<Move> {
                     keep_decision: false,
                     stop: false,
                     rewind: None,
+                    feedback: None,
                 };
             }
             Move {
@@ -648,6 +674,7 @@ pub fn recover(rows: &[WorkflowStepRow]) -> Vec<Move> {
                 keep_decision: false,
                 stop: false,
                 rewind: None,
+                feedback: None,
             }
         })
         .collect()
@@ -695,6 +722,7 @@ pub fn react(
         keep_decision: false,
         stop: false,
         rewind: None,
+        feedback: None,
     }
 }
 
@@ -728,6 +756,7 @@ pub fn recorded(
         keep_decision: false,
         stop: false,
         rewind: None,
+        feedback: None,
     }
 }
 
@@ -745,6 +774,7 @@ pub fn done(step: &str, outputs: &Outputs) -> Move {
         keep_decision: false,
         stop: false,
         rewind: None,
+        feedback: None,
     }
 }
 
@@ -763,6 +793,7 @@ pub fn queued(step: &str, outputs: &Outputs) -> Move {
         keep_decision: false,
         stop: false,
         rewind: None,
+        feedback: None,
     }
 }
 
@@ -780,6 +811,7 @@ pub fn skipped(step: &str, why: &str) -> Move {
         keep_decision: false,
         stop: false,
         rewind: None,
+        feedback: None,
     }
 }
 
@@ -805,6 +837,7 @@ pub fn still_reading(
         keep_decision: false,
         stop: false,
         rewind: None,
+        feedback: None,
     }
 }
 
@@ -823,6 +856,7 @@ pub fn not_yet(step: &str) -> Move {
         keep_decision: false,
         stop: false,
         rewind: None,
+        feedback: None,
     }
 }
 
@@ -840,6 +874,7 @@ pub fn failed(step: &str, why: &str) -> Move {
         keep_decision: false,
         stop: false,
         rewind: None,
+        feedback: None,
     }
 }
 
@@ -1237,6 +1272,7 @@ fn resume_capture(
         keep_decision: false,
         stop: false,
         rewind: None,
+        feedback: None,
     }
 }
 
@@ -1353,7 +1389,10 @@ fn route_judged(
     if !back {
         // A later step was chosen. Succeed this one even when the verdict failed, so the
         // chosen step's needs are met. The outcome stays, and that is what the branch reads.
-        return react(&step.id, from, false, outcome, outputs, note);
+        // A failed verdict or a request for changes leaves its note for that step.
+        let mut change = react(&step.id, from, false, outcome, outputs, note);
+        change.feedback = feedback_copy(&step.id, when, outcome);
+        return change;
     }
     let seen = rows
         .iter()
@@ -1387,6 +1426,7 @@ fn route_judged(
             seen,
             feedback: feedback_copy(&step.id, when, outcome),
         }),
+        feedback: None,
     }
 }
 
@@ -1490,6 +1530,7 @@ fn to(step: &str, from: StepStatus, to: StepStatus) -> Move {
         keep_decision: false,
         stop: false,
         rewind: None,
+        feedback: None,
     }
 }
 

@@ -473,7 +473,12 @@ impl Checker<'_> {
         let mut first_line: HashMap<&str, u64> = HashMap::new();
         for step in &raw.value {
             let id = &step.id.value;
-            if !is_name(id) {
+            if id == "stop" {
+                self.problem(
+                    &step.id.referenced,
+                    "`stop` cannot be a step's id. It means the branch ends.",
+                );
+            } else if !is_name(id) {
                 self.problem(
                     &step.id.referenced,
                     format!(

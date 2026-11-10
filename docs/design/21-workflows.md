@@ -772,10 +772,12 @@ still halts the run and a success lets every step that needs this one start.
 An `approve` step must name `approved`, `rejected` and `changes_requested`. A `run_test`
 step must name `passed` and `failed`. Any other action refuses `on` and `max_attempts`.
 A target must be a later step that needs this one, or an earlier step this one needs,
-or this step itself, or `stop`. A target that is neither is a parse error, and so is a
+or this step itself, or `stop`. A step cannot be named `stop`, because that word means
+the branch ends. A target that is neither is a parse error, and so is a
 step that no path from the start can reach. A route back needs `max_attempts`, from 2
 to 10, counting the first entry. Above 10 is a parse error. Setting it when nothing
-loops is a parse error too. The engine also stops at 10.
+loops is a parse error too. The engine also stops at 10. An inner loop's `max_attempts`
+counts entries across outer loops, because `attempts` is never reset.
 
 `stop` on a failed verdict halts the run. `stop` on a passed verdict skips steps that
 have not finished and ends the run succeeded. A route to a later step succeeds this
@@ -796,18 +798,25 @@ error names the outcome and the limit, and says to start a new run. `ys workflow
 prints that line after the table. The runs list in the app shows it on the failed row.
 
 The feedback goes to the step being run again as a named artifact. A request for
-changes writes `changes-<step>`, source `decision`. A failed verdict that loops writes
-`failure-<step>`, source `verdict`. A later step may `consumes` that name only when
-the producer routes that outcome back onto a set that includes the consumer. The
-first pass has no body yet, and the handoff skips a missing artifact. Each attempt's
-body is kept in `workflow_artifact_versions`. The row in `workflow_artifacts` is the
-latest, which is what a consumer reads. A later attempt does not replace an older
-body. The same attempt stored again leaves the first version and updates the latest.
+changes writes `changes-<step>`, source `decision`. A failed verdict writes
+`failure-<step>`, source `verdict`, whether the route goes back or forward to a later
+step. A later step may `consumes` that name only when the producer routes that outcome
+onto a set that includes the consumer. The first pass has no body yet, and the handoff
+skips a missing artifact. Each attempt's body is kept in `workflow_artifact_versions`.
+The row in `workflow_artifacts` is the latest, which is what a consumer reads. A later
+attempt does not replace an older body. The same attempt stored again updates that
+version, so it matches the body that was used. A rewind drops the current `changes-*`
+and `failure-*` rows of the steps it runs again, after copying them into the version
+table, so an earlier loop's note is not handed out on the next pass.
 
 Looping back deletes the approval decision and the wait for every step that runs
-again. The next pass through an approval waits, issues a new one-time code, and
-needs a new decision. An old decision is not applied again. The checks that refuse
-a session Yardsort started, and the Floor Manager, still apply on that new decision.
+again, after copying the actor, the time and the decision into
+`workflow_approval_history` (migration `0034`, index 33). The next pass through an
+approval waits, issues a new one-time code, and needs a new decision. An old decision
+is not applied again. The checks that refuse a session Yardsort started, and the Floor
+Manager, still apply on that new decision. A rewind is not applied when the same plan
+is already halting or stopping the run, so those steps are skipped rather than sent
+back to pending. A `run_test` step that rewind sends back has its smoke test cancelled.
 
 A file with no `on` still loads, and a run queued from it keeps today's behaviour.
 

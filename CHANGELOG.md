@@ -13,8 +13,12 @@ has the downloads and the full commit lists.
   10, including the first try. At the limit the run stops, says why, and says to start a
   new run. You see that in `ys workflow runs` and on the run in the app. Each pass through
   an approval waits again and needs a new code and a new decision. The note or the failed
-  report is an artifact the step being run again can read, and each attempt is kept. The
-  count survives a restart and is not increased twice. A file with no `on` still loads.
+  report is an artifact the step being run again can read, and each attempt is kept. A
+  failed route that goes forward leaves that report for the step it goes to as well. An
+  earlier loop's note is not handed out again when a later loop runs those steps. A step
+  cannot be named `stop`. A rewind is not applied when the run is already stopping, and a
+  smoke test still running on a step that is sent back is cancelled. The count survives a
+  restart and is not increased twice. A file with no `on` still loads.
   See [Conditional paths](docs/guide/workflows.md#conditional-paths).
 - **A workflow that is waiting on you stays waiting across a restart.** The run view
   says `Blocked: waiting for your approval.` and what to do. The sidebar lists every
