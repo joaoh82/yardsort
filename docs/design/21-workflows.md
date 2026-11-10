@@ -137,7 +137,7 @@ branch, in the first built-in.
 | `version`     | The schema version, `1`. A file with a higher version than the app knows is listed, not runnable                                                                                                                                                                                                                       |
 | `trigger`     | `kind: manual` only in v1; `context: workspace`, the default, says what the run is about and which variables exist. `context: tracked_pull_request` (since [38 § slice 5](38-pull-requests-elsewhere.md#slice-5-what-shipped)) is a run about a pull request a workspace tracks in another repository, started from it |
 | `inputs[]`    | `id`, `kind` (`harness`, `text`, `choice` with `options`), `label`, `required` (default `false`), `default`. Collected before the run starts, in the app or as `--input`                                                                                                                                               |
-| `steps[]`     | `id`, `action`, `needs` (step ids), then the action's own keys. An `approve` or `run_test` step may set `on` and `max_attempts`. See [Conditional paths](#conditional-paths). A step id is `[a-z0-9_-]+`                                                                                                                    |
+| `steps[]`     | `id`, `action`, `needs` (step ids), then the action's own keys. An `approve` or `run_test` step may set `on` and `max_attempts`. See [Conditional paths](#conditional-paths). A step id is `[a-z0-9_-]+`                                                                                                               |
 
 ### Actions in v1
 

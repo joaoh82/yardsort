@@ -25,9 +25,7 @@ export interface Link {
  * A route to a later step is drawn too, when `needs` does not already. A route back to an
  * earlier step is drawn, and is not given to the layout, which cannot place a cycle.
  */
-export function layoutSteps(
-  steps: { id: string; needs: string[]; routes?: { to: string }[] }[],
-): {
+export function layoutSteps(steps: { id: string; needs: string[]; routes?: { to: string }[] }[]): {
   nodes: Placed[];
   links: Link[];
 } {
@@ -66,9 +64,7 @@ export function layoutSteps(
 }
 
 /** What each step needs, including through other steps. */
-function ancestorIds(
-  steps: { id: string; needs: string[] }[],
-): Map<string, Set<string>> {
+function ancestorIds(steps: { id: string; needs: string[] }[]): Map<string, Set<string>> {
   const needs = new Map(steps.map((step) => [step.id, step.needs]));
   const found = new Map<string, Set<string>>();
   function visit(id: string, stack: Set<string>): Set<string> {

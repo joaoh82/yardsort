@@ -376,24 +376,24 @@ and `run_test`. The keys are the outcomes that step can produce, and each value 
 step id or `stop`. Yardsort does not branch on the text of a note or a report.
 
 ```yaml
-  - id: sign-off
-    needs: [plan]
-    action: approve
-    prompt: Look at the plan.
-    on:
-      approved: implement
-      changes_requested: plan
-      rejected: stop
-    max_attempts: 3
-  - id: verify
-    needs: [implement]
-    action: run_test
-    test: "{{ inputs.check }}"
-    gate: true
-    on:
-      passed: ship
-      failed: implement
-    max_attempts: 3
+- id: sign-off
+  needs: [plan]
+  action: approve
+  prompt: Look at the plan.
+  on:
+    approved: implement
+    changes_requested: plan
+    rejected: stop
+  max_attempts: 3
+- id: verify
+  needs: [implement]
+  action: run_test
+  test: "{{ inputs.check }}"
+  gate: true
+  on:
+    passed: ship
+    failed: implement
+  max_attempts: 3
 ```
 
 `approved` goes on to `implement`. `changes_requested` runs `plan` again and gives it the

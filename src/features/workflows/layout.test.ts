@@ -42,11 +42,7 @@ describe("layoutSteps", () => {
       {
         id: "sign-off",
         needs: ["plan"],
-        routes: [
-          { to: "implement" },
-          { to: "plan" },
-          { to: "stop" },
-        ],
+        routes: [{ to: "implement" }, { to: "plan" }, { to: "stop" }],
       },
       { id: "implement", needs: ["sign-off"] },
     ]);
