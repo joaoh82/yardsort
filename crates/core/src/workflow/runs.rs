@@ -35,6 +35,25 @@ pub trait Look {
     ) -> Result<Option<crate::forge::PrLook>, String> {
         Err("Pull requests are not watched from here.".to_owned())
     }
+    /// A pull request the workspace tracks in another repository, as a trigger watches it: read
+    /// by its link.
+    fn watch_tracked_pull_request(
+        &self,
+        _workspace: &WorkspaceRow,
+        _tracked: &crate::store::TrackedPullRequestRow,
+    ) -> Result<crate::forge::PrLook, String> {
+        Err("Pull requests are not watched from here.".to_owned())
+    }
+    /// A pull request the workspace tracks in another repository, as a run about it
+    /// ([`Request::tracked`]) needs it: read now by its link, and open, with where it is. What
+    /// a trigger asks for before it starts such a run.
+    fn tracked_pull_request(
+        &self,
+        _workspace: &WorkspaceRow,
+        _tracked: &crate::store::TrackedPullRequestRow,
+    ) -> Result<PrFacts, String> {
+        Err("Pull requests in other repositories are not read from here.".to_owned())
+    }
 }
 
 /// What a run found out about where it runs, kept with it (`workflow_runs.context`). A run's

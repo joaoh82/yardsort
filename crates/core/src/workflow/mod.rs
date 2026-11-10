@@ -266,6 +266,10 @@ pub const BUILT_IN: &[(&str, &str)] = &[
         "address-review",
         include_str!("builtin/address-review.yaml"),
     ),
+    (
+        "address-review-elsewhere",
+        include_str!("builtin/address-review-elsewhere.yaml"),
+    ),
     ("fix-checks", include_str!("builtin/fix-checks.yaml")),
     ("review-branch", include_str!("builtin/review-branch.yaml")),
 ];

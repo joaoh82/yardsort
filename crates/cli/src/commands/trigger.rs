@@ -656,6 +656,8 @@ fn add(ys: &Yardsort, asked: Add, out: &Output) -> Result<(), Failure> {
             .collect(),
         no_bots: asked.no_bots,
         names,
+        // Set from the workflow when the trigger is saved.
+        elsewhere: false,
     };
     let quiet = match asked.quiet.as_deref() {
         Some(text) => quiet_ms(text)?,
@@ -697,10 +699,16 @@ fn add(ys: &Yardsort, asked: Add, out: &Output) -> Result<(), Failure> {
             .sessions(&workspace.id)?
             .iter()
             .any(|session| session.running);
-    let watch = if events.iter().any(|event| event.of_a_pull_request()) {
+    let elsewhere = trigger::Filters::parse(&row.filters).elsewhere;
+    let watch = if events.iter().any(|event| event.of_a_pull_request()) && !elsewhere {
         ys.store.pr_watch(&workspace.id)?
     } else {
         None
+    };
+    let tracked = if elsewhere {
+        ys.store.tracked_pull_requests(&workspace.id)?
+    } else {
+        Vec::new()
     };
     let item = listed(ys, &row, &[])?;
     out.emit(&item, || {
@@ -723,6 +731,23 @@ fn add(ys: &Yardsort, asked: Add, out: &Output) -> Result<(), Failure> {
                     "{} has no pull request yet. One opening is `pr.opened`.",
                     workspace.name
                 ),
+            }
+        }
+        if elsewhere {
+            match tracked.as_slice() {
+                [] => sayln!(
+                    "{} tracks no pull request elsewhere yet. One tracked with `ys pr track` is \
+                     `pr.opened`.",
+                    workspace.name
+                ),
+                rows => {
+                    let links: Vec<&str> = rows.iter().map(|row| row.url.as_str()).collect();
+                    sayln!(
+                        "Watching {}: what is there now is not news, only what comes next. One \
+                         tracked from now on is `pr.opened`.",
+                        links.join(", ")
+                    );
+                }
             }
         }
         if untold {

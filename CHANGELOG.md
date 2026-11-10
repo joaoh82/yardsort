@@ -3,6 +3,18 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Triggers on pull requests in other repositories.** A trigger whose workflow is about a pull
+  request a workspace tracks elsewhere — **Request code review elsewhere**, the new **Address
+  reviews elsewhere**, or one of your own with `context: tracked_pull_request` — now hears the
+  `pr.*` events of every pull request the workspace tracks with `ys pr track`, each on its own:
+  reviews, comments, checks, conflicts, and `pr.opened` when one is tracked. The run is about the
+  pull request that set it off. Before, no `pr.*` event fired for a tracked pull request, and such
+  a workflow could not be a trigger's. A trigger about the workspace's own pull request still hears
+  only that one. In the trigger dialog they are under **On a pull request it tracks elsewhere**.
+  See [Pull requests elsewhere](docs/guide/triggers.md#pull-requests-elsewhere).
+
 ## 0.24.1
 
 - **Start work on another computer, and resume its conversations, from the phone or the desktop.**

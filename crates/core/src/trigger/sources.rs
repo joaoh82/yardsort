@@ -118,6 +118,7 @@ pub fn read_done(store: &Store) -> IpcResult<Vec<Observation>> {
                 target_id: None,
                 status: None,
                 post: None,
+                tracked: None,
             }
         })
         .collect();
@@ -159,6 +160,7 @@ pub fn read_custom(store: &Store) -> IpcResult<Vec<Observation>> {
             target_id: None,
             status: None,
             post: None,
+            tracked: None,
         });
     }
     if let Some(last) = rows.last() {
@@ -210,6 +212,7 @@ pub fn read_endings(store: &Store, now: i64) -> IpcResult<Vec<Observation>> {
             target_id: Some(run.target_id.clone()),
             status: Some(run.status.clone()),
             post: None,
+            tracked: None,
         });
     }
     store.set_trigger_cursor(ENDINGS, until)?;
@@ -258,6 +261,7 @@ fn settled(store: &Store, git: &Git, run: &RunRow, at: i64) -> IpcResult<Observa
         target_id: None,
         status: None,
         post: None,
+        tracked: None,
     })
 }
 
@@ -293,6 +297,7 @@ fn exited(run: &RunRow, payload: &str, at: i64) -> Observation {
             .to_owned(),
         ),
         post: None,
+        tracked: None,
     }
 }
 
@@ -443,6 +448,7 @@ mod tests {
             target_id: None,
             status: None,
             post: None,
+            tracked: None,
         }
     }
 

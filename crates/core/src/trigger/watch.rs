@@ -17,6 +17,16 @@
 //!   branch's open pull request: a different one is `pr.opened`, and the same one reopened
 //!   carries on where it was, its reviews and checks already seen.
 //!
+//! - **A pull request tracked elsewhere is watched by its link.** A trigger whose workflow is
+//!   about one elsewhere (`context: tracked_pull_request`, [`super::Filters::elsewhere`]) hears
+//!   the pull requests its workspace tracks in other repositories (`ys pr track`), each watched
+//!   on its own ([`look_at_tracked`]) and told apart by its link. Being tracked is its
+//!   `pr.opened`, at the time it was tracked: an agent tracks the pull request it has just
+//!   opened. That is news only at a look soon after the tracking ([`OPENED_WITHIN_MS`]); a pull
+//!   request tracked long before its first look — before Yardsort watched them at all, say —
+//!   is seeded, and nothing it had is told. One tracked before a trigger was saved is seeded
+//!   when the trigger is ([`seed_tracked`]).
+//!
 //! Where the looks happen — a thread of the app's, once a minute — is the app's business.
 
 use std::collections::BTreeMap;
@@ -27,11 +37,16 @@ use super::TriggerEvent;
 use crate::error::IpcResult;
 use crate::forge::{Mergeable, PrLook, PullRequestState, WatchPostKind};
 use crate::git::Git;
-use crate::store::{PrWatchRow, Store, WorkspaceRow};
+use crate::store::{PrWatchRow, Store, TrackedPullRequestRow, WorkspaceRow};
 use crate::workflow::runs::Look;
 
 /// How often a watched pull request is looked at.
 pub const LOOK_EVERY_MS: i64 = 60_000;
+
+/// How often a merged or closed pull request tracked elsewhere is looked at: only its reopening
+/// is news, and it stays tracked until someone stops tracking it. The window reads one as
+/// seldom.
+pub const LOOK_CLOSED_EVERY_MS: i64 = 10 * 60_000;
 
 /// What a watch knows before it has looked.
 fn blank(workspace_id: &str) -> PrWatchRow {
@@ -41,9 +56,24 @@ fn blank(workspace_id: &str) -> PrWatchRow {
     }
 }
 
-/// Workspaces an enabled trigger on a `pr.*` event listens to.
-pub fn watched(store: &Store) -> IpcResult<Vec<WorkspaceRow>> {
-    let mut ids: Vec<String> = store
+/// How soon after a pull request was tracked a first look still tells it as `pr.opened`, with
+/// the reviews and comments it had gathered since. A look is due once a minute; this leaves
+/// room for a forge that did not answer the first time, and for the app starting up.
+pub const OPENED_WITHIN_MS: i64 = 10 * 60_000;
+
+/// A pull request a trigger watches: the workspace's own, or one it tracks elsewhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Watched {
+    pub workspace: WorkspaceRow,
+    /// The pull request tracked elsewhere; `None` for the workspace's own.
+    pub tracked: Option<TrackedPullRequestRow>,
+}
+
+/// Every pull request an enabled trigger on a `pr.*` event listens to: the workspace's own for
+/// one whose workflow is about it, and each one the workspace tracks elsewhere for one whose
+/// workflow is about those.
+pub fn watched(store: &Store) -> IpcResult<Vec<Watched>> {
+    let mut wanted: Vec<(String, bool)> = store
         .triggers()?
         .into_iter()
         .filter(|trigger| {
@@ -52,43 +82,91 @@ pub fn watched(store: &Store) -> IpcResult<Vec<WorkspaceRow>> {
                     .iter()
                     .any(|event| event.of_a_pull_request())
         })
-        .filter_map(|trigger| trigger.workspace_id)
+        .filter_map(|trigger| {
+            let elsewhere = super::Filters::parse(&trigger.filters).elsewhere;
+            trigger.workspace_id.map(|id| (id, elsewhere))
+        })
         .collect();
-    ids.sort();
-    ids.dedup();
+    wanted.sort();
+    wanted.dedup();
     let mut found = Vec::new();
-    for id in ids {
+    for (id, elsewhere) in wanted {
         // `workspace_triggers` leaves out a removed project's.
         if store.workspace_triggers(&id)?.is_empty() {
             continue;
         }
-        if let Some(workspace) = store
+        let Some(workspace) = store
             .workspace(&id)?
             .filter(|w| !w.archived && !w.forgotten)
-        {
-            found.push(workspace);
+        else {
+            continue;
+        };
+        if elsewhere {
+            for tracked in store.tracked_pull_requests(&id)? {
+                found.push(Watched {
+                    workspace: workspace.clone(),
+                    tracked: Some(tracked),
+                });
+            }
+        } else {
+            found.push(Watched {
+                workspace,
+                tracked: None,
+            });
         }
     }
     Ok(found)
 }
 
-/// The watched workspaces whose pull request is due a look at `now`. Watches nothing listens
-/// to any more go, so a trigger saved later starts from what is true then.
-pub fn due(store: &Store, now: i64) -> IpcResult<Vec<WorkspaceRow>> {
+/// The watched pull requests due a look at `now`. Watches nothing listens to any more go, so a
+/// trigger saved later starts from what is true then.
+pub fn due(store: &Store, now: i64) -> IpcResult<Vec<Watched>> {
     let watched = watched(store)?;
     for watch in store.pr_watches()? {
-        if !watched.iter().any(|w| w.id == watch.workspace_id) {
+        let listened = watched
+            .iter()
+            .any(|w| w.tracked.is_none() && w.workspace.id == watch.workspace_id);
+        if !listened {
             store.remove_pr_watch(&watch.workspace_id)?;
         }
     }
+    for (tracked_id, _) in store.tracked_pr_watches()? {
+        let listened = watched
+            .iter()
+            .any(|w| w.tracked.as_ref().is_some_and(|t| t.id == tracked_id));
+        if !listened {
+            store.remove_tracked_pr_watch(&tracked_id)?;
+        }
+    }
     let mut due = Vec::new();
-    for workspace in watched {
-        let looked_at = store.pr_watch(&workspace.id)?.map_or(0, |w| w.looked_at);
-        if now - looked_at >= LOOK_EVERY_MS {
-            due.push(workspace);
+    for watched in watched {
+        let watch = match &watched.tracked {
+            Some(tracked) => store.tracked_pr_watch(&tracked.id)?,
+            None => store.pr_watch(&watched.workspace.id)?,
+        };
+        let every = match &watch {
+            Some(watch) if watched.tracked.is_some() && watch.closed => LOOK_CLOSED_EVERY_MS,
+            _ => LOOK_EVERY_MS,
+        };
+        if now - watch.map_or(0, |w| w.looked_at) >= every {
+            due.push(watched);
         }
     }
     Ok(due)
+}
+
+/// Look at one watched pull request: [`look_at`] or [`look_at_tracked`].
+pub fn look_at_watched(
+    store: &Store,
+    look: &dyn Look,
+    git: &Git,
+    watched: &Watched,
+    now: i64,
+) -> IpcResult<Vec<Observation>> {
+    match &watched.tracked {
+        Some(tracked) => look_at_tracked(store, look, tracked, now),
+        None => look_at(store, look, git, &watched.workspace, now),
+    }
 }
 
 /// Write the workspace's watch from what the forge says now, firing nothing: what is true when
@@ -115,6 +193,91 @@ pub fn seed(store: &Store, look: &dyn Look, workspace: &WorkspaceRow, now: i64) 
     }
     store.put_pr_watch(&watch)?;
     Ok(())
+}
+
+/// Write a watch for each pull request the workspace tracks elsewhere, as [`seed`] does for
+/// its own: what is true of them when a trigger about them is saved is not news to it. One
+/// tracked later is watched from its first look.
+pub fn seed_tracked(
+    store: &Store,
+    look: &dyn Look,
+    workspace: &WorkspaceRow,
+    now: i64,
+) -> IpcResult<()> {
+    for tracked in store.tracked_pull_requests(&workspace.id)? {
+        if store.tracked_pr_watch(&tracked.id)?.is_some() {
+            continue;
+        }
+        let mut watch = blank(&workspace.id);
+        match look.watch_tracked_pull_request(workspace, &tracked) {
+            Ok(found) => {
+                watch.seeded = true;
+                let (_, seeded) = compare(&watch, Some(&found), now);
+                watch = seeded;
+            }
+            Err(why) => watch.problem = Some(why),
+        }
+        watch.branch = None;
+        store.put_tracked_pr_watch(&tracked.id, &watch)?;
+    }
+    Ok(())
+}
+
+/// Look at a pull request the workspace tracks elsewhere, by its link, write what was seen, and
+/// return what is news, each saying which pull request it is about
+/// ([`Observation::tracked`]).
+///
+/// Its first look, when it comes soon after the tracking ([`OPENED_WITHIN_MS`]), tells it as
+/// opened, and the reviews and comments posted since it was tracked; one that comes later
+/// tells nothing, and only records what is there. A look the forge could not answer is written
+/// down as a problem and is news of nothing.
+pub fn look_at_tracked(
+    store: &Store,
+    look: &dyn Look,
+    tracked: &TrackedPullRequestRow,
+    now: i64,
+) -> IpcResult<Vec<Observation>> {
+    let mut old = store
+        .tracked_pr_watch(&tracked.id)?
+        .unwrap_or_else(|| blank(&tracked.workspace_id));
+    let Some(workspace) = store.workspace(&tracked.workspace_id)? else {
+        return Ok(Vec::new());
+    };
+    match look.watch_tracked_pull_request(&workspace, tracked) {
+        Ok(found) => {
+            let first = !old.seeded;
+            let soon = now - tracked.created_at <= OPENED_WITHIN_MS;
+            if first && soon {
+                // Seeded with no pull request: the one found is one opening.
+                old.seeded = true;
+            }
+            let (seen, mut next) = compare(&old, Some(&found), now);
+            next.branch = None;
+            store.put_tracked_pr_watch(&tracked.id, &next)?;
+            Ok(seen
+                .into_iter()
+                // A first look long after the tracking only records; a soon one tells what
+                // came since the tracking, not what was there before it.
+                .filter(|seen| !first || (soon && seen.at >= tracked.created_at))
+                .map(|mut seen| {
+                    // What a soon first look finds of its state came about when it was
+                    // tracked, as far as anyone knows: a trigger saved after that, whose
+                    // watch could not be seeded, is not told it.
+                    if first && seen.post.is_none() {
+                        seen.at = tracked.created_at;
+                    }
+                    seen.tracked = Some(tracked.url.clone());
+                    seen
+                })
+                .collect())
+        }
+        Err(why) => {
+            old.looked_at = now;
+            old.problem = Some(why);
+            store.put_tracked_pr_watch(&tracked.id, &old)?;
+            Ok(Vec::new())
+        }
+    }
 }
 
 /// Look at the workspace's pull request, write what was seen, and return what is news. A look
@@ -218,6 +381,7 @@ pub fn compare(
             target_id: None,
             status: status.map(str::to_owned),
             post: None,
+            tracked: None,
         }
     };
 
@@ -411,6 +575,48 @@ fn plural(n: u32, what: &str) -> String {
     } else {
         format!("{n} {what}s")
     }
+}
+
+/// [`Look::watch_tracked_pull_request`] for the app and `ys`: the pull request `tracked` names,
+/// asked about in its own repository, from the project's checkout — or anywhere, once that has
+/// gone: `gh` needs no repository around it.
+pub fn watch_tracked_of(
+    gh: Option<&crate::forge::Gh>,
+    store: &Store,
+    workspace: &WorkspaceRow,
+    tracked: &TrackedPullRequestRow,
+) -> Result<PrLook, String> {
+    let gh = gh.ok_or_else(|| {
+        "Watching a pull request needs the GitHub CLI (`gh`) on your PATH.".to_owned()
+    })?;
+    let repo = crate::tracked::repo_from_key(&tracked.repo)
+        .ok_or_else(|| format!("{} is not a repository Yardsort can read.", tracked.repo))?;
+    let cwd = store
+        .project(&workspace.project_id)
+        .ok()
+        .flatten()
+        .map(|project| std::path::PathBuf::from(project.root_path))
+        .filter(|root| root.is_dir())
+        .unwrap_or_else(std::env::temp_dir);
+    gh.pr_look_in(
+        &cwd,
+        &repo,
+        tracked.number,
+        crate::workflow::runs::PULL_REQUEST_LIMIT,
+    )
+    .map_err(|error| {
+        let asked = format!(
+            "Could not ask GitHub about {}/{}#{}",
+            repo.owner, repo.name, tracked.number
+        );
+        match &error {
+            _ if error.is_logged_out() => {
+                format!("{asked}: gh is not logged in. Run `gh auth login`.")
+            }
+            crate::forge::ForgeError::Failed { stderr, .. } => format!("{asked}: gh says {stderr}"),
+            other => format!("{asked}: {other}"),
+        }
+    })
 }
 
 /// [`Look::watch_pull_request`] for the app and `ys`: pull request `number`, or else the open

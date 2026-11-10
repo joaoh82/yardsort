@@ -257,21 +257,59 @@ describe("TriggerDialog", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
-  it("does not offer a workflow about a pull request elsewhere, which only that one starts", async () => {
-    const elsewhere = builtIn("code-review-elsewhere");
+  it("offers a workflow about a pull request elsewhere for the pull request's events alone", async () => {
+    const elsewhere = builtIn("code-review-elsewhere", [
+      {
+        id: "reviewer",
+        kind: "harness",
+        label: "Who reviews",
+        required: true,
+        default: null,
+        options: [],
+      },
+    ]);
     elsewhere.workflow!.trigger = { kind: "manual", context: "tracked_pull_request" };
     useWorkflowStore.setState({
       items: [...useWorkflowStore.getState().items, elsewhere],
       loaded: true,
     });
+    core.triggerSave.mockResolvedValue({ trigger: trigger("t-new"), untold: [] });
     const user = userEvent.setup();
     render(<TriggerDialog workspaceId={fixLogin.id} onClose={vi.fn()} />);
+    const offered = () =>
+      [...screen.getByRole("combobox", { name: "Workflow" }).querySelectorAll("option")].map(
+        (option) => option.getAttribute("value"),
+      );
+
+    // Not for the workspace's events: such a run is always about one of those pull requests.
+    await user.click(screen.getByRole("checkbox", { name: "Says its work is done" }));
+    expect(offered()).not.toContain("code-review-elsewhere");
+    await user.click(screen.getByRole("checkbox", { name: "Says its work is done" }));
+
     await user.click(screen.getByRole("checkbox", { name: "Opens" }));
-    const offered = [
-      ...screen.getByRole("combobox", { name: "Workflow" }).querySelectorAll("option"),
-    ].map((option) => option.getAttribute("value"));
-    expect(offered).toContain("address-review");
-    expect(offered).not.toContain("code-review-elsewhere");
+    expect(offered()).toContain("address-review");
+    expect(
+      screen.getByRole("group", { name: "On a pull request it tracks elsewhere" }),
+    ).toContainElement(screen.getByRole("option", { name: "code-review-elsewhere" }));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Workflow" }),
+      "code-review-elsewhere",
+    );
+    // Chosen, the workspace's events are not to be had.
+    expect(screen.getByRole("checkbox", { name: "Says its work is done" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "A review comes in" })).toBeEnabled();
+    expect(
+      screen.getByText(/When this workspace tracks a pull request elsewhere, or a draft of one/),
+    ).toHaveTextContent("have claude review the pull request on GitHub");
+
+    await user.click(screen.getByRole("button", { name: "Add trigger" }));
+    expect(core.triggerSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: ["pr.opened"],
+        targetId: "code-review-elsewhere",
+        inputs: { reviewer: "claude" },
+      }),
+    );
   });
 
   it("says why the core refused it and stays open", async () => {

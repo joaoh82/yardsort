@@ -484,6 +484,28 @@ impl Look for AppLook<'_> {
             number,
         )
     }
+
+    fn watch_tracked_pull_request(
+        &self,
+        workspace: &WorkspaceRow,
+        tracked: &yardsort_core::store::TrackedPullRequestRow,
+    ) -> Result<yardsort_core::forge::PrLook, String> {
+        yardsort_core::trigger::watch::watch_tracked_of(
+            Gh::find(&self.0.env()).as_ref(),
+            &self.0.store,
+            workspace,
+            tracked,
+        )
+    }
+
+    fn tracked_pull_request(
+        &self,
+        workspace: &WorkspaceRow,
+        tracked: &yardsort_core::store::TrackedPullRequestRow,
+    ) -> Result<runs::PrFacts, String> {
+        crate::publish::tracked::for_a_run(self.0, &workspace.id, &tracked.id)
+            .map_err(|error| error.message)
+    }
 }
 
 #[cfg(all(test, unix))]

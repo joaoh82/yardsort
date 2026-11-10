@@ -288,6 +288,8 @@ struct Forge {
     down: RefCell<bool>,
     /// The number each look asked about, `None` for the branch's open one.
     asked: RefCell<Vec<Option<u32>>>,
+    /// Pull requests elsewhere, by link.
+    elsewhere: RefCell<BTreeMap<String, PrLook>>,
 }
 
 impl Forge {
@@ -327,6 +329,56 @@ impl Look for Forge {
         }
         Ok(self.pr.borrow().clone())
     }
+
+    fn watch_tracked_pull_request(
+        &self,
+        _workspace: &WorkspaceRow,
+        tracked: &TrackedPullRequestRow,
+    ) -> Result<PrLook, String> {
+        if *self.down.borrow() {
+            return Err("GitHub did not answer.".into());
+        }
+        self.elsewhere
+            .borrow()
+            .get(&tracked.url)
+            .cloned()
+            .ok_or_else(|| format!("No {}.", tracked.url))
+    }
+
+    fn tracked_pull_request(
+        &self,
+        _workspace: &WorkspaceRow,
+        tracked: &TrackedPullRequestRow,
+    ) -> Result<crate::workflow::runs::PrFacts, String> {
+        let found = self.watch_tracked_pull_request(_workspace, tracked)?;
+        if found.state != PullRequestState::Open {
+            return Err(format!("acme/lib#{} is not open.", found.number));
+        }
+        Ok(crate::workflow::runs::PrFacts {
+            number: found.number,
+            url: found.url,
+            title: found.title,
+            elsewhere: Some(crate::workflow::runs::Elsewhere {
+                repo: "acme/lib".into(),
+                clone: Some("/projects/parent/lib".into()),
+                opened_by: tracked.session_id.clone(),
+            }),
+        })
+    }
+}
+
+/// Pull request `number` of `acme/lib`, a repository the project's checkout holds a clone of:
+/// as a watch sees it.
+fn lib(number: u32) -> PrLook {
+    PrLook {
+        url: lib_url(number),
+        branch: "speed-up".into(),
+        ..pr(number)
+    }
+}
+
+fn lib_url(number: u32) -> String {
+    format!("https://github.com/acme/lib/pull/{number}")
 }
 
 impl Tx {
@@ -357,6 +409,63 @@ impl Tx {
         let mut taken = 0;
         for seen in look_at(self.store(), forge, &git, &self.fx.workspace, now).unwrap() {
             taken += observe(self.store(), &seen).unwrap();
+        }
+        taken
+    }
+
+    /// The workspace tracks `acme/lib#number`, as of `at`, and the forge has it as `look`.
+    fn track(&self, forge: &Forge, look: PrLook, at: i64) -> TrackedPullRequestRow {
+        let url = look.url.clone();
+        forge
+            .elsewhere
+            .borrow_mut()
+            .insert(url.clone(), look.clone());
+        let (row, _) = self
+            .store()
+            .track_pull_request(&crate::store::NewTrackedPullRequest {
+                workspace_id: self.workspace_id(),
+                session_id: None,
+                repo: "github.com/acme/lib",
+                number: look.number,
+                url: &url,
+                tracked_by: "cli",
+            })
+            .unwrap();
+        self.store().set_tracked_at(&row.id, at).unwrap();
+        TrackedPullRequestRow {
+            created_at: at,
+            ..row
+        }
+    }
+
+    /// A trigger on `events` that runs the workflow `workflow`, about pull requests elsewhere
+    /// or the workspace's own as the workflow says, saved at `NOW`.
+    fn on(
+        &self,
+        forge: &Forge,
+        events: &[TriggerEvent],
+        workflow: &str,
+        inputs: &BTreeMap<String, String>,
+    ) -> crate::store::TriggerRow {
+        let filters = Filters::default();
+        let mut draft = self.draft(events, &filters, ScheduleTarget::Workflow, workflow, inputs);
+        draft.quiet_ms = events
+            .iter()
+            .map(|e| e.default_quiet_ms())
+            .max()
+            .unwrap_or(0);
+        crate::trigger::add(self.store(), &self.fx.data_dir, forge, &draft, "app", NOW).unwrap()
+    }
+
+    /// Every watched pull request that is due, looked at as the app's thread does. Returns how
+    /// many triggers took what was seen.
+    fn look_due(&self, forge: &Forge, now: i64) -> usize {
+        let git = crate::git::testing::git();
+        let mut taken = 0;
+        for watched in due(self.store(), now).unwrap() {
+            for seen in look_at_watched(self.store(), forge, &git, &watched, now).unwrap() {
+                taken += observe(self.store(), &seen).unwrap();
+            }
         }
         taken
     }
@@ -622,5 +731,299 @@ fn a_closed_watch_asks_for_the_branchs_open_pull_request() {
         *forge.asked.borrow(),
         [Some(7), None],
         "by number while open, then the branch's open one"
+    );
+}
+
+#[test]
+fn a_review_elsewhere_is_heard_by_a_trigger_about_those_and_not_by_one_about_its_own() {
+    let tx = Tx::new();
+    tx.agent("rec-1", "pty-1");
+    let forge = Forge::default();
+    // The workspace's own #7, and a #7 in acme/lib it tracks: two different pull requests.
+    forge.set(pr(7));
+    let tracked = tx.track(&forge, lib(7), NOW - 60_000);
+    let none = BTreeMap::new();
+    let posts = [TriggerEvent::PrReview, TriggerEvent::PrComment];
+    let own = tx.on(&forge, &posts, "address-review", &none);
+    let elsewhere = tx.on(&forge, &posts, "address-review-elsewhere", &none);
+    assert!(Filters::parse(&elsewhere.filters).elsewhere);
+    assert!(!Filters::parse(&own.filters).elsewhere);
+    assert!(
+        crate::trigger::describe(&elsewhere)
+            .starts_with("When a review comes in on a pull request it tracks elsewhere"),
+        "{}",
+        crate::trigger::describe(&elsewhere)
+    );
+    // Saving seeded it: what it had then is not news.
+    let watch = tx.store().tracked_pr_watch(&tracked.id).unwrap().unwrap();
+    assert!(watch.seeded);
+    assert_eq!(watch.number, Some(7));
+
+    let mut reviewed = lib(7);
+    reviewed.posts = vec![post(
+        "review:1",
+        WatchPostKind::Review,
+        "alice",
+        NOW + 1_000,
+    )];
+    forge.elsewhere.borrow_mut().insert(lib_url(7), reviewed);
+    assert_eq!(
+        due(tx.store(), NOW + 60_000).unwrap().len(),
+        2,
+        "one watch each"
+    );
+    assert_eq!(
+        tx.look_due(&forge, NOW + 60_000),
+        1,
+        "only the trigger about those"
+    );
+
+    let fired = tx.tick(&forge, NOW + 1_000 + 2 * 60_000);
+    assert_eq!(fired.len(), 1);
+    assert_eq!(fired[0].trigger.id, elsewhere.id);
+    assert_eq!(fired[0].fire.outcome, "started", "{:?}", fired[0].fire.note);
+    assert_eq!(fired[0].fire.subject, format!("pr:{}", lib_url(7)));
+    let run = tx
+        .store()
+        .workflow_run(fired[0].fire.run_id.as_deref().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.workflow_id, "address-review-elsewhere");
+    let facts = Facts::parse(&run.context);
+    let pr_facts = facts.pr.expect("the pull request elsewhere");
+    assert_eq!(pr_facts.url, lib_url(7));
+    assert_eq!(
+        pr_facts.elsewhere.map(|e| e.repo).as_deref(),
+        Some("acme/lib")
+    );
+    assert_eq!(
+        facts.event.get("summary").map(String::as_str),
+        Some("1 review from alice")
+    );
+
+    // A review on its own #7 is the other trigger's.
+    tx.store()
+        .finish_workflow_run(&run.id, "succeeded", None)
+        .unwrap();
+    let mut own_reviewed = pr(7);
+    own_reviewed.posts = vec![post(
+        "review:2",
+        WatchPostKind::Review,
+        "bob",
+        NOW + 5 * 60_000,
+    )];
+    forge.set(own_reviewed);
+    assert_eq!(tx.look_due(&forge, NOW + 6 * 60_000), 1);
+    let fired = tx.tick(&forge, NOW + 8 * 60_000);
+    assert_eq!(fired.len(), 1);
+    assert_eq!(fired[0].trigger.id, own.id);
+    assert_eq!(fired[0].fire.subject, "pr:7");
+}
+
+#[test]
+fn being_tracked_soon_before_a_look_is_opening_and_long_before_is_nothing() {
+    let tx = Tx::new();
+    tx.agent("rec-1", "pty-1");
+    let forge = Forge::default();
+    let reviewer = BTreeMap::from([("reviewer".to_owned(), "claude".to_owned())]);
+    let trigger = tx.on(
+        &forge,
+        &[TriggerEvent::PrOpened],
+        "code-review-elsewhere",
+        &reviewer,
+    );
+    assert!(
+        crate::trigger::describe(&trigger)
+            .starts_with("When the workspace tracks a pull request elsewhere"),
+        "{}",
+        crate::trigger::describe(&trigger)
+    );
+
+    // An agent opened acme/lib#9 and tracked it half a minute before the look.
+    let mut opened = lib(9);
+    opened.posts = vec![
+        // Its review from before it was tracked is not news; one since is, to a trigger on
+        // reviews.
+        post("review:1", WatchPostKind::Review, "alice", NOW - 3_600_000),
+    ];
+    let tracked = tx.track(&forge, opened, NOW + 30_000);
+    assert!(tx.store().tracked_pr_watch(&tracked.id).unwrap().is_none());
+    assert_eq!(tx.look_due(&forge, NOW + 60_000), 1);
+    let fired = tx.tick(&forge, NOW + 60_000);
+    assert_eq!(fired.len(), 1);
+    assert_eq!(fired[0].fire.outcome, "started", "{:?}", fired[0].fire.note);
+    assert_eq!(fired[0].fire.event, "pr.opened");
+    let run = tx
+        .store()
+        .workflow_run(fired[0].fire.run_id.as_deref().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.workflow_id, "code-review-elsewhere");
+    let facts = Facts::parse(&run.context);
+    assert_eq!(
+        facts.pr.as_ref().map(|pr| pr.url.as_str()),
+        Some(lib_url(9).as_str())
+    );
+    assert_eq!(
+        facts
+            .pr
+            .and_then(|pr| pr.elsewhere)
+            .and_then(|e| e.clone)
+            .as_deref(),
+        Some("/projects/parent/lib")
+    );
+    assert_eq!(tx.look_due(&forge, NOW + 2 * 60_000), 0, "told once");
+
+    // One tracked long before its first look — before Yardsort watched them, say — opened
+    // long ago too: it is only recorded.
+    let old = tx.track(&forge, lib(10), NOW + 60_000);
+    assert_eq!(tx.look_due(&forge, NOW + 60_000 + OPENED_WITHIN_MS + 1), 0);
+    let watch = tx.store().tracked_pr_watch(&old.id).unwrap().unwrap();
+    assert!(watch.seeded);
+    assert_eq!(watch.number, Some(10));
+}
+
+#[test]
+fn a_pull_request_tracked_before_the_trigger_was_saved_did_not_open_for_it() {
+    let tx = Tx::new();
+    tx.agent("rec-1", "pty-1");
+    let forge = Forge::default();
+    // Tracked a moment before, and GitHub not answering when the trigger was saved.
+    tx.track(&forge, lib(9), NOW - 1_000);
+    *forge.down.borrow_mut() = true;
+    let reviewer = BTreeMap::from([("reviewer".to_owned(), "claude".to_owned())]);
+    tx.on(
+        &forge,
+        &[TriggerEvent::PrOpened],
+        "code-review-elsewhere",
+        &reviewer,
+    );
+    *forge.down.borrow_mut() = false;
+    assert_eq!(tx.look_due(&forge, NOW + 60_000), 0);
+}
+
+#[test]
+fn a_workflow_about_one_elsewhere_runs_on_the_pull_requests_events_alone() {
+    let tx = Tx::new();
+    let forge = Forge::default();
+    let reviewer = BTreeMap::from([("reviewer".to_owned(), "claude".to_owned())]);
+    let filters = Filters::default();
+    for (events, code) in [
+        (&[TriggerEvent::WorkspaceDone][..], "trigger_events"),
+        (&[TriggerEvent::PrMerged][..], "trigger_pull_request_gone"),
+    ] {
+        let draft = tx.draft(
+            events,
+            &filters,
+            ScheduleTarget::Workflow,
+            "code-review-elsewhere",
+            &reviewer,
+        );
+        let error = crate::trigger::add(tx.store(), &tx.fx.data_dir, &forge, &draft, "app", NOW)
+            .unwrap_err();
+        assert_eq!(error.code, code, "{}", error.message);
+    }
+    // A trigger about its own pull request is not one about those elsewhere, whatever it is
+    // sent.
+    let sent = Filters {
+        elsewhere: true,
+        ..Filters::default()
+    };
+    let none = BTreeMap::new();
+    let events = [TriggerEvent::PrReview];
+    let draft = tx.draft(
+        &events,
+        &sent,
+        ScheduleTarget::Workflow,
+        "address-review",
+        &none,
+    );
+    let row = crate::trigger::add(tx.store(), &tx.fx.data_dir, &forge, &draft, "app", NOW).unwrap();
+    assert!(!Filters::parse(&row.filters).elsewhere);
+}
+
+#[test]
+fn untracked_its_watch_goes_and_what_was_gathering_for_it_is_refused() {
+    let tx = Tx::new();
+    tx.agent("rec-1", "pty-1");
+    let forge = Forge::default();
+    let tracked = tx.track(&forge, lib(7), NOW - 60_000);
+    let none = BTreeMap::new();
+    let posts = [TriggerEvent::PrReview, TriggerEvent::PrComment];
+    let trigger = tx.on(&forge, &posts, "address-review-elsewhere", &none);
+    let mut reviewed = lib(7);
+    reviewed.posts = vec![post(
+        "review:1",
+        WatchPostKind::Review,
+        "alice",
+        NOW + 1_000,
+    )];
+    forge.elsewhere.borrow_mut().insert(lib_url(7), reviewed);
+    assert_eq!(tx.look_due(&forge, NOW + 60_000), 1);
+
+    assert!(tx
+        .store()
+        .untrack_pull_request(tx.workspace_id(), &tracked.id)
+        .unwrap());
+    assert!(
+        tx.store().tracked_pr_watches().unwrap().is_empty(),
+        "it went with it"
+    );
+    let fired = tx.tick(&forge, NOW + 1_000 + 2 * 60_000);
+    assert_eq!(fired[0].fire.outcome, "refused");
+    assert!(
+        fired[0]
+            .fire
+            .note
+            .as_deref()
+            .is_some_and(|note| note.contains("no longer tracks")),
+        "{:?}",
+        fired[0].fire.note
+    );
+
+    // Tracked again and switched off: nothing is watched.
+    let again = tx.track(&forge, lib(7), NOW + 3 * 60_000);
+    tx.look_due(&forge, NOW + 4 * 60_000);
+    assert!(tx.store().tracked_pr_watch(&again.id).unwrap().is_some());
+    crate::trigger::set_enabled(tx.store(), &trigger.id, false, NOW + 5 * 60_000).unwrap();
+    assert!(due(tx.store(), NOW + 6 * 60_000).unwrap().is_empty());
+    assert!(tx.store().tracked_pr_watches().unwrap().is_empty());
+}
+
+#[test]
+fn a_closed_pull_request_elsewhere_is_looked_at_seldom_and_its_reopening_is_not_new() {
+    let tx = Tx::new();
+    tx.agent("rec-1", "pty-1");
+    let forge = Forge::default();
+    let tracked = tx.track(&forge, lib(7), NOW - 60_000);
+    let none = BTreeMap::new();
+    let posts = [TriggerEvent::PrReview, TriggerEvent::PrComment];
+    tx.on(&forge, &posts, "address-review-elsewhere", &none);
+    let mut closed = lib(7);
+    closed.state = PullRequestState::Closed;
+    forge.elsewhere.borrow_mut().insert(lib_url(7), closed);
+    tx.look_due(&forge, NOW + 60_000);
+    assert!(
+        tx.store()
+            .tracked_pr_watch(&tracked.id)
+            .unwrap()
+            .unwrap()
+            .closed
+    );
+    assert!(due(tx.store(), NOW + 2 * 60_000).unwrap().is_empty());
+    assert_eq!(
+        due(tx.store(), NOW + 60_000 + LOOK_CLOSED_EVERY_MS)
+            .unwrap()
+            .len(),
+        1
+    );
+    forge.elsewhere.borrow_mut().insert(lib_url(7), lib(7));
+    assert_eq!(tx.look_due(&forge, NOW + 60_000 + LOOK_CLOSED_EVERY_MS), 0);
+    assert!(
+        !tx.store()
+            .tracked_pr_watch(&tracked.id)
+            .unwrap()
+            .unwrap()
+            .closed
     );
 }

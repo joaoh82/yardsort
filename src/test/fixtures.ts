@@ -423,6 +423,7 @@ export const trigger = (id: string, overrides: Partial<TriggerItem> = {}): Trigg
   capped: false,
   last: null,
   watch: { number: 142, closed: false, problem: null, lookedAt: Date.now() - 30_000 },
+  watchingElsewhere: [],
   createdAt: Date.now() - 86_400_000,
   ...overrides,
 });

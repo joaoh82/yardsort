@@ -683,6 +683,7 @@ fn a_users_files_are_listed_beside_the_built_ins_by_name() {
         names,
         vec![
             "Address reviews",
+            "Address reviews elsewhere",
             "Another",
             "Fix failing checks",
             "Request code review",
@@ -692,7 +693,7 @@ fn a_users_files_are_listed_beside_the_built_ins_by_name() {
         ]
     );
     assert!(matches!(
-        &listed[1].source,
+        &listed[2].source,
         Source::File { replaces_built_in: false, path } if path.ends_with("demo.yaml")
     ));
 }

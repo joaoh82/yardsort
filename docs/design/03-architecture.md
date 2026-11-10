@@ -337,8 +337,8 @@ the rules for a link and for refusing the project's own repository are in the co
 `gh pr view <url>`, which needs no repository around it: four at a time, at most twenty per
 project, an open one again with the project's list and a merged or closed one every ten minutes,
 kept by link in `Forge`. They reach the window as `ProjectPullRequests::tracked`, and the window
-keys them by repository and number, never by number alone. See
-[36](38-pull-requests-elsewhere.md).
+keys them by repository and number, never by number alone. A trigger whose workflow is about one
+elsewhere watches each tracked one by repository and number, in `tracked_pr_watches` (migration 0028) beside the workspaces' own `pr_watches`. See [38](38-pull-requests-elsewhere.md).
 
 **Tasks** are a project's GitHub issues, and the same idea one step further out: the reading and
 the rules are in the core (`yardsort_core::tasks`) so that the app and `ys task` share them, and

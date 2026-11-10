@@ -4006,6 +4006,113 @@ fn a_preset_watches_the_pull_request_from_what_is_on_it_when_it_is_added() {
     );
 }
 
+/// A trigger whose workflow is about a pull request elsewhere watches the ones the workspace
+/// tracks, each asked about in its own repository, from what is on them when it is added.
+#[cfg(unix)]
+#[test]
+fn a_trigger_about_pull_requests_elsewhere_watches_the_tracked_ones_from_when_it_is_added() {
+    let tasks = Tasks::new(
+        Some("git@github.com:example/widgets.git"),
+        Some("case \"$*\" in\n*graphql*) cat \"$here/look.json\" ;;\nesac"),
+    );
+    let made = make_workspace(&tasks.fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let url = "https://github.com/example/lib/pull/3";
+    std::fs::write(
+        tasks.bin.path().join("look.json"),
+        serde_json::json!({"data": {"repository": {"pullRequest": {
+            "number": 3, "url": url, "title": "Speed up", "state": "OPEN", "isDraft": false,
+            "headRefName": "speed-up", "headRefOid": "abc", "mergeable": "MERGEABLE",
+            "commits": {"nodes": []},
+            "reviews": {"nodes": [{"databaseId": 1, "state": "COMMENTED",
+                "submittedAt": "2026-11-07T07:51:50Z", "body": "Hm.", "url": "r1",
+                "author": {"__typename": "User", "login": "alice"},
+                "comments": {"totalCount": 0, "nodes": []}}]},
+            "comments": {"nodes": []}
+        }}, "viewer": {"login": "me"}}})
+        .to_string(),
+    )
+    .unwrap();
+    tasks
+        .ys(None, &["pr", "track", url, "--workspace", name])
+        .ok();
+
+    // About those, it runs on their events alone.
+    let refused = tasks
+        .ys(
+            None,
+            &[
+                "trigger",
+                "add",
+                "--on",
+                "workspace.done",
+                "--workflow",
+                "address-review-elsewhere",
+                "--workspace",
+                name,
+            ],
+        )
+        .failed();
+    assert!(
+        refused.contains("tracks in another repository"),
+        "{refused}"
+    );
+
+    let added = tasks
+        .ys(
+            None,
+            &[
+                "trigger",
+                "add",
+                "--on",
+                "pr.review",
+                "--on",
+                "pr.comment",
+                "--workflow",
+                "address-review-elsewhere",
+                "--workspace",
+                name,
+            ],
+        )
+        .ok();
+    assert!(
+        added.contains(&format!("Watching {url}: what is there now is not news")),
+        "{added}"
+    );
+    let listed: serde_json::Value =
+        serde_json::from_str(&tasks.ys(None, &["trigger", "list", "--json"]).ok()).unwrap();
+    assert!(
+        listed[0]["when"]
+            .as_str()
+            .unwrap()
+            .contains("a pull request it tracks elsewhere"),
+        "{listed}"
+    );
+
+    let store = Store::open(&tasks.fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = listed[0]["workspaceId"].as_str().unwrap();
+    let tracked = store
+        .tracked_pull_requests(workspace)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let watch = store.tracked_pr_watch(&tracked.id).unwrap().unwrap();
+    assert!(watch.seeded);
+    assert_eq!(watch.number, Some(3));
+    assert!(watch.seen.contains("review:1"), "{watch:?}");
+    assert!(
+        store.pr_watch(workspace).unwrap().is_none(),
+        "its own pull request is not watched for it"
+    );
+    let asked = tasks.asked();
+    assert!(
+        asked
+            .iter()
+            .any(|asked| asked.contains("api graphql -F owner=example -F name=lib")),
+        "{asked:?}"
+    );
+}
+
 /// On GitHub, with a `gh` that has the recorded open pull requests, two pages of them.
 #[cfg(unix)]
 fn pull_requests() -> Tasks {

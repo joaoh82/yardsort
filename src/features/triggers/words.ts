@@ -178,7 +178,9 @@ export function sentence(asking: Asking): string {
   const { events, filters } = asking;
   if (events.length === 0 || !asking.targetId) return "";
   const agent = asking.oneAgent ? "this agent" : "an agent";
-  const pr = "this workspace's pull request";
+  const pr = filters.elsewhere
+    ? "a pull request this workspace tracks elsewhere"
+    : "this workspace's pull request";
   const who = filters.from === "anyone" ? "anyone" : "someone other than you";
   const has = (event: TriggerEvent) => events.includes(event);
 
@@ -210,7 +212,12 @@ export function sentence(asking: Asking): string {
     whens.push(`${which} ${how} here`);
   }
   if (has("pr.opened")) {
-    whens.push(filters.drafts ? `${pr} opens, drafts too` : `${pr} opens or is marked ready`);
+    // Tracking one is its opening: an agent tracks the one it has just opened.
+    const opens = filters.elsewhere
+      ? "this workspace tracks a pull request elsewhere"
+      : `${pr} opens`;
+    const ready = filters.elsewhere ? ", or a draft of one is marked ready" : " or is marked ready";
+    whens.push(filters.drafts ? `${opens}, drafts too` : `${opens}${ready}`);
   }
   const reviews = has("pr.review");
   const comments = has("pr.comment");
@@ -258,7 +265,10 @@ function doing({ target, targetId, inputs }: Asking): string {
     case "review-branch":
       return `have ${reviewer} review the branch, and tell the agent what it found`;
     case "code-review":
+    case "code-review-elsewhere":
       return `have ${reviewer} review the pull request on GitHub`;
+    case "address-review-elsewhere":
+      return "tell the agent that opened it to address it";
     case "smoke-then-tell":
       return inputs.suite
         ? `run the smoke test ${inputs.suite} and tell the agent how it went`

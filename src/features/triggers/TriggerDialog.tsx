@@ -147,11 +147,20 @@ export function TriggerDialog(props: Props) {
     target === "workflow"
       ? (workflows.find((item) => item.id === targetId)?.workflow ?? null)
       : null;
-  // One about a pull request elsewhere is started from that pull request, never on its own.
   const runnableWorkflows = workflows.filter(
     (item) =>
       item.problems.length === 0 && item.workflow && item.workflow.trigger.context === "workspace",
   );
+  // One about a pull request the workspace tracks elsewhere runs on those pull requests' events,
+  // so it is offered for the pull request's events alone.
+  const elsewhere = workflow?.trigger.context === "tracked_pull_request";
+  const prEventsOnly = events.every((event) => subjectOf(event) === "pull request");
+  const elsewhereWorkflows = prEventsOnly
+    ? workflows.filter(
+        (item) =>
+          item.problems.length === 0 && item.workflow?.trigger.context === "tracked_pull_request",
+      )
+    : [];
 
   // The workspace's tests are wanted for a test trigger, for a workflow's `test` input, and for
   // the `test.finished` filter.
@@ -242,7 +251,7 @@ export function TriggerDialog(props: Props) {
   const inputsSent = Object.fromEntries(Object.entries(given).filter(([, value]) => value.trim()));
   const words = sentence({
     events,
-    filters: sent,
+    filters: { ...sent, ...(elsewhere ? { elsewhere: true } : {}) },
     target,
     targetId: chosen ? targetId : "",
     inputs: inputsSent,
@@ -467,15 +476,18 @@ export function TriggerDialog(props: Props) {
                 <span className="mt-1 text-[12px] text-ink-faint">{group}</span>
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                   {EVENTS.filter((e) => e.group === group).map((e) => {
-                    const other = subject !== null && subjectOf(e.id) !== subject;
+                    const notElsewhere = elsewhere && subjectOf(e.id) !== "pull request";
+                    const other = (subject !== null && subjectOf(e.id) !== subject) || notElsewhere;
                     return (
                       <label
                         key={e.id}
                         className={`${check} ${other ? "opacity-40" : ""}`}
                         title={
-                          other
-                            ? "A trigger is about one kind of thing — an agent, the pull request, or the workspace. Make a second trigger for this."
-                            : e.id
+                          notElsewhere
+                            ? "The workflow is about a pull request this workspace tracks elsewhere, so it runs on that pull request's events."
+                            : other
+                              ? "A trigger is about one kind of thing — an agent, the pull request, or the workspace. Make a second trigger for this."
+                              : e.id
                         }
                       >
                         <input
@@ -716,6 +728,15 @@ export function TriggerDialog(props: Props) {
                       {item.name}
                     </option>
                   ))}
+                  {elsewhereWorkflows.length > 0 && (
+                    <optgroup label="On a pull request it tracks elsewhere">
+                      {elsewhereWorkflows.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               ) : (
                 <select

@@ -74,14 +74,14 @@ own, never in one of your projects; a repository because some agents will not ru
 
 ## Where workflows come from
 
-- **Built in.** Yardsort ships with six. **Request code review** (`code-review`): a second
+- **Built in.** Yardsort ships with seven. **Request code review** (`code-review`): a second
   agent, one you pick, reviews the workspace's pull request in the same worktree and posts its
   review on GitHub with `gh`. When the review is on the pull request, you get a notification, and
   the agent that wrote the pull request is told once it is not busy. See
   [Requesting a code review](#requesting-a-code-review). **Request code review elsewhere**
   (`code-review-elsewhere`) does the same for a pull request the workspace
   [tracks in another repository](commits-and-pull-requests.md#pull-requests-in-other-repositories),
-  and is started from that pull request: see
+  and is started from that pull request or a trigger: see
   [A pull request in another repository](#a-pull-request-in-another-repository).
   **Smoke test, then tell the agent**
   (`smoke-then-tell`): it runs one of the workspace's [smoke tests](smoke-tests.md) and tells the
@@ -91,7 +91,9 @@ own, never in one of your projects; a repository because some agents will not ru
   pull request has new reviews or comments, with the `gh` commands that read them, and asks it to
   fix what is right, push and answer each comment; **Fix failing checks** (`fix-checks`) tells it
   which checks failed on which commit and how to read their logs. Both last until the agent has
-  answered. **Review the branch** (`review-branch`): a second agent, one you pick, reviews the
+  answered. **Address reviews elsewhere** (`address-review-elsewhere`) does what **Address
+  reviews** does for a pull request the workspace tracks in another repository, telling the agent
+  that opened it, and is for a [trigger](triggers.md#pull-requests-elsewhere) on those. **Review the branch** (`review-branch`): a second agent, one you pick, reviews the
   branch against its base in the same worktree, without a pull request, and writes its findings
   as its last message; then the workspace's own agent is told to read them with
   [`ys workspace context`](cli.md#ys-workspace-context-workspace) and address them. Each is
@@ -294,9 +296,12 @@ its link:
    clone, push, and answer each comment.
 
 It needs the clone: without one in the project's folder, the dialog says so and does not start.
-It is offered only on a pull request elsewhere: the Workflows view does not run or schedule it,
-and triggers do not offer it. A workflow of your own can be about a pull request elsewhere too,
-with `context: tracked_pull_request`; `pr.repo` and `pr.clone` are refused in any other.
+It is offered only on a pull request elsewhere: the Workflows view does not run or schedule it.
+A [trigger](triggers.md#pull-requests-elsewhere) can start it — or **Address reviews
+elsewhere**, or any workflow about one — on the `pr.*` events of each pull request the workspace
+tracks: `pr.opened` to review each one an agent opens. A workflow of your own can be about a pull
+request elsewhere too, with `context: tracked_pull_request`; `pr.repo` and `pr.clone` are refused
+in any other.
 
 ## The file
 

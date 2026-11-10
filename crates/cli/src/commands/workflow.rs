@@ -294,6 +294,20 @@ impl runs::Look for Looking<'_> {
         let gh = yardsort_core::forge::Gh::find(self.0.env());
         yardsort_core::trigger::watch::watch_pull_request_of(gh.as_ref(), &git, workspace, number)
     }
+
+    fn watch_tracked_pull_request(
+        &self,
+        workspace: &WorkspaceRow,
+        tracked: &yardsort_core::store::TrackedPullRequestRow,
+    ) -> Result<yardsort_core::forge::PrLook, String> {
+        let gh = yardsort_core::forge::Gh::find(self.0.env());
+        yardsort_core::trigger::watch::watch_tracked_of(
+            gh.as_ref(),
+            &self.0.store,
+            workspace,
+            tracked,
+        )
+    }
 }
 
 /// The workspace this is run in: the agent's own, from its launch environment, or the folder.

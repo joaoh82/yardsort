@@ -3,7 +3,8 @@
 _Proposed 2026-11-09, and built the same day in five slices — see
 [slice 1](#slice-1-what-shipped), [slice 2](#slice-2-what-shipped),
 [slice 3](#slice-3-what-shipped), [slice 4](#slice-4-what-shipped) and
-[slice 5](#slice-5-what-shipped). [M31](05-roadmap.md#m31--pull-requests-in-other-repositories)
+[slice 5](#slice-5-what-shipped) — with triggers on them added on 2026-11-10
+([slice 6](#slice-6-what-shipped)). [M31](05-roadmap.md#m31--pull-requests-in-other-repositories)
 tracks the hands-on pass on the three systems that is left._
 
 A project is one repository, and every pull request Yardsort shows is one of that repository's.
@@ -153,7 +154,8 @@ checkout as a working folder. Measured: 0.5 s for one pull request.
   says that is what shows.
 
 Outcomes see only the project's own. Workflows are about the workspace's own pull request,
-except one whose `context` is `tracked_pull_request`, started from a tracked one (slice 5).
+except one whose `context` is `tracked_pull_request`, started from a tracked one (slice 5) or by a
+trigger on a tracked one's `pr.*` events (slice 6).
 
 ## Telling the agent
 
@@ -236,6 +238,8 @@ note and `ys pr track` cover it.
    nested clone. See [slice 4](#slice-4-what-shipped).
 5. **Code review on one.** ✅ The workflow on a tracked pull request, in the nested clone;
    review activity waited on by link. See [slice 5](#slice-5-what-shipped).
+6. **Triggers on them.** ✅ The `pr.*` events of each tracked pull request, for a trigger whose
+   workflow is about one elsewhere. See [slice 6](#slice-6-what-shipped).
 
 ## Tests
 
@@ -497,6 +501,59 @@ Testing Library — only the workflows about one offered, previewed and started 
 id, the agent that opened it named, and refused without a clone — and the button in the Pull
 requests view opening it. Not yet done: a real review run on a real tracked pull request, and the
 three systems' hands-on pass.
+
+## Slice 6: what shipped
+
+Built 2026-11-10, after a workspace of `flotta_parent` tracking three pull requests in two nested
+clones had a trigger on `pr.review`/`pr.comment` and one on `pr.opened` that never fired: the
+watch ([36](36-triggers.md)) asked only about the workspace's own branch, and a workflow about one
+elsewhere was refused a trigger.
+
+- **Which trigger hears which.** A trigger whose workflow's `context` is `tracked_pull_request`
+  hears the `pr.*` events of every pull request its workspace tracks, and none of its own; any
+  other hears its own and none elsewhere. The workflow decides, not a choice of the user's: an
+  `{{ pr.* }}` is the one pull request the run is about, and a workspace workflow's would be the
+  wrong one. It is kept on the trigger as `Filters::elsewhere`, set from the workflow when the
+  trigger is saved, so the watch thread and `observe` need no workflow file. A workflow edited to
+  the other context afterwards has its fires refused by the door, with the reason.
+- **One watch per tracked pull request**, `tracked_pr_watches` (migration 0028), keyed by the
+  tracked row and going with it, holding what `pr_watches` holds but the branch. The rules are
+  `watch::compare`'s, unchanged; `watch::look_at_tracked` asks by repository and number
+  (`Gh::pr_look_in`: `gh api graphql -F owner=… -F name=…`, `--hostname` off github.com) from the
+  project's checkout or anywhere, as slice 1's reads do. `watch::due` lists each as a
+  `Watched` of its own, and drops a watch nothing listens to. A merged or closed one stays
+  tracked until someone untracks it, so it is looked at every ten minutes
+  (`LOOK_CLOSED_EVERY_MS`), as the window reads one, for its reopening.
+- **Being tracked is opening.** The pull request exists before Yardsort hears of it, so a first
+  look that is not a seed would never see one open. An agent tracks the one it has just opened,
+  so the first look of one tracked in the last ten minutes (`OPENED_WITHIN_MS`) tells
+  `pr.opened`, dated when it was tracked, with the reviews and comments posted since. Dating it
+  then, rather than at the look, is what keeps it from a trigger saved after the tracking whose
+  seed GitHub did not answer. A first look later than that — the three rows that were already
+  there when this shipped — only seeds: their reviews from before are not news.
+- **Counted by link.** A fire's subject is `pr:<link>` for one elsewhere, never `pr:<number>`, so
+  the cap, the gathering and `from: anyone`'s own-run check never mix lib#7 with the project's #7.
+- **The run is about the one that set it off.** At the fire, the tracked row is found by the
+  subject's link — gone if it was untracked: **refused** — and read again by its link through
+  `Look::tracked_pull_request`, which in the app is slice 5's `for_a_run`: open, with its clone and
+  the conversation that opened it. That goes to the door as `Request::tracked`.
+- **Refused when saved:** such a workflow on any event but `pr.*`, and on `pr.merged` or
+  `pr.closed`, after which it is not open.
+- **Address reviews elsewhere** (`address-review-elsewhere`) is the new built-in for the second of
+  that workspace's triggers: `address-review`, telling `session: origin` — the agent that opened
+  it — with the commands by link. It does not use `pr.clone`, so it runs without the clone.
+- **The window.** The trigger dialog offers such workflows under **On a pull request it tracks
+  elsewhere** unless an event other than `pr.*` is ticked, and greys the rest out once one is chosen; the
+  sentence and the list say "a pull request it tracks elsewhere"; the trigger's details list each
+  one watched (`TriggerItem::watching_elsewhere`).
+
+How it was checked: the watch and the fires in the core against a real store and a forge from a
+table — a review on lib#7 starting `address-review-elsewhere` about lib#7 and not the trigger on
+the workspace's own #7, and the reverse; opening soon after tracking and not long after, nor for
+a trigger saved after the tracking; the refusals; untracking dropping the watch and refusing what
+was gathering; the arguments `gh` is given, against a stand-in `gh`; `ys trigger add` end to end
+with the real binary; the dialog and the list through Testing Library. Not yet done: the app by
+hand against a real tracked pull request, and the three systems' hands-on pass.
 
 ## The hands-on pass
 

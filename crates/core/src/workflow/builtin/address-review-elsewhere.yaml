@@ -1,0 +1,35 @@
+# Built into Yardsort. To change it, duplicate it: a file in your workflows folder with the same
+# id is used instead of this one, and removing that file brings this one back.
+id: address-review-elsewhere
+name: Address reviews elsewhere
+description: >
+  Tell the agent that opened a pull request this workspace tracks in another repository —
+  or, when it is not running, the workspace's own agent — once it is quiet, that the pull
+  request has new reviews or comments, and to address them. The run lasts until the agent has
+  answered, so a trigger that starts it does not start it again for the agent's own replies.
+version: 1
+
+trigger:
+  kind: manual
+  context: tracked_pull_request
+
+steps:
+  - id: tell
+    action: send_to_session
+    session: origin
+    timeout: 1h
+    prompt: |
+      Pull request {{ pr.repo }}#{{ pr.number }} ({{ pr.url }}) has new reviews or comments:
+      {{ event.summary }}. It is in {{ pr.repo }}, not in this project's repository.
+      Read the reviews and the conversation with `gh pr view {{ pr.url }} --comments`, and the
+      comments on lines with `gh api repos/{{ pr.repo }}/pulls/{{ pr.number }}/comments`, adding
+      `--hostname` and the host in its link when that is not github.com. Fix what is right
+      where its branch is checked out, push, and answer each comment saying what you did or why
+      you did not.
+
+  - id: answered
+    action: wait_session
+    needs: [tell]
+    session: origin
+    until: settled
+    timeout: 2h

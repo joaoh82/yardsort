@@ -1397,6 +1397,13 @@ export type Filters_Deserialize = {
 	noBots?: boolean,
 	/**  `custom`: the names it listens for, without `custom.`. At least one. */
 	names?: string[],
+	/**
+	 *  `pr.*`: the events of the pull requests the workspace tracks in other repositories
+	 *  (`ys pr track`), each one apart, rather than of its own pull request. Not chosen: it is
+	 *  set when the trigger is saved, from whether its workflow is about one elsewhere
+	 *  (`context: tracked_pull_request`).
+	 */
+	elsewhere?: boolean,
 };
 
 /**
@@ -1434,6 +1441,13 @@ export type Filters_Serialize = {
 	noBots?: boolean,
 	/**  `custom`: the names it listens for, without `custom.`. At least one. */
 	names?: string[],
+	/**
+	 *  `pr.*`: the events of the pull requests the workspace tracks in other repositories
+	 *  (`ys pr track`), each one apart, rather than of its own pull request. Not chosen: it is
+	 *  set when the trigger is saved, from whether its workflow is about one elsewhere
+	 *  (`context: tracked_pull_request`).
+	 */
+	elsewhere?: boolean,
 };
 
 /**  Which forge a host is, as far as the shape of its URLs goes. */
@@ -3466,6 +3480,19 @@ export type TrackedPullRequestsChanged = {
 	projectIds: string[],
 };
 
+/**  A pull request the workspace tracks elsewhere, as a trigger's watch last saw it. */
+export type TrackedWatch = {
+	/**  `owner/name#7`. */
+	name: string,
+	url: string,
+	/**  It was merged or closed. */
+	closed: boolean,
+	/**  Why the last look could not be made. */
+	problem: string | null,
+	/**  When it was last looked at; 0 for never. */
+	lookedAt: number | null,
+};
+
 /**  What starts a run, and what a run is about. */
 export type Trigger = {
 	kind: TriggerKind,
@@ -3620,6 +3647,11 @@ export type TriggerItem_Deserialize = {
 	last: TriggerFire | null,
 	/**  What it knows of its workspace's pull request, for one on a `pr.*` event. */
 	watch: PullRequestWatch | null,
+	/**
+	 *  For one about pull requests elsewhere (`filters.elsewhere`): each the workspace tracks,
+	 *  as its watch last saw it.
+	 */
+	watchingElsewhere: TrackedWatch[],
 	createdAt: number | null,
 };
 
@@ -3666,6 +3698,11 @@ export type TriggerItem_Serialize = {
 	last: TriggerFire | null,
 	/**  What it knows of its workspace's pull request, for one on a `pr.*` event. */
 	watch: PullRequestWatch | null,
+	/**
+	 *  For one about pull requests elsewhere (`filters.elsewhere`): each the workspace tracks,
+	 *  as its watch last saw it.
+	 */
+	watchingElsewhere: TrackedWatch[],
 	createdAt: number | null,
 };
 

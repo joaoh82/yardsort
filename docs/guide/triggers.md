@@ -152,6 +152,8 @@ filters are ones the events have.
   cancelled run.
 - **The pull request's events** are about the open pull request for the branch the workspace has
   checked out, on GitHub, as `gh` sees it. See [Watching a pull request](#watching-a-pull-request).
+  A trigger whose workflow is about a pull request the workspace tracks in another repository
+  hears those instead: see [Pull requests elsewhere](#pull-requests-elsewhere).
 
 ## Watching a pull request
 
@@ -189,6 +191,49 @@ watches.
   `{{ event.number }}` and `{{ event.title }}` instead.
 - **GitHub not answering** — no network, `gh` logged out — is no news; the trigger looks again a
   minute later.
+
+## Pull requests elsewhere
+
+A workspace can [track pull requests in other repositories](commits-and-pull-requests.md) — the
+ones its agent opens in a nested clone of the project's folder, with `ys pr track`. A trigger
+hears their `pr.*` events when its workflow is about such a pull request (`context:
+tracked_pull_request`): **Request code review elsewhere** (`code-review-elsewhere`), **Address
+reviews elsewhere** (`address-review-elsewhere`), or one of your own. Such a trigger hears every
+pull request the workspace tracks, each on its own, and none of the workspace's own; a trigger
+whose workflow is about the workspace's own pull request hears only that one. So to have both
+reviewed, make two triggers.
+
+```sh
+ys trigger add --on pr.opened --workflow code-review-elsewhere --input reviewer=codex --workspace fix-login
+ys trigger add --on pr.review --on pr.comment --workflow address-review-elsewhere --workspace fix-login
+```
+
+In the trigger dialog, the workflows about one elsewhere are under **On a pull request it tracks
+elsewhere**, offered unless an event that is not the pull request's is ticked; once one is
+chosen, the other events are greyed out.
+
+- **Being tracked is `pr.opened`.** An agent tracks the pull request it has just opened, so
+  `pr.opened` is the workspace tracking one — by `ys pr track`, **Track pull request…**, or the
+  agent's own reporting — when Yardsort looks at it within ten minutes of the tracking. One
+  tracked longer before its first look is only watched from then on. A draft counts once it is
+  marked ready, or at once with `--drafts`.
+- **What is there when you add the trigger is not news**, for each pull request already tracked,
+  as for the workspace's own. Reviews and comments posted before a pull request was tracked are
+  not news either.
+- **Each counts its own runs.** The cap is per pull request, and two with the same number in
+  different repositories are two.
+- **The run is about the one that set it off**, read again by its link when the run starts:
+  `{{ pr.* }}`, `pr.repo` and `pr.clone` are that pull request's, and `session: origin` is the
+  agent that opened it while it runs, else the workspace's own agent. One no longer tracked, or
+  no longer open, is **refused**, with the reason.
+- **Only the pull request's events.** Such a workflow is always about one pull request, so a
+  trigger cannot start it on the workspace's or an agent's events, nor on `pr.merged` or
+  `pr.closed`, after which it is not open.
+- **A merged or closed one** is told once, as the workspace's own is, then looked at every ten
+  minutes rather than every minute, for its reopening. **Stop tracking** one and it is no longer
+  watched.
+
+The trigger's details list the pull requests it watches.
 
 ## The done signal
 
@@ -340,7 +385,7 @@ to has ended. The number beside **Triggers** in the sidebar counts those that ne
 refused, waiting for approval, or with no workspace.
 
 A trigger opens to its switch, **Edit…**, **Reset** when it is capped, **Remove…**, what it is
-set to, the pull request it is watching, and its history, newest first, each line with **Open
+set to, the pull request it is watching — or the ones elsewhere —, and its history, newest first, each line with **Open
 run** when it started one: that run, open in the workflow's view or the workspace's smoke tests.
 `ys trigger fires <trigger>` lists the same:
 

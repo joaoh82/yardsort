@@ -37,6 +37,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0025_custom_events.sql"),
     include_str!("../migrations/0026_remote_computer.sql"),
     include_str!("../migrations/0027_tracked_pull_requests.sql"),
+    include_str!("../migrations/0028_tracked_pr_watches.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -901,6 +902,16 @@ impl Store {
         )?;
         let rows = stmt.query_map([project_id], tracked_from_row)?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// When a tracked pull request was tracked, for tests that keep a made-up clock.
+    #[cfg(test)]
+    pub(crate) fn set_tracked_at(&self, id: &str, at: i64) -> StoreResult<()> {
+        self.conn().execute(
+            "UPDATE tracked_pull_requests SET created_at = ? WHERE id = ?",
+            params![at, id],
+        )?;
+        Ok(())
     }
 
     /// Stop following one, by its id or its link. Returns whether there was one.
