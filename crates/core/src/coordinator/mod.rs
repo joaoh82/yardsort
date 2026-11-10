@@ -9,7 +9,9 @@
 //!   the permission setting changes, so they describe the level that is actually in force.
 //! - **Reach:** `ys`, the command line, which reads the same database the app does. Its `PATH`
 //!   begins with the folder this copy's own `ys` is in, and `YARDSORT_DATA_DIR` names this
-//!   profile, so `ys` answers about the projects the window shows and nobody else's.
+//!   profile, and `YARDSORT_CONFIG_DIR` names the directory that holds `settings.toml`, so `ys`
+//!   answers about the projects the window shows and reads the permission the window saved.
+//!   On Linux those are different directories.
 //!   `YARDSORT_COORDINATOR` is set too. While it is set, `ys` enforces the permission level from
 //!   settings: it is not enough that the instructions say where the lines are.
 //!
@@ -42,6 +44,11 @@ pub const DIR: &str = "coordinator";
 /// it applies to the next command without a restart. Unsetting it, or running something that is
 /// not `ys`, is outside the gate — the guide says so, and it is not a sandbox.
 pub const ENV: &str = "YARDSORT_COORDINATOR";
+
+/// How long a test is willing to wait for a confirmation, in milliseconds. A child agent must
+/// not inherit it: it is not a permission, and a short wait meant for one test would cut off
+/// the next command.
+pub const CONFIRM_WAIT_ENV: &str = "YARDSORT_COORDINATOR_CONFIRM_WAIT";
 
 /// What `CLAUDE.md` says: Claude Code reads that file, not `AGENTS.md`, and `@` imports one.
 const CLAUDE_MD: &str = "@AGENTS.md\n";
@@ -98,18 +105,27 @@ pub fn current(host: &dyn TerminalHost) -> Option<SessionInfo> {
 /// The variables the coordinator gets on top of the user's environment: the profile `ys` is to
 /// read, and a `PATH` that finds this copy's `ys` before any other.
 ///
-/// `ys_dir` is the folder holding the `ys` that came with the app. `None` — a development build
-/// before `ys` was built — leaves `PATH` as it is, and the coordinator finds whatever `ys` the
+/// `ys_dir` is the folder holding the `ys` that came with the app. `None`, a development build
+/// before `ys` was built, leaves `PATH` as it is, and the coordinator finds whatever `ys` the
 /// user installed, if any.
+///
+/// `config_dir` is where `settings.toml` actually is. On Linux that is not `data_dir`. Passing
+/// only the data directory would make `ys` look for settings beside the database, find none,
+/// and treat every level as ask first.
 pub fn environment(
     env: &ShellEnv,
     data_dir: &Path,
+    config_dir: &Path,
     ys_dir: Option<&Path>,
 ) -> Vec<(String, String)> {
     let mut vars = vec![
         (
             "YARDSORT_DATA_DIR".to_owned(),
             data_dir.to_string_lossy().into_owned(),
+        ),
+        (
+            "YARDSORT_CONFIG_DIR".to_owned(),
+            config_dir.to_string_lossy().into_owned(),
         ),
         // Presence is the marker. The level is not put here: `ys` reads it from settings, and
         // a value the agent can edit would be a level the agent can edit.
@@ -145,6 +161,7 @@ impl Launcher<'_> {
         &self,
         harness: HarnessRequest,
         ys_dir: Option<&Path>,
+        config_dir: &Path,
         size: TermSize,
         level: FloorManagerLevel,
     ) -> IpcResult<SessionInfo> {
@@ -182,7 +199,7 @@ impl Launcher<'_> {
         resolved.labels.insert(LABEL.to_owned(), harness_id);
         resolved
             .env
-            .extend(environment(self.env, self.data_dir, ys_dir));
+            .extend(environment(self.env, self.data_dir, config_dir, ys_dir));
         self.start(resolved, Some(home.to_string_lossy().into_owned()), size)
     }
 }
@@ -257,19 +274,33 @@ mod tests {
         };
         let path = format!("{other}{sep}{ys}");
         let env = env_with(&[("Path", &path)]);
-        let vars = environment(&env, Path::new("/tmp/profile"), Some(Path::new(ys)));
+        let vars = environment(
+            &env,
+            Path::new("/tmp/profile"),
+            Path::new("/tmp/config"),
+            Some(Path::new(ys)),
+        );
         assert_eq!(vars[0].0, "YARDSORT_DATA_DIR");
         assert_eq!(vars[0].1, "/tmp/profile");
+        assert_eq!(
+            vars[1],
+            ("YARDSORT_CONFIG_DIR".to_owned(), "/tmp/config".to_owned())
+        );
         // Present, and not the level: the agent must not be able to edit its permission by
         // editing the value.
-        assert_eq!(vars[1], (ENV.to_owned(), "1".to_owned()));
+        assert_eq!(vars[2], (ENV.to_owned(), "1".to_owned()));
         // The spelling the environment has, and the folder once, at the front.
-        assert_eq!(vars[2], ("Path".to_owned(), format!("{ys}{sep}{other}")));
+        assert_eq!(vars[3], ("Path".to_owned(), format!("{ys}{sep}{other}")));
 
         // No `ys` of its own: `PATH` is left as it is. The marker is still set.
-        let vars = environment(&env, Path::new("/tmp/profile"), None);
-        assert_eq!(vars.len(), 2);
-        assert_eq!(vars[1].0, ENV);
+        let vars = environment(
+            &env,
+            Path::new("/tmp/profile"),
+            Path::new("/tmp/config"),
+            None,
+        );
+        assert_eq!(vars.len(), 3);
+        assert_eq!(vars[2].0, ENV);
     }
 
     /// A harness that is a shell script, so a real process runs in a real PTY.
@@ -319,7 +350,8 @@ mod tests {
         let harnesses = vec![script_harness(
             bin.path(),
             &format!(
-                "pwd > '{0}'; echo \"$YARDSORT_DATA_DIR\" >> '{0}'; echo \"$PATH\" >> '{0}'; \
+                "pwd > '{0}'; echo \"$YARDSORT_DATA_DIR\" >> '{0}'; \
+                 echo \"$YARDSORT_CONFIG_DIR\" >> '{0}'; echo \"$PATH\" >> '{0}'; \
                  echo \"$YARDSORT_COORDINATOR\" >> '{0}'; sleep 30",
                 out.display()
             ),
@@ -342,25 +374,34 @@ mod tests {
             data_dir: data.path(),
         };
         let size = TermSize { cols: 80, rows: 24 };
+        let config = data.path().join("config-place");
+        std::fs::create_dir(&config).unwrap();
 
         let first = launcher
-            .coordinator(request(), Some(ys_dir.path()), size, FloorManagerLevel::Ask)
+            .coordinator(
+                request(),
+                Some(ys_dir.path()),
+                &config,
+                size,
+                FloorManagerLevel::Ask,
+            )
             .unwrap();
         assert_eq!(first.labels.get(LABEL).map(String::as_str), Some("fake"));
         assert!(!first.labels.contains_key(crate::launch::WORKSPACE_LABEL));
-        wait_until(|| std::fs::read_to_string(&out).is_ok_and(|seen| seen.lines().count() >= 4));
+        wait_until(|| std::fs::read_to_string(&out).is_ok_and(|seen| seen.lines().count() >= 5));
         let seen = std::fs::read_to_string(&out).unwrap();
         let lines: Vec<&str> = seen.lines().collect();
         let home = std::fs::canonicalize(home(data.path())).unwrap();
         assert_eq!(std::fs::canonicalize(lines[0]).unwrap(), home);
         assert_eq!(lines[1], data.path().to_string_lossy());
+        assert_eq!(lines[2], config.to_string_lossy());
         assert!(
-            lines[2].starts_with(&*ys_dir.path().to_string_lossy()),
+            lines[3].starts_with(&*ys_dir.path().to_string_lossy()),
             "ys first on PATH: {}",
-            lines[2]
+            lines[3]
         );
         assert_eq!(
-            lines[3], "1",
+            lines[4], "1",
             "the gate's marker, not a level the agent can edit"
         );
         assert!(home.join("AGENTS.md").is_file());
@@ -372,6 +413,7 @@ mod tests {
             .coordinator(
                 request(),
                 Some(ys_dir.path()),
+                &config,
                 size,
                 FloorManagerLevel::Trusted,
             )
@@ -389,7 +431,13 @@ mod tests {
         });
         assert_eq!(current(&host).map(|s| s.id), Some(first.id.clone()));
         let next = launcher
-            .coordinator(request(), Some(ys_dir.path()), size, FloorManagerLevel::Ask)
+            .coordinator(
+                request(),
+                Some(ys_dir.path()),
+                &config,
+                size,
+                FloorManagerLevel::Ask,
+            )
             .unwrap();
         assert_ne!(next.id, first.id);
         assert!(host.info(&first.id).is_err(), "the ended one is forgotten");

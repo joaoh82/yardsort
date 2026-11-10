@@ -65,13 +65,15 @@ const PERMISSIONS: { level: FloorManagerLevel; label: string; hint: string }[] =
  */
 function FloorManagerPermission({
   level,
+  disabled,
   onChange,
 }: {
   level: FloorManagerLevel;
+  disabled: boolean;
   onChange: (level: FloorManagerLevel) => void;
 }) {
   return (
-    <fieldset className="grid gap-2 rounded border border-line px-3 py-2">
+    <fieldset disabled={disabled} className="grid gap-2 rounded border border-line px-3 py-2">
       <legend className="px-1 text-ink-muted">Floor Manager permission</legend>
       {PERMISSIONS.map((choice) => (
         <label key={choice.level} className="flex items-start gap-2">
@@ -118,6 +120,7 @@ export function GeneralSettings() {
   const [autoCheck, setAutoCheck] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [levelError, setLevelError] = useState<string | null>(null);
+  const [savingLevel, setSavingLevel] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const adopt = (next: SettingsInfo) => {
@@ -158,14 +161,17 @@ export function GeneralSettings() {
   };
 
   const setLevel = async (level: FloorManagerLevel) => {
-    const previous = info.floorManager;
-    setInfo({ ...info, floorManager: level });
+    if (savingLevel) return;
+    setSavingLevel(true);
     setLevelError(null);
     try {
-      await ipc.settingsSaveFloorManager(level);
+      // The saved settings, not the copy this render closed over: two clicks otherwise
+      // put the first one's editor and notify fields back.
+      setInfo(await ipc.settingsSaveFloorManager(level));
     } catch (reason) {
-      setInfo({ ...info, floorManager: previous });
       setLevelError(errorMessage(reason));
+    } finally {
+      setSavingLevel(false);
     }
   };
 
@@ -231,6 +237,7 @@ export function GeneralSettings() {
       <UpdateNow />
       <FloorManagerPermission
         level={info.floorManager}
+        disabled={savingLevel}
         onChange={(level) => void setLevel(level)}
       />
       {levelError && (

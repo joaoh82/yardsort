@@ -329,6 +329,12 @@ fn spawn_daemon(endpoint: &Endpoint, log_path: &Path, spool_dir: &Path) -> std::
                 .stderr(std::process::Stdio::null());
         }
     }
+    // The process that starts a daemon may be the Floor Manager's `ys`. On Windows a terminal
+    // keeps the daemon's environment, so the marker would gate every later agent. The level is
+    // not a variable a child should carry.
+    command
+        .env_remove(crate::coordinator::ENV)
+        .env_remove(crate::coordinator::CONFIRM_WAIT_ENV);
     detach(&mut command);
     command.spawn()?;
     Ok(())

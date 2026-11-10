@@ -9,6 +9,7 @@ import { useModalFocus } from "@/lib/useModalFocus";
  */
 export function FloorManagerConfirmations() {
   const [pending, setPending] = useState<CoordinatorConfirmation[]>([]);
+  const [gone, setGone] = useState(false);
 
   useEffect(() => {
     if (!hasCore()) return;
@@ -31,6 +32,33 @@ export function FloorManagerConfirmations() {
     };
   }, []);
 
+  if (gone) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6">
+        <div
+          role="alertdialog"
+          aria-labelledby="floor-manager-gone-title"
+          className="w-[32rem] max-w-[calc(100vw-2rem)] rounded-lg border border-line bg-surface p-5 shadow-2xl shadow-black/50"
+        >
+          <h2 id="floor-manager-gone-title" className="text-base font-semibold">
+            No longer waiting
+          </h2>
+          <p className="mt-2 text-ink-muted">It was not run.</p>
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              autoFocus
+              onClick={() => setGone(false)}
+              className="h-8 rounded border border-line px-3 text-ink-muted hover:border-accent hover:text-ink"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const current = pending[0];
   if (!current) return null;
   return (
@@ -39,6 +67,10 @@ export function FloorManagerConfirmations() {
       request={current}
       more={pending.length - 1}
       onDone={(id) => setPending((waiting) => waiting.filter((item) => item.id !== id))}
+      onGone={(id) => {
+        setPending((waiting) => waiting.filter((item) => item.id !== id));
+        setGone(true);
+      }}
     />
   );
 }
@@ -47,11 +79,14 @@ function ConfirmDialog({
   request,
   more,
   onDone,
+  onGone,
 }: {
   request: CoordinatorConfirmation;
   /** How many more are waiting behind this one. */
   more: number;
   onDone: (id: string) => void;
+  /** The waiting `ys` is gone: answering would record a yes nothing runs. */
+  onGone: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +100,11 @@ function ConfirmDialog({
     setBusy(true);
     setError(null);
     try {
-      await ipc.coordinatorAnswer(request.id, allow);
+      const recorded = await ipc.coordinatorAnswer(request.id, allow);
+      if (!recorded) {
+        onGone(request.id);
+        return;
+      }
       onDone(request.id);
     } catch (reason) {
       busyRef.current = false;
@@ -79,10 +118,11 @@ function ConfirmDialog({
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation();
       void answer(false);
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
     // `answer` closes over this request. A new request remounts the dialog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request.id]);

@@ -26,7 +26,9 @@ other, with no output parsed. What makes it a coordinator is two things:
    running agent has already read the old file; it reads the new one the next time it starts.
    The gate does not wait for that.
 2. **What it can reach.** It reaches `ys`. The launch puts the folder of the app's own `ys` first
-   on `PATH`, sets `YARDSORT_DATA_DIR` to the profile, and sets `YARDSORT_COORDINATOR`. The
+   on `PATH`, sets `YARDSORT_DATA_DIR` to the profile, sets `YARDSORT_CONFIG_DIR` to the
+   directory that holds `settings.toml` (on Linux that is not the data directory), and sets
+   `YARDSORT_COORDINATOR`. The
    variable's value is ignored. While it is set, `ys` reads the permission from settings on
    every command and enforces it. `ys` already covered projects, workspaces, sessions, logs,
    activity, tasks, workflows, tests, schedules and triggers. What it lacked was pull requests,
@@ -74,13 +76,18 @@ Ask first does not trust the agent to ask, and it does not read stdin: the agent
 itself. `ys` checks that the desktop app holds the profile lock. If it does not, the command is
 refused at once. If it does, `ys` writes `<data dir>/coordinator/confirm/<uuid>.json` and polls
 for `<uuid>.answer` (`yes` or `no`) until the app writes it, the lock drops, or ten minutes
-pass. The window polls the same folder and shows **Allow** / **Don't allow**. Answering writes
-the file. It does not run the command: the process that is waiting is the one that parsed it.
+pass. `ys` touches the request while it waits. One that has not been touched for a few seconds
+is dropped, and so is an answer file left behind with no request, so a command that was killed
+does not stay in the dialog until the ten minutes run out. The window polls the same folder and
+shows **Allow** / **Don't allow**. Answering writes the file. It does not run the command: the
+process that is waiting is the one that parsed it. If nothing is waiting, the window says so
+instead of recording an answer nothing will run.
 The id has to be a uuid whose stem matches the request, so an answer cannot name a path outside
 that folder.
 
 This is not a security boundary against a Floor Manager that wants to get around it. It runs as
-the user. It can write the answer file, unset `YARDSORT_COORDINATOR`, or run `git`, `gh` or an
+the user. It can write the answer file, unset `YARDSORT_COORDINATOR`, edit `settings.toml` so
+the level is `trusted`, point `ys --data-dir` at another profile, or run `git`, `gh` or an
 editor. The instructions tell it not to. The guide says the same to the user. There is no `ys`
 command for archiving a workspace, deleting a branch, merging, closing or approving a pull
 request, or editing project files, so those stay instructions: the gate cannot see them. The

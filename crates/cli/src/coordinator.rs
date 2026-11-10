@@ -40,11 +40,85 @@ pub(crate) fn enforce(data_dir: &Option<PathBuf>, command: &Command) -> Result<(
         };
     }
     let ys = Yardsort::open(data_dir.clone())?;
+    // A file we could not read must not fall through to the default, which is ask first: that
+    // would quietly loosen read only. A missing file is not this case.
+    if let Some(problem) = &ys.settings_problem {
+        return Err(Failure::new(format!(
+            "The Floor Manager's settings could not be read, so this was treated as read only \
+             and was not run: {line}\n{problem}"
+        )));
+    }
     match coordinator::decide(ys.settings.floor_manager.level, action, &line) {
         Decision::Allow => Ok(()),
         Decision::Refuse(message) => Err(Failure::new(message)),
-        Decision::Confirm => coordinator::ask(&ys.data_dir, &line).map_err(Failure::new),
+        Decision::Confirm => {
+            let shown = confirmation_text(command, &line)?;
+            coordinator::ask(&ys.data_dir, &shown).map_err(Failure::new)
+        }
     }
+}
+
+/// What ask first puts in the dialog. A comment read from a file is part of the command the
+/// user is allowing, so the text is in the request. `-` is refused: standard input is not
+/// knowable until it is consumed, and consuming it would leave the command with nothing to post.
+fn confirmation_text(command: &Command, line: &str) -> Result<String, Failure> {
+    let Some(file) = body_file(command) else {
+        return Ok(line.to_owned());
+    };
+    if file == "-" {
+        return Err(Failure::new(
+            "Not run: --body-file - would post whatever is on standard input, and ask first \
+             would show only the flag. Pass the text as an argument, or name a file, so the \
+             confirmation shows what would be posted.",
+        ));
+    }
+    let text = std::fs::read_to_string(file).map_err(|error| {
+        Failure::new(format!(
+            "Not run: the text in {file} could not be read, so it was not posted: {error}"
+        ))
+    })?;
+    let (shown, cut) = preview_body(&text);
+    let mut out = format!("{line}\n\nThe text that would be posted:\n{shown}");
+    if cut {
+        out.push_str("\n\nThe rest is in the file.");
+    }
+    Ok(out)
+}
+
+fn body_file(command: &Command) -> Option<&str> {
+    match command {
+        Command::Task(task::Command::Create { body_file, .. })
+        | Command::Task(task::Command::Comment { body_file, .. }) => body_file.as_deref(),
+        _ => None,
+    }
+}
+
+/// How much of a comment the dialog shows. The rest stays in the file, and the request says so.
+const BODY_PREVIEW: usize = 8 * 1024;
+
+/// The comment, with control characters and bidi overrides escaped, and newlines kept so it
+/// can be read. A bidi override in this text can reorder the buttons that follow it.
+fn preview_body(text: &str) -> (String, bool) {
+    let mut end = 0;
+    for (index, character) in text.char_indices() {
+        let next = index + character.len_utf8();
+        if next > BODY_PREVIEW {
+            break;
+        }
+        end = next;
+    }
+    (show_text(&text[..end]), end < text.len())
+}
+
+fn show_text(text: &str) -> String {
+    let mut out = String::new();
+    for character in text.chars() {
+        match character {
+            '\n' | '\t' => out.push(character),
+            other => push_visible(other, &mut out, false),
+        }
+    }
+    out
 }
 
 /// What this command does. Exhaustive on purpose: a new subcommand has to be named as a read,
@@ -159,13 +233,68 @@ fn command_line() -> String {
 }
 
 fn quote(arg: &str) -> String {
-    if arg.is_empty()
-        || arg
-            .chars()
-            .any(|c| c.is_whitespace() || matches!(c, '"' | '\\' | '\'' | '$' | '`'))
-    {
-        format!("\"{}\"", arg.replace('\\', "\\\\").replace('"', "\\\""))
-    } else {
-        arg.to_owned()
+    let needs_quotes = arg.is_empty() || arg.chars().any(must_quote);
+    if !needs_quotes {
+        return arg.to_owned();
+    }
+    let mut out = String::from("\"");
+    for character in arg.chars() {
+        push_visible(character, &mut out, true);
+    }
+    out.push('"');
+    out
+}
+
+/// A character that would split the command line, or change how the dialog reads it.
+fn must_quote(character: char) -> bool {
+    character.is_whitespace()
+        || matches!(character, '"' | '\\' | '\'' | '$' | '`')
+        || is_hidden(character)
+}
+
+/// Newlines, other controls, and bidi overrides. Left in a command line, a newline looks like
+/// a second command and a bidi override can reverse the text of the dialog.
+fn is_hidden(character: char) -> bool {
+    let code = character as u32;
+    (character.is_control() && character != '\t')
+        || (0x202A..=0x202E).contains(&code)
+        || (0x2066..=0x2069).contains(&code)
+        || matches!(code, 0x200E | 0x200F | 0x061C)
+}
+
+/// Write `character` so it cannot change the surrounding text. Inside a quoted argument,
+/// newline, return and tab become the two-character escapes. Elsewhere a newline or tab is
+/// kept by the caller.
+fn push_visible(character: char, out: &mut String, quoted: bool) {
+    match character {
+        '\\' | '"' => {
+            out.push('\\');
+            out.push(character);
+        }
+        '\n' if quoted => out.push_str("\\n"),
+        '\r' if quoted => out.push_str("\\r"),
+        '\t' if quoted => out.push_str("\\t"),
+        other if is_hidden(other) || (quoted && other.is_control()) => {
+            out.push_str(&format!("\\u{{{:04x}}}", other as u32));
+        }
+        other => out.push(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quote;
+
+    #[test]
+    fn a_command_line_cannot_hide_a_second_command_or_reorder_the_dialog() {
+        assert_eq!(quote("plain"), "plain");
+        assert_eq!(quote("has space"), "\"has space\"");
+        let newline = quote("one\ntwo");
+        assert!(!newline.contains('\n'), "{newline}");
+        assert!(newline.contains("\\n"), "{newline}");
+        let bidi = quote("ok\u{202e}evil");
+        assert!(!bidi.contains('\u{202e}'), "{bidi}");
+        assert!(bidi.contains("\\u{202e}"), "{bidi}");
+        assert_eq!(quote("a\\b\"c"), "\"a\\\\b\\\"c\"");
     }
 }

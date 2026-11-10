@@ -502,7 +502,7 @@ describe("Settings", () => {
     const trusted = screen.getByRole("radio", { name: /Trusted/ });
     await user.click(trusted);
     expect(core.settingsSaveFloorManager).toHaveBeenCalledWith("trusted");
-    expect(trusted).toBeChecked();
+    await waitFor(() => expect(trusted).toBeChecked());
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 

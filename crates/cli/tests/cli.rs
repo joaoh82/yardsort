@@ -1,8 +1,9 @@
 //! `ys` end to end: the real binary, a real database, real git repositories.
 //!
-//! No agent is started here. Launching one needs a harness on `PATH`, which a CI runner has no
-//! reason to have — what is tested instead is that everything up to the launch is right, and
-//! that asking for a harness that is not there fails *before* anything is created.
+//! One test starts a stand-in harness, to check the Floor Manager does not hand its marker to
+//! the agent it starts. The rest start no agent: a CI runner has no harness on `PATH`, so what
+//! is tested instead is that everything up to the launch is right, and that asking for a harness
+//! that is not there fails before anything is created.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -328,6 +329,217 @@ fn destructive_commands_are_refused_at_every_permission() {
             );
         }
         assert_eq!(worktree_count(&fx), 1, "{level} deleted the workspace");
+    }
+}
+
+/// Linux keeps settings in the config directory and the database in the data directory. The
+/// Floor Manager sets `YARDSORT_DATA_DIR`, so without `YARDSORT_CONFIG_DIR` `ys` would look
+/// beside the database, find nothing, and ignore read only.
+#[test]
+fn the_floor_manager_reads_settings_from_the_config_directory() {
+    let fx = Fixture::new();
+    // Beside the database, trusted. A lookup that ignores the config directory would allow this.
+    fx.set_floor("trusted");
+    let config = tempfile::tempdir().unwrap();
+    std::fs::write(
+        config.path().join("settings.toml"),
+        "[floor_manager]\nlevel = \"read-only\"\n",
+    )
+    .unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args([
+            "workspace",
+            "new",
+            &fx.project_name,
+            "should be refused",
+            "--no-agent",
+        ])
+        .env("YARDSORT_DATA_DIR", &fx.data_dir)
+        .env("YARDSORT_CONFIG_DIR", config.path())
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env("YARDSORT_NO_DAEMON", "1")
+        .env(yardsort_core::coordinator::ENV, "1")
+        .env_remove("SWITCHYARD_DATA_DIR")
+        .env_remove("SWITCHYARD_CONFIG_DIR")
+        .env_remove(yardsort_core::coordinator::CONFIRM_WAIT_ENV);
+    let output = command.output().expect("ys should run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stdout: {}\nstderr: {stderr}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        stderr.contains("read only") && stderr.contains("was not run"),
+        "the trusted file beside the database must not win: {stderr}"
+    );
+    assert_eq!(worktree_count(&fx), 0);
+}
+
+#[test]
+fn an_unreadable_settings_file_is_read_only_for_the_floor_manager() {
+    let fx = Fixture::new();
+    std::fs::write(fx.data_dir.join("settings.toml"), "level = [\n").unwrap();
+    let refused = fx
+        .ys_floor(
+            &["workspace", "new", &fx.project_name, "nope", "--no-agent"],
+            None,
+        )
+        .failed();
+    assert!(refused.contains("could not be read"), "{refused}");
+    assert!(refused.contains("read only"), "{refused}");
+    assert_eq!(worktree_count(&fx), 0);
+    // The user's own ys is not the Floor Manager. A broken file is still the defaults for them.
+    fx.ys(&[
+        "workspace",
+        "new",
+        &fx.project_name,
+        "the user, not the floor manager",
+        "--no-agent",
+    ])
+    .ok();
+}
+
+#[test]
+fn ask_first_shows_the_comment_and_refuses_a_body_from_stdin() {
+    let fx = Fixture::new();
+    let note = fx.data_dir.join("note.md");
+    std::fs::write(&note, "please look\n\u{202e}hidden").unwrap();
+    let shown = fx
+        .ys_floor(
+            &[
+                "task",
+                "comment",
+                "12",
+                "--body-file",
+                &note.to_string_lossy(),
+            ],
+            None,
+        )
+        .failed();
+    assert!(shown.contains("The text that would be posted:"), "{shown}");
+    assert!(shown.contains("please look\n"), "{shown}");
+    assert!(!shown.contains('\u{202e}'), "{shown}");
+    assert!(shown.contains("\\u{202e}"), "{shown}");
+    assert!(
+        shown.contains("not open"),
+        "the text is shown, then nobody can allow it: {shown}"
+    );
+
+    let stdin = fx
+        .ys_floor(&["task", "comment", "12", "--body-file", "-"], None)
+        .failed();
+    assert!(stdin.contains("standard input"), "{stdin}");
+    assert!(!stdin.contains("not open"), "{stdin}");
+
+    let sneaky = fx
+        .ys_floor(
+            &[
+                "workspace",
+                "new",
+                &fx.project_name,
+                "one\ntwo\u{202e}three",
+                "--no-agent",
+            ],
+            None,
+        )
+        .failed();
+    assert!(sneaky.contains("\\n"), "{sneaky}");
+    assert!(sneaky.contains("\\u{202e}"), "{sneaky}");
+    assert!(!sneaky.contains('\u{202e}'), "{sneaky}");
+}
+
+/// A trusted Floor Manager starts an agent. That agent must not see the marker, or its own
+/// `ys` is gated.
+#[cfg(unix)]
+#[test]
+fn a_trusted_floor_manager_does_not_hand_its_marker_to_the_agent_it_starts() {
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    let seen = bin.path().join("seen");
+    let agent = bin.path().join("fake-agent");
+    yardsort_core::program::testing::executable(
+        &agent,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"${{YARDSORT_COORDINATOR-}}\" > '{}'\n\
+             printf '%s\\n' \"${{YARDSORT_COORDINATOR_CONFIRM_WAIT-}}\" >> '{}'\n\
+             printf '%s\\n' ran >> '{}'\nsleep 30\n",
+            seen.display(),
+            seen.display(),
+            seen.display(),
+        ),
+    );
+    std::fs::write(
+        fx.data_dir.join("settings.toml"),
+        format!(
+            "[floor_manager]\nlevel = \"trusted\"\n\n[[harness]]\nid = \"fake\"\n\
+             builtin = false\ncommand = \"{}\"\n",
+            agent.display()
+        ),
+    )
+    .unwrap();
+
+    let _stop = DaemonStop(fx.data_dir.clone());
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args([
+            "--data-dir",
+            &fx.data_dir.to_string_lossy(),
+            "workspace",
+            "new",
+            &fx.project_name,
+            "say the marker",
+            "--harness",
+            "fake",
+        ])
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env("SHELL", "/bin/sh")
+        .env(yardsort_core::coordinator::ENV, "1")
+        .env(yardsort_core::coordinator::CONFIRM_WAIT_ENV, "2000")
+        .env_remove("YARDSORT_NO_DAEMON");
+    let output = command.output().expect("ys should run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let text = loop {
+        if let Ok(text) = std::fs::read_to_string(&seen) {
+            if text.contains("ran") {
+                break text;
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the harness never ran.\nstdout: {stdout}\nstderr: {stderr}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    };
+    assert_eq!(
+        text.lines().collect::<Vec<_>>(),
+        ["", "", "ran"],
+        "the agent must print an empty marker: {text:?}"
+    );
+}
+
+/// Stops the daemon this test started, including when an assertion fails first.
+#[cfg(unix)]
+struct DaemonStop(PathBuf);
+
+#[cfg(unix)]
+impl Drop for DaemonStop {
+    fn drop(&mut self) {
+        if let Some(client) =
+            yardsort_core::daemon::connect_existing(&self.0, std::sync::Arc::new(|_| {}))
+        {
+            let _ = client.shutdown(true);
+        }
     }
 }
 

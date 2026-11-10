@@ -11,7 +11,11 @@ has the downloads and the full commit lists.
   auto mode does not skip that. Read only refuses a start or a write. Trusted may start agents,
   workspaces, workflows, tests and checkouts without asking. Deleting a workspace, closing a
   task and attaching stay refused at every level. This is not a sandbox: a shell command that
-  is not `ys` is outside the gate. See [What it may do](docs/guide/floor-manager.md#what-it-may-do).
+  is not `ys` is outside the gate. On Linux the Floor Manager reads the settings file in the
+  config directory, the same one Settings writes. A settings file that cannot be read is
+  treated as read only, and the refusal says why. Ask first shows the text a task comment
+  would post, and a confirmation nobody is still waiting on says so. See
+  [What it may do](docs/guide/floor-manager.md#what-it-may-do).
 
 ## 0.25.0
 

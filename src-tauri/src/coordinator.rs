@@ -71,8 +71,16 @@ pub async fn coordinator_start(
             fork_packet: None,
         };
         let level = state.settings.get().floor_manager.level;
+        // The file Settings saved. On Linux this is not the data directory, and `ys` would
+        // otherwise look beside the database and miss read only and trusted.
+        let config_dir = state
+            .settings
+            .path()
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| state.data_dir.clone());
         with_launcher(state, |launcher| {
-            launcher.coordinator(request, ys_dir, size, level)
+            launcher.coordinator(request, ys_dir, &config_dir, size, level)
         })?;
         Ok(status(state))
     })

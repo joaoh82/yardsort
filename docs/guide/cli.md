@@ -79,8 +79,9 @@ variable is set, `ys` enforces **Floor Manager permission** from Settings: read 
 start or a write, ask first (the default) waits until the window records Allow, and trusted runs
 the ones that are not destructive. `ys workspace delete` (with or without `--force`),
 `ys task close` and `ys attach` are refused at every level. Your own `ys`, without that
-variable, is not gated. A shell command that is not `ys` is outside the gate. See
-[What it may do](floor-manager.md#what-it-may-do).
+variable, is not gated. A shell command that is not `ys` is outside the gate. So is editing
+`settings.toml` so the level is `trusted`, and `ys --data-dir` pointed at a profile you made
+up. See [What it may do](floor-manager.md#what-it-may-do).
 
 ## Commands
 

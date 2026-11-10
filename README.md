@@ -136,8 +136,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   bottom bar's corner or **Mod+J**, is an agent you pick that has every project in view through
   `ys`. Ask what is running, which pull requests nobody has reviewed or which need attention, or
   to start a task. It suggests a workflow, opens workspaces on other people's pull requests and
-  starts reviewers on them. How much it may do on its own is a setting — read only, ask first
-  (the default) or trusted — and `ys` enforces it. Deleting a workspace, closing a task and
+  starts reviewers on them. How much it may do on its own is a setting: read only, ask first
+  (the default) or trusted. `ys` enforces it. Deleting a workspace, closing a task and
   attaching stay refused. A shell command that is not `ys` is outside that gate.
 - **Start from a repository or a link.** **Clone a repository** lists the repositories your `gh`
   account owns or collaborates on — type to narrow, pick one, clone — or takes a clone URL from

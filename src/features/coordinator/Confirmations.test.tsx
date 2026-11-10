@@ -58,7 +58,7 @@ it("asks, and Allow is the only thing that lets the command run", async () => {
 });
 
 it("Don't allow, and Escape, leave the command unrun", async () => {
-  waiting = [request("one", "ys workspace delete demo")];
+  waiting = [request("one", "ys workspace new demo fix the login")];
   const user = userEvent.setup();
   const { unmount } = render(<FloorManagerConfirmations />);
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -72,4 +72,16 @@ it("Don't allow, and Escape, leave the command unrun", async () => {
   render(<FloorManagerConfirmations />);
   await user.click(await screen.findByRole("button", { name: "Don't allow" }));
   expect(core.coordinatorAnswer).toHaveBeenLastCalledWith("two", false);
+});
+
+it("says when the command is no longer waiting", async () => {
+  waiting = [request("one", "ys workspace new demo fix the login")];
+  core.coordinatorAnswer.mockResolvedValue(false);
+  const user = userEvent.setup();
+  render(<FloorManagerConfirmations />);
+  await user.click(await screen.findByRole("button", { name: "Allow" }));
+  expect(
+    await screen.findByRole("alertdialog", { name: /no longer waiting/i }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("It was not run.")).toBeInTheDocument();
 });

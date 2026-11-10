@@ -22,6 +22,14 @@ use crate::presence::{self, Holder};
 /// short enough that a closed laptop does not leave an agent hanging overnight.
 pub const WAIT: Duration = Duration::from_secs(10 * 60);
 
+/// How recently a request must have been touched to still be someone waiting.
+///
+/// `ys` touches the file on each pass of its wait. A command killed by a harness (Claude Code
+/// stops a shell at two minutes) or by Ctrl-C does not run its cleanup, and the file would
+/// otherwise sit until [`WAIT`]. The window polls about once a second, so a few seconds is long
+/// enough to survive one slow poll and short enough that a dead command leaves the dialog.
+const FRESH: Duration = Duration::from_secs(5);
+
 /// One command waiting for a yes in the window.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -70,6 +78,9 @@ pub fn ask(data_dir: &Path, command: &str) -> Result<(), String> {
 
     let deadline = std::time::Instant::now() + wait_for();
     loop {
+        // Touched every pass, so a kill that skips [`Cleanup`] goes stale within [`FRESH`]
+        // instead of occupying the dialog until the wait runs out.
+        heartbeat(&path);
         match read_answer(&folder, &id) {
             Some(true) => return Ok(()),
             Some(false) => return Err(refused(command)),
@@ -86,22 +97,39 @@ pub fn ask(data_dir: &Path, command: &str) -> Result<(), String> {
 }
 
 /// The requests still waiting, oldest first. One that already has an answer is hidden: `ys` is
-/// about to see it. One older than [`WAIT`] is removed, so a crash does not leave a dialog up.
+/// about to see it. One that has not been touched within [`FRESH`], or is older than [`WAIT`],
+/// is removed, and so is an answer left behind with no request.
 pub fn pending(data_dir: &Path) -> std::io::Result<Vec<CoordinatorConfirmation>> {
     let folder = dir(data_dir);
     if !folder.is_dir() {
         return Ok(Vec::new());
     }
     let mut found = Vec::new();
+    let mut answers = Vec::new();
     for entry in std::fs::read_dir(&folder)? {
         let path = entry?.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
-        }
-        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if uuid::Uuid::parse_str(stem).is_err() {
+        if name.ends_with(".answer") || name.ends_with(".answer.tmp") {
+            answers.push(path);
+            continue;
+        }
+        if !name.ends_with(".json") {
+            continue;
+        }
+        let Some(stem) = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        if uuid::Uuid::parse_str(&stem).is_err() {
+            continue;
+        }
+        if !fresh(&path) {
+            remove_request(&folder, &stem);
             continue;
         }
         let Ok(text) = std::fs::read_to_string(&path) else {
@@ -117,10 +145,22 @@ pub fn pending(data_dir: &Path) -> std::io::Result<Vec<CoordinatorConfirmation>>
             continue;
         }
         if now_ms() - item.created_unix_ms > wait_for().as_secs_f64() * 1000.0 {
-            let _ = std::fs::remove_file(&path);
+            remove_request(&folder, &stem);
             continue;
         }
         found.push(item);
+    }
+    for path in answers {
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let stem = name.trim_end_matches(".tmp").trim_end_matches(".answer");
+        if uuid::Uuid::parse_str(stem).is_err() {
+            continue;
+        }
+        if !folder.join(format!("{stem}.json")).is_file() {
+            let _ = std::fs::remove_file(path);
+        }
     }
     found.sort_by(|a, b| a.created_unix_ms.total_cmp(&b.created_unix_ms));
     Ok(found)
@@ -135,7 +175,11 @@ pub fn answer(data_dir: &Path, id: &str, allow: bool) -> std::io::Result<bool> {
     };
     let id = id.to_string();
     let folder = dir(data_dir);
-    if !folder.join(format!("{id}.json")).is_file() {
+    let json = folder.join(format!("{id}.json"));
+    // Gone, or no longer being touched: writing an answer now would report success for a
+    // command that nothing is left to run.
+    if !json.is_file() || !fresh(&json) {
+        remove_request(&folder, &id);
         return Ok(false);
     }
     let temporary = folder.join(format!("{id}.answer.tmp"));
@@ -175,6 +219,32 @@ fn timed_out(command: &str) -> String {
     )
 }
 
+/// Bring the file's modification time to now. Opening for write does not truncate.
+fn heartbeat(path: &Path) {
+    let Ok(file) = std::fs::OpenOptions::new().write(true).open(path) else {
+        return;
+    };
+    let _ = file.set_modified(SystemTime::now());
+}
+
+/// Whether `ys` has touched this file within [`FRESH`]. A clock that steps backwards counts as
+/// stale: showing a command nobody is waiting on is the failure this avoids.
+fn fresh(path: &Path) -> bool {
+    let Ok(modified) = std::fs::metadata(path).and_then(|meta| meta.modified()) else {
+        return false;
+    };
+    match modified.elapsed() {
+        Ok(age) => age < FRESH,
+        Err(_) => false,
+    }
+}
+
+fn remove_request(folder: &Path, id: &str) {
+    let _ = std::fs::remove_file(folder.join(format!("{id}.json")));
+    let _ = std::fs::remove_file(folder.join(format!("{id}.answer")));
+    let _ = std::fs::remove_file(folder.join(format!("{id}.answer.tmp")));
+}
+
 fn now_ms() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -185,7 +255,7 @@ fn now_ms() -> f64 {
 /// Tests set `YARDSORT_COORDINATOR_CONFIRM_WAIT` to a few hundred milliseconds so a missed
 /// answer fails quickly. A shorter wait only refuses sooner; it cannot turn a no into a yes.
 fn wait_for() -> Duration {
-    std::env::var("YARDSORT_COORDINATOR_CONFIRM_WAIT")
+    std::env::var(super::CONFIRM_WAIT_ENV)
         .ok()
         .and_then(|text| text.parse::<u64>().ok())
         .map(Duration::from_millis)
@@ -267,5 +337,54 @@ mod tests {
         assert!(error.contains("refused"), "{error}");
         no.join().unwrap();
         assert!(pending(data.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_request_nobody_is_refreshing_is_dropped_and_orphan_answers_are_removed() {
+        let data = tempfile::tempdir().unwrap();
+        let folder = dir(data.path());
+        std::fs::create_dir_all(&folder).unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let request = CoordinatorConfirmation {
+            id: id.clone(),
+            command: "ys workspace new demo \"fix\"".into(),
+            created_unix_ms: now_ms(),
+        };
+        let path = folder.join(format!("{id}.json"));
+        std::fs::write(&path, serde_json::to_vec_pretty(&request).unwrap()).unwrap();
+        let old = SystemTime::now() - Duration::from_secs(30);
+        std::fs::File::open(&path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+
+        let orphan = uuid::Uuid::new_v4().to_string();
+        let answer_file = folder.join(format!("{orphan}.answer"));
+        let temporary = folder.join(format!("{orphan}.answer.tmp"));
+        std::fs::write(&answer_file, "yes\n").unwrap();
+        std::fs::write(&temporary, "yes\n").unwrap();
+
+        assert!(
+            pending(data.path()).unwrap().is_empty(),
+            "a dead request must not stay in the dialog"
+        );
+        assert!(!path.exists(), "the stale request is removed");
+        assert!(!answer_file.exists() && !temporary.exists());
+        assert!(!answer(data.path(), &id, true).unwrap());
+
+        let live = uuid::Uuid::new_v4().to_string();
+        let live_request = CoordinatorConfirmation {
+            id: live.clone(),
+            command: "ys test run smoke".into(),
+            created_unix_ms: now_ms(),
+        };
+        std::fs::write(
+            folder.join(format!("{live}.json")),
+            serde_json::to_vec_pretty(&live_request).unwrap(),
+        )
+        .unwrap();
+        let waiting = pending(data.path()).unwrap();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0].id, live);
     }
 }
