@@ -75,3 +75,6 @@ chrono-tz = "0.10"
 [features]
 # Test fixtures (real git repositories in temp dirs) shared with the app's own tests.
 testing = []
+# The desktop window. Only the app enables this. A remote crate must not: it decides with
+# `workflow::waits::decide_with_code`, which always takes the one-time code.
+desktop-window = []

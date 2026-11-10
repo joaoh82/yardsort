@@ -310,15 +310,19 @@ leaves `decision` and `feedback` for a later step to read as
 `{{ steps.<id>.decision }}` and `{{ steps.<id>.feedback }}`.
 
 You decide in the app, which needs no code, or from a terminal Yardsort did not start.
-Leave `--code` out and `ys` asks at the terminal without echoing the code. `--code -`
+Leave `--code` out and `ys` asks at the terminal without echoing the code. That prompt
+needs a real console. On Windows that is cmd, PowerShell, or Windows Terminal. Git Bash
+and mintty have no console for it: pass `--code -` and pipe the code in. With no
+terminal at all, `ys` fails at once and says to do that, instead of waiting. `--code -`
 reads one line from standard input. Passing the code as `--code <code>` still works,
 and `ys` warns, because that form stays in your shell history and in the process list.
 The code is about eight characters. Yardsort shows it on the run. The notification
 includes it unless Settings → General leaves it out, which is the default on Linux.
 The notice then says to open Yardsort for the code. `ys workflow runs` does not print
 the code, and neither does `--json`. A wrong code is refused. After five wrong codes,
-`ys` stops until you press **Show a new code** in the window. Listing the run does
-not issue a code. Opening Yardsort replaces a code that was only in memory, and sends
+`ys` stops until you press **Show a new code** in the window. Opening Yardsort again
+does not clear those wrong tries. Listing the run does not issue a code. Opening
+Yardsort replaces a code that was only in memory, and sends
 a new notification, unless the schedule or trigger says `never`. Yardsort does not
 have to be open for a correct code to be recorded. The run applies it once the next
 time it is open, and does not apply it again.
@@ -374,8 +378,10 @@ you would any other.
 waiting keeps waiting, and a gate is not approved or skipped. A decision you recorded while it
 was closed is applied once. A step Yardsort was in the middle of, such as starting an agent,
 fails saying so rather than being done twice. A notification already sent is not sent again,
-and an artifact already written is not written again. The one-time approval code is replaced,
-because it was only in memory, and you are told. An agent that settled while Yardsort was
+and an artifact already written is not written again. A request for changes writes its
+artifact in the same change as the decision, so a restart does not write it later. The
+one-time approval code is replaced, because it was only in memory, and you are told. Wrong
+tries are kept: five of them stay locked until **Show a new code**. An agent that settled while Yardsort was
 closed is only noticed if its harness reported the finished turn.
 
 ## Requesting a code review

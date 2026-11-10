@@ -674,9 +674,8 @@ when someone decides. It is not deleted when the engine applies it. It is delete
 only when that step starts again from pending, which issues a new code. A second
 decision is refused, and so is one on a run that is not running, or on a step that is
 not an `approve` step waiting. Requesting changes requires feedback. The
-`changes-<step id>` artifact (source `decision`) is written in the next database
-change after the step moves to failed, so a crash between the two can be repaired
-by writing the artifact again without moving the step again. An artifact
+`changes-<step id>` artifact (source `decision`) is written in the same database
+change as the step move and the wait's `applied_at`. An artifact
 name starting with `changes-` is refused at parse time.
 
 A timeout moves the step to failed only when no decision has been recorded
@@ -685,19 +684,31 @@ block the timeout. If the timeout lands first, `ys` is told the step is not wait
 
 You decide in the app, which passes no code, or with `ys workflow approve`, `reject`
 and `request-changes` from a terminal Yardsort did not start. Leave `--code` out and
-`ys` reads it from the terminal with echo off (`rpassword`). `--code -` reads one
-line from standard input. A code passed in argv warns on stderr, because it lands
-in shell history and in the process list. The code is shown in the window. The
-waiting notification includes it unless `workflows.approval_code_in_notification`
+`ys` reads it from the terminal with echo off (`rpassword`), and only when both
+standard input and standard error are terminals. Otherwise it fails at once and
+says to pass `--code -` and pipe the code in. On Windows that prompt needs a real
+console: cmd, PowerShell, or Windows Terminal. Git Bash and mintty do not, so
+those use `--code -`. `--code -` reads one line from standard input and strips a
+leading byte-order mark before trimming. A code passed in argv warns on stderr,
+because it lands in shell history and in the process list. The code is shown in
+the window. The waiting notification includes it unless `workflows.approval_code_in_notification`
 is false. Unset, that follows the platform: included on macOS and Windows, omitted
 on Linux, where a notification is readable on D-Bus. The omitted form says to open
 Yardsort for the code. The code is nowhere else: not in `ys workflow runs`,
 `--json`, the step note, outputs or a log. New hashes use 600000 PBKDF2 rounds.
 `code_rounds` on the decision row (default 100000, from before this column) is
-what a check uses, so an older hash still verifies. Five wrong codes lock the
-terminal. Listing a run does not issue a new code. **Show a new code** does, and
-so does the first look after this process started, because the plaintext was only
-in memory. Either replacement sends a notification when the run would be told.
+what a check uses, so an older hash still verifies. Any other stored count,
+including 0 or 1, is refused and does not burn a try. The check runs before the
+write transaction, which then writes only if the attempt count and the decision
+are still what the check saw. Five wrong codes lock the terminal. That count
+survives a restart: opening the app replaces the code, because the plaintext was
+only in memory, and it does not reset the count. **Show a new code** does reset
+it, and is the only thing that does. Either replacement sends a notification
+when the run would be told. Listing a run does not issue a new code. The
+setting that leaves the code out of the notification is not a lock. A process
+running as the same user can edit `settings.toml` and set
+`[workflows] approval_code_in_notification` back on, and the next notification
+includes the code.
 `ys` also refuses when any of
 `YARDSORT_COORDINATOR`, `YARDSORT_RUN_ID`, `YARDSORT_WORKSPACE_ID` or
 `YARDSORT_SESSION_RECORD_ID` is set. The Floor Manager's `ys` is `Action::Deny` at
@@ -725,16 +736,18 @@ and the reply in `answer`. This build has no question step. `answer` stores the
 reply and does not move a step. A later question step reads this row. It does
 not add a table.
 
-`workflow::waits::list_open` and `decide` are the boundary a phone or a remote
-crate calls. They read and write this database. This build adds no remote route,
-no protocol message and no phone screen. A decision recorded while the app was
-closed is not in `list_open`: the person has done their part, and the engine
-applies it.
+`workflow::waits::list_open` and `decide_with_code` are the boundary a phone or a
+remote crate calls. They read and write this database. A remote caller must use
+`decide_with_code`, which always takes the one-time code. The window calls
+`decide_in_window` with a `DesktopWindow` token. Only the app enables the
+`desktop-window` feature, so a remote crate cannot construct that token. This
+build adds no remote route, no protocol message and no phone screen. A decision
+recorded while the app was closed is not in `list_open`: the person has done
+their part, and the engine applies it.
 
-Applying a decision and writing its artifacts are two changes. The driver can
-stop after the decision is on the step, after the artifacts are written, or
-after the next step is claimed and before its effect runs. The next start
-repairs a missing `changes-*` artifact, does not write a second copy, and fails
+The step move, `applied_at`, and the decision's artifacts are one change. The
+driver can stop after that change, or after the next step is claimed and before
+its effect runs. The next start does not write the artifact again, and it fails
 a step that was claimed and not carried out, so a notification or a session is
 not started twice.
 

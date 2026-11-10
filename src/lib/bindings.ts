@@ -4131,13 +4131,16 @@ export type WorkflowWait = {
 	workflowId: string,
 	workflowName: string,
 	workspaceName: string,
-	kind: string,
+	kind: WorkflowWaitKind,
 	blockedOn: string,
 	actionNeeded: string,
 	prompt: string | null,
 	/**  `Blocked: waiting for your approval.` */
 	blockedLine: string,
 };
+
+/**  `approval` or `question`. A clarification uses the same wait row. */
+export type WorkflowWaitKind = "approval" | "question";
 
 /**  Workflow writing has its own harness preference; commit and PR writers stay workspace-based. */
 export type WorkflowWriterStatus = {

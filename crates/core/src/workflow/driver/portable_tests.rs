@@ -1904,7 +1904,7 @@ fn a_crash_after_the_decision_is_applied_does_not_start_the_next_effect() {
 }
 
 #[test]
-fn a_crash_between_the_decision_and_its_artifact_writes_the_artifact_once() {
+fn a_decision_and_its_artifact_are_one_change_and_a_restart_does_not_write_it_again() {
     let (_dir, store, run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
     let hands = Filed {
         sent: Mutex::new(Vec::new()),
@@ -1923,12 +1923,6 @@ fn a_crash_between_the_decision_and_its_artifact_writes_the_artifact_once() {
     tick_until(&store, &hands, StopAfter::AfterDecisionApplied);
     assert_eq!(step(&store, &run, "sign-off").status, "failed");
     assert_eq!(step(&store, &run, "next").status, "pending");
-    assert!(store
-        .workflow_artifacts(&run)
-        .unwrap()
-        .iter()
-        .all(|row| row.name != "changes-sign-off"));
-    tick(&store, &hands);
     let saved = store.workflow_artifacts(&run).unwrap();
     let changes: Vec<_> = saved
         .iter()
@@ -1936,6 +1930,7 @@ fn a_crash_between_the_decision_and_its_artifact_writes_the_artifact_once() {
         .collect();
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].body, "split the migration");
+    tick(&store, &hands);
     assert_eq!(step(&store, &run, "next").status, "skipped");
     assert_eq!(store.workflow_run(&run).unwrap().unwrap().status, "failed");
     assert_eq!(notice_count(&hands, "Go"), 0);
@@ -1949,48 +1944,6 @@ fn a_crash_between_the_decision_and_its_artifact_writes_the_artifact_once() {
             .count(),
         1
     );
-    assert_eq!(notice_count(&hands, "Go"), 0);
-}
-
-#[test]
-fn a_crash_after_the_artifact_is_written_does_not_write_it_again() {
-    let (_dir, store, run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
-    let hands = Filed {
-        sent: Mutex::new(Vec::new()),
-    };
-    tick(&store, &hands);
-    store
-        .record_workflow_approval(
-            &run,
-            "sign-off",
-            "changes_requested",
-            Some("split the migration"),
-            "ada",
-            None,
-        )
-        .unwrap();
-    tick_until(&store, &hands, StopAfter::AfterArtifactsWritten);
-    assert_eq!(
-        store
-            .workflow_artifacts(&run)
-            .unwrap()
-            .iter()
-            .filter(|row| row.name == "changes-sign-off")
-            .count(),
-        1
-    );
-    assert_eq!(step(&store, &run, "next").status, "pending");
-    tick(&store, &hands);
-    assert_eq!(
-        store
-            .workflow_artifacts(&run)
-            .unwrap()
-            .iter()
-            .filter(|row| row.name == "changes-sign-off")
-            .count(),
-        1
-    );
-    assert_eq!(step(&store, &run, "next").status, "skipped");
     assert_eq!(notice_count(&hands, "Go"), 0);
 }
 

@@ -6,11 +6,39 @@
 //! a recorded approval through the decision row it already reads. `applied_at` is set in
 //! that same change, and a restart applies a wait that has not been applied exactly once.
 //!
-//! [`list_open`] and [`decide`] are what a phone or a remote crate calls. They read and
-//! write this database. This build adds no remote route, no protocol message and no phone
-//! screen. Those stay with the later notification and mobile-control work.
+//! [`list_open`] and [`decide_with_code`] are what a phone or a remote crate calls. They
+//! read and write this database. A remote caller must use [`decide_with_code`]. The
+//! window path takes a `DesktopWindow`, and only the app crate can construct one,
+//! because only the app enables `desktop-window`. This build adds no remote route, no
+//! protocol message and no phone screen. Those stay with the later notification and
+//! mobile-control work.
+
+use std::collections::HashMap;
 
 use crate::store::{ApprovalWrite, Store, StoreResult};
+
+/// The desktop window. Only the app enables the `desktop-window` feature, so a remote
+/// crate cannot construct this. Remote callers use [`decide_with_code`].
+#[cfg(feature = "desktop-window")]
+#[derive(Debug, Clone, Copy)]
+pub struct DesktopWindow {
+    _private: (),
+}
+
+#[cfg(feature = "desktop-window")]
+impl DesktopWindow {
+    /// The Yardsort window. Do not call this from a remote crate.
+    pub const fn new() -> Self {
+        Self { _private: () }
+    }
+}
+
+#[cfg(feature = "desktop-window")]
+impl Default for DesktopWindow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// What the run is waiting for a person to do. `approval` today. `question` is reserved
 /// for a clarification and uses this same struct.
@@ -195,50 +223,84 @@ pub fn list_open(store: &Store) -> StoreResult<Vec<HumanWait>> {
     Ok(open)
 }
 
-/// The label for one run's WAITING ON cell. Empty when the run is not blocked on a person.
-/// A waiting approval that has not opened a row yet, from a database written before this,
-/// still says `your approval`.
-pub fn waiting_on(store: &Store, run_id: &str) -> StoreResult<Option<String>> {
-    let mut labels: Vec<String> = list_open(store)?
+/// Open waits grouped by run, one read. The value is the WAITING ON label.
+pub fn open_by_run(store: &Store) -> StoreResult<HashMap<String, String>> {
+    let mut grouped: HashMap<String, Vec<String>> = HashMap::new();
+    for wait in list_open(store)? {
+        grouped
+            .entry(wait.run_id)
+            .or_default()
+            .push(wait.blocked_on);
+    }
+    Ok(grouped
         .into_iter()
-        .filter(|wait| wait.run_id == run_id)
-        .map(|wait| wait.blocked_on)
-        .collect();
-    if labels.is_empty() {
-        let steps = store.workflow_steps(run_id)?;
-        let legacy = steps.iter().any(|step| {
-            step.action == "approve"
-                && step.status == "waiting"
-                && store
-                    .workflow_approval(run_id, &step.step_id)
-                    .ok()
-                    .flatten()
-                    .is_none()
-        });
-        if legacy {
-            labels.push(BLOCKED_APPROVAL.to_owned());
-        }
-    }
-    if labels.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(labels.join(", ")))
-    }
+        .map(|(id, labels)| (id, labels.join(", ")))
+        .collect())
 }
 
-/// Record an approval decision. The same call the window and `ys` make, and the one a
-/// later remote crate makes. Nothing here moves the step or sends a notification. The
-/// engine applies the row once, including after a restart.
-pub fn decide(
+/// The label for one run's WAITING ON cell, using a list already read by [`open_by_run`].
+/// A waiting approval that has not opened a row yet, from a database written before this,
+/// still says `your approval`.
+pub fn label_for(
+    store: &Store,
+    run_id: &str,
+    open: &HashMap<String, String>,
+) -> StoreResult<Option<String>> {
+    if let Some(label) = open.get(run_id) {
+        return Ok(Some(label.clone()));
+    }
+    legacy_approval(store, run_id)
+}
+
+/// The label for one run's WAITING ON cell. Empty when the run is not blocked on a person.
+pub fn waiting_on(store: &Store, run_id: &str) -> StoreResult<Option<String>> {
+    label_for(store, run_id, &open_by_run(store)?)
+}
+
+fn legacy_approval(store: &Store, run_id: &str) -> StoreResult<Option<String>> {
+    let steps = store.workflow_steps(run_id)?;
+    let legacy = steps.iter().any(|step| {
+        step.action == "approve"
+            && step.status == "waiting"
+            && store
+                .workflow_approval(run_id, &step.step_id)
+                .ok()
+                .flatten()
+                .is_none()
+    });
+    Ok(legacy.then(|| BLOCKED_APPROVAL.to_owned()))
+}
+
+/// Record an approval from a terminal or a remote caller. The code is required. Nothing
+/// here moves the step or sends a notification. The engine applies the row once,
+/// including after a restart. A remote crate uses this, not the window path.
+#[allow(clippy::too_many_arguments)]
+pub fn decide_with_code(
     store: &Store,
     run_id: &str,
     step_id: &str,
     decision: &str,
     feedback: Option<&str>,
     actor: &str,
-    code: Option<&str>,
+    code: &str,
 ) -> StoreResult<ApprovalWrite> {
-    store.record_workflow_approval(run_id, step_id, decision, feedback, actor, code)
+    store.record_terminal_approval(run_id, step_id, decision, feedback, actor, code)
+}
+
+/// Record an approval from the desktop window. The person is already there, so no code
+/// is asked. A remote crate cannot construct [`DesktopWindow`].
+#[cfg(feature = "desktop-window")]
+#[allow(clippy::too_many_arguments)]
+pub fn decide_in_window(
+    store: &Store,
+    _window: DesktopWindow,
+    run_id: &str,
+    step_id: &str,
+    decision: &str,
+    feedback: Option<&str>,
+    actor: &str,
+) -> StoreResult<ApprovalWrite> {
+    store.record_workflow_approval(run_id, step_id, decision, feedback, actor, None)
 }
 
 /// Why an answer was not stored. The words are for a later clarification, not shown yet.

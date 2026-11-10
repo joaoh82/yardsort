@@ -78,6 +78,9 @@ impl Fixture {
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
+        // A missing console must fail at once. Inheriting this process's stdin can be a
+        // console on Windows, and `ys` would wait there for a code that never comes.
+        command.stdin(std::process::Stdio::null());
         let output = command.output().expect("ys should run");
         Run {
             code: output.status.code(),
@@ -120,7 +123,8 @@ impl Fixture {
             .env("YARDSORT_NO_DAEMON", "1")
             .env(yardsort_core::coordinator::ENV, "1")
             // A missed answer should fail the test in a second or two, not ten minutes.
-            .env("YARDSORT_COORDINATOR_CONFIRM_WAIT", "2000");
+            .env("YARDSORT_COORDINATOR_CONFIRM_WAIT", "2000")
+            .stdin(std::process::Stdio::null());
         for name in [
             yardsort_core::activity::RUN_ENV,
             yardsort_core::activity::WORKSPACE_ENV,
@@ -2803,7 +2807,10 @@ fn an_approval_is_shown_and_decided_without_the_app_open() {
             "ship it",
         ])
         .failed();
-    assert!(no_code.contains("--code"), "{no_code}");
+    assert!(
+        no_code.contains("No terminal to ask for the code. Pass --code - and pipe it in."),
+        "{no_code}"
+    );
 
     let missing = fx
         .ys(&[
@@ -2934,6 +2941,111 @@ fn an_approval_code_can_come_from_standard_input() {
     assert!(stdout.contains("Approved"), "{stdout}");
     assert!(!stderr.contains("shell history"), "{stderr}");
     assert!(!stdout.contains(&code), "{stdout}");
+}
+
+#[test]
+fn an_approval_code_on_standard_input_may_start_with_a_byte_order_mark() {
+    use std::io::Write;
+    use std::process::Stdio;
+    use yardsort_core::store::{NewWorkflowRun, StepStatus};
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let project = store.projects().unwrap().into_iter().next().unwrap();
+    let path = fx.worktree_root.join("fix-login");
+    std::fs::create_dir_all(&path).unwrap();
+    let workspace = store
+        .add_worktree(
+            &project.id,
+            "fix-login",
+            &path.to_string_lossy(),
+            Some("fix"),
+            Some("main"),
+        )
+        .unwrap();
+    let id = "run-approval-bom";
+    store
+        .queue_workflow_run(&NewWorkflowRun {
+            id,
+            workflow_id: "sign-off",
+            workflow_name: "Sign off",
+            definition: SIGN_OFF,
+            project_id: &project.id,
+            workspace_id: &workspace.id,
+            workspace_name: &workspace.name,
+            inputs: "{}",
+            context: "{}",
+            requested_by: "cli",
+            steps: &[("sign-off", "approve")],
+        })
+        .unwrap();
+    assert!(store.start_workflow_run(id, None).unwrap());
+    assert!(store
+        .move_workflow_step(
+            id,
+            "sign-off",
+            &[StepStatus::Pending],
+            StepStatus::Waiting,
+            Some(r#"{"prompt":"Ship this?"}"#),
+            Some("Waiting for your approval."),
+            None,
+            false,
+        )
+        .unwrap());
+    let code = store.begin_approval_code(id, "sign-off").unwrap().unwrap();
+    drop(store);
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args(["--data-dir", &fx.data_dir.to_string_lossy()])
+        .args([
+            "workflow",
+            "approve",
+            id,
+            "sign-off",
+            "--code",
+            "-",
+            "--feedback",
+            "from stdin",
+        ])
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env("YARDSORT_NO_DAEMON", "1")
+        .env_remove(yardsort_core::coordinator::ENV)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().expect("ys should run");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(format!("\u{FEFF}{code}\nnot the code\n").as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stdout}\n{stderr}");
+    assert!(stdout.contains("Approved"), "{stdout}");
+    assert!(!stdout.contains(&code), "{stdout}");
+}
+
+/// A Windows runner has a console. Leaving `--code` out must still fail at once, because
+/// the prompt reads that console rather than the closed standard input.
+#[cfg(windows)]
+#[test]
+fn leaving_out_the_code_fails_at_once_without_a_console() {
+    let fx = Fixture::new();
+    let started = std::time::Instant::now();
+    let no_code = fx
+        .ys(&["workflow", "approve", "missing-run", "sign-off"])
+        .failed();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "leaving --code out waited for a console"
+    );
+    assert!(
+        no_code.contains("No terminal to ask for the code. Pass --code - and pipe it in."),
+        "{no_code}"
+    );
 }
 
 #[test]
@@ -3188,6 +3300,7 @@ impl Tasks {
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
+        command.stdin(std::process::Stdio::null());
         let output = command.output().expect("ys should run");
         Run {
             code: output.status.code(),

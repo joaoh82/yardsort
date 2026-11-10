@@ -63,6 +63,9 @@ pub fn approval_refusal(
         ApprovalWrite::CodeLocked => {
             "Too many wrong codes. Open Yardsort to be shown a new one.".to_owned()
         }
+        ApprovalWrite::CodeUnusable => {
+            "That code cannot be checked. Open Yardsort to be shown a new one.".to_owned()
+        }
     };
     Some(message)
 }

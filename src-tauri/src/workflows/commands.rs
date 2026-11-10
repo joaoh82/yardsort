@@ -189,6 +189,23 @@ fn step_from(
     }
 }
 
+/// `approval` or `question`. A clarification uses the same wait row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowWaitKind {
+    Approval,
+    Question,
+}
+
+impl WorkflowWaitKind {
+    fn parse(kind: &str) -> Self {
+        match kind {
+            "question" => Self::Question,
+            _ => Self::Approval,
+        }
+    }
+}
+
 /// A run waiting on a person, as the sidebar lists it. The same rows a later phone reads.
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -198,7 +215,7 @@ pub struct WorkflowWait {
     pub workflow_id: String,
     pub workflow_name: String,
     pub workspace_name: String,
-    pub kind: String,
+    pub kind: WorkflowWaitKind,
     pub blocked_on: String,
     pub action_needed: String,
     pub prompt: Option<String>,
@@ -576,13 +593,14 @@ pub async fn workflow_decide(
             .as_deref()
             .map(str::trim)
             .filter(|text| !text.is_empty());
-        let written = state.store.record_workflow_approval(
+        let written = workflow::waits::decide_in_window(
+            &state.store,
+            workflow::waits::DesktopWindow::new(),
             &run_id,
             &step_id,
             decision.as_str(),
             feedback,
             "app",
-            None,
         )?;
         if let Some(message) = workflow::approval_refusal(&written, &run_id, &step_id) {
             return Err(IpcError::new("approval_refused", message));
@@ -612,7 +630,7 @@ pub async fn workflow_open_waits(app: AppHandle) -> IpcResult<Vec<WorkflowWait>>
                 workflow_id: wait.workflow_id,
                 workflow_name: wait.workflow_name,
                 workspace_name: wait.workspace_name,
-                kind: wait.kind,
+                kind: WorkflowWaitKind::parse(&wait.kind),
                 blocked_on: wait.blocked_on,
                 action_needed: wait.action_needed,
                 prompt: wait.prompt,

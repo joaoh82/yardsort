@@ -604,11 +604,14 @@ and an open pull request for the workspace's branch. A run id can be shortened t
 characters, as `runs` prints it. `--json` works as everywhere.
 
 `approve`, `reject` and `request-changes` record your decision on a step that is waiting
-for approval. Leave `--code` out and `ys` asks at the terminal without echoing. `--code -`
-reads one line from standard input. `--code <code>` warns, because the code stays in your
-shell history and in the process list. `runs` does not print that code. Yardsort does not
-have to be open: a correct code is stored, and the app applies it once on its next tick.
-Five wrong codes stop `ys` until the app shows a new one. `--feedback` is a note. It is
+for approval. Leave `--code` out and `ys` asks at the terminal without echoing, when both
+standard input and standard error are terminals. Otherwise it fails at once: pass
+`--code -` and pipe the code in. On Windows the prompt needs cmd, PowerShell, or Windows
+Terminal. Git Bash and mintty use `--code -`. `--code -` reads one line from standard
+input. `--code <code>` warns, because the code stays in your shell history and in the
+process list. `runs` does not print that code. Yardsort does not have to be open: a
+correct code is stored, and the app applies it once on its next tick. Five wrong codes
+stop `ys` until the app shows a new one, and a restart does not clear that. `--feedback` is a note. It is
 required for `request-changes`. A decision is recorded once, and one on a run that has
 already ended is refused. A session Yardsort started cannot use these, and neither can the
 Floor Manager. This is not a sandbox: a process running as you that writes the database

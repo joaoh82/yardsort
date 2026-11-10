@@ -88,11 +88,9 @@ pub trait Hands {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StopAfter {
     Never,
-    /// The decision is on the step and the wait is applied. Artifacts are not written yet,
-    /// and the next step has not started.
+    /// The decision is on the step, the wait is applied, and the decision's artifacts are
+    /// written. Those are one change. The next step has not started.
     AfterDecisionApplied,
-    /// The decision's artifacts are written. The next step has not started.
-    AfterArtifactsWritten,
     /// The next step has been claimed (`running`) and its effect has not been carried out.
     AfterNextClaim,
 }
@@ -179,11 +177,13 @@ impl Driver {
             .insert((run_id.to_owned(), step_id.to_owned()), code.to_owned());
     }
 
-    /// Issue a code and remember it while holding the code lock. A restart and Show a new
-    /// code then cannot each store a hash the other does not know. `force` replaces a code
-    /// this process already holds. Nothing when the step is already decided, or when
-    /// `force` is false and this process already holds the code. The bool is whether a
-    /// code row existed before this issue.
+    /// Issue a code and remember it. `force` replaces a code this process already holds.
+    /// Nothing when the step is already decided, or when `force` is false and this process
+    /// already holds the code. The bool is whether a code row existed before this issue.
+    ///
+    /// The slow hash runs on a helper thread, and neither the code lock nor the database is
+    /// held while it runs. `force` is Show a new code, which resets the wrong-try count. A
+    /// restart reissue (`force` false) keeps that count, so a lockout survives the restart.
     pub fn issue_approval_code(
         &self,
         store: &Store,
@@ -191,13 +191,24 @@ impl Driver {
         step_id: &str,
         force: bool,
     ) -> crate::store::StoreResult<Option<(String, bool)>> {
-        let mut codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
         let key = (run_id.to_owned(), step_id.to_owned());
+        {
+            let codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
+            if !force && codes.contains_key(&key) {
+                return Ok(None);
+            }
+        }
+        let prepared = std::thread::spawn(crate::workflow::code::issue);
+        let (code, salt, hash) = prepared
+            .join()
+            .unwrap_or_else(|error| std::panic::resume_unwind(error));
+        let mut codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
         if !force && codes.contains_key(&key) {
             return Ok(None);
         }
         let had = store.approval_code_row(run_id, step_id)?;
-        let Some(code) = store.begin_approval_code(run_id, step_id)? else {
+        let Some(code) = store.save_approval_code(run_id, step_id, &code, &salt, &hash, force)?
+        else {
             return Ok(None);
         };
         codes.insert(key, code.clone());
@@ -432,7 +443,6 @@ fn move_on(
         // A decision already recorded is left for the engine to apply, and is not replaced.
         resume_human_waits(driver, store, hands, &workflow, run)?;
     }
-    repair_decision_artifacts(store, &run.id)?;
     let inputs: Inputs = serde_json::from_str(&run.inputs).unwrap_or_default();
 
     // Sessions typed to during this tick. The host marks a session busy only once output comes
@@ -663,10 +673,11 @@ enum Outcome {
 }
 
 fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResult<bool> {
-    // A person's decision is committed before its artifacts, and the wait is marked applied
-    // in that same change. A crash between the two is repaired by writing the artifacts
-    // again. The step is no longer waiting, so the decision is not applied a second time.
+    // A person's decision, the wait's applied mark, and the decision's artifacts are one
+    // change. The step is no longer waiting, so the decision is not applied a second time,
+    // and the artifact is not written again on the next start.
     if is_applied_decision(change) {
+        let artifacts = changes_artifacts(store, run_id, change)?.unwrap_or_default();
         let moved = store.move_workflow_step_applying_wait(
             run_id,
             &change.step,
@@ -676,18 +687,13 @@ fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResu
             change.note.as_deref(),
             change.outcome.as_deref(),
             change.clear_outcome,
+            &artifacts,
         )?;
         if !moved {
             return Ok(false);
         }
         driver.touch();
         if driver.arm_halt(StopAfter::AfterDecisionApplied) {
-            return Ok(true);
-        }
-        if let Some(artifacts) = changes_artifacts(store, run_id, change)? {
-            store.upsert_workflow_artifacts(run_id, &change.step, &artifacts)?;
-        }
-        if driver.arm_halt(StopAfter::AfterArtifactsWritten) {
             return Ok(true);
         }
         return Ok(true);
@@ -1366,37 +1372,6 @@ fn approval_body(
     )
 }
 
-/// Write a request-for-changes artifact that a crash dropped after the step had already
-/// moved. A second call finds the artifact and writes nothing.
-fn repair_decision_artifacts(store: &Store, run_id: &str) -> IpcResult<()> {
-    let steps = store.workflow_steps(run_id)?;
-    let saved = store.workflow_artifacts(run_id)?;
-    for step in &steps {
-        if changes_feedback(step.outcome.as_deref()).is_none() {
-            continue;
-        }
-        let name = artifact::changes_artifact_name(&step.step_id);
-        if saved.iter().any(|row| row.name == name) {
-            continue;
-        }
-        let change = Move {
-            step: step.step_id.clone(),
-            from: vec![StepStatus::Waiting],
-            to: StepStatus::Failed,
-            outputs: Some(step.outputs.clone()),
-            note: step.note.clone(),
-            outcome: step.outcome.clone(),
-            clear_outcome: false,
-            halt: false,
-            keep_decision: false,
-        };
-        if let Some(artifacts) = changes_artifacts(store, run_id, &change)? {
-            store.upsert_workflow_artifacts(run_id, &step.step_id, &artifacts)?;
-        }
-    }
-    Ok(())
-}
-
 /// The feedback on a request for changes, when this move is that decision.
 fn changes_feedback(outcome: Option<&str>) -> Option<String> {
     let outcome: StepOutcome = serde_json::from_str(outcome?).ok()?;
@@ -1407,7 +1382,7 @@ fn changes_feedback(outcome: Option<&str>) -> Option<String> {
     }
 }
 
-/// The artifacts a request for changes stores, written after the step has moved.
+/// The artifacts a request for changes stores, written in the same change as the step move.
 /// `None` when this move is not that decision. Empty feedback becomes a sentence, so the
 /// artifact is never blank.
 fn changes_artifacts(

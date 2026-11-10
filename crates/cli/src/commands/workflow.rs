@@ -3,7 +3,7 @@
 //! Workflows are YAML files in the profile's `workflows` folder, plus the ones built in. See
 //! `yardsort_core::workflow` and docs/guide/workflows.md.
 
-use std::io::Read;
+use std::io::{BufRead, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
 use std::collections::BTreeMap;
@@ -72,9 +72,10 @@ pub enum Command {
         /// A note stored with the decision.
         #[arg(long)]
         feedback: Option<String>,
-        /// The code Yardsort showed you. Leave this out to type it with echo off. `-` reads
-        /// one line from standard input. Passing the code here puts it in your shell history
-        /// and in the process list. Not printed by `ys workflow runs`.
+        /// The code Yardsort showed you. Leave this out to type it with echo off, in a real
+        /// console (cmd, PowerShell, or Windows Terminal on Windows). `-` reads one line
+        /// from standard input. Passing the code here puts it in your shell history and in
+        /// the process list. Not printed by `ys workflow runs`.
         #[arg(long, value_name = "CODE")]
         code: Option<String>,
     },
@@ -87,9 +88,10 @@ pub enum Command {
         /// A note stored with the decision.
         #[arg(long)]
         feedback: Option<String>,
-        /// The code Yardsort showed you. Leave this out to type it with echo off. `-` reads
-        /// one line from standard input. Passing the code here puts it in your shell history
-        /// and in the process list. Not printed by `ys workflow runs`.
+        /// The code Yardsort showed you. Leave this out to type it with echo off, in a real
+        /// console (cmd, PowerShell, or Windows Terminal on Windows). `-` reads one line
+        /// from standard input. Passing the code here puts it in your shell history and in
+        /// the process list. Not printed by `ys workflow runs`.
         #[arg(long, value_name = "CODE")]
         code: Option<String>,
     },
@@ -103,9 +105,10 @@ pub enum Command {
         /// What should change. Required.
         #[arg(long)]
         feedback: Option<String>,
-        /// The code Yardsort showed you. Leave this out to type it with echo off. `-` reads
-        /// one line from standard input. Passing the code here puts it in your shell history
-        /// and in the process list. Not printed by `ys workflow runs`.
+        /// The code Yardsort showed you. Leave this out to type it with echo off, in a real
+        /// console (cmd, PowerShell, or Windows Terminal on Windows). `-` reads one line
+        /// from standard input. Passing the code here puts it in your shell history and in
+        /// the process list. Not printed by `ys workflow runs`.
         #[arg(long, value_name = "CODE")]
         code: Option<String>,
     },
@@ -468,11 +471,12 @@ fn runs(ys: &Yardsort, workspace: Option<&str>, limit: usize, out: &Output) -> R
         None => None,
     };
     let rows = ys.store.workflow_runs(workspace_id.as_deref(), limit)?;
+    let open = workflow::waits::open_by_run(&ys.store).unwrap_or_default();
     let listed: Vec<RunListed> = rows
         .iter()
         .map(|run| {
             let mut listed = RunListed::from(run);
-            listed.waiting_on = workflow::waits::waiting_on(&ys.store, &run.id)
+            listed.waiting_on = workflow::waits::label_for(&ys.store, &run.id, &open)
                 .ok()
                 .flatten();
             listed
@@ -782,13 +786,8 @@ fn decide(
     let run = find_run(ys, wanted)?;
     let feedback = feedback.map(str::trim).filter(|text| !text.is_empty());
     let actor = cli_actor();
-    let written = ys.store.record_workflow_approval(
-        &run.id,
-        step,
-        decision,
-        feedback,
-        &actor,
-        Some(&code),
+    let written = workflow::waits::decide_with_code(
+        &ys.store, &run.id, step, decision, feedback, &actor, &code,
     )?;
     if let Some(message) = workflow::approval_refusal(&written, memory::short_id(&run.id), step) {
         return Err(Failure::new(message));
@@ -835,6 +834,13 @@ fn read_decision_code(code: Option<&str>) -> Result<String, Failure> {
 }
 
 fn prompt_decision_code() -> Result<String, Failure> {
+    // Both streams: rpassword opens the console (CONIN$ on Windows), not stdin, so a
+    // script or a scheduled task that merely has a console would wait forever.
+    if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
+        return Err(Failure::new(
+            "No terminal to ask for the code. Pass --code - and pipe it in.",
+        ));
+    }
     match rpassword::prompt_password("Approval code: ") {
         Ok(code) => {
             let code = code.trim().to_owned();
@@ -845,8 +851,7 @@ fn prompt_decision_code() -> Result<String, Failure> {
             }
         }
         Err(_) => Err(Failure::new(
-            "No terminal to ask for the code. Leave --code out in a terminal, or pass \
-             --code - and the code on standard input.",
+            "No terminal to ask for the code. Pass --code - and pipe it in.",
         )),
     }
 }
@@ -854,9 +859,10 @@ fn prompt_decision_code() -> Result<String, Failure> {
 fn stdin_decision_code() -> Result<String, Failure> {
     let mut raw = String::new();
     std::io::stdin()
-        .read_to_string(&mut raw)
+        .lock()
+        .read_line(&mut raw)
         .map_err(|error| Failure::new(error.to_string()))?;
-    let code = raw.lines().next().unwrap_or("").trim().to_owned();
+    let code = raw.trim_start_matches('\u{FEFF}').trim().to_owned();
     if code.is_empty() {
         Err(Failure::new(
             "Say the code Yardsort showed you on standard input.",
