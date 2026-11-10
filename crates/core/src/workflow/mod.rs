@@ -107,9 +107,23 @@ pub struct Step {
     /// The steps that must have succeeded before this one starts. Steps whose needs are all met
     /// run together.
     pub needs: Vec<String>,
+    /// Whether a failed verdict fails this step and stops the run.
+    ///
+    /// Only some actions accept it. Today that is `run_test`. Absent means it is not a gate,
+    /// so a failed verdict still succeeds the step. A later action that judges something, an
+    /// approval for example, uses the same flag.
+    #[serde(default)]
+    pub gate: bool,
     /// Flattened, so a step reads `{ id, needs, action: "notify", title }` as the file does.
     #[serde(flatten)]
     pub action: Action,
+}
+
+impl Step {
+    /// Whether a failed [`engine::StepOutcome`] fails this step and stops the run.
+    pub fn is_gate(&self) -> bool {
+        self.gate
+    }
 }
 
 /// What a step does. Every string here may hold `{{ variables }}`; see [`template`].
@@ -148,33 +162,20 @@ pub enum Action {
     /// Run a smoke test in the run's workspace and wait for its verdict. The step succeeds once
     /// the test passed or failed, so a later step can read `verdict` and act on either, and
     /// fails only when the run reaches no verdict (cancelled, errored) or does not end in time.
-    /// With `gate`, a failed verdict fails the step instead and the run stops. Leaves `run`,
-    /// `verdict` and `summary` (the text `ys test wait` prints) for later steps.
+    /// With `gate` on the step, a failed verdict fails the step instead and the run stops,
+    /// skipping every step still going. Leaves `run`, `verdict` and `summary` (the text
+    /// `ys test wait` prints) for later steps.
     RunTest {
         test: String,
         /// Values for the test's inputs, by input id; may hold `{{ variables }}`.
         inputs: BTreeMap<String, String>,
         timeout_secs: Option<u32>,
-        /// When true, a failed test verdict fails this step and stops the run. When false,
-        /// the default, the step succeeds either way.
-        gate: bool,
     },
     /// Tell the person who started the run.
     Notify { title: String, body: Option<String> },
 }
 
 impl Action {
-    /// Whether a failed [`engine::StepOutcome`] fails this step and stops the run.
-    ///
-    /// Only `run_test` can say so today. A later action that judges something, an approval
-    /// for example, uses the same flag and the same reaction in the engine.
-    pub fn is_gate(&self) -> bool {
-        match self {
-            Action::RunTest { gate, .. } => *gate,
-            _ => false,
-        }
-    }
-
     /// The name a file uses for this action.
     pub fn name(&self) -> &'static str {
         match self {

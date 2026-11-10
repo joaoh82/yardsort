@@ -79,6 +79,7 @@ function item(id: string, source: WorkflowItem["source"], extra: Partial<Workflo
         {
           id: "tell",
           needs: [],
+          gate: false,
           action: "notify",
           title: "Hi",
           body: null,
@@ -300,6 +301,7 @@ describe("WorkflowView", () => {
         endedAt: null,
         outputs: {},
         note: "no way",
+        outcome: null,
       },
     ]);
     // A schedule started this run: the list says so, and the open run says which.
@@ -352,6 +354,7 @@ describe("WorkflowView", () => {
         endedAt: null,
         outputs: {},
         note: "told it",
+        outcome: null,
       },
     ]);
     // Open run, on a trigger's history.

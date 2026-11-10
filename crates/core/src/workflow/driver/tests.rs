@@ -380,7 +380,8 @@ fn a_step_left_running_by_a_previous_app_fails_and_is_not_done_twice() {
             StepStatus::Running,
             None,
             None,
-            None
+            None,
+            false
         )
         .unwrap());
     fx.tick();

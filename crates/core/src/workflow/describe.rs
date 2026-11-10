@@ -53,7 +53,8 @@ pub const SYSTEM: &str = concat!(
        - `run_test`: runs one of the workspace's smoke tests and waits for its verdict. The \
      step succeeds whether the test passed or failed, leaving `verdict` for a later step to act \
      on either way; it fails only if the run reached no verdict or did not end in time. \
-     Optional `gate: true` makes a failed verdict fail the step and stop the run. `test` \
+     Optional `gate: true` makes a failed verdict fail the step, skip the steps still going, \
+     and stop the run. `test` \
      (a test id, or exactly `\"{{ inputs.<id> }}\"` for an \
      input of kind test), optional `inputs` (a map of the test's input ids to values), optional \
      `timeout`.\n\

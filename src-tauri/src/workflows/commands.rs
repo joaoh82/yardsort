@@ -11,6 +11,7 @@ use tauri::AppHandle;
 use tauri_specta::Event;
 use yardsort_core::forge::{Gh, PullRequest};
 use yardsort_core::store::{WorkflowRunRow, WorkflowStepRow, WorkspaceRow};
+use yardsort_core::workflow::engine::StepOutcome;
 use yardsort_core::workflow::runs::{self, Facts, Look, PrFacts};
 use yardsort_core::workflow::{self, Entry, Problem, Workflow};
 
@@ -78,6 +79,8 @@ pub struct WorkflowStepRun {
     pub ended_at: Option<f64>,
     pub outputs: BTreeMap<String, String>,
     pub note: Option<String>,
+    /// A verdict the step recorded, when it judged something. Absent otherwise.
+    pub outcome: Option<StepOutcome>,
 }
 
 /// What the Run dialog shows before starting: what the run would find.
@@ -124,6 +127,10 @@ fn step_from(row: WorkflowStepRow) -> WorkflowStepRun {
         started_at: row.started_at.map(|t| t as f64),
         ended_at: row.ended_at.map(|t| t as f64),
         note: row.note,
+        outcome: row
+            .outcome
+            .as_deref()
+            .and_then(|raw| serde_json::from_str(raw).ok()),
     }
 }
 

@@ -604,27 +604,42 @@ when it failed. This is not `wait_session`'s `outcome` output, which stays the s
 or `exited`.
 
 `engine::react` is the one place a verdict changes the run. A gate whose verdict is `failed`
-fails the step, and the run stops with the reason, the same way any failed step stops it. Any
+fails the step and halts the run: every step that has not finished (pending, waiting, or
+running) is skipped in that same tick, with the note `Skipped: the gate <id> failed.` An
+effect the plan was about to start is dropped. A step already running from an earlier tick is
+skipped too, and whatever it already started is left running. The run then ends failed. Any
 other verdict succeeds the step and keeps the outcome, so a later step can still read what
 happened. Later actions that judge something, an approval or a branch, call `react` instead of
-inventing a stop of their own.
+inventing a stop of their own. A branch should read `outcome.verdict`. Only a gate turns a
+failed verdict into status `failed`. A step that is not a gate stays `succeeded` when the
+verdict is `failed`, with that verdict on its outcome.
 
-Today only `run_test` can be a gate, with `gate: true` in the file. Absent, or `gate: false`,
-is not a gate. A failed verdict then still succeeds the step, with the note `The test failed.`
-and outputs `run`, `verdict` and `summary`, exactly as before. A passed verdict, gated or not,
-notes `The test passed.` A run that reaches no verdict (cancelled, errored), or that times out,
-fails the step and records no outcome, because there was nothing to react to.
+Today only `run_test` accepts `gate`, and it is a field of the step, next to `needs`, not of
+the action. `allowed` is what decides which actions may set it, so a later approval does not
+need a field of its own. Absent, or `gate: false`, is not a gate. A failed verdict then still
+succeeds the step, with the note `The test failed.` and outputs `run`, `verdict` and
+`summary`, exactly as before. A passed verdict, gated or not, notes `The test passed.` A run
+that reaches no verdict (cancelled, errored), or that times out, fails that step and records
+no outcome, because there was nothing to react to. It does not halt the other branches.
 
 The reason on a failed gate is the report `ys test wait` prints, under a line that says the
-test failed. The run's error names the step and then that reason. The workflow run view shows
-it, and so does `ys workflow runs`. `ys workflow runs --json` includes the outcome on the step
-when there is one.
+test failed. That full report is the step's note. The run's error is a short line, such as
+`Step smoke failed: the test failed.`, so the report is not shown twice. The workflow run
+view shows the short line on the run and the report on the step. `ys workflow runs` lists
+runs and does not include either. `ys workflow runs --run <id>` prints the short line, the
+first line of each note in the table, and the full note under the table when it continues.
+`ys workflow runs --json` includes the full note and the outcome on the step when there is one.
 
-A schedule or a trigger whose `notify` is `failure` (the default) or `always` sends that error
-when the run ends failed. `never` sends nothing. A `notify` step in the file that needs the
-gate does not run when the gate fails: its title was written for a pass, and a step runs only
-when every step it needs succeeded. A run started by hand, with no schedule and no trigger, is
-not sent as a system notification. The failure is still on the run.
+Starting a step again, from pending to running or waiting, clears its outcome. A later
+revision can re-run the step and record a new verdict. Leaving the outcome out of a move does
+not clear it.
+
+A schedule or a trigger whose `notify` is `failure` (the default) or `always` sends the first
+line of the run's error, kept to about 200 characters, and then `Open Yardsort for the report.`
+The full text stays on the run. `never` sends nothing. A `notify` step in the file that needs
+the gate does not run when the gate fails: its title was written for a pass, and a step runs
+only when every step it needs succeeded. A run started by hand, with no schedule and no
+trigger, is not sent as a system notification. The failure is still on the run.
 
 Migration `0029_workflow_step_outcome` adds a nullable `outcome` column. Rows from before it,
 and steps that judged nothing, read as none. A workflow file that does not mention `gate`

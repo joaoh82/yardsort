@@ -789,12 +789,13 @@ fn a_failed_verdict_on_a_gate_fails_the_run_and_a_schedule_tells_you_why() {
     let ended = store.workflow_run(&run).unwrap().unwrap();
     assert_eq!(ended.status, "failed");
     let error = ended.error.unwrap();
-    assert!(error.contains("Step `run` failed:"), "{error}");
-    assert!(error.contains("The test failed:"), "{error}");
-    assert!(error.contains("wanted 200, got 500"), "{error}");
+    assert_eq!(error, "Step `run` failed: the test failed.");
     let steps = store.workflow_steps(&run).unwrap();
     let smoke = steps.iter().find(|step| step.step_id == "run").unwrap();
     assert_eq!(smoke.status, "failed");
+    let note = smoke.note.as_deref().unwrap();
+    assert!(note.contains("The test failed:"), "{note}");
+    assert!(note.contains("wanted 200, got 500"), "{note}");
     let outcome: serde_json::Value =
         serde_json::from_str(smoke.outcome.as_deref().unwrap()).unwrap();
     assert_eq!(outcome["verdict"], "failed");
@@ -843,7 +844,10 @@ fn a_failed_verdict_on_a_gate_fails_the_run_and_a_schedule_tells_you_why() {
     let settled = crate::schedule::fire::settle(&store).unwrap();
     assert_eq!(settled.notices.len(), 1);
     assert_eq!(settled.notices[0].title, "Nightly failed");
-    assert_eq!(settled.notices[0].body, error);
+    assert_eq!(
+        settled.notices[0].body,
+        format!("{error}\nOpen Yardsort for the report.")
+    );
     let quiet = store
         .schedules()
         .unwrap()
@@ -851,6 +855,95 @@ fn a_failed_verdict_on_a_gate_fails_the_run_and_a_schedule_tells_you_why() {
         .find(|schedule| schedule.name == "Quiet")
         .unwrap();
     let history = store.schedule_runs(&quiet.id, 10).unwrap();
+    assert_eq!(history[0].result.as_deref(), Some("failed"));
+    assert!(history[0].notified_at.is_none());
+}
+
+#[test]
+fn a_failed_gate_run_is_told_by_a_trigger_and_not_by_one_set_to_never() {
+    let (_dir, store, run, project, workspace) = queued_workflow(GATED_TEST);
+    tick(&store, &NoHands);
+    finish_smoke(&store, "failed", Some("wanted 200, got 500"));
+    tick(&store, &NoHands);
+    let error = store.workflow_run(&run).unwrap().unwrap().error.unwrap();
+    assert_eq!(error, "Step `run` failed: the test failed.");
+    let note = store
+        .workflow_steps(&run)
+        .unwrap()
+        .into_iter()
+        .find(|step| step.step_id == "run")
+        .unwrap()
+        .note
+        .unwrap();
+    assert!(note.contains("wanted 200, got 500"), "{note}");
+
+    for (name, notify) in [("On failure", "failure"), ("Quiet", "never")] {
+        let row = store
+            .add_trigger(
+                &crate::store::TriggerFields {
+                    name,
+                    preset: None,
+                    project_id: &project,
+                    workspace_id: &workspace,
+                    workspace_name: "fix-login",
+                    session_id: None,
+                    events: r#"["workspace.done"]"#,
+                    filters: "{}",
+                    target_kind: "workflow",
+                    target_id: "gate",
+                    inputs: "{}",
+                    quiet_ms: 0,
+                    cap: 3,
+                    notify,
+                },
+                "cli",
+                1,
+            )
+            .unwrap();
+        let fire = store
+            .open_new_trigger_fire(&crate::store::NewTriggerFire {
+                trigger_id: &row.id,
+                subject: "workspace:fix",
+                event: "workspace.done",
+                at: 1,
+                due_at: 1,
+                facts: "{}",
+                depth: 0,
+            })
+            .unwrap();
+        assert!(store
+            .decide_trigger_fire(
+                &fire.id,
+                "gathering",
+                &crate::store::FireDecision {
+                    outcome: "started",
+                    run_id: Some(&run),
+                    note: None,
+                    counted: true,
+                    at: 2,
+                },
+            )
+            .unwrap());
+    }
+
+    let settled = crate::trigger::fire::settle(&store).unwrap();
+    assert_eq!(settled.notices.len(), 1);
+    assert_eq!(settled.notices[0].title, "On failure failed");
+    assert_eq!(
+        settled.notices[0].body,
+        "Step `run` failed: the test failed.\nOpen Yardsort for the report."
+    );
+    assert!(
+        !settled.notices[0].body.contains("wanted 200"),
+        "the notification is the short line; the report stays on the step"
+    );
+    let quiet = store
+        .triggers()
+        .unwrap()
+        .into_iter()
+        .find(|trigger| trigger.name == "Quiet")
+        .unwrap();
+    let history = store.trigger_fires(&quiet.id, 10).unwrap();
     assert_eq!(history[0].result.as_deref(), Some("failed"));
     assert!(history[0].notified_at.is_none());
 }

@@ -554,6 +554,7 @@ impl Checker<'_> {
             return Step {
                 id,
                 needs,
+                gate: false,
                 action: Action::Notify { title, body: None },
             };
         }
@@ -622,7 +623,6 @@ impl Checker<'_> {
                 test: self.test(raw, scope),
                 inputs: self.test_inputs(raw, scope),
                 timeout_secs: self.timeout(raw),
-                gate: raw.gate.as_ref().is_some_and(|gate| gate.value),
             },
             _ => Action::Notify {
                 title: self.required(
@@ -635,7 +635,15 @@ impl Checker<'_> {
                 body: self.text(&raw.body, scope),
             },
         };
-        Step { id, needs, action }
+        // `allowed` already rejects `gate` on an action that does not take it. Only
+        // `run_test` does, today, so a later action can become a gate without a new field.
+        let gate = action_name == "run_test" && raw.gate.as_ref().is_some_and(|gate| gate.value);
+        Step {
+            id,
+            needs,
+            gate,
+            action,
+        }
     }
 
     /// A test id as written, or exactly one `{{ inputs.<test input> }}`.

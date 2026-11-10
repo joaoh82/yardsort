@@ -462,11 +462,30 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                 s.step_id.clone(),
                 s.action.clone(),
                 s.status.clone(),
-                s.note.clone().unwrap_or_default(),
+                note_line(s.note.as_deref()),
             ]
         }));
         table(&lines);
+        // The table keeps one line. A report that continues past it is printed in full,
+        // so `ys workflow runs --run` still shows what the step recorded.
+        for step in &steps {
+            let Some(note) = step.note.as_deref() else {
+                continue;
+            };
+            if note.lines().nth(1).is_some() {
+                sayln!();
+                sayln!("{}:", step.step_id);
+                sayln!("{note}");
+            }
+        }
     })
+}
+
+/// The NOTE cell: the first line only, so a multi-line report does not break the table.
+fn note_line(note: Option<&str>) -> String {
+    note.and_then(|text| text.lines().next())
+        .unwrap_or("")
+        .to_owned()
 }
 
 fn cancel(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
@@ -617,5 +636,20 @@ fn from(source: &Source) -> String {
             replaces_built_in: true,
         } => format!("{path} (instead of the built-in)"),
         Source::File { path, .. } => path.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::note_line;
+
+    #[test]
+    fn the_note_cell_is_the_first_line_of_the_report() {
+        assert_eq!(note_line(None), "");
+        assert_eq!(note_line(Some("The test failed.")), "The test failed.");
+        assert_eq!(
+            note_line(Some("The test failed:\nwanted 200, got 500")),
+            "The test failed:"
+        );
     }
 }

@@ -720,7 +720,8 @@ Proposed in [21-workflows](21-workflows.md), after an eight-question design pass
       quick start, and screenshots of the view and the Run dialog. Recorded in
       [21 § slice 6](21-workflows.md#slice-6-what-shipped).
 - A `run_test` step can be a gate. `gate: true` records a step outcome and stops the run when
-  the smoke test fails, with the reason on the run. Recorded in
+  the smoke test fails, skipping the steps still going. The run says the test failed; the step
+  keeps the report. Recorded in
   [21 § test verdict gates](21-workflows.md#test-verdict-gates).
 
 _Exit:_ the code-review workflow runs against a real pull request on all three platforms from the

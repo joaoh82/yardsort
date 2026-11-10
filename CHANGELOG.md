@@ -19,10 +19,13 @@ has the downloads and the full commit lists.
   passed on to the agents it launches, or to the terminal daemon. See
   [What it may do](docs/guide/floor-manager.md#what-it-may-do).
 - **A smoke test step can stop the workflow when it fails.** A `run_test` step with `gate: true`
-  fails the run when the test's verdict is a failure, and says why in the run and in
-  `ys workflow runs`. A schedule or trigger that tells you when a run fails sends that reason.
-  Without `gate`, a failed test still lets the workflow continue, as it does today. A file
-  written before this still loads. See [Workflows](docs/guide/workflows.md#a-test-that-must-pass).
+  fails the run when the test's verdict is a failure, and skips every step that has not
+  finished, so a long wait does not keep the run open. The run says the test failed. The step
+  keeps the report. You see both in the app and in `ys workflow runs --run <id>`. A schedule
+  or trigger that tells you when a run fails sends the first line, and says to open Yardsort
+  for the report. Without `gate`, a failed test still lets the workflow continue, as it does
+  today. A file written before this still loads. See
+  [Workflows](docs/guide/workflows.md#a-test-that-must-pass).
 
 ## 0.25.0
 

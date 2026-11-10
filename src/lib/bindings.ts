@@ -588,7 +588,7 @@ export const commands = {
 	/**  Runs, newest first: of one workflow, or of all. */
 	workflowRuns: (workflowId: string | null, limit: number) => typedError<WorkflowRun_Serialize[], IpcError>(__TAURI_INVOKE("workflow_runs", { workflowId, limit })),
 	/**  A run's steps, in file order. */
-	workflowRunSteps: (runId: string) => typedError<WorkflowStepRun[], IpcError>(__TAURI_INVOKE("workflow_run_steps", { runId })),
+	workflowRunSteps: (runId: string) => typedError<WorkflowStepRun_Serialize[], IpcError>(__TAURI_INVOKE("workflow_run_steps", { runId })),
 	/**  What a run of `workflowId` in `workspaceId` would find, for the Run dialog to show. */
 	workflowPreview: (workflowId: string, workspaceId: string, trackedId: string | null) => typedError<RunPreview_Serialize, IpcError>(__TAURI_INVOKE("workflow_preview", { workflowId, workspaceId, trackedId })),
 	/**  Start a run. The same checks as `ys workflow run`; the driver picks it up at once. */
@@ -791,17 +791,13 @@ export type Action =
  *  Run a smoke test in the run's workspace and wait for its verdict. The step succeeds once
  *  the test passed or failed, so a later step can read `verdict` and act on either, and
  *  fails only when the run reaches no verdict (cancelled, errored) or does not end in time.
- *  With `gate`, a failed verdict fails the step instead and the run stops. Leaves `run`,
- *  `verdict` and `summary` (the text `ys test wait` prints) for later steps.
+ *  With `gate` on the step, a failed verdict fails the step instead and the run stops,
+ *  skipping every step still going. Leaves `run`, `verdict` and `summary` (the text
+ *  `ys test wait` prints) for later steps.
  */
 { action: "run_test"; test: string; 
 /**  Values for the test's inputs, by input id; may hold `{{ variables }}`. */
-inputs: { [key in string]: string }; timeoutSecs: number | null; 
-/**
- *  When true, a failed test verdict fails this step and stops the run. When false,
- *  the default, the step succeeds either way.
- */
-gate: boolean } | 
+inputs: { [key in string]: string }; timeoutSecs: number | null } | 
 /**  Tell the person who started the run. */
 { action: "notify"; title: string; body: string | null };
 
@@ -3183,7 +3179,59 @@ export type Step = {
 	 *  run together.
 	 */
 	needs: string[],
+	/**
+	 *  Whether a failed verdict fails this step and stops the run.
+	 * 
+	 *  Only some actions accept it. Today that is `run_test`. Absent means it is not a gate,
+	 *  so a failed verdict still succeeds the step. A later action that judges something, an
+	 *  approval for example, uses the same flag.
+	 */
+	gate?: boolean,
 } & Action;
+
+/**
+ *  What a step concluded, apart from whether its row succeeded or failed.
+ * 
+ *  A step that judges something produces one: a smoke test's verdict today, and later an
+ *  approval or anything a branch will switch on. [`react`] is the one place the run takes
+ *  that verdict. It is stored on the step row, not in `outputs`. `outputs` stay the strings
+ *  a later step reads as `{{ steps.<id>.<field> }}`, and this is not `wait_session`'s
+ *  `outcome` field.
+ */
+export type StepOutcome = StepOutcome_Serialize | StepOutcome_Deserialize;
+
+/**
+ *  What a step concluded, apart from whether its row succeeded or failed.
+ * 
+ *  A step that judges something produces one: a smoke test's verdict today, and later an
+ *  approval or anything a branch will switch on. [`react`] is the one place the run takes
+ *  that verdict. It is stored on the step row, not in `outputs`. `outputs` stay the strings
+ *  a later step reads as `{{ steps.<id>.<field> }}`, and this is not `wait_session`'s
+ *  `outcome` field.
+ */
+export type StepOutcome_Deserialize = {
+	verdict: StepVerdict,
+	/**  Why, when the verdict is failed. Absent when it passed and there is nothing to add. */
+	reason?: string | null,
+};
+
+/**
+ *  What a step concluded, apart from whether its row succeeded or failed.
+ * 
+ *  A step that judges something produces one: a smoke test's verdict today, and later an
+ *  approval or anything a branch will switch on. [`react`] is the one place the run takes
+ *  that verdict. It is stored on the step row, not in `outputs`. `outputs` stay the strings
+ *  a later step reads as `{{ steps.<id>.<field> }}`, and this is not `wait_session`'s
+ *  `outcome` field.
+ */
+export type StepOutcome_Serialize = {
+	verdict: StepVerdict,
+	/**  Why, when the verdict is failed. Absent when it passed and there is nothing to add. */
+	reason?: string | null,
+};
+
+/**  Passed or failed. The words match a smoke test's verdict. */
+export type StepVerdict = "passed" | "failed";
 
 /**  One step, as the card lists it. */
 export type StepWords = {
@@ -3984,7 +4032,10 @@ export type WorkflowRun_Serialize = {
 export type WorkflowRunsChanged = Record<string, never>;
 
 /**  One step of a run. */
-export type WorkflowStepRun = {
+export type WorkflowStepRun = WorkflowStepRun_Serialize | WorkflowStepRun_Deserialize;
+
+/**  One step of a run. */
+export type WorkflowStepRun_Deserialize = {
 	stepId: string,
 	action: string,
 	/**  `pending`, `running`, `waiting`, `succeeded`, `failed`, `skipped` or `cancelled`. */
@@ -3993,6 +4044,22 @@ export type WorkflowStepRun = {
 	endedAt: number | null,
 	outputs: { [key in string]: string },
 	note: string | null,
+	/**  A verdict the step recorded, when it judged something. Absent otherwise. */
+	outcome: StepOutcome_Deserialize | null,
+};
+
+/**  One step of a run. */
+export type WorkflowStepRun_Serialize = {
+	stepId: string,
+	action: string,
+	/**  `pending`, `running`, `waiting`, `succeeded`, `failed`, `skipped` or `cancelled`. */
+	status: string,
+	startedAt: number | null,
+	endedAt: number | null,
+	outputs: { [key in string]: string },
+	note: string | null,
+	/**  A verdict the step recorded, when it judged something. Absent otherwise. */
+	outcome: StepOutcome_Serialize | null,
 };
 
 /**  Workflow writing has its own harness preference; commit and PR writers stay workspace-based. */

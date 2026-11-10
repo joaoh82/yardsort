@@ -181,7 +181,9 @@ impl Run {
         if let Some(note) = &change.note {
             row.note = Some(note.clone());
         }
-        if let Some(outcome) = &change.outcome {
+        if change.clear_outcome {
+            row.outcome = None;
+        } else if let Some(outcome) = &change.outcome {
             row.outcome = Some(outcome.clone());
         }
         true
@@ -758,11 +760,168 @@ fn a_failed_verdict_on_a_gate_stops_the_run_with_the_reason() {
     assert_eq!(outcome.reason.as_deref(), Some(note));
     match &run.finished {
         Some(Finish::Failed(why)) => {
-            assert!(why.contains("Step `smoke` failed:"), "{why}");
-            assert!(why.contains("failed  login"), "{why}");
+            assert_eq!(why, "Step `smoke` failed: the test failed.");
+            assert!(
+                !why.contains("failed  login"),
+                "the report stays on the step, not the run: {why}"
+            );
         }
         other => panic!("expected the run to fail, got {other:?}"),
     }
+}
+
+#[test]
+fn a_failed_gate_halts_a_parallel_wait_on_the_same_tick() {
+    // `watch` does not need the gate, and its timeout is two hours. A failed gate still
+    // ends the run now, and skips the wait, instead of leaving it running.
+    let mut run = Run::from(
+        r#"id: t
+name: T
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: smoke
+    action: run_test
+    test: login
+    gate: true
+    timeout: 30m
+  - id: watch
+    action: wait_session
+    session: origin
+    timeout: 2h
+  - id: seen
+    action: wait_pr_activity
+    timeout: 2h
+  - id: late
+    action: notify
+    needs: [seen]
+    title: Still going
+"#,
+    );
+    run.world.origin = Some("pty-o".into());
+    // Busy, so `watch` stays waiting rather than settling.
+    run.session(
+        "pty-o",
+        SessionFacts {
+            alive: true,
+            busy: true,
+            settled_at: None,
+        },
+    );
+    let started = run.advance();
+    assert!(
+        started
+            .iter()
+            .any(|effect| matches!(effect, Effect::RunTest { .. })),
+        "the test is queued"
+    );
+    assert_eq!(run.status("watch"), "waiting");
+    assert_eq!(run.status("seen"), "waiting");
+    assert_eq!(run.status("late"), "pending");
+    let queued_out: Outputs = [("run".to_owned(), "tr-halt".to_owned())].into();
+    assert!(run.apply(&queued("smoke", &queued_out)));
+    run.world.test_runs.insert(
+        "tr-halt".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "failed  login".into(),
+        },
+    );
+    // A review arrives on the same tick the gate fails, which would have started `late`.
+    run.world.posts.push(PrActivity::Review);
+    let effects = run.advance();
+    assert!(
+        effects.is_empty(),
+        "the notify that was about to start is dropped: {effects:?}"
+    );
+    assert_eq!(run.status("smoke"), "failed");
+    assert!(run.note("smoke").unwrap().contains("failed  login"));
+    assert_eq!(run.note("watch"), Some("Skipped: the gate `smoke` failed."));
+    assert_eq!(run.status("watch"), "skipped");
+    assert_eq!(run.status("seen"), "succeeded");
+    assert_eq!(run.status("late"), "skipped");
+    assert_eq!(run.note("late"), Some("Skipped: the gate `smoke` failed."));
+    assert_eq!(
+        run.finished,
+        Some(Finish::Failed(
+            "Step `smoke` failed: the test failed.".into()
+        ))
+    );
+}
+
+#[test]
+fn starting_a_step_again_clears_the_outcome_it_had() {
+    let mut run = Run::from(GATED);
+    run.rows[0].outcome = Some(r#"{"verdict":"failed","reason":"old"}"#.into());
+    run.advance();
+    assert_eq!(run.status("smoke"), "running");
+    assert!(
+        run.rows[0].outcome.is_none(),
+        "a new attempt does not keep the previous verdict"
+    );
+}
+
+fn assert_gate_failed_without_a_verdict(run: &Run, note: &str) {
+    assert_eq!(run.status("smoke"), "failed");
+    assert_eq!(run.note("smoke"), Some(note));
+    assert!(
+        run.rows
+            .iter()
+            .find(|row| row.step_id == "smoke")
+            .unwrap()
+            .outcome
+            .is_none(),
+        "no verdict, so no outcome"
+    );
+    assert_eq!(run.status("tell"), "skipped");
+    assert_eq!(
+        run.finished.as_ref(),
+        Some(&Finish::Failed(format!("Step `smoke` failed: {note}")))
+    );
+}
+
+#[test]
+fn a_gate_that_times_out_fails_the_run_with_no_outcome() {
+    let mut run = Run::from(GATED);
+    run.advance();
+    let queued_out: Outputs = [("run".to_owned(), "tr-slow".to_owned())].into();
+    assert!(run.apply(&queued("smoke", &queued_out)));
+    run.world.test_runs.insert(
+        "tr-slow".into(),
+        TestRun {
+            status: "running".into(),
+            summary: "going".into(),
+        },
+    );
+    assert!(run.advance().is_empty());
+    run.later(31 * 60 * 1000);
+    run.advance();
+    assert_gate_failed_without_a_verdict(&run, "The test run did not end within 30m.");
+}
+
+#[test]
+fn a_gate_whose_test_run_is_gone_fails_with_no_outcome() {
+    let mut run = Run::from(GATED);
+    run.advance();
+    let queued_out: Outputs = [("run".to_owned(), "tr-gone".to_owned())].into();
+    assert!(run.apply(&queued("smoke", &queued_out)));
+    run.advance();
+    assert_gate_failed_without_a_verdict(&run, "The test run is gone.");
+}
+
+#[test]
+fn a_cancelled_test_on_a_gate_fails_with_no_outcome() {
+    let mut run = Run::from(GATED);
+    finish_test(&mut run, "tr-c", "cancelled", "cancelled");
+    assert_gate_failed_without_a_verdict(&run, "The test run cancelled.");
+}
+
+#[test]
+fn an_errored_test_on_a_gate_fails_with_no_outcome() {
+    let mut run = Run::from(GATED);
+    finish_test(&mut run, "tr-e", "errored", "the runner died");
+    assert_gate_failed_without_a_verdict(&run, "The test run errored.");
 }
 
 #[test]

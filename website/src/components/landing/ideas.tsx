@@ -255,7 +255,7 @@ export function Ideas() {
             <code className={code}>{"{{ variable }}"}</code> is checked before anything runs, with
             the line and column of each mistake. A <code className={code}>run_test</code> step
             marked <code className={code}>gate: true</code> stops the run when the smoke test fails,
-            and the run says why.
+            skips the steps still going, and says why.
           </p>
           <p>
             <strong className={strong}>Workflows</strong>, above Projects, lists the built-in ones

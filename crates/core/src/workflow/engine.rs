@@ -20,7 +20,8 @@ use crate::store::{StepStatus, WorkflowStepRow};
 /// that verdict. It is stored on the step row, not in `outputs`. `outputs` stay the strings
 /// a later step reads as `{{ steps.<id>.<field> }}`, and this is not `wait_session`'s
 /// `outcome` field.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub struct StepOutcome {
     pub verdict: StepVerdict,
     /// Why, when the verdict is failed. Absent when it passed and there is nothing to add.
@@ -29,7 +30,7 @@ pub struct StepOutcome {
 }
 
 /// Passed or failed. The words match a smoke test's verdict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum StepVerdict {
     Passed,
@@ -104,8 +105,15 @@ pub struct Move {
     /// Replaces the step's outputs, as a JSON object of strings.
     pub outputs: Option<String>,
     pub note: Option<String>,
-    /// Replaces the step's structured outcome, as JSON. Absent leaves whatever is stored.
+    /// Replaces the step's structured outcome, as JSON. Absent leaves whatever is stored,
+    /// unless `clear_outcome`, which sets it back to nothing.
     pub outcome: Option<String>,
+    /// Set the stored outcome back to nothing. A step that starts again does this, so a
+    /// later revision can re-run it and record a new verdict.
+    pub clear_outcome: bool,
+    /// This step is a gate whose verdict failed. The run skips every step that has not
+    /// finished, in this same plan, and ends failed.
+    pub halt: bool,
 }
 
 /// Something only the driver can do. Each belongs to a step the plan has just moved to
@@ -267,6 +275,10 @@ pub fn advance(
         }
     }
 
+    // A failed gate stops the whole run, not only the steps that name it in `needs`.
+    // Done before the finish check, so the steps it skips count as finished this tick.
+    halt_the_run(&mut plan, workflow, &mut status);
+
     if status.values().all(|s| s.is_final()) {
         let failed = workflow
             .steps
@@ -275,18 +287,17 @@ pub fn advance(
         plan.finish = Some(match failed {
             None => Finish::Succeeded,
             Some(step) => {
-                let note = plan
-                    .moves
-                    .iter()
-                    .rev()
-                    .find(|m| m.step == step.id)
-                    .and_then(|m| m.note.clone())
-                    .or_else(|| {
-                        rows.iter()
-                            .find(|r| r.step_id == step.id)
-                            .and_then(|r| r.note.clone())
-                    });
+                let failing = plan.moves.iter().rev().find(|m| m.step == step.id);
+                let halt = failing.is_some_and(|m| m.halt);
+                let note = failing.and_then(|m| m.note.clone()).or_else(|| {
+                    rows.iter()
+                        .find(|r| r.step_id == step.id)
+                        .and_then(|r| r.note.clone())
+                });
                 Finish::Failed(match note {
+                    Some(note) if halt => {
+                        format!("Step `{}` failed: {}", step.id, gate_failure_line(&note))
+                    }
                     Some(note) => format!("Step `{}` failed: {note}", step.id),
                     None => format!("Step `{}` failed.", step.id),
                 })
@@ -294,6 +305,78 @@ pub fn advance(
         });
     }
     plan
+}
+
+/// Skip every step that has not finished, because a gate failed.
+///
+/// An effect this plan was about to carry out is dropped, so it never starts. A step that
+/// is already `running` from an earlier tick is skipped too: the run does not wait for it.
+/// Whatever that effect already started is left running. Stopping it here could throw away
+/// work, and the run ending is what the gate asked for.
+fn halt_the_run(plan: &mut Plan, workflow: &Workflow, status: &mut BTreeMap<&str, StepStatus>) {
+    let Some(gate) = plan
+        .moves
+        .iter()
+        .find(|change| change.halt)
+        .map(|change| change.step.clone())
+    else {
+        return;
+    };
+    plan.effects.clear();
+    let why = format!("the gate `{gate}` failed");
+    for step in &workflow.steps {
+        let id = step.id.as_str();
+        if id == gate {
+            continue;
+        }
+        let Some(&current) = status.get(id) else {
+            continue;
+        };
+        if current.is_final() {
+            continue;
+        }
+        // The key is already in the map, from the row. Assign through it so this does not
+        // have to store a borrow of the workflow.
+        if let Some(existing) = plan.moves.iter_mut().rfind(|change| change.step == id) {
+            // The row is still `existing.from`. Skip from there, instead of adding a second
+            // move the store would refuse because the first has not been applied.
+            existing.to = StepStatus::Skipped;
+            existing.note = Some(format!("Skipped: {why}."));
+            existing.outputs = None;
+            existing.outcome = None;
+            existing.clear_outcome = true;
+            existing.halt = false;
+        } else {
+            plan.moves.push(skip(id, current, &why));
+        }
+        if let Some(slot) = status.get_mut(id) {
+            *slot = StepStatus::Skipped;
+        }
+    }
+}
+
+/// The short clause a failed gate leaves on the run: the first line of the report, without
+/// a trailing colon, starting lower case, ending with a period. The step's note keeps the
+/// full report.
+fn gate_failure_line(note: &str) -> String {
+    let line = note
+        .lines()
+        .next()
+        .unwrap_or(note)
+        .trim()
+        .trim_end_matches(':')
+        .trim();
+    let line = if line.is_empty() { "failed" } else { line };
+    let mut chars = line.chars();
+    let Some(first) = chars.next() else {
+        return "failed.".to_owned();
+    };
+    let mut out: String = first.to_lowercase().collect();
+    out.push_str(chars.as_str());
+    if !out.ends_with('.') {
+        out.push('.');
+    }
+    out
 }
 
 /// Steps the driver was in the middle of when it stopped. Whether the session started or the
@@ -308,17 +391,20 @@ pub fn recover(rows: &[WorkflowStepRow]) -> Vec<Move> {
             outputs: None,
             note: Some("Yardsort stopped while this step was running.".to_owned()),
             outcome: None,
+            clear_outcome: false,
+            halt: false,
         })
         .collect()
 }
 
 /// How the run takes a step's [`StepOutcome`].
 ///
-/// A gate whose verdict is [`StepVerdict::Failed`] fails the step, and the run then stops
-/// with `reason`, the same way any failed step stops it. A schedule or trigger that asks to
-/// be told on failure sends that reason. Any other verdict succeeds the step, so a later
-/// step can still read what happened. `success_note` is what that succeeded step says.
-/// Actions that judge something call this instead of deciding a stop of their own.
+/// A gate whose verdict is [`StepVerdict::Failed`] fails the step and sets [`Move::halt`],
+/// so the run skips every step still going and ends failed. The step's note keeps `reason`.
+/// The run's own error is a short line, so the report is not shown twice. Any other verdict
+/// succeeds the step, so a later step can still read what happened. `success_note` is what
+/// that succeeded step says. Actions that judge something call this instead of deciding a
+/// stop of their own.
 pub fn react(
     step_id: &str,
     from: StepStatus,
@@ -348,6 +434,8 @@ pub fn react(
         outputs: Some(serde_json::to_string(outputs).unwrap_or_else(|_| "{}".to_owned())),
         note: Some(note),
         outcome: Some(serde_json::to_string(outcome).unwrap_or_else(|_| "{}".to_owned())),
+        clear_outcome: false,
+        halt: stop,
     }
 }
 
@@ -371,6 +459,8 @@ pub fn done(step: &str, outputs: &Outputs) -> Move {
         outputs: Some(serde_json::to_string(outputs).unwrap_or_else(|_| "{}".to_owned())),
         note: None,
         outcome: None,
+        clear_outcome: false,
+        halt: false,
     }
 }
 
@@ -384,6 +474,8 @@ pub fn queued(step: &str, outputs: &Outputs) -> Move {
         outputs: Some(serde_json::to_string(outputs).unwrap_or_else(|_| "{}".to_owned())),
         note: None,
         outcome: None,
+        clear_outcome: false,
+        halt: false,
     }
 }
 
@@ -396,6 +488,8 @@ pub fn skipped(step: &str, why: &str) -> Move {
         outputs: None,
         note: Some(format!("Skipped: {why}.")),
         outcome: None,
+        clear_outcome: false,
+        halt: false,
     }
 }
 
@@ -409,6 +503,8 @@ pub fn not_yet(step: &str) -> Move {
         outputs: None,
         note: None,
         outcome: None,
+        clear_outcome: false,
+        halt: false,
     }
 }
 
@@ -421,6 +517,8 @@ pub fn failed(step: &str, why: &str) -> Move {
         outputs: None,
         note: Some(why.to_owned()),
         outcome: None,
+        clear_outcome: false,
+        halt: false,
     }
 }
 
@@ -453,7 +551,7 @@ fn begin(
 ) -> Move {
     let id = step.id.as_str();
     let render = |text: &str| template::render(text, lookup);
-    match &step.action {
+    let mut change = match &step.action {
         Action::StartSession {
             harness,
             prompt,
@@ -537,7 +635,14 @@ fn begin(
             });
             to(id, StepStatus::Pending, StepStatus::Running)
         }
+    };
+    // Starting again is a new attempt. Drop the previous verdict so a later revision can
+    // re-run the step and record a new one. A skip or a failure from pending is not a new
+    // attempt, and keeps whatever was stored.
+    if !change.to.is_final() {
+        change.clear_outcome = true;
     }
+    change
 }
 
 /// A waiting step: has what it waits for happened, or has it waited too long?
@@ -609,9 +714,7 @@ fn wait(
             )),
             _ => None,
         },
-        Action::RunTest {
-            timeout_secs, gate, ..
-        } => {
+        Action::RunTest { timeout_secs, .. } => {
             // The run's id was left when the driver queued it; wait for that run to end.
             let run = lookup(&["steps".to_owned(), id.to_owned(), "run".to_owned()])?;
             match world.test_run(&run) {
@@ -636,11 +739,12 @@ fn wait(
                     left.insert("verdict".into(), test.status.clone());
                     left.insert("summary".into(), test.summary.clone());
                     // A verdict, passed or failed, is a step outcome. A gate whose verdict
-                    // failed stops the run; any other verdict succeeds the step, so a later
-                    // step can read `verdict` and act on either. That is how "Smoke test,
-                    // then tell the agent" reports a failure for the agent to repair. A run
-                    // that reached no verdict (cancelled, errored) fails the step and leaves
-                    // no outcome, because there was nothing to react to.
+                    // failed stops the whole run; any other verdict succeeds the step, so a
+                    // later step can read `verdict` and act on either. That is how "Smoke
+                    // test, then tell the agent" reports a failure for the agent to repair.
+                    // A run that reached no verdict (cancelled, errored) fails the step and
+                    // leaves no outcome, because there was nothing to react to. It does not
+                    // halt the other branches: only a failed verdict on a gate does.
                     match test.status.as_str() {
                         "passed" | "failed" => {
                             let outcome = match test.status.as_str() {
@@ -656,7 +760,7 @@ fn wait(
                             Some(react(
                                 id,
                                 StepStatus::Waiting,
-                                *gate,
+                                step.is_gate(),
                                 &outcome,
                                 &left,
                                 format!("The test {}.", test.status),
@@ -718,6 +822,8 @@ fn to(step: &str, from: StepStatus, to: StepStatus) -> Move {
         outputs: None,
         note: None,
         outcome: None,
+        clear_outcome: false,
+        halt: false,
     }
 }
 

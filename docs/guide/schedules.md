@@ -147,8 +147,8 @@ desktop notification:
 - **How every run ends** — those, and the ones that passed or were cancelled.
 - **Never.**
 
-A workflow that stops because a smoke test gate failed is a failed run, and the notification
-is that run's reason.
+A workflow that stops because a smoke test gate failed is a failed run. The notification is
+the first line of the reason, and says to open Yardsort for the report.
 
 A run that waits for your approval is told once, whichever of the first two you chose. So is a
 time that was **refused**, since no run will end to tell you about: once when it starts being

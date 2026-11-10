@@ -378,7 +378,10 @@ fn a_finished_run_is_copied_onto_its_line_and_a_failure_is_told() {
     assert!(settled.changed);
     assert_eq!(settled.notices.len(), 1);
     assert_eq!(settled.notices[0].title, "Tell failed");
-    assert_eq!(settled.notices[0].body, "It broke.");
+    assert_eq!(
+        settled.notices[0].body,
+        "It broke.\nOpen Yardsort for the report."
+    );
     let line = tx.store().trigger_fire(&fired[0].fire.id).unwrap().unwrap();
     assert_eq!(line.result.as_deref(), Some("failed"));
 }
@@ -485,6 +488,7 @@ fn an_agent_a_workflow_started_is_that_workflows_and_sets_nothing_off() {
             Some(r#"{"session":"pty-r","run":"run-reviewer"}"#),
             None,
             None,
+            false,
         )
         .unwrap());
     assert_eq!(

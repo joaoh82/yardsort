@@ -2264,7 +2264,9 @@ impl Store {
 
     /// Move a step on, only if its run is still running and the step is in one of `from`. False
     /// otherwise, and nothing changes: the run was cancelled, or someone else moved it first.
-    /// `outputs`, `note` and `outcome`, when given, replace those columns.
+    /// `outputs` and `note`, when given, replace those columns. `clear_outcome` sets the
+    /// outcome back to nothing, which a step that starts again needs. Otherwise `outcome`,
+    /// when given, replaces it, and when absent leaves it.
     #[allow(clippy::too_many_arguments)]
     pub fn move_workflow_step(
         &self,
@@ -2275,6 +2277,7 @@ impl Store {
         outputs: Option<&str>,
         note: Option<&str>,
         outcome: Option<&str>,
+        clear_outcome: bool,
     ) -> StoreResult<bool> {
         let now = now_ms();
         let marks = from.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -2285,9 +2288,9 @@ impl Store {
                  ended_at = CASE WHEN ?2 THEN ?3 ELSE ended_at END,
                  outputs = COALESCE(?4, outputs),
                  note = COALESCE(?5, note),
-                 outcome = COALESCE(?6, outcome)
-             WHERE run_id = ?7 AND step_id = ?8 AND status IN ({marks})
-               AND EXISTS (SELECT 1 FROM workflow_runs WHERE id = ?7 AND status = 'running')"
+                 outcome = CASE WHEN ?6 THEN NULL ELSE COALESCE(?7, outcome) END
+             WHERE run_id = ?8 AND step_id = ?9 AND status IN ({marks})
+               AND EXISTS (SELECT 1 FROM workflow_runs WHERE id = ?8 AND status = 'running')"
         );
         // A step that goes straight from pending to an end, skipped say, never started, and
         // keeps no start time.
@@ -2297,6 +2300,7 @@ impl Store {
             now.into(),
             outputs.map(str::to_owned).into(),
             note.map(str::to_owned).into(),
+            i64::from(clear_outcome).into(),
             outcome.map(str::to_owned).into(),
             run_id.to_owned().into(),
             step_id.to_owned().into(),
@@ -3398,7 +3402,14 @@ mod tests {
         let path = dir.path().join("yardsort.db");
         {
             let mut conn = Connection::open(&path).unwrap();
-            upgrade(&mut conn, &MIGRATIONS[..MIGRATIONS.len() - 1], None).unwrap();
+            // The schema as it was before 0029_workflow_step_outcome. Pinned to that
+            // migration, not to "everything but the last", so a later migration does not
+            // silently become part of the old database this test opens.
+            let outcome = MIGRATIONS
+                .iter()
+                .position(|sql| sql.contains("ADD COLUMN outcome"))
+                .expect("0029_workflow_step_outcome");
+            upgrade(&mut conn, &MIGRATIONS[..outcome], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
                  (id, workflow_id, workflow_name, definition, workspace_name, inputs, status,

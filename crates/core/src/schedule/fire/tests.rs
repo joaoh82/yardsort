@@ -9,6 +9,18 @@ use crate::schedule::{set_enabled, IfMissed, ScheduleSpec, ScheduleStanding, Sch
 use crate::store::Store;
 use crate::workflow::runs::Accepting;
 
+#[test]
+fn a_failure_notice_is_the_first_line_kept_short() {
+    let long = format!("Step `smoke` failed: {}\nthen the report", "x".repeat(400));
+    let body = failure_notice(&long);
+    let mut lines = body.lines();
+    let first = lines.next().unwrap();
+    assert_eq!(first.chars().count(), 203, "{first}");
+    assert!(first.ends_with("..."));
+    assert_eq!(lines.next(), Some("Open Yardsort for the report."));
+    assert!(lines.next().is_none());
+}
+
 fn daily() -> ScheduleSpec {
     ScheduleSpec::Daily { time: time(9, 0) }
 }
@@ -629,7 +641,10 @@ fn a_failure_is_told_by_default_and_a_success_is_not() {
     );
     assert_eq!(failed.notices.len(), 1);
     assert_eq!(failed.notices[0].title, "Nightly failed");
-    assert_eq!(failed.notices[0].body, "The agent did not settle in time.");
+    assert_eq!(
+        failed.notices[0].body,
+        "The agent did not settle in time.\nOpen Yardsort for the report."
+    );
 
     assert!(ended("failure", "succeeded", None).notices.is_empty());
     // Cancelling is something a person did; it is not news to them.
