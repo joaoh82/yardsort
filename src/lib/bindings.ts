@@ -588,7 +588,7 @@ export const commands = {
 	/**  Runs, newest first: of one workflow, or of all. */
 	workflowRuns: (workflowId: string | null, limit: number) => typedError<WorkflowRun_Serialize[], IpcError>(__TAURI_INVOKE("workflow_runs", { workflowId, limit })),
 	/**  A run's steps, in file order. */
-	workflowRunSteps: (runId: string) => typedError<WorkflowStepRun_Serialize[], IpcError>(__TAURI_INVOKE("workflow_run_steps", { runId })),
+	workflowRunSteps: (runId: string) => typedError<WorkflowStepRun[], IpcError>(__TAURI_INVOKE("workflow_run_steps", { runId })),
 	/**  What a run of `workflowId` in `workspaceId` would find, for the Run dialog to show. */
 	workflowPreview: (workflowId: string, workspaceId: string, trackedId: string | null) => typedError<RunPreview_Serialize, IpcError>(__TAURI_INVOKE("workflow_preview", { workflowId, workspaceId, trackedId })),
 	/**  Start a run. The same checks as `ys workflow run`; the driver picks it up at once. */
@@ -3198,35 +3198,12 @@ export type Step = {
  *  a later step reads as `{{ steps.<id>.<field> }}`, and this is not `wait_session`'s
  *  `outcome` field.
  */
-export type StepOutcome = StepOutcome_Serialize | StepOutcome_Deserialize;
-
-/**
- *  What a step concluded, apart from whether its row succeeded or failed.
- * 
- *  A step that judges something produces one: a smoke test's verdict today, and later an
- *  approval or anything a branch will switch on. [`react`] is the one place the run takes
- *  that verdict. It is stored on the step row, not in `outputs`. `outputs` stay the strings
- *  a later step reads as `{{ steps.<id>.<field> }}`, and this is not `wait_session`'s
- *  `outcome` field.
- */
-export type StepOutcome_Deserialize = {
+export type StepOutcome = {
 	verdict: StepVerdict,
-	/**  Why, when the verdict is failed. Absent when it passed and there is nothing to add. */
-	reason?: string | null,
-};
-
-/**
- *  What a step concluded, apart from whether its row succeeded or failed.
- * 
- *  A step that judges something produces one: a smoke test's verdict today, and later an
- *  approval or anything a branch will switch on. [`react`] is the one place the run takes
- *  that verdict. It is stored on the step row, not in `outputs`. `outputs` stay the strings
- *  a later step reads as `{{ steps.<id>.<field> }}`, and this is not `wait_session`'s
- *  `outcome` field.
- */
-export type StepOutcome_Serialize = {
-	verdict: StepVerdict,
-	/**  Why, when the verdict is failed. Absent when it passed and there is nothing to add. */
+	/**
+	 *  Why, when the verdict is failed. Null when it passed. A row saved before this
+	 *  field omits it, and that reads the same as null.
+	 */
 	reason?: string | null,
 };
 
@@ -4032,10 +4009,7 @@ export type WorkflowRun_Serialize = {
 export type WorkflowRunsChanged = Record<string, never>;
 
 /**  One step of a run. */
-export type WorkflowStepRun = WorkflowStepRun_Serialize | WorkflowStepRun_Deserialize;
-
-/**  One step of a run. */
-export type WorkflowStepRun_Deserialize = {
+export type WorkflowStepRun = {
 	stepId: string,
 	action: string,
 	/**  `pending`, `running`, `waiting`, `succeeded`, `failed`, `skipped` or `cancelled`. */
@@ -4045,21 +4019,7 @@ export type WorkflowStepRun_Deserialize = {
 	outputs: { [key in string]: string },
 	note: string | null,
 	/**  A verdict the step recorded, when it judged something. Absent otherwise. */
-	outcome: StepOutcome_Deserialize | null,
-};
-
-/**  One step of a run. */
-export type WorkflowStepRun_Serialize = {
-	stepId: string,
-	action: string,
-	/**  `pending`, `running`, `waiting`, `succeeded`, `failed`, `skipped` or `cancelled`. */
-	status: string,
-	startedAt: number | null,
-	endedAt: number | null,
-	outputs: { [key in string]: string },
-	note: string | null,
-	/**  A verdict the step recorded, when it judged something. Absent otherwise. */
-	outcome: StepOutcome_Serialize | null,
+	outcome: StepOutcome | null,
 };
 
 /**  Workflow writing has its own harness preference; commit and PR writers stay workspace-based. */

@@ -397,21 +397,29 @@ pub fn settle(store: &Store) -> IpcResult<Settled> {
     Ok(settled)
 }
 
-/// What a notification says when a run failed: the first line of the reason, kept short,
-/// and where to read the rest. The full text stays on the run.
+/// What a notification says when a run failed: the first line of the reason, kept short.
+/// When the reason continues on another line, or that line was cut short, it says where
+/// to read the rest. A one-line reason is sent as it is. The full text stays on the run.
 pub fn failure_notice(reason: &str) -> String {
     const CAP: usize = 200;
-    let line = reason.lines().next().unwrap_or("").trim();
-    let mut line = if line.is_empty() {
+    let mut lines = reason.lines();
+    let first = lines.next().unwrap_or("").trim();
+    let more = lines.any(|line| !line.trim().is_empty());
+    let mut line = if first.is_empty() {
         "The run failed.".to_owned()
     } else {
-        line.to_owned()
+        first.to_owned()
     };
-    if line.chars().count() > CAP {
+    let cut = line.chars().count() > CAP;
+    if cut {
         line = line.chars().take(CAP).collect();
         line.push_str("...");
     }
-    format!("{line}\nOpen Yardsort for the report.")
+    if more || cut {
+        format!("{line}\nOpen Yardsort for the report.")
+    } else {
+        line
+    }
 }
 
 fn failed_step(step_id: &str, note: Option<&str>) -> String {

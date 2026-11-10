@@ -249,13 +249,17 @@ that do not need it. See [A test that must pass](#a-test-that-must-pass).
 A `run_test` step with `gate: true` stops the whole run when the smoke test's verdict is a
 failure. Every step that has not finished is skipped, including one that does not list the
 gate in `needs` and one that is still waiting, so a long wait does not keep the run open.
+A step that lists the gate in `needs` says the gate did not succeed. One that does not says
+the gate failed. A smoke test another step was waiting on is cancelled, so it does not keep
+running or keep asking to be approved.
 
-The run's error is a short line: it names the step and says the test failed. The step's note
-is the full report `ys test wait` prints. You see both on the run in the app and in
-`ys workflow runs --run <id>`. `ys workflow runs --json` includes the report on the step and
-its outcome. A schedule or a trigger that tells you when a run fails sends the first line of
-the error, and says to open Yardsort for the report. A `notify` step that needs the test does
-not run, because its message was written for a pass.
+The run's error is a short line. It names the step and then the first line of the report,
+such as failed login (2 of 6 steps passed). The step's note is the full report `ys test wait`
+prints. You see both on the run in the app and in `ys workflow runs --run <id>`.
+`ys workflow runs --run <id> --json` includes the report on the step and its outcome. A
+schedule or a trigger that tells you when a run fails sends that short line. When the reason
+is more than one line, or was cut short, it also says to open Yardsort for the report. A
+`notify` step that needs the test does not run, because its message was written for a pass.
 
 A run you start by hand, with no schedule and no trigger, does not send a system notification
 on its own. The failure is on the run, and in `ys workflow runs --run <id>`.

@@ -3402,14 +3402,11 @@ mod tests {
         let path = dir.path().join("yardsort.db");
         {
             let mut conn = Connection::open(&path).unwrap();
-            // The schema as it was before 0029_workflow_step_outcome. Pinned to that
-            // migration, not to "everything but the last", so a later migration does not
-            // silently become part of the old database this test opens.
-            let outcome = MIGRATIONS
-                .iter()
-                .position(|sql| sql.contains("ADD COLUMN outcome"))
-                .expect("0029_workflow_step_outcome");
-            upgrade(&mut conn, &MIGRATIONS[..outcome], None).unwrap();
+            // The schema as it was before 0029_workflow_step_outcome. 0001 is index 0,
+            // so that migration is index 28. A later migration must not become part of
+            // the old database this test opens.
+            assert!(MIGRATIONS[28].contains("workflow_step_runs ADD COLUMN outcome"));
+            upgrade(&mut conn, &MIGRATIONS[..28], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
                  (id, workflow_id, workflow_name, definition, workspace_name, inputs, status,

@@ -760,10 +760,13 @@ fn a_failed_verdict_on_a_gate_stops_the_run_with_the_reason() {
     assert_eq!(outcome.reason.as_deref(), Some(note));
     match &run.finished {
         Some(Finish::Failed(why)) => {
-            assert_eq!(why, "Step `smoke` failed: the test failed.");
+            assert_eq!(
+                why,
+                "Step `smoke` failed: failed  login  (2 of 6 steps passed)."
+            );
             assert!(
-                !why.contains("failed  login"),
-                "the report stays on the step, not the run: {why}"
+                !why.contains("The test failed"),
+                "the header stays on the step, not the run: {why}"
             );
         }
         other => panic!("expected the run to fail, got {other:?}"),
@@ -844,9 +847,127 @@ steps:
     assert_eq!(run.note("late"), Some("Skipped: the gate `smoke` failed."));
     assert_eq!(
         run.finished,
+        Some(Finish::Failed("Step `smoke` failed: failed  login.".into()))
+    );
+}
+
+#[test]
+fn a_step_left_running_is_skipped_when_a_gate_fails() {
+    // `ping` started on an earlier tick and has no move of its own this plan. The halt
+    // still skips it, with the gate's note, and the run finishes.
+    let mut run = Run::from(
+        r#"id: t
+name: T
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: smoke
+    action: run_test
+    test: login
+    gate: true
+    timeout: 30m
+  - id: ping
+    action: notify
+    title: Still going
+"#,
+    );
+    let started = run.advance();
+    assert!(
+        started
+            .iter()
+            .any(|effect| matches!(effect, Effect::Notify { .. })),
+        "the notify starts"
+    );
+    assert_eq!(run.status("ping"), "running");
+    assert_eq!(run.status("smoke"), "running");
+    let queued_out: Outputs = [("run".to_owned(), "tr-left".to_owned())].into();
+    assert!(run.apply(&queued("smoke", &queued_out)));
+    assert_eq!(
+        run.status("ping"),
+        "running",
+        "the earlier step is still going"
+    );
+    run.world.test_runs.insert(
+        "tr-left".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "failed  login  (2 of 6 steps passed)".into(),
+        },
+    );
+    let effects = run.advance();
+    assert!(effects.is_empty(), "nothing else starts: {effects:?}");
+    assert_eq!(run.status("smoke"), "failed");
+    assert_eq!(run.status("ping"), "skipped");
+    assert_eq!(run.note("ping"), Some("Skipped: the gate `smoke` failed."));
+    assert_eq!(
+        run.finished,
         Some(Finish::Failed(
-            "Step `smoke` failed: the test failed.".into()
+            "Step `smoke` failed: failed  login  (2 of 6 steps passed).".into()
         ))
+    );
+}
+
+#[test]
+fn a_halted_run_names_the_gate_not_an_earlier_failure() {
+    let mut run = Run::from(
+        r#"id: t
+name: T
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: early
+    action: notify
+    title: Hi
+  - id: smoke
+    action: run_test
+    test: login
+    gate: true
+    timeout: 30m
+"#,
+    );
+    let early = run
+        .rows
+        .iter_mut()
+        .find(|row| row.step_id == "early")
+        .unwrap();
+    early.status = "failed".into();
+    early.note = Some("boom".into());
+    let smoke = run
+        .rows
+        .iter_mut()
+        .find(|row| row.step_id == "smoke")
+        .unwrap();
+    smoke.status = "waiting".into();
+    smoke.outputs = r#"{"run":"tr-gate"}"#.into();
+    run.world.test_runs.insert(
+        "tr-gate".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "failed  login".into(),
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("early"), "failed");
+    assert_eq!(run.note("early"), Some("boom"));
+    assert_eq!(
+        run.finished,
+        Some(Finish::Failed("Step `smoke` failed: failed  login.".into()))
+    );
+}
+
+#[test]
+fn a_gate_failure_line_keeps_a_capital_that_starts_an_acronym() {
+    assert_eq!(
+        gate_failure_line("The test failed:\nHTTP 500 from login"),
+        "HTTP 500 from login."
+    );
+    assert_eq!(gate_failure_line("Failed."), "failed.");
+    assert_eq!(gate_failure_line("The test failed."), "the test failed.");
+    assert_eq!(
+        gate_failure_line("The test failed:\nfailed  login  (2 of 6 steps passed)"),
+        "failed  login  (2 of 6 steps passed)."
     );
 }
 
@@ -936,6 +1057,18 @@ fn a_passing_verdict_on_a_gate_continues() {
     assert_eq!(run.status("smoke"), "succeeded");
     assert_eq!(run.note("smoke"), Some("The test passed."));
     assert_eq!(step_outcome(&run, "smoke").verdict, StepVerdict::Passed);
+    let raw = run
+        .rows
+        .iter()
+        .find(|row| row.step_id == "smoke")
+        .unwrap()
+        .outcome
+        .as_deref()
+        .unwrap();
+    assert!(
+        raw.contains("\"reason\":null"),
+        "a pass still records the field, as null: {raw}"
+    );
     assert_eq!(run.status("tell"), "running");
     assert!(
         run.finished.is_none(),

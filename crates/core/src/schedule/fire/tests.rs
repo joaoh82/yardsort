@@ -19,6 +19,11 @@ fn a_failure_notice_is_the_first_line_kept_short() {
     assert!(first.ends_with("..."));
     assert_eq!(lines.next(), Some("Open Yardsort for the report."));
     assert!(lines.next().is_none());
+    assert_eq!(failure_notice("It broke."), "It broke.");
+    assert_eq!(
+        failure_notice("It broke.\nthen the report"),
+        "It broke.\nOpen Yardsort for the report."
+    );
 }
 
 fn daily() -> ScheduleSpec {
@@ -641,10 +646,7 @@ fn a_failure_is_told_by_default_and_a_success_is_not() {
     );
     assert_eq!(failed.notices.len(), 1);
     assert_eq!(failed.notices[0].title, "Nightly failed");
-    assert_eq!(
-        failed.notices[0].body,
-        "The agent did not settle in time.\nOpen Yardsort for the report."
-    );
+    assert_eq!(failed.notices[0].body, "The agent did not settle in time.");
 
     assert!(ended("failure", "succeeded", None).notices.is_empty());
     // Cancelling is something a person did; it is not news to them.

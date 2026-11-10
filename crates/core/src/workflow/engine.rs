@@ -24,8 +24,9 @@ use crate::store::{StepStatus, WorkflowStepRow};
 #[serde(rename_all = "camelCase")]
 pub struct StepOutcome {
     pub verdict: StepVerdict,
-    /// Why, when the verdict is failed. Absent when it passed and there is nothing to add.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Why, when the verdict is failed. Null when it passed. A row saved before this
+    /// field omits it, and that reads the same as null.
+    #[serde(default)]
     pub reason: Option<String>,
 }
 
@@ -280,10 +281,19 @@ pub fn advance(
     halt_the_run(&mut plan, workflow, &mut status);
 
     if status.values().all(|s| s.is_final()) {
-        let failed = workflow
-            .steps
+        // Name the gate that halted the run. Another step may already be failed, earlier
+        // in the file, and that one is not why the run stopped.
+        let failed = plan
+            .moves
             .iter()
-            .find(|step| status.get(step.id.as_str()) == Some(&StepStatus::Failed));
+            .find(|change| change.halt)
+            .and_then(|change| workflow.steps.iter().find(|step| step.id == change.step))
+            .or_else(|| {
+                workflow
+                    .steps
+                    .iter()
+                    .find(|step| status.get(step.id.as_str()) == Some(&StepStatus::Failed))
+            });
         plan.finish = Some(match failed {
             None => Finish::Succeeded,
             Some(step) => {
@@ -311,7 +321,8 @@ pub fn advance(
 ///
 /// An effect this plan was about to carry out is dropped, so it never starts. A step that
 /// is already `running` from an earlier tick is skipped too: the run does not wait for it.
-/// Whatever that effect already started is left running. Stopping it here could throw away
+/// The driver then cancels a smoke test a skipped `run_test` step was waiting on. Anything
+/// else that effect already started is left running: stopping it here could throw away
 /// work, and the run ending is what the gate asked for.
 fn halt_the_run(plan: &mut Plan, workflow: &Workflow, status: &mut BTreeMap<&str, StepStatus>) {
     let Some(gate) = plan
@@ -355,24 +366,41 @@ fn halt_the_run(plan: &mut Plan, workflow: &Workflow, status: &mut BTreeMap<&str
     }
 }
 
-/// The short clause a failed gate leaves on the run: the first line of the report, without
-/// a trailing colon, starting lower case, ending with a period. The step's note keeps the
-/// full report.
+/// The short clause a failed gate leaves on the run. The note starts with "The test failed:",
+/// and the useful line is the first one after that. A trailing colon is dropped, and the
+/// first character is lowercased only when the next one is already lowercase, so "HTTP 500"
+/// stays as it is. The line ends with a period. The step's note keeps the full report.
 fn gate_failure_line(note: &str) -> String {
-    let line = note
+    let lines: Vec<&str> = note
         .lines()
-        .next()
-        .unwrap_or(note)
-        .trim()
-        .trim_end_matches(':')
-        .trim();
-    let line = if line.is_empty() { "failed" } else { line };
-    let mut chars = line.chars();
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let chosen = match lines.as_slice() {
+        [head, detail, ..]
+            if head
+                .trim_end_matches(':')
+                .trim()
+                .eq_ignore_ascii_case("The test failed") =>
+        {
+            *detail
+        }
+        [head, ..] => head.trim_end_matches(':').trim(),
+        [] => "failed",
+    };
+    let chosen = if chosen.is_empty() { "failed" } else { chosen };
+    let mut chars = chosen.chars();
     let Some(first) = chars.next() else {
         return "failed.".to_owned();
     };
-    let mut out: String = first.to_lowercase().collect();
-    out.push_str(chars.as_str());
+    let rest: String = chars.collect();
+    let mut out = String::new();
+    if rest.chars().next().is_some_and(char::is_lowercase) {
+        out.extend(first.to_lowercase());
+    } else {
+        out.push(first);
+    }
+    out.push_str(&rest);
     if !out.ends_with('.') {
         out.push('.');
     }

@@ -598,16 +598,20 @@ clicking the background clears the mark. Built-in read-only files support the sa
 ## Test verdict gates
 
 A step that judges something records a structured outcome on its row, separate from the strings
-later steps read as `{{ steps.<id>.<field> }}`. The outcome is JSON, `{"verdict":"passed"}` or
-`{"verdict":"failed","reason":"..."}`. `verdict` is `passed` or `failed`. `reason` is present
-when it failed. This is not `wait_session`'s `outcome` output, which stays the string `settled`
-or `exited`.
+later steps read as `{{ steps.<id>.<field> }}`. The outcome is JSON, `{"verdict":"passed","reason":null}` or
+`{"verdict":"failed","reason":"..."}`. `verdict` is `passed` or `failed`. `reason` is the
+text when it failed, and null when it passed. This is not `wait_session`'s `outcome` output,
+which stays the string `settled` or `exited`.
 
 `engine::react` is the one place a verdict changes the run. A gate whose verdict is `failed`
 fails the step and halts the run: every step that has not finished (pending, waiting, or
-running) is skipped in that same tick, with the note `Skipped: the gate <id> failed.` An
-effect the plan was about to start is dropped. A step already running from an earlier tick is
-skipped too, and whatever it already started is left running. The run then ends failed. Any
+running) is skipped in that same tick. A step that lists the gate in `needs` is skipped
+because the gate did not succeed, and its note says so. Every other step that was still
+going is skipped because the gate failed, and its note says `Skipped: the gate <id> failed.`
+An effect the plan was about to start is dropped. A step already running from an earlier
+tick is skipped too. A smoke test that step was waiting on is cancelled, so it does not
+keep running or keep asking for approval. Other work that effect already started is left
+running. The run then ends failed. Any
 other verdict succeeds the step and keeps the outcome, so a later step can still read what
 happened. Later actions that judge something, an approval or a branch, call `react` instead of
 inventing a stop of their own. A branch should read `outcome.verdict`. Only a gate turns a
@@ -623,20 +627,22 @@ that reaches no verdict (cancelled, errored), or that times out, fails that step
 no outcome, because there was nothing to react to. It does not halt the other branches.
 
 The reason on a failed gate is the report `ys test wait` prints, under a line that says the
-test failed. That full report is the step's note. The run's error is a short line, such as
-`Step smoke failed: the test failed.`, so the report is not shown twice. The workflow run
+test failed. That full report is the step's note. The run's error names the step and then
+the first line of that report after the line that says the test failed, such as
+`Step smoke failed: failed login (2 of 6 steps passed).` The workflow run
 view shows the short line on the run and the report on the step. `ys workflow runs` lists
 runs and does not include either. `ys workflow runs --run <id>` prints the short line, the
 first line of each note in the table, and the full note under the table when it continues.
-`ys workflow runs --json` includes the full note and the outcome on the step when there is one.
+`ys workflow runs --run <id> --json` includes the full note and the outcome on the step when there is one.
 
 Starting a step again, from pending to running or waiting, clears its outcome. A later
 revision can re-run the step and record a new verdict. Leaving the outcome out of a move does
 not clear it.
 
 A schedule or a trigger whose `notify` is `failure` (the default) or `always` sends the first
-line of the run's error, kept to about 200 characters, and then `Open Yardsort for the report.`
-The full text stays on the run. `never` sends nothing. A `notify` step in the file that needs
+line of the run's error, kept to about 200 characters. When that reason is more than one
+line, or the line was cut short, it adds `Open Yardsort for the report.` A one-line reason
+is sent as it is. The full text stays on the run. `never` sends nothing. A `notify` step in the file that needs
 the gate does not run when the gate fails: its title was written for a pass, and a step runs
 only when every step it needs succeeded. A run started by hand, with no schedule and no
 trigger, is not sent as a system notification. The failure is still on the run.

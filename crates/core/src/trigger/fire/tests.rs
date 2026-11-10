@@ -378,10 +378,7 @@ fn a_finished_run_is_copied_onto_its_line_and_a_failure_is_told() {
     assert!(settled.changed);
     assert_eq!(settled.notices.len(), 1);
     assert_eq!(settled.notices[0].title, "Tell failed");
-    assert_eq!(
-        settled.notices[0].body,
-        "It broke.\nOpen Yardsort for the report."
-    );
+    assert_eq!(settled.notices[0].body, "It broke.");
     let line = tx.store().trigger_fire(&fired[0].fire.id).unwrap().unwrap();
     assert_eq!(line.result.as_deref(), Some("failed"));
 }

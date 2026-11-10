@@ -681,6 +681,35 @@ steps:
     body: "{{ steps.run.summary }}"
 "#;
 
+/// Two smoke tests at once. One is a gate. The other does not need it, so a halt is what
+/// stops it, and the test it queued should be cancelled.
+const TWO_TESTS: &str = r#"id: gate
+name: Gate
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: gate
+    action: run_test
+    test: demo
+    gate: true
+    timeout: 30m
+  - id: side
+    action: run_test
+    test: other
+    timeout: 30m
+"#;
+
+const OTHER_SMOKE: &str = r#"id: other
+name: Other
+version: 1
+steps:
+  - id: version
+    action: run
+    program: node
+    args: [--version]
+"#;
+
 /// Remembers each notification, so a test can see that a success step ran and a failure did not.
 struct Told {
     sent: Mutex<Vec<(String, Option<String>)>>,
@@ -766,6 +795,32 @@ fn finish_smoke(store: &Store, status: &str, error: Option<&str>) {
     assert!(store.finish_test_run(&run.id, status, error).unwrap());
 }
 
+fn finish_one(store: &Store, id: &str, status: &str, error: Option<&str>) {
+    let run = store.test_run(id).unwrap().expect("the smoke run");
+    if run.status == "awaiting_approval" {
+        assert!(store.approve_test_run(id).unwrap());
+    }
+    assert!(
+        store.start_test_run(id, 9, "out").unwrap(),
+        "the smoke run was {}",
+        run.status
+    );
+    assert!(store.finish_test_run(id, status, error).unwrap());
+}
+
+fn step_test_id(store: &Store, workflow_run: &str, step: &str) -> String {
+    let row = store
+        .workflow_steps(workflow_run)
+        .unwrap()
+        .into_iter()
+        .find(|row| row.step_id == step)
+        .unwrap_or_else(|| panic!("no step {step}"));
+    crate::workflow::engine::parse_outputs(&row.outputs)
+        .get("run")
+        .cloned()
+        .unwrap_or_else(|| panic!("{step} queued no smoke run: {}", row.outputs))
+}
+
 fn tick(store: &Store, hands: &dyn Hands) {
     let host = PtyHost::new(Arc::new(|_| {}));
     Driver::default().tick(store, &host, hands, &git()).unwrap();
@@ -789,7 +844,15 @@ fn a_failed_verdict_on_a_gate_fails_the_run_and_a_schedule_tells_you_why() {
     let ended = store.workflow_run(&run).unwrap().unwrap();
     assert_eq!(ended.status, "failed");
     let error = ended.error.unwrap();
-    assert_eq!(error, "Step `run` failed: the test failed.");
+    assert!(
+        error.starts_with("Step `run` failed: failed  demo"),
+        "{error}"
+    );
+    assert!(error.contains("steps passed"), "{error}");
+    assert!(
+        !error.contains('\n') && !error.contains("wanted 200"),
+        "{error}"
+    );
     let steps = store.workflow_steps(&run).unwrap();
     let smoke = steps.iter().find(|step| step.step_id == "run").unwrap();
     assert_eq!(smoke.status, "failed");
@@ -844,10 +907,7 @@ fn a_failed_verdict_on_a_gate_fails_the_run_and_a_schedule_tells_you_why() {
     let settled = crate::schedule::fire::settle(&store).unwrap();
     assert_eq!(settled.notices.len(), 1);
     assert_eq!(settled.notices[0].title, "Nightly failed");
-    assert_eq!(
-        settled.notices[0].body,
-        format!("{error}\nOpen Yardsort for the report.")
-    );
+    assert_eq!(settled.notices[0].body, error);
     let quiet = store
         .schedules()
         .unwrap()
@@ -866,7 +926,11 @@ fn a_failed_gate_run_is_told_by_a_trigger_and_not_by_one_set_to_never() {
     finish_smoke(&store, "failed", Some("wanted 200, got 500"));
     tick(&store, &NoHands);
     let error = store.workflow_run(&run).unwrap().unwrap().error.unwrap();
-    assert_eq!(error, "Step `run` failed: the test failed.");
+    assert!(
+        error.starts_with("Step `run` failed: failed  demo"),
+        "{error}"
+    );
+    assert!(error.contains("steps passed"), "{error}");
     let note = store
         .workflow_steps(&run)
         .unwrap()
@@ -929,10 +993,7 @@ fn a_failed_gate_run_is_told_by_a_trigger_and_not_by_one_set_to_never() {
     let settled = crate::trigger::fire::settle(&store).unwrap();
     assert_eq!(settled.notices.len(), 1);
     assert_eq!(settled.notices[0].title, "On failure failed");
-    assert_eq!(
-        settled.notices[0].body,
-        "Step `run` failed: the test failed.\nOpen Yardsort for the report."
-    );
+    assert_eq!(settled.notices[0].body, error);
     assert!(
         !settled.notices[0].body.contains("wanted 200"),
         "the notification is the short line; the report stays on the step"
@@ -946,6 +1007,45 @@ fn a_failed_gate_run_is_told_by_a_trigger_and_not_by_one_set_to_never() {
     let history = store.trigger_fires(&quiet.id, 10).unwrap();
     assert_eq!(history[0].result.as_deref(), Some("failed"));
     assert!(history[0].notified_at.is_none());
+}
+
+#[test]
+fn a_failed_gate_cancels_the_smoke_test_a_parallel_step_is_waiting_on() {
+    let (dir, store, run, _, _) = queued_workflow(TWO_TESTS);
+    std::fs::write(
+        crate::smoke::dir(&dir.path().join("wt")).join("other.yaml"),
+        OTHER_SMOKE,
+    )
+    .unwrap();
+    tick(&store, &NoHands);
+    let gate_run = step_test_id(&store, &run, "gate");
+    let side_run = step_test_id(&store, &run, "side");
+    let side = store.test_run(&side_run).unwrap().unwrap();
+    assert!(
+        matches!(side.status.as_str(), "queued" | "awaiting_approval"),
+        "the other test is still waiting, not {}",
+        side.status
+    );
+    finish_one(&store, &gate_run, "failed", Some("wanted 200, got 500"));
+    tick(&store, &NoHands);
+
+    let steps = store.workflow_steps(&run).unwrap();
+    let side_step = steps.iter().find(|step| step.step_id == "side").unwrap();
+    assert_eq!(side_step.status, "skipped");
+    assert_eq!(
+        side_step.note.as_deref(),
+        Some("Skipped: the gate `gate` failed.")
+    );
+    let ended = store.workflow_run(&run).unwrap().unwrap();
+    assert_eq!(ended.status, "failed");
+    let cancelled = store.test_run(&side_run).unwrap().unwrap();
+    assert_eq!(cancelled.status, "cancelled");
+    assert_eq!(
+        cancelled.error.as_deref(),
+        Some("The workflow stopped because a gate failed.")
+    );
+    let gate = store.test_run(&gate_run).unwrap().unwrap();
+    assert_eq!(gate.status, "failed");
 }
 
 #[test]
