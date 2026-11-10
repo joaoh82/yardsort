@@ -406,7 +406,7 @@ fn an_unreadable_settings_file_is_read_only_for_the_floor_manager() {
 fn ask_first_shows_the_comment_and_refuses_a_body_from_stdin() {
     let fx = Fixture::new();
     let note = fx.data_dir.join("note.md");
-    std::fs::write(&note, "please look\n\u{202e}hidden").unwrap();
+    std::fs::write(&note, "say \"hi\" \\ there\nplease look\n\u{202e}hidden").unwrap();
     let shown = fx
         .ys_floor(
             &[
@@ -421,6 +421,14 @@ fn ask_first_shows_the_comment_and_refuses_a_body_from_stdin() {
         .failed();
     assert!(shown.contains("The text that would be posted:"), "{shown}");
     assert!(shown.contains("please look\n"), "{shown}");
+    assert!(
+        shown.contains("say \"hi\" \\ there\n"),
+        "the preview is the text that would be posted: {shown}"
+    );
+    assert!(
+        !shown.contains("\\\""),
+        "quotes in the comment are not shell-escaped: {shown}"
+    );
     assert!(!shown.contains('\u{202e}'), "{shown}");
     assert!(shown.contains("\\u{202e}"), "{shown}");
     assert!(
@@ -451,32 +459,129 @@ fn ask_first_shows_the_comment_and_refuses_a_body_from_stdin() {
     assert!(!sneaky.contains('\u{202e}'), "{sneaky}");
 }
 
-/// A trusted Floor Manager starts an agent. That agent must not see the marker, or its own
-/// `ys` is gated.
+/// Ask first reads the comment once. A change to the file while the dialog is up posts the
+/// text that was shown, not whatever the file says afterwards.
 #[cfg(unix)]
+#[test]
+fn ask_first_posts_the_comment_that_was_shown() {
+    let fx = Fixture::new();
+    fx.git()
+        .run(
+            &fx.repo,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:example/widgets.git",
+            ],
+        )
+        .unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let note = fx.data_dir.join("note.md");
+    let original = "say \"hi\" \\ there\nplease look\n";
+    std::fs::write(&note, original).unwrap();
+    yardsort_core::program::testing::executable(
+        bin.path().join("gh"),
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{0}/asked'\ncat > '{0}/stdin'\n",
+            bin.path().display()
+        ),
+    );
+
+    let _held = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .expect("the profile's lock is free");
+    let data = fx.data_dir.clone();
+    let note_for_waiter = note.clone();
+    let waiter = std::thread::spawn(move || {
+        let dir = data.join("coordinator").join("confirm");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let text = std::fs::read_to_string(&path).unwrap_or_default();
+                    if !text.contains("please look") {
+                        continue;
+                    }
+                    let shown: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    let command = shown["command"].as_str().unwrap_or("");
+                    assert!(
+                        command.contains("say \"hi\" \\ there\nplease look\n"),
+                        "the dialog shows the comment as it would be posted: {command}"
+                    );
+                    std::fs::write(&note_for_waiter, "CHANGED behind the dialog\n").unwrap();
+                    let id = path.file_stem().unwrap().to_string_lossy().into_owned();
+                    assert!(
+                        yardsort_core::coordinator::answer(&data, &id, true).unwrap(),
+                        "the command was still waiting"
+                    );
+                    return;
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the confirmation never appeared"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    });
+
+    let mut path_dirs = vec![bin.path().to_path_buf()];
+    path_dirs.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args([
+            "--data-dir",
+            &fx.data_dir.to_string_lossy(),
+            "task",
+            "comment",
+            "12",
+            "--body-file",
+            &note.to_string_lossy(),
+            "--project",
+            "Demo",
+        ])
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env("YARDSORT_NO_DAEMON", "1")
+        .env(yardsort_core::coordinator::ENV, "1")
+        .env("YARDSORT_COORDINATOR_CONFIRM_WAIT", "15000")
+        .env("PATH", std::env::join_paths(&path_dirs).unwrap())
+        .env("SHELL", bin.path().join("no-such-shell"));
+    let output = command.output().expect("ys should run");
+    waiter.join().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    let posted = std::fs::read_to_string(bin.path().join("stdin")).unwrap();
+    assert_eq!(posted, original);
+    assert!(!posted.contains("CHANGED"));
+}
+
+/// A trusted Floor Manager starts an agent. That agent must not see the marker, or its own
+/// `ys` is gated, and it must not see the settings directory either.
 #[test]
 fn a_trusted_floor_manager_does_not_hand_its_marker_to_the_agent_it_starts() {
     let fx = Fixture::new();
     let bin = tempfile::tempdir().unwrap();
     let seen = bin.path().join("seen");
-    let agent = bin.path().join("fake-agent");
-    yardsort_core::program::testing::executable(
-        &agent,
-        format!(
-            "#!/bin/sh\nprintf '%s\\n' \"${{YARDSORT_COORDINATOR-}}\" > '{}'\n\
-             printf '%s\\n' \"${{YARDSORT_COORDINATOR_CONFIRM_WAIT-}}\" >> '{}'\n\
-             printf '%s\\n' ran >> '{}'\nsleep 30\n",
-            seen.display(),
-            seen.display(),
-            seen.display(),
-        ),
-    );
+    let agent = harness_that_prints_the_marker(bin.path(), &seen);
+    let command_path = agent
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
     std::fs::write(
         fx.data_dir.join("settings.toml"),
         format!(
             "[floor_manager]\nlevel = \"trusted\"\n\n[[harness]]\nid = \"fake\"\n\
-             builtin = false\ncommand = \"{}\"\n",
-            agent.display()
+             builtin = false\ncommand = \"{command_path}\"\n",
         ),
     )
     .unwrap();
@@ -495,10 +600,13 @@ fn a_trusted_floor_manager_does_not_hand_its_marker_to_the_agent_it_starts() {
             "fake",
         ])
         .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
-        .env("SHELL", "/bin/sh")
         .env(yardsort_core::coordinator::ENV, "1")
         .env(yardsort_core::coordinator::CONFIRM_WAIT_ENV, "2000")
+        .env("YARDSORT_CONFIG_DIR", "leaked-config")
+        .env("SWITCHYARD_CONFIG_DIR", "leaked-old-config")
         .env_remove("YARDSORT_NO_DAEMON");
+    #[cfg(unix)]
+    command.env("SHELL", "/bin/sh");
     let output = command.output().expect("ys should run");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -523,16 +631,62 @@ fn a_trusted_floor_manager_does_not_hand_its_marker_to_the_agent_it_starts() {
     };
     assert_eq!(
         text.lines().collect::<Vec<_>>(),
-        ["", "", "ran"],
-        "the agent must print an empty marker: {text:?}"
+        ["", "", "", "", "ran"],
+        "the agent must print an empty marker and an empty settings directory: {text:?}"
     );
 }
 
+/// A harness that writes the Floor Manager's variables, then `ran`, and stays up.
+///
+/// On Unix it is a shell script. On Windows it is a `.cmd`, which the launcher runs through
+/// `cmd.exe`. An unset variable is a blank line, not the `%NAME%` cmd leaves behind.
+fn harness_that_prints_the_marker(dir: &std::path::Path, seen: &std::path::Path) -> PathBuf {
+    #[cfg(unix)]
+    {
+        let agent = dir.join("fake-agent");
+        yardsort_core::program::testing::executable(
+            &agent,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"${{YARDSORT_COORDINATOR-}}\" > '{0}'\n\
+                 printf '%s\\n' \"${{YARDSORT_COORDINATOR_CONFIRM_WAIT-}}\" >> '{0}'\n\
+                 printf '%s\\n' \"${{YARDSORT_CONFIG_DIR-}}\" >> '{0}'\n\
+                 printf '%s\\n' \"${{SWITCHYARD_CONFIG_DIR-}}\" >> '{0}'\n\
+                 printf '%s\\n' ran >> '{0}'\nsleep 30\n",
+                seen.display(),
+            ),
+        );
+        agent
+    }
+    #[cfg(windows)]
+    {
+        let agent = dir.join("fake-agent.cmd");
+        let seen = seen.display().to_string();
+        let mut script = String::from("@echo off\r\nsetlocal EnableExtensions\r\n");
+        let mut first = true;
+        for name in [
+            "YARDSORT_COORDINATOR",
+            "YARDSORT_COORDINATOR_CONFIRM_WAIT",
+            "YARDSORT_CONFIG_DIR",
+            "SWITCHYARD_CONFIG_DIR",
+        ] {
+            let redirect = if first { ">" } else { ">>" };
+            first = false;
+            // `echo(` so a value of `1` is text, not a redirection handle (`echo 1>file`).
+            script.push_str(&format!(
+                "if defined {name} (\r\n  echo(%{name}%{redirect}\"{seen}\"\r\n) else (\r\n  echo({redirect}\"{seen}\"\r\n)\r\n",
+            ));
+        }
+        script.push_str(&format!(
+            "echo(ran>>\"{seen}\"\r\nping -n 31 127.0.0.1 >nul\r\n"
+        ));
+        std::fs::write(&agent, script).unwrap();
+        agent
+    }
+}
+
 /// Stops the daemon this test started, including when an assertion fails first.
-#[cfg(unix)]
 struct DaemonStop(PathBuf);
 
-#[cfg(unix)]
 impl Drop for DaemonStop {
     fn drop(&mut self) {
         if let Some(client) =

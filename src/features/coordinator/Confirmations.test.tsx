@@ -76,12 +76,34 @@ it("Don't allow, and Escape, leave the command unrun", async () => {
 
 it("says when the command is no longer waiting", async () => {
   waiting = [request("one", "ys workspace new demo fix the login")];
-  core.coordinatorAnswer.mockResolvedValue(false);
+  core.coordinatorAnswer.mockImplementation(async (id: string) => {
+    waiting = waiting.filter((item) => item.id !== id);
+    return false;
+  });
   const user = userEvent.setup();
   render(<FloorManagerConfirmations />);
   await user.click(await screen.findByRole("button", { name: "Allow" }));
-  expect(
-    await screen.findByRole("alertdialog", { name: /no longer waiting/i }),
-  ).toBeInTheDocument();
+  const notice = await screen.findByRole("alertdialog", { name: /no longer waiting/i });
+  expect(notice).toHaveAttribute("aria-modal", "true");
   expect(screen.getByText("It was not run.")).toBeInTheDocument();
+
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+});
+
+it("does not cover a newer command when one is no longer waiting", async () => {
+  waiting = [
+    request("one", "ys workspace new demo fix the login"),
+    request("two", "ys test run login"),
+  ];
+  core.coordinatorAnswer.mockImplementation(async (id: string) => {
+    waiting = waiting.filter((item) => item.id !== id);
+    return false;
+  });
+  const user = userEvent.setup();
+  render(<FloorManagerConfirmations />);
+  await user.click(await screen.findByRole("button", { name: "Allow" }));
+  expect(await screen.findByText("ys test run login")).toBeInTheDocument();
+  expect(screen.queryByRole("alertdialog", { name: /no longer waiting/i })).not.toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: /wants to run this/ })).toBeInTheDocument();
 });

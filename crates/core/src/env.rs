@@ -145,16 +145,21 @@ fn cleaned(vars: BTreeMap<String, String>) -> BTreeMap<String, String> {
     without_coordinator(without_foreign_sessions(without_appimage(vars)))
 }
 
-/// The Floor Manager's marker, and the test-only wait that rides with it.
+/// The Floor Manager's marker, the test-only wait that rides with it, and the settings
+/// directory that launch was given.
 ///
 /// An agent the Floor Manager starts is not the Floor Manager. Leaving the marker in the
 /// environment `ys` hands to a harness gates that agent's own `ys` (workspace done, memory
-/// propose, a test). On Windows the daemon copies the environment it was spawned with into
-/// later terminals, so the same names are removed there too.
+/// propose, a test). Leaving `YARDSORT_CONFIG_DIR` does the other half of that: the child
+/// keeps the real settings file after someone points `YARDSORT_DATA_DIR` at a throwaway
+/// database. On Windows the daemon copies the environment it was spawned with into later
+/// terminals, so the same names are removed there too.
 fn without_coordinator(mut vars: BTreeMap<String, String>) -> BTreeMap<String, String> {
     let markers = [
         crate::coordinator::ENV,
         crate::coordinator::CONFIRM_WAIT_ENV,
+        crate::paths::CONFIG_DIR_ENV[0],
+        crate::paths::CONFIG_DIR_ENV[1],
     ];
     vars.retain(|name, _| {
         !markers
@@ -647,6 +652,9 @@ mod tests {
             (crate::coordinator::ENV, "1"),
             (crate::coordinator::CONFIRM_WAIT_ENV, "2000"),
             ("yardsort_coordinator", "1"),
+            ("YARDSORT_CONFIG_DIR", "/tmp/ys-config"),
+            ("SWITCHYARD_CONFIG_DIR", "/tmp/old-config"),
+            ("yardsort_config_dir", "/tmp/ys-config"),
             ("PATH", "/bin"),
         ]
         .into_iter()

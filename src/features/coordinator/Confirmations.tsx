@@ -3,8 +3,8 @@ import { errorMessage, hasCore, ipc, type CoordinatorConfirmation } from "@/lib/
 import { useModalFocus } from "@/lib/useModalFocus";
 
 /**
- * The yes the Floor Manager's `ys` is waiting for. The panel can be closed — the agent keeps
- * running — so this watches whenever the window is open, and the dialog is the only thing that
+ * The yes the Floor Manager's `ys` is waiting for. The panel can be closed, the agent keeps
+ * running, so this watches whenever the window is open, and the dialog is the only thing that
  * answers. Answering writes the user's choice; it does not run the command.
  */
 export function FloorManagerConfirmations() {
@@ -17,7 +17,11 @@ export function FloorManagerConfirmations() {
     const look = () => {
       ipc.coordinatorConfirmations().then(
         (next) => {
-          if (!cancelled) setPending(next);
+          if (cancelled) return;
+          setPending(next);
+          // A command that is waiting is asked. The notice for one that stopped
+          // must not stay in front of it, or behind it for later.
+          if (next.length > 0) setGone(false);
         },
         () => {
           if (!cancelled) setPending([]);
@@ -32,46 +36,70 @@ export function FloorManagerConfirmations() {
     };
   }, []);
 
-  if (gone) {
+  const current = pending[0];
+  if (current) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6">
-        <div
-          role="alertdialog"
-          aria-labelledby="floor-manager-gone-title"
-          className="w-[32rem] max-w-[calc(100vw-2rem)] rounded-lg border border-line bg-surface p-5 shadow-2xl shadow-black/50"
-        >
-          <h2 id="floor-manager-gone-title" className="text-base font-semibold">
-            No longer waiting
-          </h2>
-          <p className="mt-2 text-ink-muted">It was not run.</p>
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              autoFocus
-              onClick={() => setGone(false)}
-              className="h-8 rounded border border-line px-3 text-ink-muted hover:border-accent hover:text-ink"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
+      <ConfirmDialog
+        key={current.id}
+        request={current}
+        more={pending.length - 1}
+        onDone={(id) => setPending((waiting) => waiting.filter((item) => item.id !== id))}
+        onGone={(id) => {
+          const rest = pending.filter((item) => item.id !== id);
+          setPending(rest);
+          // Only when nothing else is waiting. A newer command is asked at once.
+          if (rest.length === 0) setGone(true);
+        }}
+      />
     );
   }
 
-  const current = pending[0];
-  if (!current) return null;
+  if (!gone) return null;
+  return <GoneNotice onClose={() => setGone(false)} />;
+}
+
+function GoneNotice({ onClose }: { onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [onClose]);
+
   return (
-    <ConfirmDialog
-      key={current.id}
-      request={current}
-      more={pending.length - 1}
-      onDone={(id) => setPending((waiting) => waiting.filter((item) => item.id !== id))}
-      onGone={(id) => {
-        setPending((waiting) => waiting.filter((item) => item.id !== id));
-        setGone(true);
-      }}
-    />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6">
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="floor-manager-gone-title"
+        className="w-[32rem] max-w-[calc(100vw-2rem)] rounded-lg border border-line bg-surface p-5 shadow-2xl shadow-black/50 outline-none"
+      >
+        <h2 id="floor-manager-gone-title" className="text-base font-semibold">
+          No longer waiting
+        </h2>
+        <p className="mt-2 text-ink-muted">It was not run.</p>
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            autoFocus
+            onClick={onClose}
+            className="h-8 rounded border border-line px-3 text-ink-muted hover:border-accent hover:text-ink"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

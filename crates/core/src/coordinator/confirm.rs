@@ -22,12 +22,17 @@ use crate::presence::{self, Holder};
 /// short enough that a closed laptop does not leave an agent hanging overnight.
 pub const WAIT: Duration = Duration::from_secs(10 * 60);
 
-/// How recently a request must have been touched to still be someone waiting.
+/// How recently a request must have been touched to still be shown as someone waiting.
 ///
 /// `ys` touches the file on each pass of its wait. A command killed by a harness (Claude Code
 /// stops a shell at two minutes) or by Ctrl-C does not run its cleanup, and the file would
 /// otherwise sit until [`WAIT`]. The window polls about once a second, so a few seconds is long
 /// enough to survive one slow poll and short enough that a dead command leaves the dialog.
+///
+/// A request this old is hidden, not deleted. Deleting it would strand the `ys` that is still
+/// waiting: a pause longer than this (sleep, a busy machine, a clock stepping backwards) would
+/// take the dialog away and leave the command sitting until [`WAIT`]. The file is removed only
+/// once it is older than [`WAIT`].
 const FRESH: Duration = Duration::from_secs(5);
 
 /// One command waiting for a yes in the window.
@@ -78,14 +83,21 @@ pub fn ask(data_dir: &Path, command: &str) -> Result<(), String> {
 
     let deadline = std::time::Instant::now() + wait_for();
     loop {
-        // Touched every pass, so a kill that skips [`Cleanup`] goes stale within [`FRESH`]
-        // instead of occupying the dialog until the wait runs out.
-        heartbeat(&path);
         match read_answer(&folder, &id) {
             Some(true) => return Ok(()),
             Some(false) => return Err(refused(command)),
             None => {}
         }
+        // The window removes a request that has outlived the wait. The file is then gone and
+        // nobody will answer, so stop now instead of sitting here until the deadline. A request
+        // that is only quiet is hidden, and this file is still here for the next pass.
+        if !path.is_file() {
+            return Err(withdrawn(command));
+        }
+        // Touched every pass, so a kill that skips [`Cleanup`] goes stale within [`FRESH`]
+        // instead of occupying the dialog until the wait runs out. Opening for write does not
+        // recreate a file the window has removed.
+        heartbeat(&path);
         if presence::holder(data_dir) != Some(Holder::App) {
             return Err(not_open(command));
         }
@@ -97,8 +109,9 @@ pub fn ask(data_dir: &Path, command: &str) -> Result<(), String> {
 }
 
 /// The requests still waiting, oldest first. One that already has an answer is hidden: `ys` is
-/// about to see it. One that has not been touched within [`FRESH`], or is older than [`WAIT`],
-/// is removed, and so is an answer left behind with no request.
+/// about to see it. One that has not been touched within [`FRESH`] is hidden too, and comes
+/// back when it is touched again. One older than [`WAIT`] is removed, and so is an answer left
+/// behind with no request.
 pub fn pending(data_dir: &Path) -> std::io::Result<Vec<CoordinatorConfirmation>> {
     let folder = dir(data_dir);
     if !folder.is_dir() {
@@ -128,10 +141,6 @@ pub fn pending(data_dir: &Path) -> std::io::Result<Vec<CoordinatorConfirmation>>
         if uuid::Uuid::parse_str(&stem).is_err() {
             continue;
         }
-        if !fresh(&path) {
-            remove_request(&folder, &stem);
-            continue;
-        }
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
@@ -141,11 +150,13 @@ pub fn pending(data_dir: &Path) -> std::io::Result<Vec<CoordinatorConfirmation>>
         if item.id != stem {
             continue;
         }
-        if answer_path(&folder, &item.id).is_file() {
+        // Past the wait, whether or not something is still touching it: the command has given
+        // up, or is about to. A merely quiet file stays, so the command can show it again.
+        if older_than_wait(item.created_unix_ms) {
+            remove_request(&folder, &stem);
             continue;
         }
-        if now_ms() - item.created_unix_ms > wait_for().as_secs_f64() * 1000.0 {
-            remove_request(&folder, &stem);
+        if !fresh(&path) || answer_path(&folder, &item.id).is_file() {
             continue;
         }
         found.push(item);
@@ -176,9 +187,20 @@ pub fn answer(data_dir: &Path, id: &str, allow: bool) -> std::io::Result<bool> {
     let id = id.to_string();
     let folder = dir(data_dir);
     let json = folder.join(format!("{id}.json"));
-    // Gone, or no longer being touched: writing an answer now would report success for a
-    // command that nothing is left to run.
-    if !json.is_file() || !fresh(&json) {
+    // Gone: the command already stopped, or the wait ran out and the file was removed.
+    if !json.is_file() {
+        return Ok(false);
+    }
+    let Ok(text) = std::fs::read_to_string(&json) else {
+        return Ok(false);
+    };
+    let Ok(item) = serde_json::from_str::<CoordinatorConfirmation>(&text) else {
+        return Ok(false);
+    };
+    // Quiet is not the same as gone. A command paused for longer than [`FRESH`] is hidden from
+    // the dialog and still waiting; recording the answer is what lets it continue. Only a
+    // request older than the wait is past being answered.
+    if older_than_wait(item.created_unix_ms) {
         remove_request(&folder, &id);
         return Ok(false);
     }
@@ -219,6 +241,13 @@ fn timed_out(command: &str) -> String {
     )
 }
 
+fn withdrawn(command: &str) -> String {
+    format!(
+        "Not run: the confirmation was withdrawn before it was answered, so this was not run: \
+         {command}"
+    )
+}
+
 /// Bring the file's modification time to now. Opening for write does not truncate.
 fn heartbeat(path: &Path) {
     let Ok(file) = std::fs::OpenOptions::new().write(true).open(path) else {
@@ -227,16 +256,28 @@ fn heartbeat(path: &Path) {
     let _ = file.set_modified(SystemTime::now());
 }
 
-/// Whether `ys` has touched this file within [`FRESH`]. A clock that steps backwards counts as
-/// stale: showing a command nobody is waiting on is the failure this avoids.
+/// Whether `ys` has touched this file within [`FRESH`].
+///
+/// A modification time in the future means the clock stepped backwards after the touch. That
+/// file was just written from its own point of view, so it is still someone waiting. Treating
+/// it as stale would hide a live command until the clock caught up.
 fn fresh(path: &Path) -> bool {
     let Ok(modified) = std::fs::metadata(path).and_then(|meta| meta.modified()) else {
         return false;
     };
     match modified.elapsed() {
         Ok(age) => age < FRESH,
-        Err(_) => false,
+        Err(_) => true,
     }
+}
+
+/// Whether `created_unix_ms` is further in the past than [`wait_for`].
+///
+/// A clock that steps backwards makes this negative, which is not older: the request stays
+/// until the wait has actually passed. The command itself times its wait with a monotonic
+/// clock, so a backwards step cannot make it give up early either.
+fn older_than_wait(created_unix_ms: f64) -> bool {
+    now_ms() - created_unix_ms > wait_for().as_secs_f64() * 1000.0
 }
 
 fn remove_request(folder: &Path, id: &str) {
@@ -339,24 +380,35 @@ mod tests {
         assert!(pending(data.path()).unwrap().is_empty());
     }
 
+    /// Write access, not a read-only handle: Windows refuses `set_modified` on the latter.
+    fn touch(path: &Path, when: SystemTime) {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    fn write_request(folder: &Path, id: &str, created_unix_ms: f64) -> PathBuf {
+        let request = CoordinatorConfirmation {
+            id: id.to_owned(),
+            command: "ys workspace new demo \"fix\"".into(),
+            created_unix_ms,
+        };
+        let path = folder.join(format!("{id}.json"));
+        std::fs::write(&path, serde_json::to_vec_pretty(&request).unwrap()).unwrap();
+        path
+    }
+
     #[test]
-    fn a_request_nobody_is_refreshing_is_dropped_and_orphan_answers_are_removed() {
+    fn a_quiet_request_is_hidden_until_the_wait_is_over_and_orphan_answers_are_removed() {
         let data = tempfile::tempdir().unwrap();
         let folder = dir(data.path());
         std::fs::create_dir_all(&folder).unwrap();
         let id = uuid::Uuid::new_v4().to_string();
-        let request = CoordinatorConfirmation {
-            id: id.clone(),
-            command: "ys workspace new demo \"fix\"".into(),
-            created_unix_ms: now_ms(),
-        };
-        let path = folder.join(format!("{id}.json"));
-        std::fs::write(&path, serde_json::to_vec_pretty(&request).unwrap()).unwrap();
-        let old = SystemTime::now() - Duration::from_secs(30);
-        std::fs::File::open(&path)
-            .unwrap()
-            .set_modified(old)
-            .unwrap();
+        let path = write_request(&folder, &id, now_ms());
+        touch(&path, SystemTime::now() - Duration::from_secs(30));
 
         let orphan = uuid::Uuid::new_v4().to_string();
         let answer_file = folder.join(format!("{orphan}.answer"));
@@ -366,25 +418,69 @@ mod tests {
 
         assert!(
             pending(data.path()).unwrap().is_empty(),
-            "a dead request must not stay in the dialog"
+            "a quiet request must not stay in the dialog"
         );
-        assert!(!path.exists(), "the stale request is removed");
+        assert!(
+            path.exists(),
+            "hiding it must leave the command able to resume"
+        );
         assert!(!answer_file.exists() && !temporary.exists());
-        assert!(!answer(data.path(), &id, true).unwrap());
+        // Still inside the wait, so the yes is recorded for the command that is paused.
+        assert!(answer(data.path(), &id, true).unwrap());
+        assert!(answer_path(&folder, &id).is_file());
+        assert!(
+            path.exists(),
+            "answering a quiet request must not delete it"
+        );
 
-        let live = uuid::Uuid::new_v4().to_string();
-        let live_request = CoordinatorConfirmation {
-            id: live.clone(),
-            command: "ys test run smoke".into(),
-            created_unix_ms: now_ms(),
-        };
-        std::fs::write(
-            folder.join(format!("{live}.json")),
-            serde_json::to_vec_pretty(&live_request).unwrap(),
-        )
-        .unwrap();
+        let expired = uuid::Uuid::new_v4().to_string();
+        let expired_path = write_request(
+            &folder,
+            &expired,
+            now_ms() - wait_for().as_secs_f64() * 1000.0 - 1000.0,
+        );
+        touch(&expired_path, SystemTime::now());
+        assert!(pending(data.path()).unwrap().is_empty());
+        assert!(!expired_path.exists(), "past the wait, the file is removed");
+        assert!(!answer(data.path(), &expired, true).unwrap());
+
+        // A timestamp in the future is a clock that stepped backwards, not a dead command.
+        let rewound = uuid::Uuid::new_v4().to_string();
+        let rewound_path = write_request(&folder, &rewound, now_ms() + 60_000.0);
+        touch(&rewound_path, SystemTime::now() + Duration::from_secs(3600));
         let waiting = pending(data.path()).unwrap();
         assert_eq!(waiting.len(), 1);
-        assert_eq!(waiting[0].id, live);
+        assert_eq!(waiting[0].id, rewound);
+        assert!(rewound_path.exists());
+    }
+
+    #[test]
+    fn a_request_removed_while_waiting_is_refused_without_sitting_out_the_wait() {
+        let data = tempfile::tempdir().unwrap();
+        let _held = hold(data.path());
+        let path = data.path().to_path_buf();
+        let remover = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            loop {
+                let waiting = pending(&path).unwrap();
+                if let Some(request) = waiting.first() {
+                    std::fs::remove_file(dir(&path).join(format!("{}.json", request.id))).unwrap();
+                    return;
+                }
+                assert!(std::time::Instant::now() < deadline, "no request");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+        let started = std::time::Instant::now();
+        let error = ask(data.path(), "ys workspace new demo \"fix\"").unwrap_err();
+        assert!(
+            error.contains("withdrawn"),
+            "the command must stop when its request is gone: {error}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "it must not wait out the full window"
+        );
+        remover.join().unwrap();
     }
 }

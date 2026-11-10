@@ -1,6 +1,6 @@
 //! The Floor Manager: one agent that sees every project, in a folder of its own.
 //!
-//! It is an ordinary harness in an ordinary terminal — whichever agent the user picks — started
+//! It is an ordinary harness in an ordinary terminal, whichever agent the user picks, started
 //! in `<data dir>/coordinator`, not in any project's worktree. What makes it a coordinator is
 //! what it is told and what it can reach:
 //!
@@ -16,7 +16,7 @@
 //!   settings: it is not enough that the instructions say where the lines are.
 //!
 //! Nothing here reads what it prints: the window shows its terminal, and the user talks to it
-//! there. It has no workspace, no session record and no activity run — it is not work on a
+//! there. It has no workspace, no session record and no activity run. It is not work on a
 //! project, it is the one who asks about it.
 
 use std::path::{Path, PathBuf};
@@ -42,7 +42,7 @@ pub const DIR: &str = "coordinator";
 /// Set on the Floor Manager's process. `ys` enforces the permission level only when this is
 /// present. The value is ignored: the level is read from settings on every command, so changing
 /// it applies to the next command without a restart. Unsetting it, or running something that is
-/// not `ys`, is outside the gate — the guide says so, and it is not a sandbox.
+/// not `ys`, is outside the gate. The guide says so, and it is not a sandbox.
 pub const ENV: &str = "YARDSORT_COORDINATOR";
 
 /// How long a test is willing to wait for a confirmation, in milliseconds. A child agent must

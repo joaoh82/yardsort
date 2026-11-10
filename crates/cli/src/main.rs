@@ -169,11 +169,12 @@ fn main() {
     yardsort_core::daemon::run_daemon_and_exit_if_asked();
     yardsort_core::activity::hook::run_hook_and_exit_if_asked();
 
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
     let out = Output { json: cli.json };
     // The borrow ends before `run` takes the command. The gate has to see it first, and a
-    // refusal must not run any of it.
-    let result = coordinator::enforce(&cli.data_dir, &cli.command);
+    // refusal must not run any of it. Ask first may replace a body file with the text it
+    // showed, so the command that runs is the one that was allowed.
+    let result = coordinator::enforce(&cli.data_dir, &mut cli.command);
     let result = result.and_then(|()| run(cli, &out));
     if let Err(Failure { message, code }) = result {
         if !message.is_empty() {

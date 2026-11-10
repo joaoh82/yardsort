@@ -14,7 +14,9 @@ has the downloads and the full commit lists.
   is not `ys` is outside the gate. On Linux the Floor Manager reads the settings file in the
   config directory, the same one Settings writes. A settings file that cannot be read is
   treated as read only, and the refusal says why. Ask first shows the text a task comment
-  would post, and a confirmation nobody is still waiting on says so. See
+  would post, and posts that same text. A confirmation nobody is still waiting on says so,
+  and does not cover the next command. Agents the Floor Manager starts do not inherit its
+  settings location. See
   [What it may do](docs/guide/floor-manager.md#what-it-may-do).
 
 ## 0.25.0

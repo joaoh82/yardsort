@@ -28,13 +28,31 @@ pub fn development_data_dir() -> Option<PathBuf> {
     base_data_dir().map(|dir| dir.join(format!("{IDENTIFIER}.development")))
 }
 
+/// Both names of the directory that holds `settings.toml`: the current one, and the one from
+/// before the Switchyard rename. [`clear_config_dir_env`] removes each spelling.
+pub const CONFIG_DIR_ENV: [&str; 2] = ["YARDSORT_CONFIG_DIR", "SWITCHYARD_CONFIG_DIR"];
+
+/// Drop an inherited config directory.
+///
+/// `YARDSORT_DATA_DIR` names a profile whose settings sit beside its database. A
+/// `YARDSORT_CONFIG_DIR` left over from another launch (the Floor Manager's, or a shell that
+/// still has it) would make `ys` read that other profile's settings with this database. The app
+/// calls this when it chooses such a profile. The Floor Manager's own launch sets the variable
+/// again, on that process alone, because on Linux the real settings are not beside the database.
+pub fn clear_config_dir_env() {
+    for name in CONFIG_DIR_ENV {
+        std::env::remove_var(name);
+    }
+}
+
 /// `settings.toml`. `YARDSORT_CONFIG_DIR` names that directory. Otherwise, under
 /// `YARDSORT_DATA_DIR` alone, it sits next to the database, which is a throwaway profile. With
 /// neither set, it is the platform config directory, and on Linux that is not the data directory.
 pub fn config_dir() -> Option<PathBuf> {
     // Checked before the data directory: a throwaway profile sets only `YARDSORT_DATA_DIR` and
     // still keeps both in one place. The Floor Manager sets both, because on Linux the app's
-    // settings stay in the config directory while its database does not.
+    // settings stay in the config directory while its database does not. A later launch that
+    // names only a data directory, or that clears the config directory, does not keep the pair.
     if let Some(dir) = crate::legacy::env_var_os("CONFIG_DIR") {
         return Some(PathBuf::from(dir));
     }
@@ -134,6 +152,25 @@ mod tests {
             || {
                 assert_eq!(data_dir().unwrap(), PathBuf::from("/tmp/ys"));
                 assert_eq!(config_dir().unwrap(), PathBuf::from("/tmp/ys"));
+            },
+        );
+    }
+
+    #[test]
+    fn a_named_data_directory_drops_an_inherited_config_directory() {
+        with_env(
+            &[
+                ("YARDSORT_DATA_DIR", Some("/tmp/ys-data")),
+                ("SWITCHYARD_DATA_DIR", None),
+                ("YARDSORT_CONFIG_DIR", Some("/tmp/ys-config")),
+                ("SWITCHYARD_CONFIG_DIR", Some("/tmp/old-config")),
+            ],
+            || {
+                clear_config_dir_env();
+                assert!(std::env::var_os("YARDSORT_CONFIG_DIR").is_none());
+                assert!(std::env::var_os("SWITCHYARD_CONFIG_DIR").is_none());
+                assert_eq!(data_dir().unwrap(), PathBuf::from("/tmp/ys-data"));
+                assert_eq!(config_dir().unwrap(), PathBuf::from("/tmp/ys-data"));
             },
         );
     }

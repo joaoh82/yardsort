@@ -18,7 +18,7 @@ use crate::{Command, Failure, Yardsort};
 
 /// Refuse or confirm before the command runs. A read is not touched, and neither is a command
 /// whose environment is not the Floor Manager's.
-pub(crate) fn enforce(data_dir: &Option<PathBuf>, command: &Command) -> Result<(), Failure> {
+pub(crate) fn enforce(data_dir: &Option<PathBuf>, command: &mut Command) -> Result<(), Failure> {
     if std::env::var_os(coordinator::ENV).is_none() {
         return Ok(());
     }
@@ -61,8 +61,12 @@ pub(crate) fn enforce(data_dir: &Option<PathBuf>, command: &Command) -> Result<(
 /// What ask first puts in the dialog. A comment read from a file is part of the command the
 /// user is allowing, so the text is in the request. `-` is refused: standard input is not
 /// knowable until it is consumed, and consuming it would leave the command with nothing to post.
-fn confirmation_text(command: &Command, line: &str) -> Result<String, Failure> {
-    let Some(file) = body_file(command) else {
+///
+/// The text is read once, here, and the command then carries that string. Posting reads the
+/// file again otherwise, and a change between the dialog and the post would send something
+/// other than what was allowed.
+fn confirmation_text(command: &mut Command, line: &str) -> Result<String, Failure> {
+    let Some(file) = body_file(command).map(str::to_owned) else {
         return Ok(line.to_owned());
     };
     if file == "-" {
@@ -72,17 +76,39 @@ fn confirmation_text(command: &Command, line: &str) -> Result<String, Failure> {
              confirmation shows what would be posted.",
         ));
     }
-    let text = std::fs::read_to_string(file).map_err(|error| {
+    let text = std::fs::read_to_string(&file).map_err(|error| {
         Failure::new(format!(
             "Not run: the text in {file} could not be read, so it was not posted: {error}"
         ))
     })?;
+    remember_body(command, text.clone());
     let (shown, cut) = preview_body(&text);
     let mut out = format!("{line}\n\nThe text that would be posted:\n{shown}");
     if cut {
         out.push_str("\n\nThe rest is in the file.");
     }
     Ok(out)
+}
+
+/// Keep the text that was shown, in place of the file it was read from.
+fn remember_body(command: &mut Command, text: String) {
+    match command {
+        Command::Task(task::Command::Create {
+            body, body_file, ..
+        }) => {
+            *body = Some(text);
+            *body_file = None;
+        }
+        Command::Task(task::Command::Comment {
+            text: slot,
+            body_file,
+            ..
+        }) => {
+            *slot = Some(text);
+            *body_file = None;
+        }
+        _ => {}
+    }
 }
 
 fn body_file(command: &Command) -> Option<&str> {
@@ -97,7 +123,9 @@ fn body_file(command: &Command) -> Option<&str> {
 const BODY_PREVIEW: usize = 8 * 1024;
 
 /// The comment, with control characters and bidi overrides escaped, and newlines kept so it
-/// can be read. A bidi override in this text can reorder the buttons that follow it.
+/// can be read. Quotes and backslashes stay as they are: this is the text that would be
+/// posted, not a shell argument. A bidi override in this text can reorder the buttons that
+/// follow it.
 fn preview_body(text: &str) -> (String, bool) {
     let mut end = 0;
     for (index, character) in text.char_indices() {
@@ -113,9 +141,10 @@ fn preview_body(text: &str) -> (String, bool) {
 fn show_text(text: &str) -> String {
     let mut out = String::new();
     for character in text.chars() {
-        match character {
-            '\n' | '\t' => out.push(character),
-            other => push_visible(other, &mut out, false),
+        if is_hidden(character) && character != '\n' && character != '\t' {
+            out.push_str(&format!("\\u{{{:04x}}}", character as u32));
+        } else {
+            out.push(character);
         }
     }
     out
@@ -283,7 +312,7 @@ fn push_visible(character: char, out: &mut String, quoted: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::quote;
+    use super::{quote, show_text};
 
     #[test]
     fn a_command_line_cannot_hide_a_second_command_or_reorder_the_dialog() {
@@ -296,5 +325,15 @@ mod tests {
         assert!(!bidi.contains('\u{202e}'), "{bidi}");
         assert!(bidi.contains("\\u{202e}"), "{bidi}");
         assert_eq!(quote("a\\b\"c"), "\"a\\\\b\\\"c\"");
+    }
+
+    #[test]
+    fn a_comment_preview_keeps_quotes_and_backslashes_and_escapes_what_can_reorder_it() {
+        assert_eq!(show_text("say \"hi\" \\ there"), "say \"hi\" \\ there");
+        assert_eq!(show_text("one\ntwo\tend"), "one\ntwo\tend");
+        let bidi = show_text("ok\u{202e}evil");
+        assert!(!bidi.contains('\u{202e}'), "{bidi}");
+        assert!(bidi.contains("\\u{202e}"), "{bidi}");
+        assert!(!show_text("a\rb").contains('\r'));
     }
 }
