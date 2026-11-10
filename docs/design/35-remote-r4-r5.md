@@ -2,7 +2,7 @@
 
 **Status:** planned on 2026-11-06. The first slice, the host's account moved out of the app, was
 built the same day (§10); its local smoke tests and the owner's phone check against staging passed.
-The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. The sixth, resume and fork in the core and the host after its restarts, was built the same day (§15); its local smoke test, and the owner's run on the box, R5's gate check 3, passed. The seventh, starting and resuming from a client, was built the same day (§16), under `terminal:control` rather than a scope of its own, as the owner chose; its local smoke test and the owner's run on the box passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
+The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. The sixth, resume and fork in the core and the host after its restarts, was built the same day (§15); its local smoke test, and the owner's run on the box, R5's gate check 3, passed. The seventh, starting and resuming from a client, was built the same day (§16), under `terminal:control` rather than a scope of its own, as the owner chose; its local smoke test and the owner's run on the box passed. The eighth, R4's first, the phone reconnecting on a network change and the time budgets measured, was built on 2026-11-10 (§17); its local smoke test passed, at p95 105 ms through 100 ms of round trip. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
 2026-11-08 against where Remote is going, several machines an account owns and the desktop choosing
 where a task runs (§3, "Where agents run"); what comes after R5 is in §9. This is the plan for the last two
 phases before sync: what each has to show, what it starts from, the decisions taken before any
@@ -932,3 +932,56 @@ the window resumes it. Passed on 2026-11-09, 25 of 25 steps, on Linux.
 workspace there and watched it, the iPhone watched it too, and once it ended, **Resume** in the window
 took the conversation up again with a message. **Resume** on the iPhone waits for a TestFlight build
 with this slice.
+
+## 17 · What the eighth slice adds
+
+Built on 2026-11-10, on Linux. Nothing changed on the server, so staging needs no deploy. The phone
+gains a native module, `expo-network` 58.0.4, so it reaches the iPhone only with a new TestFlight
+build. No protocol change.
+
+- **A network change asks each open channel whether it still answers.** `Channel.check(timeoutMs)`
+  in the TypeScript client asks the host to describe itself and waits for anything back, at most
+  `timeoutMs`, closing the channel as `silent` when nothing comes, which the phone then takes as a
+  drop. `Presence.networkChanged()` checks
+  every live channel, 5 seconds each (`networkCheckMs`), and wakes a computer waiting out its backoff,
+  which tries again at once and from the first wait. A channel on a network that went answers
+  nothing, where waiting for the next keepalive could take half a minute.
+- **Which changes count** (`src/lib/network.ts`, `NetworkChanges`): `expo-network`'s listener says
+  every state it sees, often the same one twice; only a change of kind (Wi-Fi, cellular, none), or of
+  reachability, counts, and the first state heard is where it starts, not a change. Losing the
+  network counts too, and its check closes a channel that can no longer answer; the change back
+  then tries again at once. The computers list and an open terminal both hear it, through one
+  listener for the app.
+- **Nothing is sent twice.** A reconnect resumes the stream from its number, as before; typed input
+  is never queued for later, and control is not taken back: the person presses **Take control**
+  again, as after any drop (31 §5).
+- **The timing readout** (`src/lib/timing.ts`), in development builds only, under a terminal's status
+  line: the last keystroke's time from being sent to the next output arriving, and the last return to
+  the foreground's time until a new attachment's screen was drawn. It never shows in a TestFlight or
+  store build. It times activity only: what came back is never read, so it is a keystroke's echo
+  only when the terminal echoes, which is why the budgets are measured at a shell or `cat`.
+- **The tools** (`packages/remote-client/tools/`). `delay-proxy.ts` holds every byte back a set time
+  each way, in order. `echo-time.ts` signs in as a phone (with a kept sign-in, or a code and the
+  browser), takes control of a running `cat`, types 200 letters one at a time, and prints p50, p95
+  and p99 from each being sent to its echo arriving, exiting 1 over `--budget`. It types only
+  letters and prints nothing the terminal shows, and no credential.
+- **Tests that fail without it.** `check` answering, timing out and closing; the presence's waiting
+  computer woken at once and a live one checked; which network states count; the readout's words.
+  On the phone's screens, a channel lost as the network changes is opened again at once rather than
+  after its backoff, and a development build's readout times a keystroke. The proxy and the
+  percentiles have tests of their own.
+
+**Its smoke test.** `echo-budget.yaml`, locally: a `yardsort-host` on the stand-in server running
+`cat` in a workspace, a phone let type, and `echo-time.ts` through the proxy at 50 ms each way, 100
+ms of round trip, with a budget of 300 ms at p95. Passed on 2026-11-10, 11 of 11 steps, on Linux:
+
+| Through         | Keystrokes | p50    | p95    | p99    | Range         |
+| --------------- | ---------- | ------ | ------ | ------ | ------------- |
+| 100 ms, locally | 200        | 103 ms | 105 ms | 108 ms | 102 to 144 ms |
+
+So the relay and both ends add a few milliseconds to the round trip; the budget's 300 ms is for the
+real distance and the phone. Still to record, by the owner: `echo-time.ts` against staging from this
+computer and from the box; on the iPhone, with a TestFlight build of this slice, 31 §17's parts N
+(Wi-Fi to cellular and back) and W (away past the credential's 15 minutes); and the two budgets with the Network Link Conditioner at
+100 ms, read from the readout, which needs the development app (`just mobile-ios` on the Mac), since
+a TestFlight build has none.

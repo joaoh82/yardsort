@@ -52,10 +52,12 @@ export class PageFeed implements Drawing {
   /**
    * @param behind Called when the page is too far behind: all that is left is a new snapshot.
    * @param caughtUp Called when the page has drawn everything it was sent, and nothing is waiting.
+   * @param wrote Called as output comes, before it goes to the page.
    */
   constructor(
     readonly behind: () => void,
     readonly caughtUp: () => void = () => {},
+    readonly wrote: () => void = () => {},
   ) {}
 
   /** Where messages go. The page is starting anew: nothing it was sent counts any more. */
@@ -75,6 +77,7 @@ export class PageFeed implements Drawing {
   }
 
   write(bytes: Uint8Array): void {
+    this.wrote();
     const id = this.#next;
     this.#next += 1;
     const message: ToPage = { t: "output", id, data: toBase64(bytes) };

@@ -1042,6 +1042,11 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       rather than a scope of its own, as the owner chose; **Resume** on the phone; and on another
       computer's page in the desktop app, **New workspace**, **New agent** and **Resume** by that
       computer's ids.
+      Slice 8, R4's first, was built on 2026-11-10 ([35 §17](35-remote-r4-r5.md#17--what-the-eighth-slice-adds)):
+      the phone asks each open computer whether it still answers when its network changes, and
+      tries one it was waiting on at once; a development build's readout of the two budgets; and
+      `echo-time.ts` with a delay proxy to measure them. Its local smoke test passed: through 100 ms
+      of round trip, a keystroke's echo at p95 105 ms against a budget of 300.
       Slice 12 was added on 2026-11-08 at the owner's request: the slim image and a full one, with
       toolchains, `gh` and the harnesses whose licence allows it, published to the GitHub Container
       Registry on each release beside the tarballs; the other harnesses installed by the operator

@@ -70,6 +70,11 @@ has the downloads and the full commit lists.
   says to open Yardsort for the report. Without `gate`, a failed test still lets the workflow
   continue, as it does today. A file written before this still loads. See
   [Workflows](docs/guide/workflows.md#a-test-that-must-pass).
+- **The phone notices a network change.** Moving between Wi-Fi and cellular could leave a computer's
+  connection dead until the phone noticed by itself. Now a change of network has each open connection
+  asked whether it still answers, and opened again within a few seconds if not; one already waiting to
+  be reached again is tried at once. See
+  [When the phone changes network](docs/guide/remote.md#when-the-phone-changes-network).
 
 ## 0.25.0
 

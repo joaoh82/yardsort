@@ -8,6 +8,11 @@
  *
  * Channels are held only while someone is looking: the screen stops this when it is left or the
  * app goes to the background, and starts it again on the way back.
+ *
+ * **When the phone's network changes**, from Wi-Fi to cellular or back, a channel on the old one
+ * can be dead without a word, and one waiting to try again would wait out its backoff on a network
+ * that is no longer there. {@link Presence.networkChanged} checks each open channel at once and
+ * tries the rest again now, from the first wait.
  */
 
 import {
@@ -39,12 +44,16 @@ export interface PresenceOptions {
   /** The first wait after losing a channel; it doubles up to {@link maxRetryMs}. */
   firstRetryMs?: number;
   maxRetryMs?: number;
+  /** How long an open channel has to answer once the network changed. */
+  networkCheckMs?: number;
 }
 
 interface Watch {
   live: boolean;
   channel: Channel | null;
   wake: (() => void) | null;
+  /** The network changed while it waited: try again now, and from the first wait. */
+  again: boolean;
 }
 
 type Outcome = "offline" | "dropped" | "refused" | "signedOut";
@@ -78,9 +87,25 @@ export class Presence {
     }
     for (const host of hosts) {
       if (this.#watches.has(host) || this.#gone.has(host)) continue;
-      const watch: Watch = { live: true, channel: null, wake: null };
+      const watch: Watch = { live: true, channel: null, wake: null, again: false };
       this.#watches.set(host, watch);
       void this.#run(host, watch);
+    }
+  }
+
+  /**
+   * The phone's network changed. Each open channel is asked whether it still answers, and closed if
+   * it does not within {@link PresenceOptions.networkCheckMs}; each computer waiting to be tried
+   * again is tried now.
+   */
+  networkChanged(): void {
+    for (const watch of this.#watches.values()) {
+      if (watch.channel) {
+        watch.channel.check(this.options.networkCheckMs ?? 5_000);
+      } else {
+        watch.again = true;
+        watch.wake?.();
+      }
     }
   }
 
@@ -154,10 +179,16 @@ export class Presence {
         await this.#sleep(watch, waitMs);
         waitMs = Math.min(waitMs * 2, most);
       }
+      if (watch.again) {
+        watch.again = false;
+        waitMs = first;
+      }
     }
   }
 
   #sleep(watch: Watch, ms: number): Promise<void> {
+    // The network changed while it was trying: no need to wait.
+    if (watch.again) return Promise.resolve();
     return new Promise((resolve) => {
       const timer = setTimeout(resolve, ms);
       watch.wake = () => {
