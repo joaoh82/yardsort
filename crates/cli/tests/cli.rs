@@ -2684,6 +2684,138 @@ fn a_run_shows_the_artifacts_it_handed_on() {
     assert_eq!(shown["artifacts"][0]["truncated"], false);
 }
 
+const SIGN_OFF: &str = "id: sign-off
+name: Sign off
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: brief
+    action: notify
+    title: Drafted
+    produces:
+      - name: plan
+        text: The plan
+  - id: sign-off
+    action: approve
+    needs: [brief]
+    consumes: [plan]
+    prompt: Ship this?
+";
+
+#[test]
+fn an_approval_is_shown_and_decided_without_the_app_open() {
+    use yardsort_core::store::{NewWorkflowRun, StepStatus};
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let project = store.projects().unwrap().into_iter().next().unwrap();
+    let path = fx.worktree_root.join("fix-login");
+    std::fs::create_dir_all(&path).unwrap();
+    let workspace = store
+        .add_worktree(
+            &project.id,
+            "fix-login",
+            &path.to_string_lossy(),
+            Some("fix"),
+            Some("main"),
+        )
+        .unwrap();
+    let id = "run-approval-1";
+    store
+        .queue_workflow_run(&NewWorkflowRun {
+            id,
+            workflow_id: "sign-off",
+            workflow_name: "Sign off",
+            definition: SIGN_OFF,
+            project_id: &project.id,
+            workspace_id: &workspace.id,
+            workspace_name: &workspace.name,
+            inputs: "{}",
+            context: "{}",
+            requested_by: "cli",
+            steps: &[("sign-off", "approve")],
+        })
+        .unwrap();
+    assert!(store.start_workflow_run(id, None).unwrap());
+    assert!(store
+        .move_workflow_step(
+            id,
+            "sign-off",
+            &[StepStatus::Pending],
+            StepStatus::Waiting,
+            Some(r#"{"prompt":"Ship this?"}"#),
+            Some("Waiting for your approval."),
+            None,
+            false,
+        )
+        .unwrap());
+    drop(store);
+
+    let shown: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workflow", "runs", "--run", id, "--json"]).ok()).unwrap();
+    assert_eq!(shown["pendingApprovals"][0]["step"], "sign-off");
+    assert_eq!(shown["pendingApprovals"][0]["prompt"], "Ship this?");
+    assert_eq!(shown["pendingApprovals"][0]["artifacts"][0], "plan");
+    assert!(shown["decisions"].as_array().unwrap().is_empty());
+    let text = fx.ys(&["workflow", "runs", "--run", id]).ok();
+    assert!(text.contains("Waiting for your approval"), "{text}");
+    assert!(text.contains("ys workflow approve"), "{text}");
+
+    let missing = fx
+        .ys(&["workflow", "request-changes", id, "sign-off"])
+        .failed();
+    assert!(missing.contains("Say what should change"), "{missing}");
+
+    let decided = fx
+        .ys(&[
+            "workflow",
+            "approve",
+            id,
+            "sign-off",
+            "--feedback",
+            "ship it",
+        ])
+        .ok();
+    assert!(decided.contains("Approved"), "{decided}");
+    let after: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workflow", "runs", "--run", id, "--json"]).ok()).unwrap();
+    assert!(after["pendingApprovals"].as_array().unwrap().is_empty());
+    assert_eq!(after["decisions"][0]["decision"], "approved");
+    assert_eq!(after["decisions"][0]["feedback"], "ship it");
+    let twice = fx.ys(&["workflow", "reject", id, "sign-off"]).failed();
+    assert!(twice.contains("already has a decision"), "{twice}");
+}
+
+#[test]
+fn the_floor_manager_cannot_decide_an_approval() {
+    let fx = Fixture::new();
+    for level in ["read-only", "ask", "trusted"] {
+        fx.set_floor(level);
+        for args in [
+            vec!["workflow", "approve", "run", "step"],
+            vec!["workflow", "reject", "run", "step", "--feedback", "no"],
+            vec![
+                "workflow",
+                "request-changes",
+                "run",
+                "step",
+                "--feedback",
+                "split it",
+            ],
+        ] {
+            let error = fx.ys_floor(&args, None).failed();
+            assert!(
+                error.contains("at any permission"),
+                "{level} {args:?}: {error}"
+            );
+            assert!(
+                !error.contains("not open"),
+                "{level} asked instead of refusing: {error}"
+            );
+        }
+    }
+}
+
 #[test]
 fn a_run_inside_a_workspace_needs_no_name_and_bad_inputs_are_refused() {
     let fx = Fixture::new();

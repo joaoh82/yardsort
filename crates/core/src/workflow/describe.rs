@@ -60,6 +60,11 @@ pub const SYSTEM: &str = concat!(
      input of kind test), optional `inputs` (a map of the test's input ids to values), optional \
      `timeout`.\n\
        - `notify`: `title`, optional `body`. A system notification.\n\
+       - `approve`: waits until a person in Yardsort, or `ys` from their own terminal, \
+     approves, rejects, or requests changes. Optional `prompt`, optional `timeout`. It is \
+     always a gate: a rejection or a request for changes stops the run. Do not set \
+     `gate: false`. Waiting for a GitHub review is `wait_pr_activity`, not this. Leaves \
+     `decision` (`approved`, `rejected` or `changes_requested`) and `feedback`.\n\
      `session` is `origin` (the agent already working in the workspace) or exactly \
      `\"{{ steps.<id>.session }}\"` for an earlier `start_session` step that is among this \
      step's needs. `timeout` is a number and a unit: `30s`, `45m`, `2h`; at most a week.\n\n\
@@ -71,7 +76,8 @@ pub const SYSTEM: &str = concat!(
      `steps.<id>.session` and `steps.<id>.run` from a start_session step, \
      `steps.<id>.outcome` from wait_session, `steps.<id>.count` and `steps.<id>.latest_url` \
      from wait_pr_activity, `steps.<id>.run`, `steps.<id>.verdict` and `steps.<id>.summary` \
-     from run_test, `memory` (the project's notes for agents), `handoff` (what \
+     from run_test, `steps.<id>.decision` and `steps.<id>.feedback` from approve, \
+     `memory` (the project's notes for agents), `handoff` (what \
      happened in the workspace so far), `artifacts.<name>` (a named document an earlier step \
      produced; this step must list that name under `consumes`). No filters, no expressions. A \
      prompt that uses the pull request or `session: origin` needs the workspace to have one \

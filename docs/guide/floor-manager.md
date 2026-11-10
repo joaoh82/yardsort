@@ -78,6 +78,8 @@ These `ys` commands are refused at every level, trusted included:
 - `ys workspace delete`, with or without `--force`
 - `ys task close`
 - `ys attach`, which would put another agent's terminal on this one
+- `ys workflow approve`, `ys workflow reject` and `ys workflow request-changes`, which
+  decide an approval. Those are yours, in the app or in your own terminal.
 
 There is no `ys` command for archiving a workspace, deleting a branch, merging, closing or
 approving a pull request, or editing a project's files. The instructions say never to do those.

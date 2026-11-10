@@ -63,6 +63,37 @@ pub enum Command {
         /// The run: its id, or the start of it.
         run: String,
     },
+    /// Approve a step that is waiting for you. The app applies it on its next tick.
+    Approve {
+        /// The run: its id, or the start of it.
+        run: String,
+        /// The step's id.
+        step: String,
+        /// A note stored with the decision.
+        #[arg(long)]
+        feedback: Option<String>,
+    },
+    /// Reject a step that is waiting for you. The run stops. This is not an approval.
+    Reject {
+        /// The run: its id, or the start of it.
+        run: String,
+        /// The step's id.
+        step: String,
+        /// A note stored with the decision.
+        #[arg(long)]
+        feedback: Option<String>,
+    },
+    /// Ask for changes on a step that is waiting for you. The run stops, and the note is kept
+    /// for a later revision. `--feedback` is required.
+    RequestChanges {
+        /// The run: its id, or the start of it.
+        run: String,
+        /// The step's id.
+        step: String,
+        /// What should change. Required.
+        #[arg(long)]
+        feedback: Option<String>,
+    },
     /// Check a workflow file. Prints each problem with its line and column; exits 1 if there
     /// are any. Needs no Yardsort profile, so it works anywhere.
     Validate {
@@ -116,6 +147,37 @@ pub fn run(data_dir: Option<PathBuf>, command: Command, out: &Output) -> Result<
         Command::Cancel { run } => {
             let ys = Yardsort::open(data_dir)?;
             cancel(&ys, &run, out)
+        }
+        Command::Approve {
+            run,
+            step,
+            feedback,
+        } => {
+            let ys = Yardsort::open(data_dir)?;
+            decide(&ys, &run, &step, "approved", feedback.as_deref(), out)
+        }
+        Command::Reject {
+            run,
+            step,
+            feedback,
+        } => {
+            let ys = Yardsort::open(data_dir)?;
+            decide(&ys, &run, &step, "rejected", feedback.as_deref(), out)
+        }
+        Command::RequestChanges {
+            run,
+            step,
+            feedback,
+        } => {
+            let ys = Yardsort::open(data_dir)?;
+            decide(
+                &ys,
+                &run,
+                &step,
+                "changes_requested",
+                feedback.as_deref(),
+                out,
+            )
         }
         Command::Copy { id, as_id } => {
             let ys = Yardsort::open(data_dir)?;
@@ -424,13 +486,87 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
     }
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
+    struct Pending<'a> {
+        step: &'a str,
+        prompt: Option<String>,
+        artifacts: Vec<String>,
+    }
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Decision<'a> {
+        step: &'a str,
+        decision: String,
+        feedback: Option<String>,
+        actor: String,
+        decided_at: i64,
+    }
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
     struct Shown<'a> {
         #[serde(flatten)]
         run: RunListed,
         inputs: serde_json::Value,
         steps: Vec<Step<'a>>,
         artifacts: Vec<Artifact<'a>>,
+        /// Approval steps still waiting, with no decision recorded yet.
+        pending_approvals: Vec<Pending<'a>>,
+        /// Decisions recorded on this run, including one the app has not applied yet.
+        decisions: Vec<Decision<'a>>,
     }
+    let parsed = workflow::parse(&run.definition).ok();
+    let consumes_of = |step_id: &str| -> Vec<String> {
+        parsed
+            .as_ref()
+            .and_then(|workflow| workflow.steps.iter().find(|step| step.id == step_id))
+            .map(|step| step.consumes.clone())
+            .unwrap_or_default()
+    };
+    let mut pending_approvals = Vec::new();
+    let mut decisions = Vec::new();
+    for step in &steps {
+        let recorded = ys.store.workflow_approval(&run.id, &step.step_id)?;
+        if step.action == "approve" && step.status == "waiting" && recorded.is_none() {
+            let prompt = yardsort_core::workflow::engine::parse_outputs(&step.outputs)
+                .get("prompt")
+                .cloned();
+            pending_approvals.push(Pending {
+                step: &step.step_id,
+                prompt,
+                artifacts: consumes_of(&step.step_id),
+            });
+        }
+        if let Some(recorded) = recorded {
+            decisions.push(Decision {
+                step: &step.step_id,
+                decision: recorded.decision,
+                feedback: recorded.feedback,
+                actor: recorded.actor,
+                decided_at: recorded.decided_at,
+            });
+        }
+    }
+    let pending_lines: Vec<(String, Option<String>, String)> = pending_approvals
+        .iter()
+        .map(|pending| {
+            (
+                pending.step.to_owned(),
+                pending.prompt.clone(),
+                pending.artifacts.join(", "),
+            )
+        })
+        .collect();
+    let decision_lines: Vec<(String, String, String, Option<String>, i64)> = decisions
+        .iter()
+        .map(|decision| {
+            (
+                decision.step.to_owned(),
+                decision.decision.clone(),
+                decision.actor.clone(),
+                decision.feedback.clone(),
+                decision.decided_at,
+            )
+        })
+        .collect();
     let shown = Shown {
         run: RunListed::from(&run),
         inputs: serde_json::from_str(&run.inputs).unwrap_or_default(),
@@ -450,6 +586,8 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                     .and_then(|raw| serde_json::from_str(raw).ok()),
             })
             .collect(),
+        pending_approvals,
+        decisions,
         artifacts: artifacts
             .iter()
             .map(|artifact| Artifact {
@@ -530,6 +668,39 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                 sayln!("{}", artifact.body);
             }
         }
+        if !pending_lines.is_empty() {
+            sayln!();
+            sayln!("Waiting for your approval");
+            for (step, prompt, artifacts) in &pending_lines {
+                sayln!("  {step}");
+                if let Some(prompt) = prompt {
+                    sayln!("  {prompt}");
+                }
+                if !artifacts.is_empty() {
+                    sayln!("  Artifacts: {artifacts}");
+                }
+                let id = memory::short_id(&run.id);
+                sayln!("  ys workflow approve {id} {step}");
+                sayln!("  ys workflow reject {id} {step}");
+                sayln!("  ys workflow request-changes {id} {step} --feedback \"...\"");
+            }
+        }
+        if !decision_lines.is_empty() {
+            sayln!();
+            sayln!("Decisions");
+            for (step, decision, actor, feedback, at) in &decision_lines {
+                let word = match decision.as_str() {
+                    "approved" => "Approved",
+                    "rejected" => "Rejected",
+                    "changes_requested" => "Changes requested",
+                    other => other,
+                };
+                sayln!("  {step}: {word} by {actor} at {}.", when(*at));
+                if let Some(feedback) = feedback {
+                    sayln!("  {feedback}");
+                }
+            }
+        }
     })
 }
 
@@ -538,6 +709,53 @@ fn note_line(note: Option<&str>) -> String {
     note.and_then(|text| text.lines().next())
         .unwrap_or("")
         .to_owned()
+}
+
+fn decide(
+    ys: &Yardsort,
+    wanted: &str,
+    step: &str,
+    decision: &str,
+    feedback: Option<&str>,
+    out: &Output,
+) -> Result<(), Failure> {
+    let run = find_run(ys, wanted)?;
+    let feedback = feedback.map(str::trim).filter(|text| !text.is_empty());
+    let actor = cli_actor();
+    let written = ys
+        .store
+        .record_workflow_approval(&run.id, step, decision, feedback, &actor)?;
+    if let Some(message) = workflow::approval_refusal(&written, memory::short_id(&run.id), step) {
+        return Err(Failure::new(message));
+    }
+    #[derive(Serialize)]
+    struct Decided<'a> {
+        run: &'a str,
+        step: &'a str,
+        decision: &'a str,
+    }
+    let word = match decision {
+        "approved" => "Approved",
+        "rejected" => "Rejected",
+        _ => "Recorded the requested changes for",
+    };
+    out.emit(
+        &Decided {
+            run: &run.id,
+            step,
+            decision,
+        },
+        || {
+            sayln!("{word} `{step}` on run {}.", memory::short_id(&run.id));
+        },
+    )
+}
+
+/// The account `ys` is running as. The window records `app` instead.
+fn cli_actor() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "cli".to_owned())
 }
 
 fn cancel(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {

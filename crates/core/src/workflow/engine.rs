@@ -28,6 +28,84 @@ pub struct StepOutcome {
     /// field omits it, and that reads the same as null.
     #[serde(default)]
     pub reason: Option<String>,
+    /// Set when a person decided an approval. Absent on a smoke-test verdict, and on a row
+    /// saved before approvals existed.
+    #[serde(default)]
+    pub decision: Option<ApprovalDecision>,
+    /// What they wrote with the decision. Null when they wrote nothing.
+    #[serde(default)]
+    pub feedback: Option<String>,
+    /// Who decided: `app` from the window, or the name of the account `ys` ran as.
+    #[serde(default)]
+    pub actor: Option<String>,
+    /// When they decided, in milliseconds since the epoch.
+    #[serde(default)]
+    // A JavaScript number holds a timestamp. `i64` is not exported.
+    #[specta(type = Option<f64>)]
+    pub decided_at: Option<i64>,
+}
+
+impl StepOutcome {
+    /// A verdict that is not an approval. The approval fields stay empty.
+    fn judged(verdict: StepVerdict, reason: Option<String>) -> Self {
+        Self {
+            verdict,
+            reason,
+            decision: None,
+            feedback: None,
+            actor: None,
+            decided_at: None,
+        }
+    }
+}
+
+/// What a person decided on an approval step.
+///
+/// `changes_requested` is its own decision, not a rejection. Until a later ticket can send
+/// the work back around, both a rejection and a request for changes stop the run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalDecision {
+    Approved,
+    Rejected,
+    ChangesRequested,
+}
+
+impl ApprovalDecision {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::Rejected => "rejected",
+            Self::ChangesRequested => "changes_requested",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "approved" => Some(Self::Approved),
+            "rejected" => Some(Self::Rejected),
+            "changes_requested" => Some(Self::ChangesRequested),
+            _ => None,
+        }
+    }
+
+    /// The note a step keeps, before any feedback.
+    fn word(self) -> &'static str {
+        match self {
+            Self::Approved => "Approved",
+            Self::Rejected => "Rejected",
+            Self::ChangesRequested => "Changes requested",
+        }
+    }
+}
+
+/// A decision the store already accepted, as the engine reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedApproval {
+    pub decision: ApprovalDecision,
+    pub feedback: Option<String>,
+    pub actor: String,
+    pub decided_at: i64,
 }
 
 /// Passed or failed. The words match a smoke test's verdict.
@@ -67,6 +145,11 @@ pub trait World {
     /// A smoke test run by id: its status and the summary `ys test wait` prints. `None` when the
     /// row is gone.
     fn test_run(&self, run_id: &str) -> Option<TestRun>;
+    /// A decision a person has recorded for this step, if they have. The default is none, so a
+    /// world that has no approvals does not have to say so.
+    fn approval(&self, _step_id: &str) -> Option<RecordedApproval> {
+        None
+    }
 }
 
 /// A smoke test run as a `run_test` step sees it.
@@ -259,16 +342,27 @@ pub fn advance(
                     }
                 }
                 StepStatus::Waiting => {
-                    let since = started.get(id).copied().unwrap_or(now);
-                    wait(
-                        step,
-                        since,
-                        now,
-                        &lookup,
-                        &session_of,
-                        world,
-                        &mut plan.effects,
-                    )
+                    let stored = outputs.get(id).cloned().unwrap_or_default();
+                    if stored.contains_key(ARTIFACT_PENDING) {
+                        let row = rows.iter().find(|row| row.step_id == step.id);
+                        Some(resume_capture(
+                            step,
+                            &stored,
+                            row.and_then(|row| row.note.clone()),
+                            row.and_then(|row| row.outcome.clone()),
+                        ))
+                    } else {
+                        let since = started.get(id).copied().unwrap_or(now);
+                        wait(
+                            step,
+                            since,
+                            now,
+                            &lookup,
+                            &session_of,
+                            world,
+                            &mut plan.effects,
+                        )
+                    }
                 }
                 _ => None,
             };
@@ -429,13 +523,16 @@ pub fn recover(rows: &[WorkflowStepRow]) -> Vec<Move> {
     rows.iter()
         .filter(|row| row.status == StepStatus::Running.as_str())
         .map(|row| {
-            let mut outputs = parse_outputs(&row.outputs);
-            if outputs.remove(ARTIFACT_PENDING).is_some() {
+            let outputs = parse_outputs(&row.outputs);
+            if outputs.contains_key(ARTIFACT_PENDING) {
+                // Keep the marker. The next advance resumes the capture from it, including when
+                // the step's own action would not succeed a second time (a notification already
+                // sent, a transcript read that had not finished).
                 return Move {
                     step: row.step_id.clone(),
                     from: vec![StepStatus::Running],
                     to: StepStatus::Waiting,
-                    outputs: Some(serde_json::to_string(&outputs).unwrap_or_else(|_| "{}".into())),
+                    outputs: None,
                     note: row.note.clone(),
                     outcome: row.outcome.clone(),
                     clear_outcome: false,
@@ -566,6 +663,28 @@ pub fn skipped(step: &str, why: &str) -> Move {
         outputs: None,
         note: Some(format!("Skipped: {why}.")),
         outcome: None,
+        clear_outcome: false,
+        halt: false,
+    }
+}
+
+/// The artifact read has not finished. The step waits, with the marker set, so the next tick
+/// resumes the same capture instead of running the action again.
+pub fn still_reading(
+    step: &str,
+    outputs: &Outputs,
+    note: Option<String>,
+    outcome: Option<String>,
+) -> Move {
+    let mut marked = outputs.clone();
+    marked.insert(ARTIFACT_PENDING.to_owned(), "1".to_owned());
+    Move {
+        step: step.to_owned(),
+        from: vec![StepStatus::Running],
+        to: StepStatus::Waiting,
+        outputs: Some(serde_json::to_string(&marked).unwrap_or_else(|_| "{}".to_owned())),
+        note,
+        outcome,
         clear_outcome: false,
         halt: false,
     }
@@ -717,6 +836,23 @@ fn begin(
             });
             to(id, StepStatus::Pending, StepStatus::Running)
         }
+        Action::Approve { prompt, .. } => {
+            let rendered = prompt
+                .as_deref()
+                .map(render)
+                .filter(|text| !text.trim().is_empty());
+            let mut change = to(id, StepStatus::Pending, StepStatus::Waiting);
+            change.note = Some(match &rendered {
+                Some(text) => format!("Waiting for your approval.\n{text}"),
+                None => "Waiting for your approval.".to_owned(),
+            });
+            if let Some(text) = rendered {
+                let mut left = Outputs::new();
+                left.insert("prompt".to_owned(), text);
+                change.outputs = Some(serde_json::to_string(&left).unwrap_or_else(|_| "{}".into()));
+            }
+            change
+        }
     };
     // Starting again is a new attempt. Drop the previous verdict so a later revision can
     // re-run the step and record a new one. A skip or a failure from pending is not a new
@@ -830,14 +966,11 @@ fn wait(
                     match test.status.as_str() {
                         "passed" | "failed" => {
                             let outcome = match test.status.as_str() {
-                                "passed" => StepOutcome {
-                                    verdict: StepVerdict::Passed,
-                                    reason: None,
-                                },
-                                _ => StepOutcome {
-                                    verdict: StepVerdict::Failed,
-                                    reason: Some(test_failure_reason(&test.summary)),
-                                },
+                                "passed" => StepOutcome::judged(StepVerdict::Passed, None),
+                                _ => StepOutcome::judged(
+                                    StepVerdict::Failed,
+                                    Some(test_failure_reason(&test.summary)),
+                                ),
                             };
                             Some(react(
                                 id,
@@ -892,7 +1025,76 @@ fn wait(
                 None
             }
         }
+        Action::Approve { timeout_secs, .. } => {
+            if let Some(recorded) = world.approval(id) {
+                Some(approval_move(step, recorded))
+            } else if timed_out(timeout_secs) {
+                Some(fail(
+                    id,
+                    StepStatus::Waiting,
+                    &format!("Timed out after {}.", duration(timeout_secs.unwrap_or(0))),
+                ))
+            } else {
+                None
+            }
+        }
         _ => None,
+    }
+}
+
+/// Apply a recorded approval. Approve succeeds the step. Reject and request changes fail it
+/// and halt the run. A timeout is not a decision and does not come through here.
+fn approval_move(step: &super::Step, recorded: RecordedApproval) -> Move {
+    let feedback = recorded.feedback.filter(|text| !text.trim().is_empty());
+    let note = match &feedback {
+        Some(text) => format!("{}: {text}", recorded.decision.word()),
+        None => format!("{}.", recorded.decision.word()),
+    };
+    let verdict = if recorded.decision == ApprovalDecision::Approved {
+        StepVerdict::Passed
+    } else {
+        StepVerdict::Failed
+    };
+    let mut left = Outputs::new();
+    left.insert("decision".to_owned(), recorded.decision.as_str().to_owned());
+    left.insert("feedback".to_owned(), feedback.clone().unwrap_or_default());
+    let outcome = StepOutcome {
+        verdict,
+        reason: (verdict == StepVerdict::Failed).then(|| note.clone()),
+        decision: Some(recorded.decision),
+        feedback,
+        actor: Some(recorded.actor),
+        decided_at: Some(recorded.decided_at),
+    };
+    react(
+        &step.id,
+        StepStatus::Waiting,
+        step.is_gate(),
+        &outcome,
+        &left,
+        note,
+    )
+}
+
+/// The work already finished. Store the artifacts again from what the step left, rather than
+/// judging the action a second time.
+fn resume_capture(
+    step: &super::Step,
+    stored: &Outputs,
+    note: Option<String>,
+    outcome: Option<String>,
+) -> Move {
+    let mut plain = stored.clone();
+    plain.remove(ARTIFACT_PENDING);
+    Move {
+        step: step.id.clone(),
+        from: vec![StepStatus::Waiting],
+        to: StepStatus::Succeeded,
+        outputs: Some(serde_json::to_string(&plain).unwrap_or_else(|_| "{}".into())),
+        note,
+        outcome,
+        clear_outcome: false,
+        halt: false,
     }
 }
 

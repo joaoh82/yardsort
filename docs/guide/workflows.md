@@ -208,7 +208,10 @@ quiet or ends. To follow it:
 
 ```sh
 ys workflow runs                  # every run, newest first
-ys workflow runs --run 3f2a9c1e   # one run, its steps, and any artifact it handed on
+ys workflow runs --run 3f2a9c1e   # one run, its steps, artifacts, and any approval
+ys workflow approve 3f2a9c1e sign-off --feedback "ship it"
+ys workflow reject 3f2a9c1e sign-off
+ys workflow request-changes 3f2a9c1e sign-off --feedback "split the migration"
 ys workflow cancel 3f2a9c1e       # stop it
 ```
 
@@ -239,6 +242,8 @@ What each step does while it runs:
   the step, skips every other step that has not finished, and stops the run. It leaves the run's verdict and the summary
   `ys test wait` prints for later steps to use.
 - **`notify`** shows a system notification.
+- **`approve`** waits for you to approve, reject, or request changes. It is always a gate.
+  Waiting for a GitHub review is not this. See [An approval](#an-approval).
 
 A step runs only when every step in its `needs` succeeded. When one fails, the steps that need it
 are skipped, and the run fails with that step's reason. A gate that fails also skips the steps
@@ -287,6 +292,49 @@ steps:
 
 A file written before `gate` existed still loads. Leaving it out, or writing `gate: false`,
 keeps the old behaviour.
+
+### An approval
+
+An `approve` step waits for you. Put it after a brief, a plan or a review, or before a
+release. It is a gate: the steps that need it do not start until you approve. A rejection
+stops the run, the same way a failed test gate does, and it is not an approval. Waiting
+for a GitHub review (`wait_pr_activity`) is not this. That is a comment on a pull request,
+not a decision you make here.
+
+The run shows the artifacts the step consumes, so you can read the plan or the review
+before you decide. You approve, reject, or request changes, and you can leave a note.
+Requesting changes needs a note. Until a later change can send that note back around,
+a request for changes stops the run. The note is kept as an artifact named
+`changes-<step id>`, source `decision`, for that later change to read. The step also
+leaves `decision` and `feedback` for a later step to read as
+`{{ steps.<id>.decision }}` and `{{ steps.<id>.feedback }}`.
+
+You decide on the run in the app, or from your own terminal. Yardsort does not have to
+be open for `ys` to record the decision. The run applies it the next time it is open.
+
+```sh
+ys workflow approve 3f2a9c1e sign-off --feedback "ship it"
+ys workflow reject 3f2a9c1e sign-off
+ys workflow request-changes 3f2a9c1e sign-off --feedback "split the migration"
+```
+
+The Floor Manager cannot decide. Those three commands are refused at every permission.
+A decision is recorded once. A second one is refused, and so is one on a run that has
+already ended. `ys workflow runs --run <id>` shows a step that is still waiting, the
+artifacts it reads, and those commands. It also shows a decision once it is recorded:
+who, when, and the note. `--json` includes `pendingApprovals` and `decisions`.
+
+A schedule or a trigger whose notify is not `never` tells you when a run starts waiting
+for approval. So does a run you started yourself, and a schedule you started by hand.
+`notify: never` does not.
+
+`prompt` is optional, and can use variables. `timeout` is optional. Left out, the step
+waits until you decide. A timeout fails that step, records no decision, and does not
+stop a step that does not need it. `gate: false` is refused, because an approval is a
+gate. Leaving `gate` out is the same as writing `gate: true`.
+
+A file written before approvals existed still loads. A run that was queued before this
+change has no approval step, and it keeps running as it did.
 
 **Cancelling** stops the run. Agents it started keep running as ordinary sessions: close them as
 you would any other.
@@ -389,6 +437,7 @@ circle are reported, because none of them could ever start.
 | `wait_pr_activity` | `kind`, `timeout`                                                | Waits for a new review or comment on the workspace's pull request, since the run started. `kind` is `review`, `comment` or `any`, the default.                                                                                                                                                                                                                                                                                                                |
 | `run_test`         | `test` (required), `inputs`, `timeout`, `gate`                   | Runs a smoke test in the workspace and waits for its verdict. The step succeeds whether the test passed or failed, so a later step can read `verdict` and act on either; it fails only on no verdict or a timeout. `gate: true` makes a failed verdict fail the step, skip the steps still going, and stop the run. `test` is a test id, or exactly `{{ inputs.<id> }}` for an input of kind `test`. `inputs` is a map of the test's own input ids to values. |
 | `notify`           | `title` (required), `body`                                       | Tells you, with a system notification.                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `approve`          | `prompt`, `timeout`, `gate`                                      | Waits for you to approve, reject, or request changes. Always a gate: a rejection or a request for changes stops the run. `prompt` is the question, and can use variables. `timeout`, when set, fails the step with no decision and does not stop a step that does not need it. `gate: false` is refused. Waiting for a GitHub review is `wait_pr_activity`, not this.                                                                                         |
 
 A key that belongs to another action is reported as misplaced. `title` on a `start_session` step
 is an example.
@@ -411,7 +460,7 @@ nothing else: no filters, no expressions. Anything else is reported where it is 
 | `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task`                                                                    | The workspace the run is about. `task` is the first message it was started with. In the project's own checkout, `branch` is whatever git has checked out, and `base_branch` the repository's default branch, unless that is the branch itself.                                                                                                                    |
 | `pr.number`, `pr.url`, `pr.title`, `pr.repo`, `pr.clone`                                                                                                             | The open pull request for the workspace's branch, found when the run is queued. For a `tracked_pull_request` workflow, the one it is about, read by its link, with `pr.repo` its repository (`owner/name`) and `pr.clone` the project's nested clone of it; both are empty for a workspace's own.                                                                 |
 | `inputs.<id>`                                                                                                                                                        | What was given for that input.                                                                                                                                                                                                                                                                                                                                    |
-| `steps.<id>.<field>`                                                                                                                                                 | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`. The step must be among this step's `needs`.                                                                                                                 |
+| `steps.<id>.<field>`                                                                                                                                                 | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`, `decision` and `feedback` from `approve`. The step must be among this step's `needs`.                                                                       |
 | `memory`                                                                                                                                                             | The project's [memory](memory.md): its approved entries, cited, when the project shares it and has any. Empty otherwise. It never carries the request to propose new entries that an agent you start yourself gets. An agent's first message gets the memory after it anyway; put `{{ memory }}` in a `start_session` prompt to have it there instead, not twice. |
 | `handoff`                                                                                                                                                            | The workspace's [handoff](terminals-and-sessions.md#handing-work-to-another-agent) packet: what happened there so far.                                                                                                                                                                                                                                            |
 | `artifacts.<name>`                                                                                                                                                   | Text of an artifact this step consumes. See [Artifacts](#artifacts).                                                                                                                                                                                                                                                                                              |
@@ -449,7 +498,8 @@ Nothing secret is copied. A path that leaves the workspace is refused, and so is
 resolves outside it or onto a secret. A name that looks like a secret is refused too: `.env`
 and `.envrc`, a key or a credential file, `.ssh`, `.git`, `.kube`, `.docker`, `secrets.*`,
 and a `.tfvars` file. A name with a colon, or one that ends in a dot or a space, is refused.
-Control characters in a body are dropped, except newlines and tabs. The text is cut at 32000
+Control characters in a body are dropped, except newlines and tabs, and so are
+bidirectional overrides and zero-width characters. The text is cut at 32000
 characters, and the stored copy says so. A transcript is copied only when the step says
 `from: transcript`. It is the same digest Yardsort uses elsewhere, not the terminal
 scrollback, and not tool output. `raw: true` keeps each turn's own text in full, still

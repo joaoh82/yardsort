@@ -40,6 +40,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0028_tracked_pr_watches.sql"),
     include_str!("../migrations/0029_workflow_step_outcome.sql"),
     include_str!("../migrations/0030_workflow_artifacts.sql"),
+    include_str!("../migrations/0031_workflow_approval_decisions.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -473,6 +474,33 @@ pub struct WorkflowArtifactRow {
     /// The body was cut at the size cap.
     pub truncated: bool,
     pub updated_at: i64,
+}
+
+/// What recording an approval did, or why it did not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApprovalWrite {
+    Recorded,
+    MissingRun,
+    MissingStep,
+    /// The run is not running. `status` is the word the row has.
+    RunEnded {
+        status: String,
+    },
+    NotAnApproval,
+    NotWaiting,
+    AlreadyDecided,
+    FeedbackRequired,
+    NotADecision,
+}
+
+/// A decision stored for one approval step, before the engine has applied it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowApproval {
+    /// `approved`, `rejected` or `changes_requested`.
+    pub decision: String,
+    pub feedback: Option<String>,
+    pub actor: String,
+    pub decided_at: i64,
 }
 
 /// An artifact about to be stored. The body is already capped.
@@ -2337,6 +2365,197 @@ impl Store {
         Ok(())
     }
 
+    /// Insert or replace one artifact. Used when a step fails and still leaves a decision, which
+    /// is not the success path that replaces every artifact the step produced.
+    pub fn upsert_workflow_artifact(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        artifact: &NewWorkflowArtifact,
+    ) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT INTO workflow_artifacts
+             (run_id, name, step_id, source, detail, body, truncated, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(run_id, name) DO UPDATE SET
+               step_id = excluded.step_id,
+               source = excluded.source,
+               detail = excluded.detail,
+               body = excluded.body,
+               truncated = excluded.truncated,
+               updated_at = excluded.updated_at",
+            params![
+                run_id,
+                artifact.name,
+                step_id,
+                artifact.source,
+                artifact.detail,
+                artifact.body,
+                i64::from(artifact.truncated),
+                now_ms(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The decision stored for one step, if a person has recorded one.
+    pub fn workflow_approval(
+        &self,
+        run_id: &str,
+        step_id: &str,
+    ) -> StoreResult<Option<WorkflowApproval>> {
+        let conn = self.conn();
+        let found = conn
+            .query_row(
+                "SELECT decision, feedback, actor, decided_at
+                 FROM workflow_approval_decisions
+                 WHERE run_id = ?1 AND step_id = ?2",
+                params![run_id, step_id],
+                |row| {
+                    Ok(WorkflowApproval {
+                        decision: row.get(0)?,
+                        feedback: row.get(1)?,
+                        actor: row.get(2)?,
+                        decided_at: row.get(3)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(found)
+    }
+
+    /// Drop a step's decision. A step that starts again calls this, so a later revision can be
+    /// decided once more. A missing row is not an error.
+    pub fn clear_workflow_approval(&self, run_id: &str, step_id: &str) -> StoreResult<()> {
+        self.conn().execute(
+            "DELETE FROM workflow_approval_decisions WHERE run_id = ?1 AND step_id = ?2",
+            params![run_id, step_id],
+        )?;
+        Ok(())
+    }
+
+    /// Record a person's decision. The row is written only while the run is running, the step
+    /// is an approval, and it is waiting. A second decision does not replace the first. The
+    /// engine reads the row on a later tick. Nothing here moves the step.
+    pub fn record_workflow_approval(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        decision: &str,
+        feedback: Option<&str>,
+        actor: &str,
+    ) -> StoreResult<ApprovalWrite> {
+        if !matches!(decision, "approved" | "rejected" | "changes_requested") {
+            return Ok(ApprovalWrite::NotADecision);
+        }
+        let (body, _) = crate::workflow::artifact::cap(feedback.unwrap_or(""));
+        let feedback = {
+            let trimmed = body.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_owned())
+            }
+        };
+        if decision == "changes_requested" && feedback.is_none() {
+            return Ok(ApprovalWrite::FeedbackRequired);
+        }
+        let actor = crate::workflow::artifact::actor_name(actor);
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let run: Option<(String,)> = tx
+            .query_row(
+                "SELECT status FROM workflow_runs WHERE id = ?1",
+                [run_id],
+                |row| Ok((row.get(0)?,)),
+            )
+            .optional()?;
+        let Some((status,)) = run else {
+            return Ok(ApprovalWrite::MissingRun);
+        };
+        if status != "running" {
+            return Ok(ApprovalWrite::RunEnded { status });
+        }
+        let step: Option<(String, String)> = tx
+            .query_row(
+                "SELECT action, status FROM workflow_step_runs WHERE run_id = ?1 AND step_id = ?2",
+                params![run_id, step_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((action, step_status)) = step else {
+            return Ok(ApprovalWrite::MissingStep);
+        };
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT decision FROM workflow_approval_decisions
+                 WHERE run_id = ?1 AND step_id = ?2",
+                params![run_id, step_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if existing.is_some() {
+            return Ok(ApprovalWrite::AlreadyDecided);
+        }
+        if action != "approve" {
+            return Ok(ApprovalWrite::NotAnApproval);
+        }
+        if step_status != "waiting" {
+            return Ok(ApprovalWrite::NotWaiting);
+        }
+        let inserted = tx.execute(
+            "INSERT INTO workflow_approval_decisions
+             (run_id, step_id, decision, feedback, actor, decided_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(run_id, step_id) DO NOTHING",
+            params![run_id, step_id, decision, feedback, actor, now_ms()],
+        )?;
+        if inserted == 0 {
+            return Ok(ApprovalWrite::AlreadyDecided);
+        }
+        tx.commit()?;
+        Ok(ApprovalWrite::Recorded)
+    }
+
+    /// Whether a run that has just started waiting for approval should show a notification.
+    ///
+    /// A person who started the run is told. So is Run now on a schedule. A schedule or a
+    /// trigger whose `notify` is `never` is not told. `failure` and `always` are told, the
+    /// same way a smoke test waiting for approval is.
+    pub fn tell_workflow_approval(&self, run_id: &str) -> StoreResult<bool> {
+        let conn = self.conn();
+        let schedule: Option<(String, i64)> = conn
+            .query_row(
+                "SELECT s.notify, r.manual FROM schedule_runs r
+                 JOIN schedules s ON s.id = r.schedule_id
+                 WHERE r.run_id = ?1
+                 LIMIT 1",
+                [run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((notify, manual)) = schedule {
+            if manual != 0 {
+                return Ok(true);
+            }
+            return Ok(notify != "never");
+        }
+        let trigger: Option<String> = conn
+            .query_row(
+                "SELECT t.notify FROM trigger_fires f
+                 JOIN triggers t ON t.id = f.trigger_id
+                 WHERE f.run_id = ?1
+                 LIMIT 1",
+                [run_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(notify) = trigger {
+            return Ok(notify != "never");
+        }
+        Ok(true)
+    }
+
     /// Store `artifacts` and move the step, or change neither. The move is taken only while the
     /// run is still running and the step is in one of `from`. False, and the artifacts are not
     /// written, when that move does not apply: the run stopped, or the step moved first.
@@ -3631,6 +3850,65 @@ steps:
         );
         assert_eq!(store.workflow_steps("run-old").unwrap()[0].step_id, "ping");
         assert!(store.workflow_artifacts("run-old").unwrap().is_empty());
+    }
+
+    /// 0031 is index 30. A database that has every migration before it still opens, and it has
+    /// no approval decisions until someone records one.
+    #[test]
+    fn a_run_saved_before_approval_decisions_still_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("yardsort.db");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            assert!(MIGRATIONS[30].contains("CREATE TABLE workflow_approval_decisions"));
+            assert_eq!(MIGRATIONS.len(), 31);
+            upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
+            conn.execute(
+                "INSERT INTO workflow_runs
+                 (id, workflow_id, workflow_name, definition, workspace_name, inputs, status,
+                  requested_by, created_at)
+                 VALUES ('run-old', 'demo', 'Demo', 'id: demo\n', 'fix', '{}', 'running', 'cli', 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO workflow_step_runs
+                 (run_id, step_id, position, action, status)
+                 VALUES ('run-old', 'sign-off', 0, 'approve', 'waiting')",
+                [],
+            )
+            .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        assert_eq!(
+            store.workflow_run("run-old").unwrap().unwrap().status,
+            "running"
+        );
+        assert!(store
+            .workflow_approval("run-old", "sign-off")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store
+                .record_workflow_approval("run-old", "sign-off", "approved", None, "ada")
+                .unwrap(),
+            ApprovalWrite::Recorded
+        );
+        assert_eq!(
+            store
+                .record_workflow_approval("run-old", "sign-off", "rejected", Some("no"), "ada")
+                .unwrap(),
+            ApprovalWrite::AlreadyDecided
+        );
+        store
+            .finish_workflow_run("run-old", "failed", Some("stopped"))
+            .unwrap();
+        assert!(matches!(
+            store
+                .record_workflow_approval("run-old", "sign-off", "approved", None, "ada")
+                .unwrap(),
+            ApprovalWrite::RunEnded { .. }
+        ));
     }
 
     #[test]

@@ -83,6 +83,8 @@ pub struct WorkflowStepRun {
     pub outcome: Option<StepOutcome>,
     /// Named documents this step handed on. Empty when it left none.
     pub artifacts: Vec<WorkflowArtifact>,
+    /// Named documents this step reads, from earlier steps. An approval shows these.
+    pub consumed: Vec<WorkflowArtifact>,
 }
 
 /// A named document stored on a run, as the run view shows it.
@@ -134,7 +136,21 @@ fn run_from(row: WorkflowRunRow) -> WorkflowRun {
     }
 }
 
-fn step_from(row: WorkflowStepRow, artifacts: &[WorkflowArtifactRow]) -> WorkflowStepRun {
+fn artifact_from(artifact: &WorkflowArtifactRow) -> WorkflowArtifact {
+    WorkflowArtifact {
+        name: artifact.name.clone(),
+        source: artifact.source.clone(),
+        detail: artifact.detail.clone(),
+        body: artifact.body.clone(),
+        truncated: artifact.truncated,
+    }
+}
+
+fn step_from(
+    row: WorkflowStepRow,
+    artifacts: &[WorkflowArtifactRow],
+    consumes: &[String],
+) -> WorkflowStepRun {
     WorkflowStepRun {
         outputs: serde_json::from_str(&row.outputs).unwrap_or_default(),
         step_id: row.step_id.clone(),
@@ -150,13 +166,12 @@ fn step_from(row: WorkflowStepRow, artifacts: &[WorkflowArtifactRow]) -> Workflo
         artifacts: artifacts
             .iter()
             .filter(|artifact| artifact.step_id == row.step_id)
-            .map(|artifact| WorkflowArtifact {
-                name: artifact.name.clone(),
-                source: artifact.source.clone(),
-                detail: artifact.detail.clone(),
-                body: artifact.body.clone(),
-                truncated: artifact.truncated,
-            })
+            .map(artifact_from)
+            .collect(),
+        consumed: consumes
+            .iter()
+            .filter_map(|name| artifacts.iter().find(|artifact| &artifact.name == name))
+            .map(artifact_from)
             .collect(),
     }
 }
@@ -272,11 +287,27 @@ pub async fn workflow_runs(
 pub async fn workflow_run_steps(app: AppHandle, run_id: String) -> IpcResult<Vec<WorkflowStepRun>> {
     blocking(app, move |state| {
         let artifacts = state.store.workflow_artifacts(&run_id)?;
+        let definition = state
+            .store
+            .workflow_run(&run_id)?
+            .map(|run| run.definition)
+            .unwrap_or_default();
+        let consumes = workflow::parse(&definition)
+            .ok()
+            .map(|workflow| workflow.steps)
+            .unwrap_or_default();
         Ok(state
             .store
             .workflow_steps(&run_id)?
             .into_iter()
-            .map(|row| step_from(row, &artifacts))
+            .map(|row| {
+                let names = consumes
+                    .iter()
+                    .find(|step| step.id == row.step_id)
+                    .map(|step| step.consumes.as_slice())
+                    .unwrap_or(&[]);
+                step_from(row, &artifacts, names)
+            })
             .collect())
     })
     .await
@@ -463,6 +494,38 @@ pub async fn workflow_describe(app: AppHandle, description: String) -> IpcResult
         tries: done.tries,
         writer,
     })
+}
+
+/// Record an approval. The driver applies it on its next tick. Only the person at this
+/// window calls this. The Floor Manager's `ys` is refused before it can.
+#[tauri::command]
+#[specta::specta]
+pub async fn workflow_decide(
+    app: AppHandle,
+    run_id: String,
+    step_id: String,
+    decision: String,
+    feedback: Option<String>,
+) -> IpcResult<()> {
+    blocking(app.clone(), move |state| {
+        let feedback = feedback
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty());
+        let written = state
+            .store
+            .record_workflow_approval(&run_id, &step_id, &decision, feedback, "app")?;
+        if let Some(message) = workflow::approval_refusal(&written, &run_id, &step_id) {
+            return Err(IpcError::new("approval_refused", message));
+        }
+        Ok(())
+    })
+    .await?;
+    if let Some(driver) = tauri::Manager::try_state::<super::Driver>(&app) {
+        driver.wake();
+    }
+    changed(&app);
+    Ok(())
 }
 
 /// Cancel a run. Agents it started keep running.

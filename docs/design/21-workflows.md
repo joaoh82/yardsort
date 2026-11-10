@@ -601,7 +601,9 @@ A step that judges something records a structured outcome on its row, separate f
 later steps read as `{{ steps.<id>.<field> }}`. The outcome is JSON,
 `{"verdict":"passed","reason":null}` or
 `{"verdict":"failed","reason":"..."}`. `verdict` is `passed` or `failed`. `reason` is the
-text when it failed, and null when it passed. This is not `wait_session`'s `outcome` output,
+text when it failed, and null when it passed. An approval adds `decision`, `feedback`,
+`actor` and `decidedAt`. Those default to null, so an outcome saved before them still
+reads. This is not `wait_session`'s `outcome` output,
 which stays the string `settled` or `exited`.
 
 `engine::react` is the one place a verdict changes the run. A gate whose verdict is `failed`
@@ -619,11 +621,12 @@ inventing a stop of their own. A branch should read `outcome.verdict`. Only a ga
 failed verdict into status `failed`. A step that is not a gate stays `succeeded` when the
 verdict is `failed`, with that verdict on its outcome.
 
-Today only `run_test` accepts `gate`, and it is a field of the step, next to `needs`, not of
-the action. `allowed` is what decides which actions may set it, so a later approval does not
-need a field of its own. Absent, or `gate: false`, is not a gate. A failed verdict then still
-succeeds the step, with the note `The test failed.` and outputs `run`, `verdict` and
-`summary`, exactly as before. A passed verdict, gated or not, notes `The test passed.` A run
+`run_test` accepts `gate`, and it is a field of the step, next to `needs`, not of
+the action. `allowed` is what decides which actions may set it. Absent, or `gate: false`,
+is not a gate for a test. An `approve` step is always a gate. `gate: false` on one is a
+parse error, and leaving `gate` out is the same as `gate: true`. A failed test verdict on a
+step that is not a gate still succeeds the step, with the note `The test failed.` and outputs
+`run`, `verdict` and `summary`, exactly as before. A passed verdict, gated or not, notes `The test passed.` A run
 that reaches no verdict (cancelled, errored), or that times out, fails that step and records
 no outcome, because there was nothing to react to. It does not halt the other branches.
 
@@ -654,10 +657,32 @@ and steps that judged nothing, read as none. A workflow file that does not menti
 still parses. A run that was queued before this change keeps the definition it was queued
 with, which has no gate, so it keeps the old behaviour.
 
-What this leaves for later, and does not do: a human approval that calls the same `react`,
-a durable wait, a branch that switches on the verdict, a question mid-run, and controls from
-a phone. Those read the same outcome and the same failed run error. An approval or a revision
-can also name an artifact, which [Named artifacts](#named-artifacts) stores on the run.
+An `approve` step calls the same `react`. It is always a gate. While it waits, the steps
+that need it stay pending. Approving records `decision: approved` and succeeds the step.
+Rejecting records `rejected` and halts the run. Requesting changes records
+`changes_requested`, which is not a rejection, and halts the run until a later change
+can route it. The outcome also stores `feedback`, `actor` and `decidedAt`. Outputs are
+`decision` and `feedback`, so `{{ steps.<id>.decision }}` works. A timeout fails that
+step with no outcome and does not halt a step that does not need it.
+
+The decision is written to `workflow_approval_decisions` (migration `0031`, index 30)
+before the engine applies it, so it survives a restart and is visible to `ys` at once.
+The row is who, when, the decision and the feedback. It is not deleted when the engine
+applies it. It is deleted only when that step starts again from pending. A second
+decision is refused, and so is one on a run that is not running, or on a step that is
+not an `approve` step waiting. Requesting changes requires feedback. The driver then
+stores an artifact named `changes-<step id>` (source `decision`) even though the step
+failed, so a later revision can consume it.
+
+You decide in the app, or with `ys workflow approve`, `reject` and `request-changes`
+from your own terminal. The Floor Manager's `ys` is `Action::Deny` at every permission,
+including trusted and ask. Waiting for a GitHub review is `wait_pr_activity`, and it
+is not a gate.
+
+What this leaves for later, and does not do: a durable wait that resumes safely across
+a remote disconnect (the pending row already survives an ordinary restart), a branch
+that switches on the verdict or on `changes_requested`, a question mid-run, and
+controls from a phone. Those read the same outcome and the same failed run error.
 
 ## Named artifacts
 
@@ -675,7 +700,11 @@ The body is stored on the run when the producing step succeeds, in `workflow_art
 does not start on an empty handoff. The artifacts and that move to succeeded are one database
 change, and only while the run is still running. If Yardsort stops after the step has finished
 and before those artifacts are stored, the step goes back to waiting and the capture runs
-again. A step that was still doing its own work fails instead, so it does not happen twice.
+again. The pending marker stays in the step's outputs, so the capture runs again even
+when the action would not succeed a second time, such as a notification. A step that was
+still doing its own work fails instead, so it does not happen twice. A capture that then
+fails drops the marker. A transcript read stays off the driver thread. The same read is
+reused on the next tick, and the step fails only after about 20 seconds.
 An effect that finishes in the driver, such as a notification, a started session or a paste,
 stores its artifacts in that same change, before the step is marked succeeded.
 
@@ -690,7 +719,8 @@ checked again, so `notes.md` pointing at `.env` is still a secret. A component c
 or ending in a dot or a space, is refused. A secret-looking path is refused when it is written
 literally, and again when a variable in it is filled in. The body is cut at 32000 characters,
 and the stored copy says it was cut. Control characters other than newline and tab are dropped
-before that. An empty body fails the step, so the next phase does not start with a blank
+before that, and so are bidirectional overrides (U+202A through U+202E and U+2066 through
+U+2069) and zero-width characters. An empty body fails the step, so the next phase does not start with a blank
 handoff.
 
 A re-run replaces that step's rows only after the new bodies have been read. A failed attempt

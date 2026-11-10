@@ -44,6 +44,8 @@ struct Fake {
     /// Named artifacts already stored for this run. A consumer reads these at render time,
     /// so replacing a value is what a re-run looks like.
     artifacts: BTreeMap<String, String>,
+    /// Decisions a person has recorded, by step id.
+    approvals: HashMap<String, RecordedApproval>,
 }
 
 impl World for Fake {
@@ -81,6 +83,9 @@ impl World for Fake {
     }
     fn test_run(&self, run_id: &str) -> Option<TestRun> {
         self.test_runs.get(run_id).cloned()
+    }
+    fn approval(&self, step_id: &str) -> Option<RecordedApproval> {
+        self.approvals.get(step_id).cloned()
     }
 }
 
@@ -124,6 +129,7 @@ impl Run {
                 posts: Vec::new(),
                 test_runs: HashMap::new(),
                 artifacts: BTreeMap::new(),
+                approvals: HashMap::new(),
             },
             finished: None,
         }
@@ -1398,7 +1404,10 @@ fn a_step_awaiting_artifacts_is_captured_again_after_a_restart() {
         .find(|row| row.step_id == "draft")
         .unwrap()
         .outputs;
-    assert!(!outputs.contains("artifact_pending"), "{outputs}");
+    assert!(
+        outputs.contains("artifact_pending"),
+        "the marker stays, so the next tick resumes the capture: {outputs}"
+    );
     assert_eq!(
         run.note("draft"),
         Some("The session settled."),
@@ -1414,4 +1423,235 @@ fn a_step_awaiting_artifacts_is_captured_again_after_a_restart() {
     );
     assert_eq!(run.status("draft"), "running");
     assert_eq!(run.status("plan"), "pending");
+}
+
+const APPROVAL: &str = r#"id: sign
+name: Sign
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: sign-off
+    action: approve
+    prompt: Look at the plan.
+  - id: next
+    needs: [sign-off]
+    action: notify
+    title: Go
+"#;
+
+fn decided(decision: ApprovalDecision, feedback: Option<&str>) -> RecordedApproval {
+    RecordedApproval {
+        decision,
+        feedback: feedback.map(str::to_owned),
+        actor: "ada".into(),
+        decided_at: 1_700_000_000_000,
+    }
+}
+
+#[test]
+fn an_outcome_saved_before_approvals_still_reads() {
+    let outcome: StepOutcome =
+        serde_json::from_str(r#"{"verdict":"failed","reason":"old"}"#).unwrap();
+    assert_eq!(outcome.verdict, StepVerdict::Failed);
+    assert_eq!(outcome.reason.as_deref(), Some("old"));
+    assert!(outcome.decision.is_none());
+    assert!(outcome.feedback.is_none());
+    assert!(outcome.actor.is_none());
+    assert!(outcome.decided_at.is_none());
+}
+
+#[test]
+fn an_approval_blocks_the_next_step_until_someone_decides() {
+    let mut run = Run::from(APPROVAL);
+    let effects = run.advance();
+    assert!(effects.is_empty(), "{effects:?}");
+    assert_eq!(run.status("sign-off"), "waiting");
+    assert_eq!(run.status("next"), "pending");
+    assert_eq!(
+        run.note("sign-off"),
+        Some("Waiting for your approval.\nLook at the plan.")
+    );
+    assert!(run.finished.is_none());
+}
+
+#[test]
+fn approving_lets_the_next_step_start() {
+    let mut run = Run::from(APPROVAL);
+    run.advance();
+    run.world.approvals.insert(
+        "sign-off".into(),
+        decided(ApprovalDecision::Approved, Some("ship it")),
+    );
+    let effects = run.advance();
+    assert_eq!(run.status("sign-off"), "succeeded");
+    assert_eq!(run.note("sign-off"), Some("Approved: ship it"));
+    let outcome = step_outcome(&run, "sign-off");
+    assert_eq!(outcome.verdict, StepVerdict::Passed);
+    assert_eq!(outcome.decision, Some(ApprovalDecision::Approved));
+    assert_eq!(outcome.feedback.as_deref(), Some("ship it"));
+    assert_eq!(outcome.actor.as_deref(), Some("ada"));
+    assert_eq!(outcome.decided_at, Some(1_700_000_000_000));
+    let left = parse_outputs(
+        &run.rows
+            .iter()
+            .find(|row| row.step_id == "sign-off")
+            .unwrap()
+            .outputs,
+    );
+    assert_eq!(left.get("decision").map(String::as_str), Some("approved"));
+    assert_eq!(left.get("feedback").map(String::as_str), Some("ship it"));
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Notify { step, .. } if step == "next")),
+        "the next step starts: {effects:?}"
+    );
+    assert_eq!(run.status("next"), "running");
+    assert!(run.finished.is_none());
+}
+
+#[test]
+fn rejecting_halts_the_run_and_is_not_an_approval() {
+    let mut run = Run::from(APPROVAL);
+    run.advance();
+    run.world
+        .approvals
+        .insert("sign-off".into(), decided(ApprovalDecision::Rejected, None));
+    run.advance();
+    assert_eq!(run.status("sign-off"), "failed");
+    assert_eq!(run.note("sign-off"), Some("Rejected."));
+    assert_eq!(run.status("next"), "skipped");
+    let outcome = step_outcome(&run, "sign-off");
+    assert_eq!(outcome.verdict, StepVerdict::Failed);
+    assert_eq!(outcome.decision, Some(ApprovalDecision::Rejected));
+    assert!(outcome.feedback.is_none());
+    match run.finished {
+        Some(Finish::Failed(why)) => {
+            assert!(why.contains("sign-off"), "{why}");
+            assert!(why.to_lowercase().contains("rejected"), "{why}");
+        }
+        other => panic!("the run should fail, got {other:?}"),
+    }
+}
+
+#[test]
+fn requesting_changes_is_recorded_apart_from_a_rejection_and_stops_the_run() {
+    let mut run = Run::from(APPROVAL);
+    run.advance();
+    run.world.approvals.insert(
+        "sign-off".into(),
+        decided(
+            ApprovalDecision::ChangesRequested,
+            Some("split the migration"),
+        ),
+    );
+    run.advance();
+    assert_eq!(run.status("sign-off"), "failed");
+    assert_eq!(run.status("next"), "skipped");
+    assert_eq!(
+        run.note("sign-off"),
+        Some("Changes requested: split the migration")
+    );
+    let outcome = step_outcome(&run, "sign-off");
+    assert_eq!(outcome.decision, Some(ApprovalDecision::ChangesRequested));
+    assert_eq!(outcome.feedback.as_deref(), Some("split the migration"));
+    assert_ne!(outcome.decision, Some(ApprovalDecision::Rejected));
+    let why = match run.finished {
+        Some(Finish::Failed(why)) => why,
+        other => panic!("the run should stop, got {other:?}"),
+    };
+    assert!(why.to_lowercase().contains("changes requested"), "{why}");
+    assert!(!why.to_lowercase().contains("rejected"), "{why}");
+}
+
+#[test]
+fn an_approval_timeout_fails_that_step_and_does_not_halt_another() {
+    let mut run = Run::from(
+        r#"id: sign
+name: Sign
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: sign-off
+    action: approve
+    timeout: 1s
+  - id: other
+    action: notify
+    title: Hi
+"#,
+    );
+    run.advance();
+    assert_eq!(run.status("sign-off"), "waiting");
+    assert_eq!(run.status("other"), "running");
+    run.later(2_000);
+    run.advance();
+    assert_eq!(run.status("sign-off"), "failed");
+    assert_eq!(run.note("sign-off"), Some("Timed out after 1s."));
+    assert!(
+        run.rows
+            .iter()
+            .find(|row| row.step_id == "sign-off")
+            .unwrap()
+            .outcome
+            .is_none(),
+        "a timeout is not a decision"
+    );
+    assert_eq!(run.status("other"), "running");
+    assert!(run.finished.is_none());
+}
+
+#[test]
+fn a_waiting_approval_stays_waiting_when_the_run_is_recovered() {
+    let mut run = Run::from(APPROVAL);
+    run.advance();
+    assert!(recover(&run.rows).is_empty());
+    assert_eq!(run.status("sign-off"), "waiting");
+    run.advance();
+    assert_eq!(run.status("sign-off"), "waiting");
+    assert_eq!(run.status("next"), "pending");
+    assert!(run.finished.is_none());
+}
+
+#[test]
+fn a_notification_waiting_on_its_artifacts_is_captured_again() {
+    let mut run = Run::from(
+        r#"id: hand
+name: Hand
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: draft
+    action: notify
+    title: Drafted
+    produces:
+      - name: spec
+        text: Be kind.
+"#,
+    );
+    let draft = run
+        .rows
+        .iter_mut()
+        .find(|row| row.step_id == "draft")
+        .unwrap();
+    draft.status = "waiting".into();
+    draft.started_at = Some(1);
+    draft.outputs = r#"{"artifact_pending":"1"}"#.into();
+    draft.note = Some("Told.".into());
+    let effects = run.advance();
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Capture { step, .. } if step == "draft")),
+        "the capture resumes without sending the notification again: {effects:?}"
+    );
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Notify { .. })),
+        "the notification already happened: {effects:?}"
+    );
+    assert_eq!(run.status("draft"), "running");
 }

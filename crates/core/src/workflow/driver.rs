@@ -18,7 +18,8 @@ use std::time::Duration;
 use pty_host::{HostError, HostEvent, SessionId, SessionInfo, SessionState, TerminalHost};
 
 use super::engine::{
-    self, Effect, Finish, Inputs, Move, Outputs, Plan, PrSeen, SessionFacts, TestRun, World,
+    self, ApprovalDecision, Effect, Finish, Inputs, Move, Outputs, Plan, PrSeen, RecordedApproval,
+    SessionFacts, StepOutcome, TestRun, World,
 };
 use super::runs::{self, Facts, Place};
 use super::{artifact, ArtifactSource, PrActivity, SessionRef};
@@ -54,16 +55,28 @@ pub trait Hands {
     fn pr_posts(&self, workspace_id: &str, pr: &super::runs::PrFacts) -> PrAsk;
 
     /// One session's conversation, for a step that asked for a transcript. `raw` asks for each
-    /// turn's own text. Without it, the budgeted digest. `Ok(None)` when that session has no
-    /// conversation to copy. The default is none, so a driver test that never asks is unchanged.
+    /// turn's own text. Without it, the budgeted digest. [`Conversation::Ready`]`(None)` when
+    /// that session has no conversation to copy. [`Conversation::Later`] when the read has not
+    /// finished: the driver asks again on the next tick and does not fail the step. The default
+    /// is none, so a driver test that never asks is unchanged.
     fn conversation(
         &self,
         _workspace_id: &str,
         _pty_id: &str,
         _raw: bool,
-    ) -> Result<Option<String>, String> {
-        Ok(None)
+    ) -> Result<Conversation, String> {
+        Ok(Conversation::Ready(None))
     }
+}
+
+/// How far a transcript read got. A slow read must not fail the step, and must not be started
+/// again from scratch on the next tick.
+#[derive(Debug)]
+pub enum Conversation {
+    /// The read finished. `None` means that session has no conversation to copy.
+    Ready(Option<String>),
+    /// Still reading. Ask again later. The same read should be reused.
+    Later,
 }
 
 /// Asking the forge, as a job for a thread of its own.
@@ -349,7 +362,14 @@ fn move_on(
             if change.to == StepStatus::Running && acting.contains(change.step.as_str()) {
                 claims.insert(change.step.clone(), change.clone());
             } else {
-                apply(driver, store, &run.id, change)?;
+                // Drop a previous decision before the step is waiting again, while it is still
+                // pending, so a decision recorded for this attempt cannot be deleted by the clear.
+                if change.clear_outcome && change.from.contains(&StepStatus::Pending) {
+                    store.clear_workflow_approval(&run.id, &change.step)?;
+                }
+                if apply(driver, store, &run.id, change)? {
+                    follow_approval(store, hands, &workflow, run, change)?;
+                }
             }
         }
         if plan.moves.iter().any(|change| change.halt) {
@@ -717,20 +737,32 @@ impl Finishing<'_> {
                     // the step back to wait, when it is still running, lets the next tick try
                     // the capture again. A success applied on its own would finish with no body.
                     Ok(false) => (engine::not_yet(step_id), false),
-                    Err(error) => {
-                        let mut change = engine::failed(step_id, &error.to_string());
-                        change.clear_outcome = true;
-                        (change, false)
-                    }
+                    Err(error) => (capture_failed(step_id, outputs, &error.to_string()), false),
                 }
             }
-            Err(why) => {
-                let mut change = engine::failed(step_id, &why);
-                change.clear_outcome = true;
-                (change, false)
-            }
+            Err(CaptureMiss::Later) => (
+                engine::still_reading(step_id, outputs, note, outcome),
+                false,
+            ),
+            Err(CaptureMiss::Failed(why)) => (capture_failed(step_id, outputs, &why), false),
         }
     }
+}
+
+/// A capture that failed must not leave the pending marker in the step's outputs. The outputs
+/// argument is the unmarked set the capture was given.
+fn capture_failed(step_id: &str, outputs: &Outputs, why: &str) -> Move {
+    let mut change = engine::failed(step_id, why);
+    change.clear_outcome = true;
+    change.outputs = Some(serde_json::to_string(outputs).unwrap_or_else(|_| "{}".into()));
+    change
+}
+
+/// Why a capture did not store anything.
+enum CaptureMiss {
+    Failed(String),
+    /// The transcript is still being read. The step waits and the next tick asks again.
+    Later,
 }
 
 /// What reading one step's artifacts needs. The engine stays free of files and transcripts.
@@ -748,13 +780,24 @@ struct Capture<'a> {
 
 impl Capture<'_> {
     /// Read every artifact first. One failure returns none, so nothing is written.
-    fn record(&self) -> Result<Vec<NewWorkflowArtifact>, String> {
+    fn record(&self) -> Result<Vec<NewWorkflowArtifact>, CaptureMiss> {
         let memory = OnceCell::new();
         let handoff = OnceCell::new();
         let mut saved = Vec::with_capacity(self.step.produces.len());
         for decl in &self.step.produces {
+            // An approval may leave `feedback` empty. That must not fail the step after the
+            // person has already approved. Other actions still refuse an empty field.
+            if let ArtifactSource::Output { field } = &decl.source {
+                if matches!(self.step.action, super::Action::Approve { .. }) {
+                    let text = self.outputs.get(field).map(String::as_str).unwrap_or("");
+                    if text.trim().is_empty() {
+                        continue;
+                    }
+                }
+            }
             let (source, detail, text) = self.read(&decl.source, &memory, &handoff)?;
-            let (body, truncated) = artifact::require_text(&decl.name, text)?;
+            let (body, truncated) =
+                artifact::require_text(&decl.name, text).map_err(CaptureMiss::Failed)?;
             saved.push(NewWorkflowArtifact {
                 name: decl.name.clone(),
                 source,
@@ -771,12 +814,14 @@ impl Capture<'_> {
         source: &ArtifactSource,
         memory: &OnceCell<Option<String>>,
         handoff: &OnceCell<Option<String>>,
-    ) -> Result<(String, Option<String>, String), String> {
+    ) -> Result<(String, Option<String>, String), CaptureMiss> {
         let lookup = |path: &[String]| self.lookup(path, memory, handoff);
+        let failed = CaptureMiss::Failed;
         match source {
             ArtifactSource::File { path } => {
                 let path = super::template::render(path, lookup);
-                let text = artifact::read_file(Path::new(&self.place.workspace.path), &path)?;
+                let text = artifact::read_file(Path::new(&self.place.workspace.path), &path)
+                    .map_err(failed)?;
                 Ok(("file".into(), Some(path), text))
             }
             ArtifactSource::Text { text } => {
@@ -787,19 +832,26 @@ impl Capture<'_> {
                     .outputs
                     .get(field)
                     .cloned()
-                    .ok_or_else(|| format!("The step left no `{field}` to hand on."))?;
+                    .ok_or_else(|| failed(format!("The step left no `{field}` to hand on.")))?;
                 Ok(("output".into(), Some(field.clone()), text))
             }
             ArtifactSource::Transcript { session, raw } => {
-                let pty = self
-                    .session_pty(session)
-                    .ok_or_else(|| "There is no session to copy a conversation from.".to_owned())?;
-                let text = self
+                let pty = self.session_pty(session).ok_or_else(|| {
+                    failed("There is no session to copy a conversation from.".to_owned())
+                })?;
+                let text = match self
                     .hands
-                    .conversation(&self.place.workspace.id, &pty, *raw)?
-                    .ok_or_else(|| {
-                        "There is no conversation to copy for that session.".to_owned()
-                    })?;
+                    .conversation(&self.place.workspace.id, &pty, *raw)
+                    .map_err(failed)?
+                {
+                    Conversation::Later => return Err(CaptureMiss::Later),
+                    Conversation::Ready(Some(text)) => text,
+                    Conversation::Ready(None) => {
+                        return Err(failed(
+                            "There is no conversation to copy for that session.".to_owned(),
+                        ));
+                    }
+                };
                 Ok((
                     "transcript".into(),
                     Some(if *raw { "raw" } else { "digest" }.into()),
@@ -962,6 +1014,148 @@ impl World for Seen<'_> {
             summary,
         })
     }
+
+    fn approval(&self, step_id: &str) -> Option<RecordedApproval> {
+        let row = self
+            .store
+            .workflow_approval(self.run_id, step_id)
+            .ok()
+            .flatten()?;
+        let decision = ApprovalDecision::parse(&row.decision)?;
+        Some(RecordedApproval {
+            decision,
+            feedback: row.feedback,
+            actor: row.actor,
+            decided_at: row.decided_at,
+        })
+    }
+}
+
+/// Tell the person, once, when an approval step starts waiting, and store the artifact a
+/// request for changes leaves. A notification that cannot be shown does not fail the step.
+fn follow_approval(
+    store: &Store,
+    hands: &dyn Hands,
+    workflow: &super::Workflow,
+    run: &WorkflowRunRow,
+    change: &Move,
+) -> IpcResult<()> {
+    let step = workflow.steps.iter().find(|step| step.id == change.step);
+    let approve = step.is_some_and(|step| matches!(step.action, super::Action::Approve { .. }));
+    if approve && change.to == StepStatus::Waiting && change.from.contains(&StepStatus::Pending) {
+        // A lookup error is told anyway: missing a notice is worse than an extra one.
+        let tell = store.tell_workflow_approval(&run.id).unwrap_or(true);
+        if tell {
+            let prompt = change
+                .outputs
+                .as_deref()
+                .and_then(|raw| engine::parse_outputs(raw).get("prompt").cloned());
+            let _ = hands.notify(
+                "Waiting for your approval",
+                Some(&approval_body(run, &change.step, prompt.as_deref())),
+            );
+        }
+    }
+    if change.to == StepStatus::Failed {
+        if let Some(feedback) = changes_feedback(change.outcome.as_deref()) {
+            leave_changes(
+                store,
+                step,
+                &run.id,
+                &change.step,
+                change.outputs.as_deref(),
+                &feedback,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn approval_body(run: &WorkflowRunRow, step: &str, prompt: Option<&str>) -> String {
+    let mut body = format!(
+        "{} in {} is waiting on `{}`.",
+        run.workflow_name, run.workspace_name, step
+    );
+    if let Some(line) = prompt
+        .and_then(|text| text.lines().next())
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        body.push(' ');
+        body.push_str(line);
+    }
+    body
+}
+
+/// The feedback on a request for changes, when this move is that decision.
+fn changes_feedback(outcome: Option<&str>) -> Option<String> {
+    let outcome: StepOutcome = serde_json::from_str(outcome?).ok()?;
+    if outcome.decision == Some(ApprovalDecision::ChangesRequested) {
+        Some(outcome.feedback.unwrap_or_default())
+    } else {
+        None
+    }
+}
+
+/// Store `changes-<step>` and any non-empty output the step declared, even though the step
+/// failed. A later revision reads the artifact by name. Empty feedback becomes a sentence,
+/// so the artifact is never blank.
+fn leave_changes(
+    store: &Store,
+    step: Option<&super::Step>,
+    run_id: &str,
+    step_id: &str,
+    outputs_json: Option<&str>,
+    feedback: &str,
+) -> IpcResult<()> {
+    let outputs = outputs_json.map(engine::parse_outputs).unwrap_or_default();
+    let changes_name = artifact::changes_artifact_name(step_id);
+    if let Some(step) = step {
+        for decl in &step.produces {
+            let ArtifactSource::Output { field } = &decl.source else {
+                continue;
+            };
+            if decl.name == changes_name {
+                continue;
+            }
+            let Some(text) = outputs.get(field).filter(|text| !text.trim().is_empty()) else {
+                continue;
+            };
+            let Ok((body, truncated)) = artifact::require_text(&decl.name, text.clone()) else {
+                continue;
+            };
+            store.upsert_workflow_artifact(
+                run_id,
+                step_id,
+                &NewWorkflowArtifact {
+                    name: decl.name.clone(),
+                    source: "output".into(),
+                    detail: Some(field.clone()),
+                    body,
+                    truncated,
+                },
+            )?;
+        }
+    }
+    let body = if feedback.trim().is_empty() {
+        "Changes requested.".to_owned()
+    } else {
+        feedback.to_owned()
+    };
+    let (body, truncated) = artifact::require_text(&changes_name, body)
+        .unwrap_or(("Changes requested.".to_owned(), false));
+    store.upsert_workflow_artifact(
+        run_id,
+        step_id,
+        &NewWorkflowArtifact {
+            name: changes_name,
+            source: "decision".into(),
+            detail: Some("changes_requested".into()),
+            body,
+            truncated,
+        },
+    )?;
+    Ok(())
 }
 
 /// The workspace's newest live harness session: the conversation records newest first, matched

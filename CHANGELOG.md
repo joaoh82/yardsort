@@ -5,6 +5,18 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **A workflow can wait for your approval.** An `approve` step shows the artifacts it
+  reads and waits for you to approve, reject, or request changes. The steps that need
+  it do not start until you approve. A rejection stops the run, and it is not an
+  approval. Requesting changes needs a note, stops the run for now, and keeps that
+  note as an artifact named `changes-<step>` for a later revision. You decide on the
+  run in the app, or with `ys workflow approve`, `ys workflow reject` and
+  `ys workflow request-changes`. The Floor Manager cannot. A decision is recorded
+  once, with who, when and the note, and one on a finished run is refused. Yardsort
+  tells you when a run starts waiting, unless the schedule or trigger says `never`.
+  A run that is waiting when you quit is still waiting when you open it again.
+  Waiting for a GitHub review is not this. A file written before this still loads.
+  See [An approval](docs/guide/workflows.md#an-approval).
 - **A workflow step can hand a named document to the next step.** `produces` names what a step
   leaves when it succeeds, and a later step `consumes` it by name. The next agent receives that
   text, and the run keeps it so you can read what was passed on, in the app and in

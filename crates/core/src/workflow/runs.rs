@@ -511,6 +511,7 @@ fn texts(action: &Action) -> Vec<&str> {
             .into_iter()
             .flatten()
             .collect(),
+        Action::Approve { prompt, .. } => prompt.as_deref().into_iter().collect(),
         Action::WaitSession { .. } | Action::WaitPrActivity { .. } => Vec::new(),
     }
 }

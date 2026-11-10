@@ -25,8 +25,10 @@ const CUT_NOTE: &str = "\n\n[Yardsort cut this artifact at 32000 characters.]";
 
 /// Cut `text` to [`MAX_CHARS`], noting the cut in the stored body.
 ///
-/// C0 and C1 controls are dropped first, except newline and tab. A body is typed into a
-/// later session, and a control there can close a paste or hide the rest of the text.
+/// C0 and C1 controls are dropped first, except newline and tab, and so are bidi overrides
+/// and zero-width characters. A body is typed into a later session, and a control there can
+/// close a paste or hide the rest of the text. A bidi override can make the rest of the
+/// text read backwards.
 pub fn cap(text: &str) -> (String, bool) {
     let text = strip_controls(text);
     if text.chars().count() <= MAX_CHARS {
@@ -48,14 +50,45 @@ pub fn require_text(name: &str, text: String) -> Result<(String, bool), String> 
     Ok((body, truncated))
 }
 
-/// Drop C0 and C1 controls. Newline and tab stay, so a document keeps its lines.
-fn strip_controls(text: &str) -> String {
-    text.chars()
-        .filter(|ch| {
-            let code = u32::from(*ch);
-            *ch == '\n' || *ch == '\t' || !((code <= 0x1F) || (0x80..=0x9F).contains(&code))
-        })
-        .collect()
+/// Drop C0 and C1 controls, bidi overrides and zero-width characters. Newline and tab stay,
+/// so a document keeps its lines.
+pub(crate) fn strip_controls(text: &str) -> String {
+    text.chars().filter(|ch| !is_hidden(*ch)).collect()
+}
+
+/// A character that must not be stored in an artifact or a decision.
+///
+/// Controls other than newline and tab, bidi overrides and isolates (`U+202A`–`U+202E`,
+/// `U+2066`–`U+2069`), bidi marks, and zero-width characters. Left in, a control can close a
+/// paste and a bidi override can reverse the text a person reads before they approve it.
+fn is_hidden(ch: char) -> bool {
+    if ch == '\n' || ch == '\t' {
+        return false;
+    }
+    let code = u32::from(ch);
+    code <= 0x1F
+        || (0x80..=0x9F).contains(&code)
+        || (0x202A..=0x202E).contains(&code)
+        || (0x2066..=0x2069).contains(&code)
+        || matches!(
+            code,
+            0x200B | 0x200C | 0x200D | 0x200E | 0x200F | 0x061C | 0x2060 | 0xFEFF
+        )
+}
+
+/// Who decided, with controls and bidi marks removed, kept short. Empty becomes `cli`.
+pub(crate) fn actor_name(raw: &str) -> String {
+    let cleaned: String = strip_controls(raw).trim().chars().take(200).collect();
+    if cleaned.is_empty() {
+        "cli".to_owned()
+    } else {
+        cleaned
+    }
+}
+
+/// The artifact a request for changes leaves, so a later revision can consume it by name.
+pub fn changes_artifact_name(step_id: &str) -> String {
+    format!("changes-{step_id}")
 }
 
 /// Why `path` cannot be an artifact file, before it is read. A path that still has
@@ -392,12 +425,31 @@ mod tests {
         assert!(error.contains("secret"), "{error}");
     }
 
+    /// The same case on Windows. Creating a symlink needs a privilege many CI accounts do not
+    /// have, and then the test skips rather than failing the build.
+    #[cfg(windows)]
+    #[test]
+    fn a_link_to_a_secret_file_is_not_read_on_windows() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join(".env"), "TOKEN=1").unwrap();
+        let link = root.path().join("notes.md");
+        if let Err(error) = std::os::windows::fs::symlink_file(root.path().join(".env"), &link) {
+            eprintln!("skipping: cannot create a symlink ({error})");
+            return;
+        }
+        let error = read_file(root.path(), "notes.md").unwrap_err();
+        assert!(error.contains("secret"), "{error}");
+    }
+
     #[test]
     fn control_characters_are_dropped_from_an_artifact() {
-        let (text, truncated) =
-            require_text("spec", "be\u{0007} kind\r\n\tline\u{009b}".into()).unwrap();
+        let (text, truncated) = require_text(
+            "spec",
+            "be\u{0007} kind\r\n\tline\u{009b}\u{202E}abc\u{200B}\u{2066}x\u{FEFF}".into(),
+        )
+        .unwrap();
         assert!(!truncated);
-        assert_eq!(text, "be kind\n\tline");
+        assert_eq!(text, "be kind\n\tlineabcx");
         let error = require_text("spec", "\u{0001}\r".into()).unwrap_err();
         assert!(error.contains("empty"), "{error}");
     }

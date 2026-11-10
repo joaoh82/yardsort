@@ -9,9 +9,10 @@
 //! is also how `ys` knows the app is running, and it keeps two apps on one profile from driving
 //! the same run twice.
 
+use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Mutex, PoisonError};
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock, PoisonError};
+use std::time::{Duration, Instant};
 
 use pty_host::{HostEvent, SessionInfo, TermSize};
 use serde::Serialize;
@@ -21,7 +22,7 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_specta::Event;
 use yardsort_core::forge::Gh;
 use yardsort_core::launch::{HarnessRequest, Launch};
-use yardsort_core::workflow::driver::{self, Hands, PrAsk};
+use yardsort_core::workflow::driver::{self, Conversation, Hands, PrAsk};
 
 use crate::state::AppState;
 
@@ -31,9 +32,12 @@ pub mod commands;
 /// timeouts are this precise.
 const TICK: Duration = Duration::from_secs(1);
 
-/// How long the driver waits for one transcript. Past this, the step fails and the read is
-/// left to finish on its own, so one large conversation cannot stall every run.
-const TRANSCRIPT_WAIT: Duration = Duration::from_secs(5);
+/// How long one transcript read may take before the step fails. The driver thread does not
+/// wait this long: it peeks, and asks again on the next tick, reusing the same read.
+const TRANSCRIPT_LIMIT: Duration = Duration::from_secs(20);
+
+/// How long the first peek waits, so a short transcript finishes on the same tick.
+const TRANSCRIPT_PEEK: Duration = Duration::from_millis(100);
 
 /// The size an agent is started at. Its tab resizes it when the window shows it.
 const SIZE: TermSize = TermSize {
@@ -132,6 +136,75 @@ fn drive(handle: &AppHandle, woken: &Receiver<()>) {
     }
 }
 
+struct TranscriptJob {
+    started: Instant,
+    rx: Receiver<Result<Option<String>, String>>,
+}
+
+type TranscriptKey = (String, String, bool);
+
+fn transcript_jobs() -> &'static Mutex<HashMap<TranscriptKey, TranscriptJob>> {
+    static JOBS: OnceLock<Mutex<HashMap<TranscriptKey, TranscriptJob>>> = OnceLock::new();
+    JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Peek at the read for this session. The first call starts one thread. Later calls reuse it.
+/// After [`TRANSCRIPT_LIMIT`] the step fails and that thread is left to finish on its own.
+fn poll_transcript(
+    handle: &AppHandle,
+    workspace_id: &str,
+    record: &str,
+    raw: bool,
+) -> Result<Conversation, String> {
+    let key = (workspace_id.to_owned(), record.to_owned(), raw);
+    let mut jobs = transcript_jobs()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if !jobs.contains_key(&key) {
+        let (tx, rx) = mpsc::channel();
+        let handle = handle.clone();
+        let workspace_id = workspace_id.to_owned();
+        let record = record.to_owned();
+        let spawned = std::thread::Builder::new()
+            .name("artifact-transcript".into())
+            .spawn(move || {
+                let _ = tx.send(read_transcript(&handle, &workspace_id, &record, raw));
+            });
+        if let Err(error) = spawned {
+            return Err(format!(
+                "Could not read that session's conversation: {error}"
+            ));
+        }
+        jobs.insert(
+            key.clone(),
+            TranscriptJob {
+                started: Instant::now(),
+                rx,
+            },
+        );
+    }
+    let job = jobs.remove(&key).expect("the job was just inserted");
+    let started = job.started;
+    drop(jobs);
+    let wait = TRANSCRIPT_PEEK.saturating_sub(started.elapsed());
+    match job.rx.recv_timeout(wait) {
+        Ok(result) => result.map(Conversation::Ready),
+        Err(RecvTimeoutError::Timeout) if started.elapsed() >= TRANSCRIPT_LIMIT => {
+            Err("Reading that conversation took too long, so it was not copied.".into())
+        }
+        Err(RecvTimeoutError::Timeout) => {
+            transcript_jobs()
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(key, job);
+            Ok(Conversation::Later)
+        }
+        Err(RecvTimeoutError::Disconnected) => {
+            Err("Could not read that session's conversation.".into())
+        }
+    }
+}
+
 /// One session's conversation, read from the harness files. Called off the driver thread.
 fn read_transcript(
     handle: &AppHandle,
@@ -223,7 +296,7 @@ impl Hands for AppHands<'_> {
         workspace_id: &str,
         pty_id: &str,
         raw: bool,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Conversation, String> {
         use yardsort_core::launch::RECORD_LABEL;
         // The terminal id is not the session record. The record is what the transcript is filed
         // under. Tool output is not in those turns, and this does not read the terminal scrollback.
@@ -235,32 +308,12 @@ impl Hands for AppHands<'_> {
             .find(|session| session.id.0 == pty_id)
             .and_then(|session| session.labels.get(RECORD_LABEL).cloned());
         let Some(record) = record else {
-            return Ok(None);
+            return Ok(Conversation::Ready(None));
         };
         // Reading a transcript walks the harness's files. That stays off this thread, which is
-        // also what moves every other run on, and it does not wait on it forever.
-        let handle = self.handle.clone();
-        let workspace_id = workspace_id.to_owned();
-        let (tx, rx) = mpsc::channel();
-        let spawned = std::thread::Builder::new()
-            .name("artifact-transcript".into())
-            .spawn(move || {
-                let _ = tx.send(read_transcript(&handle, &workspace_id, &record, raw));
-            });
-        if let Err(error) = spawned {
-            return Err(format!(
-                "Could not read that session's conversation: {error}"
-            ));
-        }
-        match rx.recv_timeout(TRANSCRIPT_WAIT) {
-            Ok(result) => result,
-            Err(RecvTimeoutError::Timeout) => {
-                Err("Reading that conversation took too long, so it was not copied.".into())
-            }
-            Err(RecvTimeoutError::Disconnected) => {
-                Err("Could not read that session's conversation.".into())
-            }
-        }
+        // also what moves every other run on. One read per session is reused until it finishes
+        // or it has had TRANSCRIPT_LIMIT. A second call does not start a second thread.
+        poll_transcript(self.handle, workspace_id, &record, raw)
     }
 
     fn pr_posts(&self, workspace_id: &str, pr: &yardsort_core::workflow::runs::PrFacts) -> PrAsk {

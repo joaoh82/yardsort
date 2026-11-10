@@ -77,10 +77,11 @@ pub fn decide(level: FloorManagerLevel, action: Action, command: &str) -> Decisi
         Action::Read => Decision::Allow,
         Action::Deny => Decision::Refuse(format!(
             "The Floor Manager cannot do this, at any permission: {command}\n\
-             Deleting a workspace (with or without --force), closing a task, and attaching \
-             to another terminal are refused here. Merging, approving and editing project \
-             files are not ys commands; they stay off limits, and a shell command that is \
-             not ys is not this gate."
+             Deleting a workspace (with or without --force), closing a task, attaching \
+             to another terminal, and deciding a workflow approval are refused here. \
+             Merging, approving a pull request, and editing project files are not ys \
+             commands; they stay off limits, and a shell command that is not ys is not \
+             this gate."
         )),
         Action::Act => match level {
             FloorManagerLevel::ReadOnly => Decision::Refuse(format!(

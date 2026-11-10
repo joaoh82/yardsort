@@ -33,6 +33,31 @@ pub use parse::{parse, step_lines};
 /// The schema version this build reads. A file asking for a later one is listed, not run.
 pub const SCHEMA_VERSION: u32 = 1;
 
+/// Why a decision was not recorded, in the words the window and `ys` show. `None` when it was.
+pub fn approval_refusal(
+    result: &crate::store::ApprovalWrite,
+    run: &str,
+    step: &str,
+) -> Option<String> {
+    use crate::store::ApprovalWrite;
+    let message = match result {
+        ApprovalWrite::Recorded => return None,
+        ApprovalWrite::MissingRun => format!("No run {run:?}. `ys workflow runs` lists them."),
+        ApprovalWrite::MissingStep => format!("Run {run} has no step `{step}`."),
+        ApprovalWrite::RunEnded { status } => {
+            format!("Run {run} has already ended ({status}).")
+        }
+        ApprovalWrite::NotAnApproval => format!("Step `{step}` is not an approval."),
+        ApprovalWrite::NotWaiting => format!("Step `{step}` is not waiting for approval."),
+        ApprovalWrite::AlreadyDecided => format!("Step `{step}` already has a decision."),
+        ApprovalWrite::FeedbackRequired => "Say what should change.".to_owned(),
+        ApprovalWrite::NotADecision => {
+            "That is not a decision. Use approved, rejected, or changes requested.".to_owned()
+        }
+    };
+    Some(message)
+}
+
 /// Files bigger than this are not read. A workflow is a page of text, not a data set.
 pub const MAX_FILE_BYTES: u64 = 256 * 1024;
 
@@ -110,9 +135,9 @@ pub struct Step {
     pub needs: Vec<String>,
     /// Whether a failed verdict fails this step and stops the run.
     ///
-    /// Only some actions accept it. Today that is `run_test`. Absent means it is not a gate,
-    /// so a failed verdict still succeeds the step. A later action that judges something, an
-    /// approval for example, uses the same flag.
+    /// `run_test` accepts the flag. Absent means that step is not a gate, so a failed verdict
+    /// still succeeds it. An `approve` step is always a gate: a rejection or a request for
+    /// changes stops the run. `is_gate` is what the engine reads.
     #[serde(default)]
     pub gate: bool,
     /// Named documents this step leaves when it succeeds. A later step reads one by name.
@@ -130,8 +155,10 @@ pub struct Step {
 
 impl Step {
     /// Whether a failed [`engine::StepOutcome`] fails this step and stops the run.
+    ///
+    /// An approval is always a gate, even when the file leaves `gate` out.
     pub fn is_gate(&self) -> bool {
-        self.gate
+        self.gate || matches!(self.action, Action::Approve { .. })
     }
 }
 
@@ -182,6 +209,12 @@ pub enum Action {
     },
     /// Tell the person who started the run.
     Notify { title: String, body: Option<String> },
+    /// Wait until a person approves, rejects, or requests changes. Always a gate. Waiting for
+    /// a GitHub review is [`Action::WaitPrActivity`], not this. Leaves `decision` and `feedback`.
+    Approve {
+        prompt: Option<String>,
+        timeout_secs: Option<u32>,
+    },
 }
 
 impl Action {
@@ -194,6 +227,7 @@ impl Action {
             Action::WaitPrActivity { .. } => "wait_pr_activity",
             Action::RunTest { .. } => "run_test",
             Action::Notify { .. } => "notify",
+            Action::Approve { .. } => "approve",
         }
     }
 
@@ -204,6 +238,7 @@ impl Action {
             "wait_session" => &["outcome"],
             "wait_pr_activity" => &["count", "latest_url"],
             "run_test" => &["run", "verdict", "summary"],
+            "approve" => &["decision", "feedback"],
             _ => &[],
         }
     }
