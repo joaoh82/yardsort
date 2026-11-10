@@ -474,6 +474,8 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
     // app are still in it, which is why this comes before the records are settled.
     let handle = app.handle().clone();
     let spool_root = data_dir.clone();
+    let heard = std::sync::Arc::new(terminal::Heard::default());
+    let hearing = heard.clone();
     let connected = daemon::connect(
         &data_dir,
         std::sync::Arc::new(move |event| {
@@ -492,6 +494,12 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
             if let Some(listener) = handle.try_state::<triggers::Listener>() {
                 listener.observe(&event);
             }
+            // A session `ys` started gets a tab, the first time it is heard from. Finding out
+            // asks the daemon, which cannot answer on the thread that delivers its events.
+            if let Some(id) = hearing.first(&event) {
+                let (handle, id) = (handle.clone(), id.to_owned());
+                std::thread::spawn(move || terminal::announce_if_cli(&handle, &id));
+            }
             let _ = terminal::PtyHostEvent(event).emit(&handle);
         }),
     );
@@ -502,6 +510,7 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
         .into_iter()
         .map(|session| session.id.0)
         .collect();
+    heard.already(alive.iter().cloned());
     let settled = yardsort_core::runtime::settle_at_start(&store, &data_dir, &alive)?;
 
     app.manage(state::AppState::new(

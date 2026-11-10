@@ -23,6 +23,57 @@ pub use yardsort_core::launch::{
 #[derive(Debug, Clone, Serialize, Type, tauri_specta::Event)]
 pub struct PtyHostEvent(pub HostEvent);
 
+/// The sessions this app has heard from.
+///
+/// The daemon tells every client about every session, including the ones `ys` started from a
+/// terminal. A session's first word is the first the app knows of it, which is when the window
+/// is told to give it a tab — and, when `ys workspace new` made it, to show its workspace.
+#[derive(Default)]
+pub struct Heard(std::sync::Mutex<std::collections::HashSet<String>>);
+
+impl Heard {
+    /// Sessions already there, which the window picks up on its own when it loads.
+    pub fn already(&self, ids: impl IntoIterator<Item = String>) {
+        self.0.lock().unwrap().extend(ids);
+    }
+
+    /// The session's id, when this event is the first heard from it. An exit is the last, so
+    /// its session is forgotten then, and the set does not grow for as long as the app runs.
+    pub fn first<'a>(&self, event: &'a HostEvent) -> Option<&'a str> {
+        let (HostEvent::Busy { id } | HostEvent::Quiet { id, .. } | HostEvent::Exited { id, .. }) =
+            event;
+        let mut heard = self.0.lock().unwrap();
+        let first = if matches!(event, HostEvent::Exited { .. }) {
+            !heard.remove(&id.0)
+        } else {
+            heard.insert(id.0.clone())
+        };
+        first.then_some(id.0.as_str())
+    }
+}
+
+/// If `ys` started session `id`, tell the window, as for one a workflow started. Blocks on the
+/// daemon, so it is not for the thread that delivers its events.
+pub fn announce_if_cli(handle: &AppHandle, id: &str) {
+    use tauri::Manager;
+    use tauri_specta::Event;
+    let Some(state) = handle.try_state::<AppState>() else {
+        return;
+    };
+    let Some(session) = state.host.list().into_iter().find(|s| s.id.0 == id) else {
+        return;
+    };
+    let Some(workspace_id) = yardsort_core::launch::started_by_cli(&session) else {
+        return;
+    };
+    crate::activity::launched(&state);
+    let _ = crate::workflows::SessionStarted {
+        workspace_id: workspace_id.to_owned(),
+        session_id: session.id.0.clone(),
+    }
+    .emit(handle);
+}
+
 /// Terminal output, sent over the channel as raw bytes rather than JSON: the webview receives
 /// an `ArrayBuffer` it can hand straight to xterm.js.
 ///
@@ -206,4 +257,47 @@ pub async fn env_info(app: AppHandle, reload: bool) -> IpcResult<EnvInfo> {
         Ok(EnvInfo::from(&*env))
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pty_host::ExitInfo;
+
+    fn busy(id: &str) -> HostEvent {
+        HostEvent::Busy {
+            id: SessionId(id.into()),
+        }
+    }
+
+    /// Only a session's first event is news; one already running when the app started, or
+    /// already heard from, is not. An exit is the last word, heard once.
+    #[test]
+    fn a_session_is_news_only_the_first_time_it_is_heard_from() {
+        let heard = Heard::default();
+        heard.already(["running-at-start".to_owned()]);
+        assert_eq!(heard.first(&busy("running-at-start")), None);
+
+        assert_eq!(heard.first(&busy("new")), Some("new"));
+        assert_eq!(heard.first(&busy("new")), None);
+        let quiet = HostEvent::Quiet {
+            id: SessionId("new".into()),
+            busy_ms: 10,
+        };
+        assert_eq!(heard.first(&quiet), None);
+        let exited = |id: &str| HostEvent::Exited {
+            id: SessionId(id.into()),
+            exit: ExitInfo {
+                code: 0,
+                success: true,
+                signal: None,
+            },
+        };
+        assert_eq!(heard.first(&exited("new")), None, "heard from before");
+        assert_eq!(
+            heard.first(&exited("silent")),
+            Some("silent"),
+            "a session that exits without a word is still news"
+        );
+    }
 }

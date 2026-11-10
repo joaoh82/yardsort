@@ -1157,7 +1157,7 @@ export const ipc = {
 
   onHostEvent: (handler: (event: HostEvent) => void) =>
     events.ptyHostEvent.listen((event) => handler(event.payload)),
-  /** A workflow run started a session the window did not ask for; it should get a tab. */
+  /** A workflow, a device or `ys` started a session the window did not ask for: give it a tab. */
   onSessionStarted: (handler: (workspaceId: string) => void) =>
     events.sessionStarted.listen((event) => handler(event.payload.workspaceId)),
 

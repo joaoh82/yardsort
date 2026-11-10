@@ -3005,7 +3005,7 @@ export type SessionRef =
 { step: string };
 
 /**
- *  A workflow run, or a device through Remote, started a session in a workspace: the window
+ *  A workflow run, a device through Remote, or `ys` started a session in a workspace: the window
  *  should show it as a tab, and the workspace if it is new.
  */
 export type SessionStarted = {

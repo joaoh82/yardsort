@@ -134,6 +134,10 @@ It keeps working after this command returns. Open Yardsort to watch.
 The project can be named or given by id. If the harness you asked for is not configured or not
 installed, nothing is created at all — no branch, no folder, no record.
 
+If Yardsort is open on the same profile, the workspace shows in the sidebar as soon as the agent
+prints anything, with the agent in a tab; the tab stays in the background, so whatever you are
+looking at stays on screen. If it is not open, both are there when it next starts.
+
 ### `ys workspace delete <workspace>`
 
 Removes the folder and forgets the workspace, including its session history. **The branch is

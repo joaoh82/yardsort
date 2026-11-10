@@ -37,7 +37,7 @@ const SIZE: TermSize = TermSize {
     rows: 30,
 };
 
-/// A workflow run, or a device through Remote, started a session in a workspace: the window
+/// A workflow run, a device through Remote, or `ys` started a session in a workspace: the window
 /// should show it as a tab, and the workspace if it is new.
 #[derive(Debug, Clone, Serialize, Type, tauri_specta::Event)]
 #[serde(rename_all = "camelCase")]
