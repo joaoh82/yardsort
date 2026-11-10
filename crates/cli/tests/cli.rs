@@ -567,6 +567,11 @@ fn ask_first_posts_the_comment_that_was_shown() {
 
 /// A trusted Floor Manager starts an agent. That agent must not see the marker, or its own
 /// `ys` is gated, and it must not see the settings directory either.
+///
+/// Windows is covered by `a_daemon_is_not_handed_the_floor_managers_marker_or_settings_directory`
+/// in the core. Starting the detached daemon from the Windows CI runner is refused, so this
+/// full launch stays here, where a daemon can be started.
+#[cfg(unix)]
 #[test]
 fn a_trusted_floor_manager_does_not_hand_its_marker_to_the_agent_it_starts() {
     let fx = Fixture::new();
@@ -638,55 +643,29 @@ fn a_trusted_floor_manager_does_not_hand_its_marker_to_the_agent_it_starts() {
 
 /// A harness that writes the Floor Manager's variables, then `ran`, and stays up.
 ///
-/// On Unix it is a shell script. On Windows it is a `.cmd`, which the launcher runs through
-/// `cmd.exe`. An unset variable is a blank line, not the `%NAME%` cmd leaves behind.
+/// An unset variable is a blank line.
+#[cfg(unix)]
 fn harness_that_prints_the_marker(dir: &std::path::Path, seen: &std::path::Path) -> PathBuf {
-    #[cfg(unix)]
-    {
-        let agent = dir.join("fake-agent");
-        yardsort_core::program::testing::executable(
-            &agent,
-            format!(
-                "#!/bin/sh\nprintf '%s\\n' \"${{YARDSORT_COORDINATOR-}}\" > '{0}'\n\
-                 printf '%s\\n' \"${{YARDSORT_COORDINATOR_CONFIRM_WAIT-}}\" >> '{0}'\n\
-                 printf '%s\\n' \"${{YARDSORT_CONFIG_DIR-}}\" >> '{0}'\n\
-                 printf '%s\\n' \"${{SWITCHYARD_CONFIG_DIR-}}\" >> '{0}'\n\
-                 printf '%s\\n' ran >> '{0}'\nsleep 30\n",
-                seen.display(),
-            ),
-        );
-        agent
-    }
-    #[cfg(windows)]
-    {
-        let agent = dir.join("fake-agent.cmd");
-        let seen = seen.display().to_string();
-        let mut script = String::from("@echo off\r\nsetlocal EnableExtensions\r\n");
-        let mut first = true;
-        for name in [
-            "YARDSORT_COORDINATOR",
-            "YARDSORT_COORDINATOR_CONFIRM_WAIT",
-            "YARDSORT_CONFIG_DIR",
-            "SWITCHYARD_CONFIG_DIR",
-        ] {
-            let redirect = if first { ">" } else { ">>" };
-            first = false;
-            // `echo(` so a value of `1` is text, not a redirection handle (`echo 1>file`).
-            script.push_str(&format!(
-                "if defined {name} (\r\n  echo(%{name}%{redirect}\"{seen}\"\r\n) else (\r\n  echo({redirect}\"{seen}\"\r\n)\r\n",
-            ));
-        }
-        script.push_str(&format!(
-            "echo(ran>>\"{seen}\"\r\nping -n 31 127.0.0.1 >nul\r\n"
-        ));
-        std::fs::write(&agent, script).unwrap();
-        agent
-    }
+    let agent = dir.join("fake-agent");
+    yardsort_core::program::testing::executable(
+        &agent,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"${{YARDSORT_COORDINATOR-}}\" > '{0}'\n\
+             printf '%s\\n' \"${{YARDSORT_COORDINATOR_CONFIRM_WAIT-}}\" >> '{0}'\n\
+             printf '%s\\n' \"${{YARDSORT_CONFIG_DIR-}}\" >> '{0}'\n\
+             printf '%s\\n' \"${{SWITCHYARD_CONFIG_DIR-}}\" >> '{0}'\n\
+             printf '%s\\n' ran >> '{0}'\nsleep 30\n",
+            seen.display(),
+        ),
+    );
+    agent
 }
 
 /// Stops the daemon this test started, including when an assertion fails first.
+#[cfg(unix)]
 struct DaemonStop(PathBuf);
 
+#[cfg(unix)]
 impl Drop for DaemonStop {
     fn drop(&mut self) {
         if let Some(client) =
