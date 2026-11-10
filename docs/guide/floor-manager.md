@@ -155,8 +155,8 @@ The agent is started with:
 
 - `YARDSORT_DATA_DIR` set to your profile, so `ys` reads the same projects the window shows;
 - `YARDSORT_CONFIG_DIR` set to the folder that holds `settings.toml`. On Linux that is not the
-  data directory. Agents it starts do not inherit this, so a data directory they set for
-  themselves keeps its own settings;
+  data directory. Yardsort removes a value set for it from every agent it launches, and from the
+  terminal daemon, so a data directory an agent sets for itself keeps that profile's own settings;
 - `YARDSORT_COORDINATOR` set, which is what makes `ys` enforce the permission. The value is
   ignored: the level is the setting, read on every command;
 - the folder that holds this copy of Yardsort's own `ys` first on its `PATH`, so it uses the

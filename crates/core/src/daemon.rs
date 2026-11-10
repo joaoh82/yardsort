@@ -567,10 +567,12 @@ mod tests {
         assert!(!now.exists(), "a second daemon was started");
     }
 
-    /// The daemon is started with the Floor Manager's environment and then keeps it. On Windows
-    /// every later terminal inherits that environment, so the marker and the settings directory
-    /// have to be gone before the process is created. A detached daemon cannot be started from
-    /// every Windows runner, so this asks a normal child, with the same scrub.
+    /// `spawn_daemon` scrubs `YARDSORT_COORDINATOR`, `YARDSORT_COORDINATOR_CONFIRM_WAIT`,
+    /// `YARDSORT_CONFIG_DIR` and `SWITCHYARD_CONFIG_DIR` before the process exists. On Windows
+    /// every later terminal inherits that environment. A detached daemon cannot be started from
+    /// every Windows runner, so this asks a normal child with the same scrub. `cleaned`, which
+    /// is what an agent is handed directly, is covered by
+    /// `the_floor_managers_marker_does_not_reach_a_child`.
     #[test]
     fn a_daemon_is_not_handed_the_floor_managers_marker_or_settings_directory() {
         let dir = tempfile::tempdir().unwrap();

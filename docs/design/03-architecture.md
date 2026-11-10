@@ -731,8 +731,10 @@ One harness session with a `coordinator` label and no `workspace` label. It is s
 again when the permission setting changes, describing the level that is set. Its environment
 adds `YARDSORT_DATA_DIR` for the profile, `YARDSORT_CONFIG_DIR` for the directory that holds
 `settings.toml` (on Linux that is not the data directory), `YARDSORT_COORDINATOR` so `ys`
-enforces that level, and puts the folder of the bundled `ys` first on `PATH`. Child agents and
-the daemon are not given the marker or `YARDSORT_CONFIG_DIR`. The level is read from settings
+enforces that level, and puts the folder of the bundled `ys` first on `PATH`. That config
+directory is given to this process only: a user-set `YARDSORT_CONFIG_DIR` is removed from every
+agent the app launches, and from the daemon. Child agents are not given the marker either. The
+level is read from settings
 on every `ys` command: read only refuses a start or a write, ask first waits for a yes the window
 records, and trusted allows the ones that are not destructive. Delete, close and attach are
 refused at every level. It reaches the rest of Yardsort only through `ys`: no new IPC surface

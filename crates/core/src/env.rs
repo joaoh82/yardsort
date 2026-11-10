@@ -146,14 +146,14 @@ fn cleaned(vars: BTreeMap<String, String>) -> BTreeMap<String, String> {
 }
 
 /// The Floor Manager's marker, the test-only wait that rides with it, and the settings
-/// directory that launch was given.
+/// directory.
 ///
-/// An agent the Floor Manager starts is not the Floor Manager. Leaving the marker in the
-/// environment `ys` hands to a harness gates that agent's own `ys` (workspace done, memory
-/// propose, a test). Leaving `YARDSORT_CONFIG_DIR` does the other half of that: the child
-/// keeps the real settings file after someone points `YARDSORT_DATA_DIR` at a throwaway
-/// database. On Windows the daemon copies the environment it was spawned with into later
-/// terminals, so the same names are removed there too.
+/// Every environment handed to an agent goes through here, not only one the Floor Manager
+/// starts. Leaving the marker in the environment `ys` hands to a harness gates that agent's own
+/// `ys` (workspace done, memory propose, a test). Leaving `YARDSORT_CONFIG_DIR` does the other
+/// half: an agent keeps the real settings file after someone points `YARDSORT_DATA_DIR` at a
+/// throwaway database. On Windows the daemon copies the environment it was spawned with into
+/// later terminals, so the same names are removed there too.
 fn without_coordinator(mut vars: BTreeMap<String, String>) -> BTreeMap<String, String> {
     let markers = [
         crate::coordinator::ENV,
@@ -646,6 +646,8 @@ mod tests {
         );
     }
 
+    /// `cleaned` drops the marker, the test wait, and both settings-directory names, whatever
+    /// their case. What remains is the rest of the environment an agent is given.
     #[test]
     fn the_floor_managers_marker_does_not_reach_a_child() {
         let vars: BTreeMap<String, String> = [

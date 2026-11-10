@@ -77,8 +77,9 @@ itself. `ys` checks that the desktop app holds the profile lock. If it does not,
 refused at once. If it does, `ys` writes `<data dir>/coordinator/confirm/<uuid>.json` and polls
 for `<uuid>.answer` (`yes` or `no`) until the app writes it, the lock drops, or ten minutes
 pass. `ys` touches the request while it waits. One that has not been touched for a few seconds
-is dropped, and so is an answer file left behind with no request, so a command that was killed
-does not stay in the dialog until the ten minutes run out. The window polls the same folder and
+is hidden, and comes back when it is touched again. It is removed only once it is older than the
+ten minute wait, and so is an answer file left behind with no request, so a command that was
+killed does not stay in the dialog for the whole wait. The window polls the same folder and
 shows **Allow** / **Don't allow**. Answering writes the file. It does not run the command: the
 process that is waiting is the one that parsed it. If nothing is waiting, the window says so
 instead of recording an answer nothing will run.
