@@ -1,0 +1,25 @@
+{
+  "api": 2,
+  "hook": "event",
+  "payload": {
+    "id": "evt_00000000000fixture15",
+    "created": 1794296205932,
+    "type": "permission.asked",
+    "location": {
+      "directory": "/tmp/yardsort-fixture/repo"
+    },
+    "data": {
+      "id": "per_00000000000fixture01",
+      "sessionID": "ses_00000000000fixture01",
+      "action": "shell",
+      "resources": ["ls"],
+      "save": ["ls *"],
+      "source": {
+        "type": "tool",
+        "messageID": "msg_00000000000fixture03",
+        "id": "call_f151158d52d34a73b44b0b7a"
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

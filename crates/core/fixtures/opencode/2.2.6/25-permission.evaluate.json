@@ -1,0 +1,17 @@
+{
+  "api": 2,
+  "hook": "permission.evaluate",
+  "payload": {
+    "sessionID": "ses_00000000000fixture01",
+    "agent": "build",
+    "action": "shell",
+    "resources": ["ls"],
+    "source": {
+      "type": "tool",
+      "messageID": "msg_00000000000fixture03",
+      "id": "call_f151158d52d34a73b44b0b7a"
+    },
+    "effect": "ask"
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

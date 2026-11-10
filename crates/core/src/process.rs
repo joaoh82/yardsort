@@ -72,6 +72,11 @@ impl Group {
         self.child.wait()
     }
 
+    /// The child's standard output, to read, when it was piped.
+    pub fn stdout(&mut self) -> Option<std::process::ChildStdout> {
+        self.child.stdout.take()
+    }
+
     /// The child's standard input, to write to and then drop, when it was piped.
     pub fn stdin(&mut self) -> Option<std::process::ChildStdin> {
         self.child.stdin.take()

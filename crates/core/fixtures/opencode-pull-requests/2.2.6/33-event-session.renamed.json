@@ -1,0 +1,22 @@
+{
+  "api": 2,
+  "hook": "event",
+  "payload": {
+    "id": "evt_00000000000fixture23",
+    "created": 1794296228389,
+    "type": "session.renamed",
+    "durable": {
+      "aggregateID": "ses_00000000000fixture01",
+      "seq": 24,
+      "version": 1
+    },
+    "location": {
+      "directory": "/tmp/yardsort-fixture/repo"
+    },
+    "data": {
+      "sessionID": "ses_00000000000fixture01",
+      "title": "gh and MCP PR creation"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

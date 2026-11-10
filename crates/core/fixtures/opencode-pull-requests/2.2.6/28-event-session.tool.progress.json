@@ -1,0 +1,33 @@
+{
+  "api": 2,
+  "hook": "event",
+  "payload": {
+    "id": "evt_00000000000fixture20",
+    "created": 1794296227773,
+    "type": "session.tool.progress",
+    "location": {
+      "directory": "/tmp/yardsort-fixture/repo"
+    },
+    "data": {
+      "sessionID": "ses_00000000000fixture01",
+      "assistantMessageID": "msg_00000000000fixture03",
+      "id": "call_00_6pxjdviucm2xvc1rligerr3z",
+      "metadata": {
+        "toolCalls": [
+          {
+            "tool": "github.create_pull_request",
+            "status": "running",
+            "input": {
+              "owner": "example",
+              "repo": "lib",
+              "title": "Bump",
+              "head": "bump",
+              "base": "main"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

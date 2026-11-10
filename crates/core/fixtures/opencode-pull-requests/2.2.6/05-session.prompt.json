@@ -1,0 +1,14 @@
+{
+  "api": 2,
+  "hook": "session.prompt",
+  "payload": {
+    "sessionID": "ses_00000000000fixture01",
+    "messageID": "msg_00000000000fixture01",
+    "prompt": {
+      "text": "Run this exact shell command: gh pr create --title Bump --body Bump. Then call the create_pull_request tool of the github MCP server with owner example, repo lib, title Bump, head bump and base main. Reply with the two links you got, nothing else.",
+      "files": []
+    },
+    "delivery": "steer"
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

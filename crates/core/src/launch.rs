@@ -359,9 +359,24 @@ impl Launcher<'_> {
                 }
                 Some(activity::opencode::HARNESS_ID) if self.activity.capture_opencode => {
                     let existing = self.env.vars.get(activity::opencode::CONFIG_ENV).cloned();
+                    // OpenCode 2 is armed differently from 1, and only the program can say
+                    // which it is.
+                    let folder = cwd
+                        .as_deref()
+                        .map(std::path::PathBuf::from)
+                        .filter(|dir| dir.is_dir())
+                        .unwrap_or_else(std::env::temp_dir);
+                    let major = resolved.program.as_deref().and_then(|program| {
+                        activity::opencode::major_version(self.env, program, &folder)
+                    });
                     (
-                        activity::opencode::arm(&resolved.args, self.data_dir, existing.as_deref())
-                            .map(|variable| resolved.env.push(variable)),
+                        activity::opencode::arm(
+                            &mut resolved.args,
+                            self.data_dir,
+                            existing.as_deref(),
+                            major,
+                        )
+                        .map(|variable| resolved.env.push(variable)),
                         activity::opencode::METHOD,
                     )
                 }
@@ -2105,6 +2120,82 @@ mod tests {
             .unwrap()
             .iter()
             .any(|d| d.name == "hooks_not_armed"));
+    }
+
+    /// An OpenCode that says it is 2 is given its plugin as a folder, and a server of its own:
+    /// `--standalone`, before everything else on its command line.
+    #[cfg(unix)]
+    #[test]
+    fn an_opencode_2_launch_is_given_its_plugin_and_a_server_of_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher::default();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let program = bin.join("opencode-two");
+        crate::program::testing::executable(
+            &program,
+            "#!/bin/sh\n[ \"$1\" = --version ] && echo 'opencode v2.2.6'\nexit 0\n",
+        );
+        let mut vars: std::collections::BTreeMap<String, String> = std::env::vars().collect();
+        let path = format!(
+            "{}:{}",
+            bin.display(),
+            vars.get("PATH").cloned().unwrap_or_default()
+        );
+        vars.insert("PATH".into(), path);
+        let env = Arc::new(ShellEnv {
+            vars,
+            source: EnvSource::Process,
+            warning: None,
+        });
+        let harnesses = [HarnessOverride {
+            id: "opencode".into(),
+            command: Some("opencode-two".into()),
+            ..Default::default()
+        }];
+        let on = ActivitySettings {
+            capture_opencode: true,
+            ..Default::default()
+        };
+        let request = Launch::Harness(HarnessRequest {
+            id: "opencode".into(),
+            model: None,
+            effort: None,
+            prompt: Some("hello".into()),
+            handoff: false,
+            skip_memory: false,
+            quiet_memory: false,
+            skip_context: false,
+            fork_packet: None,
+        });
+        launcher(&store, &host, &env, &harnesses, &on, dir.path())
+            .in_workspace(&ws, request, SIZE)
+            .unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        assert_eq!(
+            plan.args.first().map(String::as_str),
+            Some("--standalone"),
+            "{:?}",
+            plan.args
+        );
+        assert_eq!(
+            plan.args.get(1).map(String::as_str),
+            Some("--prompt"),
+            "{:?}",
+            plan.args
+        );
+        let (_, content) = plan
+            .env
+            .iter()
+            .find(|(k, _)| k == activity::opencode::CONFIG_ENV)
+            .expect("the configuration variable");
+        let config: serde_json::Value = serde_json::from_str(content).unwrap();
+        assert_eq!(
+            config["plugins"][0],
+            activity::opencode::file_url(&activity::opencode::plugin_dir(dir.path()))
+        );
     }
 
     #[test]

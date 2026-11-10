@@ -38,8 +38,8 @@ plugin: OpenCode imports the module. `--pure` skips every configured plugin, our
 
 | Question                    | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **How the plugin is given** | `OPENCODE_CONFIG_CONTENT={"plugin":["file:///<data-dir>/activity/hooks/opencode.js"]}` in the launch's environment. Merged with the user's configuration by OpenCode itself; if the launch environment already carries the variable, our plugin is added to its `plugin` list rather than replacing it, and configuration that is not JSON is left alone (`hooks_not_armed`). No file of the user's is written; `~/.config/opencode` is not visited.                                                                                                                                                                                                     |
-| **Where the plugin lives**  | `<data-dir>/activity/hooks/opencode.js`, written from a template in the binary before each launch, so it names the current executable. `ResolvedLaunch` gained `env` for this: a launch may carry variables of its own, appended to the user's environment by `Launcher::start`.                                                                                                                                                                                                                                                                                                                                                                         |
+| **How the plugin is given** | `OPENCODE_CONFIG_CONTENT={"plugin":["file:///<data-dir>/activity/hooks/opencode.js"]}` in the launch's environment (since [§ 8](#8--opencode-2), the file `opencode/index.js` there, and its folder under `plugins` for OpenCode 2). Merged with the user's configuration by OpenCode itself; if the launch environment already carries the variable, our plugin is added to its `plugin` list rather than replacing it, and configuration that is not JSON is left alone (`hooks_not_armed`). No file of the user's is written; `~/.config/opencode` is not visited.                                                                                    |
+| **Where the plugin lives**  | `<data-dir>/activity/hooks/opencode.js` (since [§ 8](#8--opencode-2), `opencode/index.js`), written from a template in the binary before each launch, so it names the current executable. `ResolvedLaunch` gained `env` for this: a launch may carry variables of its own, appended to the user's environment by `Launcher::start`.                                                                                                                                                                                                                                                                                                                      |
 | **What the plugin does**    | Subscribes to `event`, `chat.message`, `tool.execute.before`, `tool.execute.after`, `permission.ask`. `reduce()` — pure, exported, tested under vitest against the fixtures — keeps a whitelist of fields of the raw payload's own shape and drops everything else: no prompt text, command, output, file content, title or error message leaves OpenCode's process. Each kept call is handed to this executable in hook mode on **stdin** (a tool's output can exceed an argument's length; the reduced payload never does, but stdin has no limit to think about). Spawned as an argument list; fire and forget; every hook swallows its own failures. |
 | **`--pure`**                | Respected by not arming: the user asked for no external plugins.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | **Both shapes, one reader** | The Rust normalizer reads the raw hook shapes; the plugin's reduced shape is a subset with the same paths, plus `directory` at the top. Rust tests run over the raw fixtures, so they prove reduction even of what the plugin does not send.                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -114,12 +114,11 @@ other call's output stays in OpenCode's process. Recorded against **1.18.34**
 
 ## 7 · Risks and the next slice
 
-- **OpenCode 2 has shipped, and the plugin does not load there.** Found on 2026-11-09 against
+- **OpenCode 2 has shipped, and the plugin did not load there.** Found on 2026-11-09 against
   2.2.6, while recording [38](38-pull-requests-elsewhere.md)'s slice 3: a plugin given as a
   file is refused (`configured plugin path must be a directory`), and one given as a folder must
   export a default definition with an `id` and an `effect` or `setup` function, where 1.x calls
-  every export as a plugin function. An OpenCode 2 launch reports nothing. Porting the plugin to
-  2's form, and re-recording, is its own piece of work; until then the adapter is 1.x's.
+  every export as a plugin function. Ported on 2026-11-10: [§ 8](#8--opencode-2).
 - **The plugin runs inside the agent.** It is the one adapter whose code can, in principle, affect
   the harness: every hook is wrapped, the spawn is fire-and-forget, and nothing is awaited. A
   plugin that could not spawn the executable — after an update moved it — reports nothing and
@@ -131,3 +130,86 @@ other call's output stays in OpenCode's process. Recorded against **1.18.34**
   token total from `usage.reported` (Codex and OpenCode), `agent.notified` /
   `approval.requested` driving the sidebar badge, and the session-id follow-up so Resume can
   name a Codex or OpenCode conversation instead of taking the latest in the directory.
+
+## 8 · OpenCode 2
+
+Ported on 2026-11-10 against **OpenCode 2.2.6**. Both versions are kept: one module, one adapter
+with a mapping for each.
+
+**What was found.**
+
+- **The plugin's form.** A plugin is a folder (its `index.js`), listed under `plugins`, not
+  `plugin`, and its default export is a definition `{ id, setup(ctx) }`. `setup` registers hooks
+  on the domains — `ctx.tool.hook("execute.before" | "execute.after")`,
+  `ctx.session.hook("prompt")`, `ctx.permission.hook("evaluate")` — and reads the bus through
+  `ctx.event.subscribe({ types, signal })`; it answers with a cleanup. OpenCode 1 from 1.18.29
+  starts an object entry point through its `server` function, so one default export with `id`,
+  `server` and `setup` serves both, and each ignores the other's config key. Checked by hand
+  against 1.18.34 and 2.2.6, with both keys given: each started its own entry point, once.
+  `OPENCODE_CONFIG_CONTENT` still merges with the user's configuration.
+- **Where sessions run.** The TUI starts a background service (`opencode serve --service`) and
+  every later launch on the machine connects to it, and it outlives the launch that started it.
+  It loads plugins from _its own_ environment. Seen with two TUIs in two folders, each given a
+  different capture plugin and run id: the second was served by the first's plugin, with the
+  first's `YARDSORT_RUN_ID`, and its own plugin never loaded. A plugin there would put every
+  later OpenCode session on the machine — one started outside Yardsort, too — on a run that has
+  ended. `--standalone` gives a launch a private server (`serve --stdio`) that inherits its
+  environment and ends with it, and the sessions are kept in the same database, so
+  `opencode session list` and `--continue` find them. OpenCode 1 refuses `--standalone` as an
+  unknown flag, so the launch has to know which it is starting.
+- **The shapes**, recorded with `scripts/record-opencode.sh` (now version-aware: `--standalone
+--auto`, and a rule that every shell command asks, so a permission is asked for and granted)
+  into `crates/core/fixtures/opencode/2.2.6/`, and with `scripts/record-pr-creation.sh opencode`
+  into `crates/core/fixtures/opencode-pull-requests/2.2.6/`. Every delivery is
+  `{api: 2, hook, payload, directory}`. A hook gets one event, not `input` and `output`: a tool's
+  is `{tool, sessionID, messageID, id, input}`, and its end adds `status` (`completed` or
+  `error`) with `result {output, content, metadata}` or `error`, so a failed call is reported
+  directly. The shell tool is `shell`, its exit in `result.output.exit`; a file tool's argument
+  is `path`; `write` says `existed`. The bus is new: `session.created` (only when the TUI makes the
+  session; `run` makes its own before a plugin listens), `session.step.started` / `.ended` (the
+  step's model at its start; `tokens`, `cost`, `finish` and the `files` it changed at its end),
+  `session.execution.succeeded` / `.failed` / `.interrupted` (the turn), `permission.asked`
+  (`action`, `resources` — the command or path — and `source.id`, the call) and
+  `permission.replied` (`reply`). There is no file-edited event. An MCP tool runs inside the
+  `execute` tool, whose hooks fire around the inner call's, under the same call id.
+
+**Decisions.**
+
+| Question               | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One plugin or two      | One module, `opencode-plugin.js`, written to `activity/hooks/opencode/index.js`: given as the file to `plugin` and as the folder to `plugins`. Its one export is the default; the pure functions hang off it under `testing`.                                                                                                                                                                                                                                                                                                                                                               |
+| Telling 1 from 2       | `opencode --version`, run with the launch's environment, in its folder (a version manager's shim answers for what that folder pins), before arming: five seconds at most, in a process group ended if it is still running. An answer is kept a minute per executable, folder and modification time; no answer is not kept. Only a program whose name starts `opencode` is asked (a wrapper such as `npx` would answer for itself), and only a line that is a version (`1.18.34`, `opencode v2.2.6`) answers. Known, only that version's key is added to the configuration; not known, both. |
+| The shared service     | An OpenCode 2 launch is given `--standalone`, first, unless it has it. One whose arguments name `--server` is not armed (`hooks_not_armed`). A plugin that finds `--service` in its process's arguments registers nothing: an unknown version, or a service started some other way, reports nothing rather than reporting on the wrong run.                                                                                                                                                                                                                                                 |
+| Hooks and events       | `tool.execute.before` / `.after`, `session.prompt` (the length only), and the bus events above. Not `permission.evaluate`, which runs for every action that is allowed too; `permission.asked` is the one that waits for you.                                                                                                                                                                                                                                                                                                                                                               |
+| What the plugin adds   | From its own memory, and marked as such: a failed call's `durationMs` (from its start, keyed by tool and id) and a step's `model` (from its start).                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Writes, for provenance | No file event exists, so a completed `write` or `edit` is marked `wrote` and counted as the write; OpenCode 1's tool calls are still not counted beside its file event. `patch` writes too, but its call names no path, so it is not counted. The step's end lists the files it changed; that list is not sent, as nothing reads it yet.                                                                                                                                                                                                                                                    |
+| Pull requests          | As for 1: the shell's `gh pr create` hands on its command and printed output, a GitHub `…create_pull_request` tool its `content`; the executable keeps the link alone. The inner MCP call carries the link; the `execute` around it hands on nothing.                                                                                                                                                                                                                                                                                                                                       |
+
+| OpenCode 2                                     | Event                                                                  |
+| ---------------------------------------------- | ---------------------------------------------------------------------- |
+| `session.created`                              | `session.started` (session, version, parent)                           |
+| `session.prompt` hook                          | `prompt.submitted` (characters)                                        |
+| `tool.execute.before`                          | `tool.started` (tool, call, path)                                      |
+| `tool.execute.after`, `completed`              | `tool.completed` (exit code, truncated, created, `wrote`, a PR's link) |
+| `tool.execute.after`, `error`                  | `tool.failed` (duration)                                               |
+| `permission.asked` / `permission.replied`      | `approval.requested` (the action as `tool`) / `approval.resolved`      |
+| `session.step.ended`                           | `usage.reported` (tokens, a total summed from them, cost, model)       |
+| `session.execution.succeeded` / `.interrupted` | `turn.completed` (`interrupted: true` for the second)                  |
+| `session.execution.failed`                     | `turn.failed` (the error's type)                                       |
+
+**Verification.** `opencode::tests::the_recorded_opencode_2_run_maps…`,
+`…a_pull_request_an_opencode_2_call_opened…`, `…opencode_2_sessions_turns_and_failures…`,
+`…an_opencode_2_launch_is_given_a_server_of_its_own`, `…the_version_is_read…`,
+`…the_program_is_asked_which_opencode_it_is` (stand-ins), and
+`launch::tests::an_opencode_2_launch_is_given_its_plugin_and_a_server_of_its_own`;
+`opencodePlugin.test.ts` plays the 2.2.6 fixtures through `reduceV2` (nothing of the prompt,
+command, output, file or error leaves it) and `setup` against a stand-in context (its hooks, its
+subscription and its cleanup; nothing at all in the shared service). By hand on Linux, through
+`ys workspace new … --harness opencode` in a throwaway profile: the real 2.2.6 TUI started as
+`opencode --standalone --prompt …`, its private server carrying the run's id, and the timeline
+showed `session.started`, `prompt.submitted`, `write` started and done with `hello.txt`, `read`
+failed with `missing.txt` and 14 ms, `shell` done with exit 0, two `usage.reported` with
+`opencode/big-pickle`, and `turn.completed`, nothing of the prompt or a command in any payload.
+And the guard: a TUI started without `--standalone`, given Yardsort's plugin and a workspace's
+ids, ran its turn in the shared service and left nothing in the inbox. The app window's rows,
+and macOS and Windows, are [08 § 14](08-manual-checklist.md#14--opencode-reporting)'s.
