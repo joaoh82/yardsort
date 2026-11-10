@@ -23,6 +23,80 @@ pub use yardsort_core::launch::{
 #[derive(Debug, Clone, Serialize, Type, tauri_specta::Event)]
 pub struct PtyHostEvent(pub HostEvent);
 
+/// The sessions this app has heard from.
+///
+/// The daemon tells every client about every session, including the ones `ys` started from a
+/// terminal. A session's first word is the first the app knows of it, which is when the window
+/// is told to give it a tab — and, when `ys workspace new` made it, to show its workspace.
+#[derive(Default)]
+pub struct Heard(std::sync::Mutex<std::collections::HashSet<String>>);
+
+impl Heard {
+    /// Sessions already there, which the window picks up on its own when it loads.
+    pub fn already(&self, ids: impl IntoIterator<Item = String>) {
+        self.0.lock().unwrap().extend(ids);
+    }
+
+    /// The session's id, when this event is the first heard from it. An exit is the last, so
+    /// its session is forgotten then, and the set does not grow for as long as the app runs.
+    pub fn first<'a>(&self, event: &'a HostEvent) -> Option<&'a str> {
+        let (HostEvent::Busy { id } | HostEvent::Quiet { id, .. } | HostEvent::Exited { id, .. }) =
+            event;
+        let mut heard = self.0.lock().unwrap();
+        let first = if matches!(event, HostEvent::Exited { .. }) {
+            !heard.remove(&id.0)
+        } else {
+            heard.insert(id.0.clone())
+        };
+        first.then_some(id.0.as_str())
+    }
+}
+
+/// How often, and how many times, to look for a session the daemon does not list yet. A
+/// session's first output can come before the spawn has added it to the list — the pump starts
+/// first — and the list is asked for over a connection of its own, so it can lose that race.
+const LOOK_EVERY: std::time::Duration = std::time::Duration::from_millis(50);
+const LOOKS: u32 = 40;
+
+/// If `ys` started session `id`, tell the window, as for one a workflow started. Blocks on the
+/// daemon, and waits for it to list the session, so it is not for the thread that delivers its
+/// events.
+pub fn announce_if_cli(handle: &AppHandle, id: &str) {
+    use tauri::Manager;
+    use tauri_specta::Event;
+    let Some(state) = handle.try_state::<AppState>() else {
+        return;
+    };
+    let Some(workspace_id) = cli_workspace(|| state.host.list(), id, LOOK_EVERY, LOOKS) else {
+        return;
+    };
+    crate::activity::launched(&state);
+    let _ = crate::workflows::SessionStarted {
+        workspace_id,
+        session_id: id.to_owned(),
+    }
+    .emit(handle);
+}
+
+/// The workspace of session `id` when `ys` started it. A session not listed yet is looked for
+/// again, `looks` times in all, `every` apart; one that is listed is decided on at once.
+fn cli_workspace(
+    list: impl Fn() -> Vec<SessionInfo>,
+    id: &str,
+    every: std::time::Duration,
+    looks: u32,
+) -> Option<String> {
+    for look in 1..=looks {
+        if let Some(session) = list().into_iter().find(|s| s.id.0 == id) {
+            return yardsort_core::launch::started_by_cli(&session).map(str::to_owned);
+        }
+        if look < looks {
+            std::thread::sleep(every);
+        }
+    }
+    None
+}
+
 /// Terminal output, sent over the channel as raw bytes rather than JSON: the webview receives
 /// an `ArrayBuffer` it can hand straight to xterm.js.
 ///
@@ -206,4 +280,104 @@ pub async fn env_info(app: AppHandle, reload: bool) -> IpcResult<EnvInfo> {
         Ok(EnvInfo::from(&*env))
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pty_host::ExitInfo;
+
+    fn session(id: &str, by: &str) -> SessionInfo {
+        SessionInfo {
+            id: SessionId(id.into()),
+            program: "agent".into(),
+            args: vec![],
+            cwd: None,
+            pid: None,
+            size: TermSize { cols: 80, rows: 24 },
+            labels: [
+                (yardsort_core::launch::LAUNCHED_BY_LABEL.into(), by.into()),
+                (yardsort_core::launch::WORKSPACE_LABEL.into(), "ws-1".into()),
+            ]
+            .into(),
+            state: pty_host::SessionState::Running,
+            has_output: true,
+            busy: true,
+            busy_ms: 0,
+            idle_ms: 0,
+        }
+    }
+
+    /// The daemon can tell of a session's first output before it lists the session: the pump
+    /// starts before the spawn records it. That session is still announced once it is listed,
+    /// and one that is never listed is given up on after the last look.
+    #[test]
+    fn a_session_heard_from_before_the_daemon_lists_it_is_still_found() {
+        let asked = std::cell::Cell::new(0);
+        let list = |by: &'static str, listed_from: u32| {
+            let asked = &asked;
+            move || {
+                asked.set(asked.get() + 1);
+                if asked.get() >= listed_from {
+                    vec![session("other", "cli"), session("new", by)]
+                } else {
+                    vec![session("other", "cli")]
+                }
+            }
+        };
+        let every = std::time::Duration::from_millis(1);
+
+        let found = cli_workspace(list("cli", 3), "new", every, 40);
+        assert_eq!(found.as_deref(), Some("ws-1"));
+        assert_eq!(asked.get(), 3, "asked until it was listed, and no more");
+
+        asked.set(0);
+        assert_eq!(cli_workspace(list("app", 1), "new", every, 40), None);
+        assert_eq!(
+            asked.get(),
+            1,
+            "a session the app started is decided on at once"
+        );
+
+        asked.set(0);
+        assert_eq!(cli_workspace(list("cli", u32::MAX), "new", every, 5), None);
+        assert_eq!(asked.get(), 5, "never listed: given up after the last look");
+    }
+
+    fn busy(id: &str) -> HostEvent {
+        HostEvent::Busy {
+            id: SessionId(id.into()),
+        }
+    }
+
+    /// Only a session's first event is news; one already running when the app started, or
+    /// already heard from, is not. An exit is the last word, heard once.
+    #[test]
+    fn a_session_is_news_only_the_first_time_it_is_heard_from() {
+        let heard = Heard::default();
+        heard.already(["running-at-start".to_owned()]);
+        assert_eq!(heard.first(&busy("running-at-start")), None);
+
+        assert_eq!(heard.first(&busy("new")), Some("new"));
+        assert_eq!(heard.first(&busy("new")), None);
+        let quiet = HostEvent::Quiet {
+            id: SessionId("new".into()),
+            busy_ms: 10,
+        };
+        assert_eq!(heard.first(&quiet), None);
+        let exited = |id: &str| HostEvent::Exited {
+            id: SessionId(id.into()),
+            exit: ExitInfo {
+                code: 0,
+                success: true,
+                signal: None,
+            },
+        };
+        assert_eq!(heard.first(&exited("new")), None, "heard from before");
+        assert_eq!(
+            heard.first(&exited("silent")),
+            Some("silent"),
+            "a session that exits without a word is still news"
+        );
+    }
 }

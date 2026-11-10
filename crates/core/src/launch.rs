@@ -77,6 +77,18 @@ pub const HARNESS_SESSION_LABEL: &str = "harnessSession";
 pub const RECORD_LABEL: &str = "record";
 /// Label carrying the id of the activity run (see [`crate::activity`]) a PTY session is.
 pub const RUN_LABEL: &str = "run";
+/// Label saying who started a session: `app` or `cli` (see [`LaunchedBy`]). A window open on
+/// the same daemon hears about every session, and shows the ones `ys` started as tabs.
+pub const LAUNCHED_BY_LABEL: &str = "launchedBy";
+
+/// The workspace of a session that `ys` started there, which a window open on the same profile
+/// did not ask for and so has no tab for yet. `None` for anything else.
+pub fn started_by_cli(session: &SessionInfo) -> Option<&str> {
+    let by = session.labels.get(LAUNCHED_BY_LABEL)?;
+    (by == LaunchedBy::Cli.as_str())
+        .then(|| session.labels.get(WORKSPACE_LABEL).map(String::as_str))
+        .flatten()
+}
 /// Label carrying the id of the workspace whose run command a PTY session is.
 pub const PROJECT_RUN_LABEL: &str = "projectRun";
 /// Label on an agent that was told about the workspace's other conversations, saying which:
@@ -469,6 +481,10 @@ impl Launcher<'_> {
         }
         plan.env.extend(resolved.env);
         plan.labels = resolved.labels;
+        plan.labels.insert(
+            LAUNCHED_BY_LABEL.to_owned(),
+            self.launched_by.as_str().to_owned(),
+        );
         plan.prompt = resolved.paste_when_ready;
         Ok(self.host.spawn(plan)?)
     }
@@ -987,6 +1003,48 @@ mod tests {
             launched_by: LaunchedBy::Cli,
             data_dir,
         }
+    }
+
+    /// A session `ys` starts says so, which is how a window open on the same daemon knows to
+    /// show it; one the app starts does not, so the window is not told about its own tabs.
+    #[test]
+    fn a_session_ys_starts_is_labelled_for_the_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let harnesses = [shell_harness()];
+        let activity = ActivitySettings::default();
+        let mut launcher = launcher(&store, &host, &env, &harnesses, &activity, dir.path());
+        let start = |launcher: &Launcher<'_>| {
+            launcher
+                .in_workspace(
+                    &ws,
+                    Launch::Harness(HarnessRequest {
+                        id: "sh-agent".into(),
+                        model: None,
+                        effort: None,
+                        prompt: Some("exit 0".into()),
+                        handoff: false,
+                        skip_memory: true,
+                        quiet_memory: true,
+                        skip_context: true,
+                        fork_packet: None,
+                    }),
+                    SIZE,
+                )
+                .unwrap()
+        };
+
+        let from_ys = start(&launcher);
+        assert_eq!(from_ys.labels[LAUNCHED_BY_LABEL], "cli");
+        assert_eq!(started_by_cli(&from_ys), Some(ws.as_str()));
+
+        launcher.launched_by = LaunchedBy::App;
+        let from_app = start(&launcher);
+        assert_eq!(from_app.labels[LAUNCHED_BY_LABEL], "app");
+        assert_eq!(started_by_cli(&from_app), None);
     }
 
     /// With the project sharing its memory, the agent's first message carries the approved

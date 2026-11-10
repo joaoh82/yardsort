@@ -11,6 +11,10 @@ has the downloads and the full commit lists.
   starting, and starts OpenCode 2 with `--standalone`, so that each launch's sessions run in a
   server of its own and are reported on the right run, not in the background service every
   OpenCode on the computer shares. OpenCode 1 needs 1.18.29 or later.
+- **A workspace `ys` makes shows in the open window at once, with its agent in a tab.**
+  `ys workspace new`, `ys task start` and the other `ys` commands that start an agent now put it
+  in the window the moment it prints its first line; before, the workspace waited for the window
+  to be focused again and the agent got no tab until the app was restarted.
 
 ## 0.24.1
 
