@@ -746,6 +746,29 @@ struct ApprovalChallenge {
     rounds: i64,
 }
 
+/// The code a terminal presented, as the check saw it. The write accepts the decision
+/// only when both the attempt count and this hash are still on the row.
+struct CheckedCode {
+    attempts: i64,
+    hash: Vec<u8>,
+}
+
+/// Runs between a successful code check and the decision write, in tests only. A test
+/// uses it to replace the code in that window. Production builds do not have the hook.
+#[cfg(test)]
+fn run_code_check_hook() {
+    CODE_CHECK_HOOK.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().as_mut() {
+            hook();
+        }
+    });
+}
+
+#[cfg(test)]
+thread_local! {
+    static CODE_CHECK_HOOK: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
+}
+
 fn approval_challenge(
     conn: &Connection,
     run_id: &str,
@@ -2528,7 +2551,8 @@ impl Store {
     /// `workflow::waits::decide_in_window` passes that. A terminal with no issued
     /// code, a wrong code, a round count this build will not run, or five wrong codes
     /// already, is refused. The slow check runs before the write transaction. The write
-    /// then checks that the attempt count and the decision are still what the check saw.
+    /// then checks that the attempt count, the code hash, and the decision are still
+    /// what the check saw. A code replaced while the hash runs is not accepted.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn record_workflow_approval(
         &self,
@@ -2556,14 +2580,18 @@ impl Store {
         }
         let actor = crate::workflow::artifact::actor_name(actor);
         // Hash outside the write. A wrong code is counted in its own short transaction.
-        let expected_attempts = if let Some(code) = code {
+        let expected = if let Some(code) = code {
             match self.check_presented_code(run_id, step_id, code)? {
-                Ok(attempts) => Some(attempts),
+                Ok(checked) => Some(checked),
                 Err(refusal) => return Ok(refusal),
             }
         } else {
             None
         };
+        // A restart can replace the code while the slow check above is hashing.
+        // The write below matches the hash that check saw, so the new code is not accepted.
+        #[cfg(test)]
+        run_code_check_hook();
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let run: Option<(String,)> = tx
@@ -2599,11 +2627,11 @@ impl Store {
         if existing.as_ref().is_some_and(|row| row.decision.is_some()) {
             return Ok(ApprovalWrite::AlreadyDecided);
         }
-        if let Some(expected) = expected_attempts {
+        if let Some(expected) = expected.as_ref() {
             let Some(row) = existing.as_ref() else {
                 return Ok(ApprovalWrite::NoCode);
             };
-            if row.attempts != expected {
+            if row.attempts != expected.attempts {
                 return Ok(if row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
                     ApprovalWrite::CodeLocked
                 } else {
@@ -2612,12 +2640,22 @@ impl Store {
             }
         }
         let now = now_ms();
-        let written = if let Some(expected) = expected_attempts {
+        let written = if let Some(expected) = expected.as_ref() {
             tx.execute(
                 "UPDATE workflow_approval_decisions
                  SET decision = ?3, feedback = ?4, actor = ?5, decided_at = ?6
-                 WHERE run_id = ?1 AND step_id = ?2 AND decision IS NULL AND attempts = ?7",
-                params![run_id, step_id, decision, feedback, actor, now, expected],
+                 WHERE run_id = ?1 AND step_id = ?2 AND decision IS NULL
+                   AND attempts = ?7 AND code_hash = ?8",
+                params![
+                    run_id,
+                    step_id,
+                    decision,
+                    feedback,
+                    actor,
+                    now,
+                    expected.attempts,
+                    expected.hash
+                ],
             )?
         } else if existing.is_some() {
             tx.execute(
@@ -2636,11 +2674,18 @@ impl Store {
         };
         if written == 0 {
             let again = approval_challenge(&tx, run_id, step_id)?;
+            if again.as_ref().is_some_and(|row| row.decision.is_some()) {
+                return Ok(ApprovalWrite::AlreadyDecided);
+            }
             if again
                 .as_ref()
                 .is_some_and(|row| row.attempts >= crate::workflow::code::ATTEMPT_LIMIT)
             {
                 return Ok(ApprovalWrite::CodeLocked);
+            }
+            // The code was replaced, or the attempt count moved, after the check.
+            if expected.is_some() {
+                return Ok(ApprovalWrite::WrongCode);
             }
             return Ok(ApprovalWrite::AlreadyDecided);
         }
@@ -2664,12 +2709,14 @@ impl Store {
 
     /// Check a presented code before any decision is written. A wrong code increments the
     /// attempt count in its own transaction, and only while that count is still what was read.
+    /// The hash returned is the one that matched, so the later write can refuse a code a
+    /// restart replaced while this check was hashing.
     fn check_presented_code(
         &self,
         run_id: &str,
         step_id: &str,
         code: &str,
-    ) -> StoreResult<Result<i64, ApprovalWrite>> {
+    ) -> StoreResult<Result<CheckedCode, ApprovalWrite>> {
         let Some(row) = approval_challenge(&self.conn(), run_id, step_id)? else {
             return Ok(Err(ApprovalWrite::NoCode));
         };
@@ -2688,7 +2735,10 @@ impl Store {
         if !crate::workflow::code::matches(code, &row.salt, &row.hash, rounds) {
             return Ok(Err(self.note_wrong_code(run_id, step_id, row.attempts)?));
         }
-        Ok(Ok(row.attempts))
+        Ok(Ok(CheckedCode {
+            attempts: row.attempts,
+            hash: row.hash,
+        }))
     }
 
     /// Count one wrong code, unless the row changed since it was read.
@@ -4857,6 +4907,79 @@ steps:
                 .decision,
             "approved"
         );
+    }
+
+    #[test]
+    fn a_code_replaced_while_it_is_checked_is_not_accepted() {
+        let store = Store::in_memory();
+        waiting_approval(&store, "run-1");
+        let code = store
+            .begin_approval_code("run-1", "sign-off")
+            .unwrap()
+            .unwrap();
+        let original: Vec<u8> = store
+            .conn()
+            .query_row(
+                "SELECT code_hash FROM workflow_approval_decisions
+                 WHERE run_id = 'run-1' AND step_id = 'sign-off'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        // The hook runs after the presented code has matched and before the write,
+        // which is the window a restart reissue has while the hash runs. The pointer
+        // stays valid: the hook runs before this function returns, and is then cleared.
+        let store_ptr: *const Store = &store;
+        CODE_CHECK_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                let store = unsafe { &*store_ptr };
+                // A different hash, attempts left as they are. This is what a restart
+                // reissue stores. No need to hash a real code to prove the write refuses it.
+                store
+                    .save_approval_code(
+                        "run-1",
+                        "sign-off",
+                        "REPLACED",
+                        b"other-salt",
+                        &[9u8; 32],
+                        false,
+                    )
+                    .unwrap();
+            }));
+        });
+        let result = store.record_workflow_approval(
+            "run-1",
+            "sign-off",
+            "approved",
+            None,
+            "ada",
+            Some(&code),
+        );
+        CODE_CHECK_HOOK.with(|hook| *hook.borrow_mut() = None);
+        assert_eq!(result.unwrap(), ApprovalWrite::WrongCode);
+        assert!(store
+            .workflow_approval("run-1", "sign-off")
+            .unwrap()
+            .is_none());
+        let now: Vec<u8> = store
+            .conn()
+            .query_row(
+                "SELECT code_hash FROM workflow_approval_decisions
+                 WHERE run_id = 'run-1' AND step_id = 'sign-off'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_ne!(now, original);
+        let attempts: i64 = store
+            .conn()
+            .query_row(
+                "SELECT attempts FROM workflow_approval_decisions WHERE run_id = 'run-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(attempts, 0);
     }
 
     #[test]
