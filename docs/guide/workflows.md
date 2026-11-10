@@ -233,14 +233,60 @@ What each step does while it runs:
 - **`run_test`** queues one of the workspace's [smoke tests](smoke-tests.md) and waits for its
   verdict. The run shows as a tab in the workspace, like any other. A test whose file you have
   not approved waits for you in Yardsort, and the step waits with it until its timeout. The step
-  succeeds once the test reaches a verdict — whether it passed or failed — so a later step can
-  read that verdict and act on either outcome; it fails only when the run reaches no verdict
-  (cancelled or errored) or does not end in time. It leaves the run's verdict and the summary
+  succeeds once the test reaches a verdict, whether it passed or failed, so a later step can
+  read that verdict and act on either. It fails only when the run reaches no verdict
+  (cancelled or errored) or does not end in time. With `gate: true`, a failed verdict fails
+  the step, skips every other step that has not finished, and stops the run. It leaves the run's verdict and the summary
   `ys test wait` prints for later steps to use.
 - **`notify`** shows a system notification.
 
-A step runs only when every step in its `needs` succeeded. When one fails, the steps after it are
-skipped, and the run fails with that step's reason.
+A step runs only when every step in its `needs` succeeded. When one fails, the steps that need it
+are skipped, and the run fails with that step's reason. A gate that fails also skips the steps
+that do not need it. See [A test that must pass](#a-test-that-must-pass).
+
+### A test that must pass
+
+A `run_test` step with `gate: true` stops the whole run when the smoke test's verdict is a
+failure. Every step that has not finished is skipped, including one that does not list the
+gate in `needs` and one that is still waiting, so a long wait does not keep the run open.
+A step that lists the gate in `needs` says the gate did not succeed. One that does not says
+the gate failed. A smoke test another step was waiting on is cancelled, so it does not keep
+running or keep asking to be approved.
+
+The run's error is a short line. It names the step and then the first line of the report,
+such as failed login (2 of 6 steps passed). The step's note is the full report `ys test wait`
+prints. You see both on the run in the app and in `ys workflow runs --run <id>`.
+`ys workflow runs --run <id> --json` includes the report on the step and its outcome. A
+schedule or a trigger that tells you when a run fails sends that short line. When the reason
+is more than one line, or was cut short, it also says to open Yardsort for the report. A
+`notify` step that needs the test does not run, because its message was written for a pass.
+
+A run you start by hand, with no schedule and no trigger, does not send a system notification
+on its own. The failure is on the run, and in `ys workflow runs --run <id>`.
+
+Without `gate`, a failed test still lets the workflow continue, which is how **Smoke test,
+then tell the agent** reports a failure for the agent to repair.
+
+```yaml
+id: check
+name: Check
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: smoke
+    action: run_test
+    test: login
+    gate: true
+    timeout: 30m
+  - id: tell
+    action: notify
+    needs: [smoke]
+    title: Tests passed
+```
+
+A file written before `gate` existed still loads. Leaving it out, or writing `gate: false`,
+keeps the old behaviour.
 
 **Cancelling** stops the run. Agents it started keep running as ordinary sessions: close them as
 you would any other.
@@ -335,14 +381,14 @@ Every step has an `id`, named the same way as an input, and an `action`. `needs`
 steps that must finish first. A step cannot need itself. Steps that wait for each other in a
 circle are reported, because none of them could ever start.
 
-| Action             | Keys                                                             | What it does                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `start_session`    | `harness` (required), `prompt`, `model`, `effort`, `skip_memory` | Starts an agent in the workspace, like the composer does, with `prompt` as its first message. It opens as a tab there. `harness` is an agent's id, like `claude`, or exactly `{{ inputs.<id> }}` for an input of kind `harness`.                                                                                                                             |
-| `wait_session`     | `session` (required), `until`, `timeout`                         | Waits for a session. `until: settled`, the default, means it has gone quiet after at least 8 seconds of output, or its harness reported a finished turn. `until: exited` means the program has ended.                                                                                                                                                        |
-| `send_to_session`  | `session` (required), `prompt` (required), `timeout`             | Types `prompt` into a running session. It waits until that session is quiet: a busy agent is never interrupted. If the session is gone, the step is skipped.                                                                                                                                                                                                 |
-| `wait_pr_activity` | `kind`, `timeout`                                                | Waits for a new review or comment on the workspace's pull request, since the run started. `kind` is `review`, `comment` or `any`, the default.                                                                                                                                                                                                               |
-| `run_test`         | `test` (required), `inputs`, `timeout`                           | Runs a smoke test in the workspace and waits for its verdict. The step succeeds whether the test passed or failed, so a later step can read `verdict` and act on either; it fails only on no verdict or a timeout. `test` is a test id, or exactly `{{ inputs.<id> }}` for an input of kind `test`. `inputs` is a map of the test's own input ids to values. |
-| `notify`           | `title` (required), `body`                                       | Tells you, with a system notification.                                                                                                                                                                                                                                                                                                                       |
+| Action             | Keys                                                             | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start_session`    | `harness` (required), `prompt`, `model`, `effort`, `skip_memory` | Starts an agent in the workspace, like the composer does, with `prompt` as its first message. It opens as a tab there. `harness` is an agent's id, like `claude`, or exactly `{{ inputs.<id> }}` for an input of kind `harness`.                                                                                                                                                                                                                              |
+| `wait_session`     | `session` (required), `until`, `timeout`                         | Waits for a session. `until: settled`, the default, means it has gone quiet after at least 8 seconds of output, or its harness reported a finished turn. `until: exited` means the program has ended.                                                                                                                                                                                                                                                         |
+| `send_to_session`  | `session` (required), `prompt` (required), `timeout`             | Types `prompt` into a running session. It waits until that session is quiet: a busy agent is never interrupted. If the session is gone, the step is skipped.                                                                                                                                                                                                                                                                                                  |
+| `wait_pr_activity` | `kind`, `timeout`                                                | Waits for a new review or comment on the workspace's pull request, since the run started. `kind` is `review`, `comment` or `any`, the default.                                                                                                                                                                                                                                                                                                                |
+| `run_test`         | `test` (required), `inputs`, `timeout`, `gate`                   | Runs a smoke test in the workspace and waits for its verdict. The step succeeds whether the test passed or failed, so a later step can read `verdict` and act on either; it fails only on no verdict or a timeout. `gate: true` makes a failed verdict fail the step, skip the steps still going, and stop the run. `test` is a test id, or exactly `{{ inputs.<id> }}` for an input of kind `test`. `inputs` is a map of the test's own input ids to values. |
+| `notify`           | `title` (required), `body`                                       | Tells you, with a system notification.                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 A key that belongs to another action is reported as misplaced. `title` on a `start_session` step
 is an example.

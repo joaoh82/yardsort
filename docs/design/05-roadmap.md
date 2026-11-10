@@ -719,6 +719,10 @@ Proposed in [21-workflows](21-workflows.md), after an eight-question design pass
 - [x] Slice 6: docs and pictures. The README's highlight and section, the website's section, the
       quick start, and screenshots of the view and the Run dialog. Recorded in
       [21 § slice 6](21-workflows.md#slice-6-what-shipped).
+- A `run_test` step can be a gate. `gate: true` records a step outcome and stops the run when
+  the smoke test fails, skipping the steps still going and cancelling a smoke test they were
+  waiting on. The run names the first line of the report; the step keeps the rest. Recorded in
+  [21 § test verdict gates](21-workflows.md#test-verdict-gates).
 
 _Exit:_ the code-review workflow runs against a real pull request on all three platforms from the
 window and from `ys`; a busy agent is never written to; every validation error has a failing

@@ -55,7 +55,7 @@ fn allowed(action: &str) -> &'static [&'static str] {
         "wait_session" => &["session", "until", "timeout"],
         "send_to_session" => &["session", "prompt", "timeout"],
         "wait_pr_activity" => &["kind", "timeout"],
-        "run_test" => &["test", "inputs", "timeout"],
+        "run_test" => &["test", "inputs", "timeout", "gate"],
         "notify" => &["title", "body"],
         _ => &[],
     }
@@ -133,6 +133,8 @@ struct RawStep {
     title: Option<Spanned<String>>,
     #[serde(default)]
     body: Option<Spanned<String>>,
+    #[serde(default)]
+    gate: Option<Spanned<bool>>,
 }
 
 impl RawStep {
@@ -155,6 +157,7 @@ impl RawStep {
             ("inputs", at(&self.inputs)),
             ("title", at(&self.title)),
             ("body", at(&self.body)),
+            ("gate", at(&self.gate)),
         ]
         .into_iter()
         .filter_map(|(key, at)| at.map(|at| (key, at)))
@@ -551,6 +554,7 @@ impl Checker<'_> {
             return Step {
                 id,
                 needs,
+                gate: false,
                 action: Action::Notify { title, body: None },
             };
         }
@@ -631,7 +635,15 @@ impl Checker<'_> {
                 body: self.text(&raw.body, scope),
             },
         };
-        Step { id, needs, action }
+        // `allowed` already rejects `gate` on an action that does not take it. Only
+        // `run_test` does, today, so a later action can become a gate without a new field.
+        let gate = action_name == "run_test" && raw.gate.as_ref().is_some_and(|gate| gate.value);
+        Step {
+            id,
+            needs,
+            gate,
+            action,
+        }
     }
 
     /// A test id as written, or exactly one `{{ inputs.<test input> }}`.

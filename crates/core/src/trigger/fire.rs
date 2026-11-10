@@ -812,7 +812,10 @@ pub fn settle(store: &Store) -> IpcResult<Settled> {
                     trigger.name,
                     crate::schedule::fire::ending(&status)
                 ),
-                body: reason.filter(|_| failed).unwrap_or(place),
+                body: match reason.filter(|_| failed) {
+                    Some(reason) => crate::schedule::fire::failure_notice(&reason),
+                    None => place,
+                },
             });
         }
     }

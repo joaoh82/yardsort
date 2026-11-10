@@ -389,7 +389,8 @@ YAML file in your profile: the inputs to ask for, and steps that start an agent,
 settle, type to it once it is quiet, wait for a review on the pull request, and notify you. A
 step names the steps it needs, so the ones that need nothing of each other run side by side.
 Yardsort checks every name and every `{{ variable }}` before it runs anything, and names the line
-and column of each mistake.
+and column of each mistake. A `run_test` step marked `gate: true` stops the run when the smoke
+test fails, skips the steps still going, cancels a smoke test they were waiting on, and says why.
 
 ![Workflows: the built-in code review as a chart, with its file and its runs beside it](docs/images/workflows.png)
 

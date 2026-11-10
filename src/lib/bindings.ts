@@ -789,9 +789,11 @@ export type Action =
 { action: "wait_pr_activity"; kind: PrActivity; timeoutSecs: number | null } | 
 /**
  *  Run a smoke test in the run's workspace and wait for its verdict. The step succeeds once
- *  the test passed or failed — a later step reads `verdict` and acts on either — and fails
- *  only when the run reaches no verdict (cancelled, errored) or does not end in time. Leaves
- *  `run`, `verdict` and `summary` (the text `ys test wait` prints) for later steps.
+ *  the test passed or failed, so a later step can read `verdict` and act on either, and
+ *  fails only when the run reaches no verdict (cancelled, errored) or does not end in time.
+ *  With `gate` on the step, a failed verdict fails the step instead and the run stops,
+ *  skipping every step still going. Leaves `run`, `verdict` and `summary` (the text
+ *  `ys test wait` prints) for later steps.
  */
 { action: "run_test"; test: string; 
 /**  Values for the test's inputs, by input id; may hold `{{ variables }}`. */
@@ -3177,7 +3179,36 @@ export type Step = {
 	 *  run together.
 	 */
 	needs: string[],
+	/**
+	 *  Whether a failed verdict fails this step and stops the run.
+	 * 
+	 *  Only some actions accept it. Today that is `run_test`. Absent means it is not a gate,
+	 *  so a failed verdict still succeeds the step. A later action that judges something, an
+	 *  approval for example, uses the same flag.
+	 */
+	gate?: boolean,
 } & Action;
+
+/**
+ *  What a step concluded, apart from whether its row succeeded or failed.
+ * 
+ *  A step that judges something produces one: a smoke test's verdict today, and later an
+ *  approval or anything a branch will switch on. [`react`] is the one place the run takes
+ *  that verdict. It is stored on the step row, not in `outputs`. `outputs` stay the strings
+ *  a later step reads as `{{ steps.<id>.<field> }}`, and this is not `wait_session`'s
+ *  `outcome` field.
+ */
+export type StepOutcome = {
+	verdict: StepVerdict,
+	/**
+	 *  Why, when the verdict is failed. Null when it passed. A row saved before this
+	 *  field omits it, and that reads the same as null.
+	 */
+	reason?: string | null,
+};
+
+/**  Passed or failed. The words match a smoke test's verdict. */
+export type StepVerdict = "passed" | "failed";
 
 /**  One step, as the card lists it. */
 export type StepWords = {
@@ -3987,6 +4018,8 @@ export type WorkflowStepRun = {
 	endedAt: number | null,
 	outputs: { [key in string]: string },
 	note: string | null,
+	/**  A verdict the step recorded, when it judged something. Absent otherwise. */
+	outcome: StepOutcome | null,
 };
 
 /**  Workflow writing has its own harness preference; commit and PR writers stay workspace-based. */

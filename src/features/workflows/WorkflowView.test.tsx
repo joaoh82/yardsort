@@ -79,6 +79,7 @@ function item(id: string, source: WorkflowItem["source"], extra: Partial<Workflo
         {
           id: "tell",
           needs: [],
+          gate: false,
           action: "notify",
           title: "Hi",
           body: null,
@@ -300,6 +301,7 @@ describe("WorkflowView", () => {
         endedAt: null,
         outputs: {},
         note: "no way",
+        outcome: null,
       },
     ]);
     // A schedule started this run: the list says so, and the open run says which.
@@ -316,7 +318,8 @@ describe("WorkflowView", () => {
     expect(row).toHaveTextContent("scheduled");
     expect(row).toHaveTextContent("triggered");
     await userEvent.setup().click(row);
-    expect(await within(runs).findByText("no way")).toBeInTheDocument();
+    expect(await within(runs).findByText("no way")).toHaveClass("whitespace-pre-wrap");
+    expect(within(runs).getByText("Step `tell` failed: no way")).toHaveClass("whitespace-pre-wrap");
     expect(within(runs).getByText("Notify you")).toBeInTheDocument();
     expect(within(runs).getByText("Scheduled · Nightly")).toBeInTheDocument();
     expect(within(runs).getByText("Triggered · Address reviews")).toBeInTheDocument();
@@ -351,6 +354,7 @@ describe("WorkflowView", () => {
         endedAt: null,
         outputs: {},
         note: "told it",
+        outcome: null,
       },
     ]);
     // Open run, on a trigger's history.

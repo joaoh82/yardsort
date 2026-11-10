@@ -17,7 +17,7 @@ use std::time::Duration;
 use pty_host::{HostError, HostEvent, SessionId, SessionInfo, SessionState, TerminalHost};
 
 use super::engine::{
-    self, Effect, Finish, Inputs, Move, Outputs, PrSeen, SessionFacts, TestRun, World,
+    self, Effect, Finish, Inputs, Move, Outputs, Plan, PrSeen, SessionFacts, TestRun, World,
 };
 use super::runs::{self, Facts, Place};
 use super::PrActivity;
@@ -25,7 +25,7 @@ use crate::error::IpcResult;
 use crate::forge::{PrPost, PrPostKind};
 use crate::git::Git;
 use crate::launch::{HarnessRequest, HARNESS_LABEL, RECORD_LABEL, RUN_LABEL, WORKSPACE_LABEL};
-use crate::store::{now_ms, StepStatus, Store, WorkflowRunRow};
+use crate::store::{now_ms, StepStatus, Store, WorkflowRunRow, WorkflowStepRow};
 
 /// A quiet after at least this much output counts as an agent having settled. The same bar the
 /// window uses to tell finished work from the echo of a keystroke, or of a paste.
@@ -337,6 +337,9 @@ fn move_on(
                 apply(driver, store, &run.id, change)?;
             }
         }
+        if plan.moves.iter().any(|change| change.halt) {
+            cancel_tests_a_halt_skipped(store, &workflow, &steps, &plan)?;
+        }
         let mut delivered = false;
         for effect in plan.effects {
             let step = step_of(&effect).to_owned();
@@ -381,6 +384,36 @@ fn move_on(
         if !delivered {
             return Ok(());
         }
+    }
+    Ok(())
+}
+
+/// A halted plan skipped these steps after they had already queued a smoke test. Cancel
+/// that test, so it does not keep running or keep asking for approval. A test that has
+/// already ended is left as it is.
+fn cancel_tests_a_halt_skipped(
+    store: &Store,
+    workflow: &super::Workflow,
+    steps: &[WorkflowStepRow],
+    plan: &Plan,
+) -> IpcResult<()> {
+    for change in &plan.moves {
+        if change.to != StepStatus::Skipped {
+            continue;
+        }
+        let Some(step) = workflow.steps.iter().find(|step| step.id == change.step) else {
+            continue;
+        };
+        if step.action.name() != "run_test" {
+            continue;
+        }
+        let Some(row) = steps.iter().find(|row| row.step_id == change.step) else {
+            continue;
+        };
+        let Some(test_run) = engine::parse_outputs(&row.outputs).get("run").cloned() else {
+            continue;
+        };
+        store.cancel_test_run(&test_run, "The workflow stopped because a gate failed.")?;
     }
     Ok(())
 }
@@ -431,6 +464,8 @@ fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResu
         change.to,
         change.outputs.as_deref(),
         change.note.as_deref(),
+        change.outcome.as_deref(),
+        change.clear_outcome,
     )?;
     if moved {
         driver.touch();

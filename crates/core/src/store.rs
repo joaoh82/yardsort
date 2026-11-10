@@ -38,6 +38,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0026_remote_computer.sql"),
     include_str!("../migrations/0027_tracked_pull_requests.sql"),
     include_str!("../migrations/0028_tracked_pr_watches.sql"),
+    include_str!("../migrations/0029_workflow_step_outcome.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -452,6 +453,9 @@ pub struct WorkflowStepRow {
     /// A JSON object of strings.
     pub outputs: String,
     pub note: Option<String>,
+    /// A step outcome as JSON, when the step judged something. Null on older rows and on
+    /// steps that produced none. See `workflow::engine::StepOutcome`.
+    pub outcome: Option<String>,
 }
 
 /// A run about to be queued, with its steps in file order as `(step id, action)`.
@@ -2226,7 +2230,8 @@ impl Store {
     pub fn workflow_steps(&self, run_id: &str) -> StoreResult<Vec<WorkflowStepRow>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT run_id, step_id, position, action, status, started_at, ended_at, outputs, note
+            "SELECT run_id, step_id, position, action, status, started_at, ended_at, outputs,
+                    note, outcome
              FROM workflow_step_runs WHERE run_id = ? ORDER BY position",
         )?;
         let rows = stmt.query_map([run_id], |row| {
@@ -2240,6 +2245,7 @@ impl Store {
                 ended_at: row.get(6)?,
                 outputs: row.get(7)?,
                 note: row.get(8)?,
+                outcome: row.get(9)?,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -2258,7 +2264,10 @@ impl Store {
 
     /// Move a step on, only if its run is still running and the step is in one of `from`. False
     /// otherwise, and nothing changes: the run was cancelled, or someone else moved it first.
-    /// `outputs`, when given, replaces the step's outputs.
+    /// `outputs` and `note`, when given, replace those columns. `clear_outcome` sets the
+    /// outcome back to nothing, which a step that starts again needs. Otherwise `outcome`,
+    /// when given, replaces it, and when absent leaves it.
+    #[allow(clippy::too_many_arguments)]
     pub fn move_workflow_step(
         &self,
         run_id: &str,
@@ -2267,6 +2276,8 @@ impl Store {
         to: StepStatus,
         outputs: Option<&str>,
         note: Option<&str>,
+        outcome: Option<&str>,
+        clear_outcome: bool,
     ) -> StoreResult<bool> {
         let now = now_ms();
         let marks = from.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -2276,9 +2287,10 @@ impl Store {
                  started_at = CASE WHEN ?2 THEN started_at ELSE COALESCE(started_at, ?3) END,
                  ended_at = CASE WHEN ?2 THEN ?3 ELSE ended_at END,
                  outputs = COALESCE(?4, outputs),
-                 note = COALESCE(?5, note)
-             WHERE run_id = ?6 AND step_id = ?7 AND status IN ({marks})
-               AND EXISTS (SELECT 1 FROM workflow_runs WHERE id = ?6 AND status = 'running')"
+                 note = COALESCE(?5, note),
+                 outcome = CASE WHEN ?6 THEN NULL ELSE COALESCE(?7, outcome) END
+             WHERE run_id = ?8 AND step_id = ?9 AND status IN ({marks})
+               AND EXISTS (SELECT 1 FROM workflow_runs WHERE id = ?8 AND status = 'running')"
         );
         // A step that goes straight from pending to an end, skipped say, never started, and
         // keeps no start time.
@@ -2288,6 +2300,8 @@ impl Store {
             now.into(),
             outputs.map(str::to_owned).into(),
             note.map(str::to_owned).into(),
+            i64::from(clear_outcome).into(),
+            outcome.map(str::to_owned).into(),
             run_id.to_owned().into(),
             step_id.to_owned().into(),
         ];
@@ -3378,6 +3392,52 @@ mod tests {
         let state = store.ui_state().unwrap();
         assert_eq!(state["selected"], "b");
         assert_eq!(state.len(), 2);
+    }
+
+    /// A database from the version before step outcomes has no `outcome` column. Opening it
+    /// adds the column, and a step that was already there still reads as having none.
+    #[test]
+    fn a_run_saved_before_step_outcomes_still_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("yardsort.db");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            // The schema as it was before 0029_workflow_step_outcome. 0001 is index 0,
+            // so that migration is index 28. A later migration must not become part of
+            // the old database this test opens.
+            assert!(MIGRATIONS[28].contains("workflow_step_runs ADD COLUMN outcome"));
+            upgrade(&mut conn, &MIGRATIONS[..28], None).unwrap();
+            conn.execute(
+                "INSERT INTO workflow_runs
+                 (id, workflow_id, workflow_name, definition, workspace_name, inputs, status,
+                  requested_by, created_at)
+                 VALUES ('run-old', 'demo', 'Demo',
+                         'id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: ping
+    action: notify
+    title: Hi
+', 'fix', '{}', 'succeeded', 'cli', 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO workflow_step_runs (run_id, step_id, position, action, status)
+                 VALUES ('run-old', 'ping', 0, 'notify', 'succeeded')",
+                [],
+            )
+            .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let run = store.workflow_run("run-old").unwrap().unwrap();
+        assert_eq!(run.status, "succeeded");
+        let steps = store.workflow_steps("run-old").unwrap();
+        assert_eq!(steps[0].step_id, "ping");
+        assert_eq!(steps[0].outcome, None);
     }
 
     #[test]

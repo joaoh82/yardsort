@@ -313,6 +313,43 @@ fn an_unknown_action_lists_the_real_ones() {
 }
 
 #[test]
+fn a_run_test_file_from_before_gates_still_loads_and_is_not_a_gate() {
+    let workflow = parse(include_str!("builtin/smoke-then-tell.yaml")).unwrap();
+    let Action::RunTest { test, .. } = &workflow.steps[0].action else {
+        panic!("the built-in starts with run_test");
+    };
+    assert!(
+        !workflow.steps[0].is_gate(),
+        "omitting gate keeps today's behaviour"
+    );
+    assert_eq!(test, "{{ inputs.suite }}");
+}
+
+#[test]
+fn a_run_test_step_can_be_marked_as_a_gate() {
+    let workflow = parse(&with_steps(
+        "  - id: check\n    action: run_test\n    test: login\n    gate: true\n",
+    ))
+    .unwrap();
+    let Action::RunTest { .. } = &workflow.steps[1].action else {
+        panic!("run_test");
+    };
+    assert!(workflow.steps[1].gate);
+    assert!(workflow.steps[1].is_gate());
+}
+
+#[test]
+fn gate_on_another_action_is_named_as_misplaced() {
+    let found = problem(&with_steps(
+        "  - id: go\n    action: notify\n    title: Hi\n    gate: true\n",
+    ));
+    assert!(
+        found.ends_with("`gate` is not something a `notify` step takes."),
+        "{found}"
+    );
+}
+
+#[test]
 fn a_key_on_the_wrong_action_is_named_as_misplaced() {
     let found = problem(&with_steps(
         "  - id: go\n    action: notify\n    title: Hi\n    harness: claude\n",

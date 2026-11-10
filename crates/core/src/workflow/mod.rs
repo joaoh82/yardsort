@@ -107,9 +107,23 @@ pub struct Step {
     /// The steps that must have succeeded before this one starts. Steps whose needs are all met
     /// run together.
     pub needs: Vec<String>,
+    /// Whether a failed verdict fails this step and stops the run.
+    ///
+    /// Only some actions accept it. Today that is `run_test`. Absent means it is not a gate,
+    /// so a failed verdict still succeeds the step. A later action that judges something, an
+    /// approval for example, uses the same flag.
+    #[serde(default)]
+    pub gate: bool,
     /// Flattened, so a step reads `{ id, needs, action: "notify", title }` as the file does.
     #[serde(flatten)]
     pub action: Action,
+}
+
+impl Step {
+    /// Whether a failed [`engine::StepOutcome`] fails this step and stops the run.
+    pub fn is_gate(&self) -> bool {
+        self.gate
+    }
 }
 
 /// What a step does. Every string here may hold `{{ variables }}`; see [`template`].
@@ -146,9 +160,11 @@ pub enum Action {
         timeout_secs: Option<u32>,
     },
     /// Run a smoke test in the run's workspace and wait for its verdict. The step succeeds once
-    /// the test passed or failed — a later step reads `verdict` and acts on either — and fails
-    /// only when the run reaches no verdict (cancelled, errored) or does not end in time. Leaves
-    /// `run`, `verdict` and `summary` (the text `ys test wait` prints) for later steps.
+    /// the test passed or failed, so a later step can read `verdict` and act on either, and
+    /// fails only when the run reaches no verdict (cancelled, errored) or does not end in time.
+    /// With `gate` on the step, a failed verdict fails the step instead and the run stops,
+    /// skipping every step still going. Leaves `run`, `verdict` and `summary` (the text
+    /// `ys test wait` prints) for later steps.
     RunTest {
         test: String,
         /// Values for the test's inputs, by input id; may hold `{{ variables }}`.

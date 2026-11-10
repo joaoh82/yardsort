@@ -9,6 +9,23 @@ use crate::schedule::{set_enabled, IfMissed, ScheduleSpec, ScheduleStanding, Sch
 use crate::store::Store;
 use crate::workflow::runs::Accepting;
 
+#[test]
+fn a_failure_notice_is_the_first_line_kept_short() {
+    let long = format!("Step `smoke` failed: {}\nthen the report", "x".repeat(400));
+    let body = failure_notice(&long);
+    let mut lines = body.lines();
+    let first = lines.next().unwrap();
+    assert_eq!(first.chars().count(), 203, "{first}");
+    assert!(first.ends_with("..."));
+    assert_eq!(lines.next(), Some("Open Yardsort for the report."));
+    assert!(lines.next().is_none());
+    assert_eq!(failure_notice("It broke."), "It broke.");
+    assert_eq!(
+        failure_notice("It broke.\nthen the report"),
+        "It broke.\nOpen Yardsort for the report."
+    );
+}
+
 fn daily() -> ScheduleSpec {
     ScheduleSpec::Daily { time: time(9, 0) }
 }

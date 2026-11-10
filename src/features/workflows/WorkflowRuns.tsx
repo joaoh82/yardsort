@@ -110,7 +110,11 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                         Pull request #{run.pullRequest.number} {run.pullRequest.title}
                       </p>
                     )}
-                    {run.error && <p className="mb-1.5 text-red-400 select-text">{run.error}</p>}
+                    {run.error && (
+                      <p className="mb-1.5 whitespace-pre-wrap text-red-400 select-text">
+                        {run.error}
+                      </p>
+                    )}
                     <ol className="flex flex-col gap-1">
                       {(steps ?? []).map((step) => (
                         <li key={step.stepId} className="flex flex-col">
@@ -129,7 +133,7 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                             </span>
                           </span>
                           {step.note && (
-                            <span className="pl-1 text-[11px] text-ink-muted select-text">
+                            <span className="pl-1 whitespace-pre-wrap text-[11px] text-ink-muted select-text">
                               {step.note}
                             </span>
                           )}
