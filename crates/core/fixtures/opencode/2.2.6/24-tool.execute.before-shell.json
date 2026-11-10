@@ -1,0 +1,16 @@
+{
+  "api": 2,
+  "hook": "tool.execute.before",
+  "payload": {
+    "tool": "shell",
+    "sessionID": "ses_00000000000fixture01",
+    "agent": "build",
+    "messageID": "msg_00000000000fixture03",
+    "id": "call_f151158d52d34a73b44b0b7a",
+    "input": {
+      "command": "ls",
+      "workdir": "/tmp/yardsort-fixture/repo"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

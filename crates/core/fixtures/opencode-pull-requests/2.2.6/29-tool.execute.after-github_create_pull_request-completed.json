@@ -1,0 +1,32 @@
+{
+  "api": 2,
+  "hook": "tool.execute.after",
+  "payload": {
+    "tool": "github_create_pull_request",
+    "sessionID": "ses_00000000000fixture01",
+    "agent": "build",
+    "messageID": "msg_00000000000fixture03",
+    "id": "call_00_6pxjdviucm2xvc1rligerr3z",
+    "input": {
+      "owner": "example",
+      "repo": "lib",
+      "title": "Bump",
+      "head": "bump",
+      "base": "main"
+    },
+    "status": "completed",
+    "result": {
+      "output": {
+        "id": "2989102733",
+        "url": "https://github.com/example/lib/pull/42"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"id\": \"2989102733\", \"url\": \"https://github.com/example/lib/pull/42\"}"
+        }
+      ]
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

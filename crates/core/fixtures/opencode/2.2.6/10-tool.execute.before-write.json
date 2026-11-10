@@ -1,0 +1,16 @@
+{
+  "api": 2,
+  "hook": "tool.execute.before",
+  "payload": {
+    "tool": "write",
+    "sessionID": "ses_00000000000fixture01",
+    "agent": "build",
+    "messageID": "msg_00000000000fixture02",
+    "id": "call_2dddbeb2e45347eabd3eec31",
+    "input": {
+      "path": "/tmp/yardsort-fixture/repo/hello.txt",
+      "content": "hello"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

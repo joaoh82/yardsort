@@ -1,0 +1,16 @@
+{
+  "api": 2,
+  "hook": "event",
+  "payload": {
+    "id": "evt_00000000000fixture02",
+    "created": 1794296224517,
+    "type": "mcp.resources.changed",
+    "location": {
+      "directory": "/tmp/yardsort-fixture/repo"
+    },
+    "data": {
+      "server": "github"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

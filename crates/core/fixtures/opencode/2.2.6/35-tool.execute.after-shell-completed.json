@@ -1,0 +1,36 @@
+{
+  "api": 2,
+  "hook": "tool.execute.after",
+  "payload": {
+    "tool": "shell",
+    "sessionID": "ses_00000000000fixture01",
+    "agent": "build",
+    "messageID": "msg_00000000000fixture03",
+    "id": "call_f151158d52d34a73b44b0b7a",
+    "input": {
+      "command": "ls",
+      "workdir": "/tmp/yardsort-fixture/repo"
+    },
+    "status": "completed",
+    "result": {
+      "output": {
+        "exit": 0,
+        "truncated": false,
+        "output": "hello.txt\n",
+        "status": "completed"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "hello.txt\n"
+        }
+      ],
+      "metadata": {
+        "status": "completed",
+        "truncated": false,
+        "exit": 0
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

@@ -1,0 +1,14 @@
+{
+  "api": 2,
+  "hook": "event",
+  "payload": {
+    "id": "evt_00000000000fixture28",
+    "created": 1794296228959,
+    "type": "location.shutdown",
+    "location": {
+      "directory": "/tmp/yardsort-fixture/repo"
+    },
+    "data": {}
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

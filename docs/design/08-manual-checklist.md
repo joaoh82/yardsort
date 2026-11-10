@@ -295,8 +295,10 @@ the activity timeline** and **Capture what Codex reports** in Settings → Gener
 
 ## 14 · OpenCode reporting
 
-Needs a real OpenCode (1.18.x) logged in. Switch on **Record when agents start and exit**, **Show
-the activity timeline** and **Capture what OpenCode reports** in Settings → General.
+Needs a real OpenCode logged in: run the section with OpenCode 1 (1.18.29 or later) and again with
+OpenCode 2. Switch on **Record when agents start and exit**, **Show the activity timeline** and
+**Capture what OpenCode reports** in Settings → General. OpenCode 2 names its shell tool `shell`
+where 1 says `bash`, and has no _file changed_ row.
 
 | ✓   | Check                                                                                                                                                                                                                                                                                                                                                                           |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -307,7 +309,9 @@ the activity timeline** and **Capture what OpenCode reports** in Settings → Ge
 |     | `~/.config/opencode/opencode.json` is byte-for-byte unchanged, and a plugin of your own under `~/.config/opencode/plugins/` still runs.                                                                                                                                                                                                                                         |
 |     | Switch **Capture** off; start OpenCode again: no `opencode/` rows, and `OPENCODE_CONFIG_CONTENT` is unset in a shell it opens.                                                                                                                                                                                                                                                  |
 |     | Add `--pure` to the OpenCode harness's arguments with Capture on: the launch works, no plugin rows, and `hooks_not_armed` appears among the counters.                                                                                                                                                                                                                           |
-|     | **macOS / Windows:** all of the above; on Windows the plugin is `%APPDATA%\dev.yardsort.app\activity\hooks\opencode.js` and spawns `yardsort.exe --yardsort-hook opencode …`.                                                                                                                                                                                                   |
+|     | **OpenCode 2:** the agent's command line starts `opencode --standalone`, and `opencode service status` says _stopped_ unless something else started it. Start a second OpenCode in another workspace at the same time: each one's rows are in its own workspace. **Resume** the first afterwards: it continues the same conversation.                                           |
+|     | **OpenCode 2:** run `opencode` yourself in a terminal outside Yardsort while one started by Yardsort is open: nothing of yours appears in any timeline.                                                                                                                                                                                                                         |
+|     | **macOS / Windows:** all of the above; on Windows the plugin is `%APPDATA%\dev.yardsort.app\activity\hooks\opencode\index.js` and spawns `yardsort.exe --yardsort-hook opencode …`.                                                                                                                                                                                             |
 
 ## 15 · Grok reporting
 
