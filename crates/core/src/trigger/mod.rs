@@ -760,7 +760,9 @@ fn check_elsewhere(
     Err(IpcError::new(
         "trigger_events",
         format!(
-            "`{}` is about a pull request the workspace tracks in another repository, so a              trigger starts it on that pull request's events: `pr.opened`, `pr.review` and the              other `pr.*`.",
+            "`{}` is about a pull request the workspace tracks in another repository, so a \
+             trigger starts it on that pull request's events: `pr.opened`, `pr.review` and the \
+             other `pr.*`.",
             workflow.id
         ),
     ))
@@ -781,7 +783,8 @@ fn check_pull_request_gone(
             return Err(IpcError::new(
                 "trigger_pull_request_gone",
                 format!(
-                    "`{}` is about an open pull request elsewhere, and after `{}` it is not                      open. Use a workflow about the workspace instead, with `{{{{ event.url }}}}`.",
+                    "`{}` is about an open pull request elsewhere, and after `{}` it is not \
+                     open. Use a workflow about the workspace instead, with `{{{{ event.url }}}}`.",
                     workflow.id,
                     event.as_str()
                 ),
@@ -1045,6 +1048,12 @@ pub fn describe_on(trigger: &TriggerRow, pull_request: Option<u32>) -> String {
                 .replace(
                     "the workspace's pull request",
                     "a pull request it tracks elsewhere",
+                )
+                // "the pull request's checks" first: the possessive of the long name reads
+                // as "the checks on" it.
+                .replace(
+                    "the pull request's checks",
+                    "the checks on a pull request it tracks elsewhere",
                 )
                 .replace("the pull request", "a pull request it tracks elsewhere"),
             Some(number) => event

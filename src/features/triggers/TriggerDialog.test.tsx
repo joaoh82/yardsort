@@ -285,6 +285,10 @@ describe("TriggerDialog", () => {
     await user.click(screen.getByRole("checkbox", { name: "Says its work is done" }));
     expect(offered()).not.toContain("code-review-elsewhere");
     await user.click(screen.getByRole("checkbox", { name: "Says its work is done" }));
+    // Nor once it is merged: it is no longer open.
+    await user.click(screen.getByRole("checkbox", { name: "It is merged" }));
+    expect(offered()).not.toContain("code-review-elsewhere");
+    await user.click(screen.getByRole("checkbox", { name: "It is merged" }));
 
     await user.click(screen.getByRole("checkbox", { name: "Opens" }));
     expect(offered()).toContain("address-review");
@@ -298,6 +302,9 @@ describe("TriggerDialog", () => {
     // Chosen, the workspace's events are not to be had.
     expect(screen.getByRole("checkbox", { name: "Says its work is done" })).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "A review comes in" })).toBeEnabled();
+    // After these it is not open, and the core refuses them.
+    expect(screen.getByRole("checkbox", { name: "It is merged" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "It is closed without merging" })).toBeDisabled();
     expect(
       screen.getByText(/When this workspace tracks a pull request elsewhere, or a draft of one/),
     ).toHaveTextContent("have claude review the pull request on GitHub");

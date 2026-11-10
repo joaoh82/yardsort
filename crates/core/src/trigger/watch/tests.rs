@@ -922,7 +922,27 @@ fn a_workflow_about_one_elsewhere_runs_on_the_pull_requests_events_alone() {
         let error = crate::trigger::add(tx.store(), &tx.fx.data_dir, &forge, &draft, "app", NOW)
             .unwrap_err();
         assert_eq!(error.code, code, "{}", error.message);
+        assert!(
+            !error.message.contains("  "),
+            "one sentence: {}",
+            error.message
+        );
     }
+    // Its checks read as the checks on one, not as a possessive of the long name.
+    let checks = [TriggerEvent::PrChecksFailed];
+    let draft = tx.draft(
+        &checks,
+        &filters,
+        ScheduleTarget::Workflow,
+        "code-review-elsewhere",
+        &reviewer,
+    );
+    let row = crate::trigger::add(tx.store(), &tx.fx.data_dir, &forge, &draft, "app", NOW).unwrap();
+    assert_eq!(
+        crate::trigger::describe(&row),
+        "When the checks on a pull request it tracks elsewhere fail, run the workflow \
+         `code-review-elsewhere`"
+    );
     // A trigger about its own pull request is not one about those elsewhere, whatever it is
     // sent.
     let sent = Filters {

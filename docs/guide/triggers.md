@@ -222,13 +222,19 @@ chosen, the other events are greyed out.
   not news either.
 - **Each counts its own runs.** The cap is per pull request, and two with the same number in
   different repositories are two.
+- **One run at a time, across them.** As for every trigger, one run of a workflow goes at a time
+  in a workspace: while **Address reviews elsewhere** is going for one pull request, a review on
+  another **waits** and starts when that run ends, with everything that came meanwhile. Nothing
+  is lost. This is on purpose: it is usually the same agent that opened them all, and two runs
+  telling it at once would talk over each other.
 - **The run is about the one that set it off**, read again by its link when the run starts:
   `{{ pr.* }}`, `pr.repo` and `pr.clone` are that pull request's, and `session: origin` is the
   agent that opened it while it runs, else the workspace's own agent. One no longer tracked, or
   no longer open, is **refused**, with the reason.
 - **Only the pull request's events.** Such a workflow is always about one pull request, so a
   trigger cannot start it on the workspace's or an agent's events, nor on `pr.merged` or
-  `pr.closed`, after which it is not open.
+  `pr.closed`, after which it is not open. The dialog greys those out once such a workflow is
+  chosen.
 - **A merged or closed one** is told once, as the workspace's own is, then looked at every ten
   minutes rather than every minute, for its reopening. **Stop tracking** one and it is no longer
   watched.

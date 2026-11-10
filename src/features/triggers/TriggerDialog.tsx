@@ -154,7 +154,10 @@ export function TriggerDialog(props: Props) {
   // One about a pull request the workspace tracks elsewhere runs on those pull requests' events,
   // so it is offered for the pull request's events alone.
   const elsewhere = workflow?.trigger.context === "tracked_pull_request";
-  const prEventsOnly = events.every((event) => subjectOf(event) === "pull request");
+  const prEventsOnly = events.every(
+    (event) =>
+      subjectOf(event) === "pull request" && event !== "pr.merged" && event !== "pr.closed",
+  );
   const elsewhereWorkflows = prEventsOnly
     ? workflows.filter(
         (item) =>
@@ -476,7 +479,13 @@ export function TriggerDialog(props: Props) {
                 <span className="mt-1 text-[12px] text-ink-faint">{group}</span>
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                   {EVENTS.filter((e) => e.group === group).map((e) => {
-                    const notElsewhere = elsewhere && subjectOf(e.id) !== "pull request";
+                    // About an open pull request elsewhere: not the workspace's events, and not
+                    // the two after which it is not open.
+                    const notElsewhere =
+                      elsewhere &&
+                      (subjectOf(e.id) !== "pull request" ||
+                        e.id === "pr.merged" ||
+                        e.id === "pr.closed");
                     const other = (subject !== null && subjectOf(e.id) !== subject) || notElsewhere;
                     return (
                       <label
@@ -484,7 +493,7 @@ export function TriggerDialog(props: Props) {
                         className={`${check} ${other ? "opacity-40" : ""}`}
                         title={
                           notElsewhere
-                            ? "The workflow is about a pull request this workspace tracks elsewhere, so it runs on that pull request's events."
+                            ? "The workflow is about an open pull request this workspace tracks elsewhere, so it runs on that pull request's events while it is open."
                             : other
                               ? "A trigger is about one kind of thing — an agent, the pull request, or the workspace. Make a second trigger for this."
                               : e.id

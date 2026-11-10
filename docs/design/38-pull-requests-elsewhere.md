@@ -534,18 +534,29 @@ elsewhere was refused a trigger.
   there when this shipped — only seeds: their reviews from before are not news.
 - **Counted by link.** A fire's subject is `pr:<link>` for one elsewhere, never `pr:<number>`, so
   the cap, the gathering and `from: anyone`'s own-run check never mix lib#7 with the project's #7.
+- **One run at a time per workspace, kept on purpose.** Found in review: the lock that makes a
+  fire wait (`workflow_active_in`, and the door's `workflow_already_running`) is per workflow and
+  workspace, so while `address-review-elsewhere` waits up to two hours for its agent on one
+  tracked pull request, a review on another is **waiting**, retried at every tick and started
+  when the first run ends, with what came meanwhile. Making it per subject was weighed and left:
+  the agent that opened them is usually the same one, and two runs typing into it at once would
+  collide. The cap stays per link. A workspace that wants two addressed side by side needs the
+  lock per tracked pull request in both places.
 - **The run is about the one that set it off.** At the fire, the tracked row is found by the
   subject's link — gone if it was untracked: **refused** — and read again by its link through
   `Look::tracked_pull_request`, which in the app is slice 5's `for_a_run`: open, with its clone and
   the conversation that opened it. That goes to the door as `Request::tracked`.
 - **Refused when saved:** such a workflow on any event but `pr.*`, and on `pr.merged` or
-  `pr.closed`, after which it is not open.
+  `pr.closed`, after which it is not open. The dialog greys those out too once such a workflow
+  is chosen (found in review).
 - **Address reviews elsewhere** (`address-review-elsewhere`) is the new built-in for the second of
   that workspace's triggers: `address-review`, telling `session: origin` — the agent that opened
   it — with the commands by link. It does not use `pr.clone`, so it runs without the clone.
 - **The window.** The trigger dialog offers such workflows under **On a pull request it tracks
   elsewhere** unless an event other than `pr.*` is ticked, and greys the rest out once one is chosen; the
-  sentence and the list say "a pull request it tracks elsewhere"; the trigger's details list each
+  sentence and the list say "a pull request it tracks elsewhere" — "the checks on a pull request it
+  tracks elsewhere" for the check events, which first read as a possessive of the long name (found
+  in review); the trigger's details list each
   one watched (`TriggerItem::watching_elsewhere`).
 
 How it was checked: the watch and the fires in the core against a real store and a forge from a
