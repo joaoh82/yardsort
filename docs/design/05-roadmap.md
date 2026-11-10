@@ -1203,13 +1203,19 @@ projects and starts work when the user agrees.
       naming it. `ys pr list` with the view's review filters and `--attention`, and
       `ys pr checkout`, for which `prepare_branch` moved into the core. Recorded in
       [37](37-floor-manager.md).
+- [x] Permission is a setting, and `ys` enforces it. Read only, ask first (the default) and
+      trusted, in Settings → General. The launch sets `YARDSORT_COORDINATOR`; `ys` reads the
+      level from settings on every command. Ask first waits for **Allow** in the window. Delete,
+      close and attach are refused at every level. Question 53 settled. Recorded in
+      [37](37-floor-manager.md).
 - [ ] Resume its conversation after it ends, and start it with a question from elsewhere in the
       window.
-- [ ] Settle the name, and whether the lines it is told are enough (questions 53–55).
+- [ ] Settle the name (questions 54–55).
 
 _Exit:_ on all three platforms, asking the Floor Manager to review the open pull requests nobody
-has reviewed ends with one reviewer per pull request posting on GitHub, every one of them proposed
-first and started only after a yes.
+has reviewed ends with one reviewer per pull request posting on GitHub. At the default, ask
+first, every one of them is started only after **Allow**. At trusted the non-destructive starts
+run without that, and deleting, closing and attaching are still refused.
 
 ## M31 — Pull requests in other repositories
 

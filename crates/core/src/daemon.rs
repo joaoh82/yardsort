@@ -329,6 +329,10 @@ fn spawn_daemon(endpoint: &Endpoint, log_path: &Path, spool_dir: &Path) -> std::
                 .stderr(std::process::Stdio::null());
         }
     }
+    // The process that starts a daemon may be the Floor Manager's `ys`. On Windows a terminal
+    // keeps the daemon's environment, so the marker would gate every later agent, and the
+    // settings directory would follow them too. Neither is a variable a child should carry.
+    scrub_coordinator_env(&mut command);
     detach(&mut command);
     command.spawn()?;
     Ok(())
@@ -356,6 +360,20 @@ fn log_file(path: &Path) -> Option<(std::process::Stdio, std::process::Stdio)> {
         .ok()?;
     let second = file.try_clone().ok()?;
     Some((file.into(), second.into()))
+}
+
+/// Drop the Floor Manager's marker, its test wait, and the settings directory from a process
+/// that will outlive this one.
+///
+/// On Windows a terminal inherits the daemon's environment instead of replacing it, so a name
+/// left here is a name every later agent sees. [`crate::env`] strips the same names from the
+/// environment handed to a program directly.
+fn scrub_coordinator_env(command: &mut std::process::Command) {
+    command
+        .env_remove(crate::coordinator::ENV)
+        .env_remove(crate::coordinator::CONFIRM_WAIT_ENV)
+        .env_remove(crate::paths::CONFIG_DIR_ENV[0])
+        .env_remove(crate::paths::CONFIG_DIR_ENV[1]);
 }
 
 /// Put the daemon outside this process's session and process group, so closing the terminal (or
@@ -547,6 +565,62 @@ mod tests {
             unreachable!()
         };
         assert!(!now.exists(), "a second daemon was started");
+    }
+
+    /// `spawn_daemon` scrubs `YARDSORT_COORDINATOR`, `YARDSORT_COORDINATOR_CONFIRM_WAIT`,
+    /// `YARDSORT_CONFIG_DIR` and `SWITCHYARD_CONFIG_DIR` before the process exists. On Windows
+    /// every later terminal inherits that environment. A detached daemon cannot be started from
+    /// every Windows runner, so this asks a normal child with the same scrub. `cleaned`, which
+    /// is what an agent is handed directly, is covered by
+    /// `the_floor_managers_marker_does_not_reach_a_child`.
+    #[test]
+    fn a_daemon_is_not_handed_the_floor_managers_marker_or_settings_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let seen = dir.path().join("seen.txt");
+        let mut command = child_that_prints_the_marker(&seen);
+        command
+            .env(crate::coordinator::ENV, "1")
+            .env(crate::coordinator::CONFIRM_WAIT_ENV, "2000")
+            .env(crate::paths::CONFIG_DIR_ENV[0], "leaked-config")
+            .env(crate::paths::CONFIG_DIR_ENV[1], "leaked-old-config")
+            .env("YARDSORT_KEEP", "kept");
+        scrub_coordinator_env(&mut command);
+        let status = command.status().expect("the child should run");
+        assert!(status.success(), "{status}");
+        let text = std::fs::read_to_string(&seen).unwrap();
+        let lines: Vec<String> = text.lines().map(|line| line.to_ascii_uppercase()).collect();
+        for name in [
+            crate::coordinator::ENV,
+            crate::coordinator::CONFIRM_WAIT_ENV,
+            crate::paths::CONFIG_DIR_ENV[0],
+            crate::paths::CONFIG_DIR_ENV[1],
+        ] {
+            let prefix = format!("{name}=");
+            assert!(
+                !lines.iter().any(|line| line.starts_with(&prefix)),
+                "{name} reached the child:\n{text}"
+            );
+        }
+        assert!(
+            lines.iter().any(|line| line == "YARDSORT_KEEP=KEPT"),
+            "the child did not keep the variable it was given:\n{text}"
+        );
+    }
+
+    /// Prints the whole environment. `env` on Unix, `set` on Windows: both write `NAME=value`.
+    fn child_that_prints_the_marker(seen: &Path) -> std::process::Command {
+        let output = std::fs::File::create(seen).unwrap();
+        let mut command = if cfg!(windows) {
+            let mut command = std::process::Command::new("cmd.exe");
+            command.args(["/D", "/C", "set"]);
+            command
+        } else {
+            let mut command = std::process::Command::new("sh");
+            command.args(["-c", "env"]);
+            command
+        };
+        command.stdout(output);
+        command
     }
 
     /// The log is replaced, not appended to, so a data directory cannot fill up with old runs.

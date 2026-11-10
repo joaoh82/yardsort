@@ -70,10 +70,53 @@ pub async fn coordinator_start(
             skip_context: true,
             fork_packet: None,
         };
+        let level = state.settings.get().floor_manager.level;
+        // The file Settings saved. On Linux this is not the data directory, and `ys` would
+        // otherwise look beside the database and miss read only and trusted.
+        let config_dir = state
+            .settings
+            .path()
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| state.data_dir.clone());
         with_launcher(state, |launcher| {
-            launcher.coordinator(request, ys_dir, size)
+            launcher.coordinator(request, ys_dir, &config_dir, size, level)
         })?;
         Ok(status(state))
+    })
+    .await
+}
+
+/// Commands the Floor Manager has asked to run and is waiting on. Oldest first. Empty when
+/// nothing is waiting, which is the usual answer: the window polls this.
+#[tauri::command]
+#[specta::specta]
+pub async fn coordinator_confirmations(
+    app: AppHandle,
+) -> IpcResult<Vec<yardsort_core::coordinator::CoordinatorConfirmation>> {
+    blocking(app, |state| {
+        coordinator::pending(&state.data_dir).map_err(|error| {
+            yardsort_core::error::IpcError::new(
+                "coordinator_confirm",
+                format!("Cannot read what the Floor Manager is waiting to run: {error}"),
+            )
+        })
+    })
+    .await
+}
+
+/// The user pressed Allow or Don't allow. This writes the answer the waiting `ys` reads. It
+/// does not run the command: that process already has it, and runs it only after a yes.
+#[tauri::command]
+#[specta::specta]
+pub async fn coordinator_answer(app: AppHandle, id: String, allow: bool) -> IpcResult<bool> {
+    blocking(app, move |state| {
+        coordinator::answer(&state.data_dir, &id, allow).map_err(|error| {
+            yardsort_core::error::IpcError::new(
+                "coordinator_confirm",
+                format!("Cannot record the answer: {error}"),
+            )
+        })
     })
     .await
 }

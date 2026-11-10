@@ -15,6 +15,8 @@ import {
   type ActivitySettingsDto,
   type ContextUsage,
   type CoordinatorStatus,
+  type CoordinatorConfirmation,
+  type FloorManagerLevel,
   type ConversationContext,
   type AgentOutcomes,
   type Attempt,
@@ -199,6 +201,8 @@ import {
 
 export type {
   CoordinatorStatus,
+  CoordinatorConfirmation,
+  FloorManagerLevel,
   RemoteRepository,
   Repositories,
   ResolvedLink,
@@ -501,6 +505,10 @@ export const ipc = {
   workspaceCreate: (request: NewWorkspace) => unwrap(commands.workspaceCreate(request)),
   /** Rejects with code `worktree_dirty` unless `force` is set. The branch is always kept. */
   workspaceDelete: (id: string, force = false) => done(commands.workspaceDelete(id, force)),
+
+  /** How much the Floor Manager may do on its own. The next `ys` command follows it. */
+  settingsSaveFloorManager: (level: FloorManagerLevel) =>
+    unwrap(commands.settingsSaveFloorManager(level)),
 
   settingsSaveGeneral: (general: {
     editorCommand: string | null;
@@ -972,6 +980,10 @@ export const ipc = {
     unwrap(commands.coordinatorStart(harness, size)),
   /** End the running one. Its last screen stays until it is started again. */
   coordinatorStop: () => unwrap(commands.coordinatorStop()),
+  /** Commands a Floor Manager's `ys` is waiting for this window to allow. */
+  coordinatorConfirmations: () => unwrap(commands.coordinatorConfirmations()),
+  /** Record the user's yes or no. Resolves to whether a request was waiting. */
+  coordinatorAnswer: (id: string, allow: boolean) => unwrap(commands.coordinatorAnswer(id, allow)),
 
   ptySpawn: (request: SpawnRequest) => unwrap(commands.ptySpawn(request)),
   ptyList: () => unwrap(commands.ptyList()),

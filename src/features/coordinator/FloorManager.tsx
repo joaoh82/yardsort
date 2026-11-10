@@ -31,7 +31,7 @@ export function FloorManagerButton() {
 
 /**
  * The Floor Manager: one agent with every project in view, in a panel over the lower-right
- * corner. Not modal — the rest of the window keeps working beside it — and closing it leaves the
+ * corner. Not modal, the rest of the window keeps working beside it, and closing it leaves the
  * agent running, as closing the window does.
  */
 export function FloorManagerPanel() {

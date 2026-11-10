@@ -1,8 +1,9 @@
 //! `ys` end to end: the real binary, a real database, real git repositories.
 //!
-//! No agent is started here. Launching one needs a harness on `PATH`, which a CI runner has no
-//! reason to have — what is tested instead is that everything up to the launch is right, and
-//! that asking for a harness that is not there fails *before* anything is created.
+//! One test starts a stand-in harness, to check the Floor Manager does not hand its marker to
+//! the agent it starts. The rest start no agent: a CI runner has no harness on `PATH`, so what
+//! is tested instead is that everything up to the launch is right, and that asking for a harness
+//! that is not there fails before anything is created.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -68,6 +69,9 @@ impl Fixture {
             yardsort_core::activity::RUN_ENV,
             yardsort_core::activity::WORKSPACE_ENV,
             yardsort_core::activity::RECORD_ENV,
+            // A Floor Manager's gate must not leak into a test that is the user running `ys`.
+            yardsort_core::coordinator::ENV,
+            "YARDSORT_COORDINATOR_CONFIRM_WAIT",
         ] {
             command.env_remove(name);
         }
@@ -84,6 +88,80 @@ impl Fixture {
 
     fn git(&self) -> Git {
         git()
+    }
+
+    /// Write the Floor Manager permission. Ask is the default, and it is not stored.
+    fn set_floor(&self, level: &str) {
+        std::fs::write(
+            self.data_dir.join("settings.toml"),
+            format!("[floor_manager]\nlevel = \"{level}\"\n"),
+        )
+        .unwrap();
+    }
+
+    /// Run `ys` as the Floor Manager: the gate is on. `answer` is what the app would press.
+    /// `None` means the app is not open, so ask-first refuses at once.
+    fn ys_floor(&self, args: &[&str], answer: Option<&str>) -> Run {
+        let held = answer.map(|_| {
+            yardsort_core::presence::AppLock::take(&self.data_dir)
+                .unwrap()
+                .expect("the profile's lock is free")
+        });
+        let waiter = answer.map(|word| {
+            let data = self.data_dir.clone();
+            let word = word.to_owned();
+            std::thread::spawn(move || answer_when_asked(&data, &word))
+        });
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+        command
+            .args(["--data-dir", &self.data_dir.to_string_lossy()])
+            .args(args)
+            .env("YARDSORT_WORKTREE_ROOT", &self.worktree_root)
+            .env("YARDSORT_NO_DAEMON", "1")
+            .env(yardsort_core::coordinator::ENV, "1")
+            // A missed answer should fail the test in a second or two, not ten minutes.
+            .env("YARDSORT_COORDINATOR_CONFIRM_WAIT", "2000");
+        for name in [
+            yardsort_core::activity::RUN_ENV,
+            yardsort_core::activity::WORKSPACE_ENV,
+            yardsort_core::activity::RECORD_ENV,
+        ] {
+            command.env_remove(name);
+        }
+        let output = command.output().expect("ys should run");
+        if let Some(waiter) = waiter {
+            waiter.join().expect("the confirmation waiter");
+        }
+        drop(held);
+        Run {
+            code: output.status.code(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }
+    }
+}
+
+/// Write `word` (`yes` or `no`) against the request `ys` is waiting on.
+fn answer_when_asked(data_dir: &std::path::Path, word: &str) {
+    let dir = data_dir.join("coordinator").join("confirm");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "json") {
+                    let stem = path.file_stem().unwrap().to_string_lossy();
+                    std::fs::write(dir.join(format!("{stem}.answer")), format!("{word}\n"))
+                        .unwrap();
+                    return;
+                }
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the Floor Manager's command never asked for a confirmation"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }
 
@@ -114,6 +192,487 @@ impl Run {
             self.stderr
         );
         self.stderr
+    }
+}
+
+fn worktree_count(fx: &Fixture) -> usize {
+    let json = fx.ys(&["workspace", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    worktrees_in(&listed).len()
+}
+
+/// The gate is the variable the launch sets, not the setting on its own: the user's own `ys`
+/// stays able to delete a workspace after they set the Floor Manager to read only.
+#[test]
+fn the_floor_manager_gate_is_its_own_environment_not_every_ys() {
+    let fx = Fixture::new();
+    fx.set_floor("read-only");
+    fx.ys(&[
+        "workspace",
+        "new",
+        &fx.project_name,
+        "the user, not the floor manager",
+        "--no-agent",
+    ])
+    .ok();
+    assert_eq!(worktree_count(&fx), 1);
+}
+
+#[test]
+fn read_only_refuses_a_start_and_still_lists_and_the_next_command_can_be_trusted() {
+    let fx = Fixture::new();
+    fx.set_floor("read-only");
+    let listed = fx.ys_floor(&["project", "list"], None).ok();
+    assert!(listed.contains("Demo"), "{listed}");
+
+    let refused = fx
+        .ys_floor(
+            &[
+                "workspace",
+                "new",
+                &fx.project_name,
+                "fix the login bug",
+                "--no-agent",
+            ],
+            None,
+        )
+        .failed();
+    assert!(
+        refused.contains("read only") && refused.contains("was not run"),
+        "{refused}"
+    );
+    assert_eq!(
+        worktree_count(&fx),
+        0,
+        "a refused start must not create a worktree"
+    );
+
+    // The level is read from settings on every command, so this does not wait for a restart.
+    fx.set_floor("trusted");
+    fx.ys_floor(
+        &[
+            "workspace",
+            "new",
+            &fx.project_name,
+            "fix the login bug",
+            "--no-agent",
+        ],
+        None,
+    )
+    .ok();
+    assert_eq!(worktree_count(&fx), 1);
+}
+
+#[test]
+fn ask_first_requires_a_confirmation_the_app_records() {
+    let fx = Fixture::new();
+    let start = [
+        "workspace",
+        "new",
+        &fx.project_name,
+        "fix the login bug",
+        "--no-agent",
+    ];
+
+    // The default level is ask first, and with the app closed there is nobody to ask.
+    let closed = fx.ys_floor(&start, None).failed();
+    assert!(
+        closed.contains("ask first") && closed.contains("not open"),
+        "{closed}"
+    );
+    assert_eq!(worktree_count(&fx), 0);
+
+    let refused = fx.ys_floor(&start, Some("no")).failed();
+    assert!(refused.contains("refused"), "{refused}");
+    assert_eq!(worktree_count(&fx), 0, "a no must not create a worktree");
+
+    fx.ys_floor(&start, Some("yes")).ok();
+    assert_eq!(worktree_count(&fx), 1);
+}
+
+#[test]
+fn destructive_commands_are_refused_at_every_permission() {
+    let fx = Fixture::new();
+    fx.ys(&[
+        "workspace",
+        "new",
+        &fx.project_name,
+        "keep this workspace",
+        "--no-agent",
+    ])
+    .ok();
+    let json = fx.ys(&["workspace", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let name = worktrees_in(&listed)[0]["name"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    for level in ["read-only", "ask", "trusted"] {
+        fx.set_floor(level);
+        for args in [
+            vec!["workspace", "delete", name.as_str()],
+            vec!["workspace", "delete", name.as_str(), "--force"],
+            vec!["task", "close", "1", "--yes"],
+            vec!["attach"],
+        ] {
+            let error = fx.ys_floor(&args, None).failed();
+            assert!(
+                error.contains("at any permission"),
+                "{level} {args:?}: {error}"
+            );
+            // Ask first must not turn a delete into a confirmation. There is no app here, and
+            // the message is the refusal, not "Yardsort is not open".
+            assert!(
+                !error.contains("not open"),
+                "{level} asked instead of refusing: {error}"
+            );
+        }
+        assert_eq!(worktree_count(&fx), 1, "{level} deleted the workspace");
+    }
+}
+
+/// Linux keeps settings in the config directory and the database in the data directory. The
+/// Floor Manager sets `YARDSORT_DATA_DIR`, so without `YARDSORT_CONFIG_DIR` `ys` would look
+/// beside the database, find nothing, and ignore read only.
+#[test]
+fn the_floor_manager_reads_settings_from_the_config_directory() {
+    let fx = Fixture::new();
+    // Beside the database, trusted. A lookup that ignores the config directory would allow this.
+    fx.set_floor("trusted");
+    let config = tempfile::tempdir().unwrap();
+    std::fs::write(
+        config.path().join("settings.toml"),
+        "[floor_manager]\nlevel = \"read-only\"\n",
+    )
+    .unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args([
+            "workspace",
+            "new",
+            &fx.project_name,
+            "should be refused",
+            "--no-agent",
+        ])
+        .env("YARDSORT_DATA_DIR", &fx.data_dir)
+        .env("YARDSORT_CONFIG_DIR", config.path())
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env("YARDSORT_NO_DAEMON", "1")
+        .env(yardsort_core::coordinator::ENV, "1")
+        .env_remove("SWITCHYARD_DATA_DIR")
+        .env_remove("SWITCHYARD_CONFIG_DIR")
+        .env_remove(yardsort_core::coordinator::CONFIRM_WAIT_ENV);
+    let output = command.output().expect("ys should run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stdout: {}\nstderr: {stderr}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        stderr.contains("read only") && stderr.contains("was not run"),
+        "the trusted file beside the database must not win: {stderr}"
+    );
+    assert_eq!(worktree_count(&fx), 0);
+}
+
+#[test]
+fn an_unreadable_settings_file_is_read_only_for_the_floor_manager() {
+    let fx = Fixture::new();
+    std::fs::write(fx.data_dir.join("settings.toml"), "level = [\n").unwrap();
+    let refused = fx
+        .ys_floor(
+            &["workspace", "new", &fx.project_name, "nope", "--no-agent"],
+            None,
+        )
+        .failed();
+    assert!(refused.contains("could not be read"), "{refused}");
+    assert!(refused.contains("read only"), "{refused}");
+    assert_eq!(worktree_count(&fx), 0);
+    // The user's own ys is not the Floor Manager. A broken file is still the defaults for them.
+    fx.ys(&[
+        "workspace",
+        "new",
+        &fx.project_name,
+        "the user, not the floor manager",
+        "--no-agent",
+    ])
+    .ok();
+}
+
+#[test]
+fn ask_first_shows_the_comment_and_refuses_a_body_from_stdin() {
+    let fx = Fixture::new();
+    let note = fx.data_dir.join("note.md");
+    std::fs::write(&note, "say \"hi\" \\ there\nplease look\n\u{202e}hidden").unwrap();
+    let shown = fx
+        .ys_floor(
+            &[
+                "task",
+                "comment",
+                "12",
+                "--body-file",
+                &note.to_string_lossy(),
+            ],
+            None,
+        )
+        .failed();
+    assert!(shown.contains("The text that would be posted:"), "{shown}");
+    assert!(shown.contains("please look\n"), "{shown}");
+    assert!(
+        shown.contains("say \"hi\" \\ there\n"),
+        "the preview is the text that would be posted: {shown}"
+    );
+    assert!(
+        !shown.contains("\\\""),
+        "quotes in the comment are not shell-escaped: {shown}"
+    );
+    assert!(!shown.contains('\u{202e}'), "{shown}");
+    assert!(shown.contains("\\u{202e}"), "{shown}");
+    assert!(
+        shown.contains("not open"),
+        "the text is shown, then nobody can allow it: {shown}"
+    );
+
+    let stdin = fx
+        .ys_floor(&["task", "comment", "12", "--body-file", "-"], None)
+        .failed();
+    assert!(stdin.contains("standard input"), "{stdin}");
+    assert!(!stdin.contains("not open"), "{stdin}");
+
+    let sneaky = fx
+        .ys_floor(
+            &[
+                "workspace",
+                "new",
+                &fx.project_name,
+                "one\ntwo\u{202e}three",
+                "--no-agent",
+            ],
+            None,
+        )
+        .failed();
+    assert!(sneaky.contains("\\n"), "{sneaky}");
+    assert!(sneaky.contains("\\u{202e}"), "{sneaky}");
+    assert!(!sneaky.contains('\u{202e}'), "{sneaky}");
+}
+
+/// Ask first reads the comment once. A change to the file while the dialog is up posts the
+/// text that was shown, not whatever the file says afterwards.
+#[cfg(unix)]
+#[test]
+fn ask_first_posts_the_comment_that_was_shown() {
+    let fx = Fixture::new();
+    fx.git()
+        .run(
+            &fx.repo,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:example/widgets.git",
+            ],
+        )
+        .unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let note = fx.data_dir.join("note.md");
+    let original = "say \"hi\" \\ there\nplease look\n";
+    std::fs::write(&note, original).unwrap();
+    yardsort_core::program::testing::executable(
+        bin.path().join("gh"),
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{0}/asked'\ncat > '{0}/stdin'\n",
+            bin.path().display()
+        ),
+    );
+
+    let _held = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .expect("the profile's lock is free");
+    let data = fx.data_dir.clone();
+    let note_for_waiter = note.clone();
+    let waiter = std::thread::spawn(move || {
+        let dir = data.join("coordinator").join("confirm");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let text = std::fs::read_to_string(&path).unwrap_or_default();
+                    if !text.contains("please look") {
+                        continue;
+                    }
+                    let shown: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    let command = shown["command"].as_str().unwrap_or("");
+                    assert!(
+                        command.contains("say \"hi\" \\ there\nplease look\n"),
+                        "the dialog shows the comment as it would be posted: {command}"
+                    );
+                    std::fs::write(&note_for_waiter, "CHANGED behind the dialog\n").unwrap();
+                    let id = path.file_stem().unwrap().to_string_lossy().into_owned();
+                    assert!(
+                        yardsort_core::coordinator::answer(&data, &id, true).unwrap(),
+                        "the command was still waiting"
+                    );
+                    return;
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the confirmation never appeared"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    });
+
+    let mut path_dirs = vec![bin.path().to_path_buf()];
+    path_dirs.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args([
+            "--data-dir",
+            &fx.data_dir.to_string_lossy(),
+            "task",
+            "comment",
+            "12",
+            "--body-file",
+            &note.to_string_lossy(),
+            "--project",
+            "Demo",
+        ])
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env("YARDSORT_NO_DAEMON", "1")
+        .env(yardsort_core::coordinator::ENV, "1")
+        .env("YARDSORT_COORDINATOR_CONFIRM_WAIT", "15000")
+        .env("PATH", std::env::join_paths(&path_dirs).unwrap())
+        .env("SHELL", bin.path().join("no-such-shell"));
+    let output = command.output().expect("ys should run");
+    waiter.join().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    let posted = std::fs::read_to_string(bin.path().join("stdin")).unwrap();
+    assert_eq!(posted, original);
+    assert!(!posted.contains("CHANGED"));
+}
+
+/// A trusted Floor Manager starts an agent. That agent must not see the marker, or its own
+/// `ys` is gated, and it must not see the settings directory either.
+///
+/// Windows is covered by `a_daemon_is_not_handed_the_floor_managers_marker_or_settings_directory`
+/// in the core. Starting the detached daemon from the Windows CI runner is refused, so this
+/// full launch stays here, where a daemon can be started.
+#[cfg(unix)]
+#[test]
+fn a_trusted_floor_manager_does_not_hand_its_marker_to_the_agent_it_starts() {
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    let seen = bin.path().join("seen");
+    let agent = harness_that_prints_the_marker(bin.path(), &seen);
+    let command_path = agent
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    std::fs::write(
+        fx.data_dir.join("settings.toml"),
+        format!(
+            "[floor_manager]\nlevel = \"trusted\"\n\n[[harness]]\nid = \"fake\"\n\
+             builtin = false\ncommand = \"{command_path}\"\n",
+        ),
+    )
+    .unwrap();
+
+    let _stop = DaemonStop(fx.data_dir.clone());
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args([
+            "--data-dir",
+            &fx.data_dir.to_string_lossy(),
+            "workspace",
+            "new",
+            &fx.project_name,
+            "say the marker",
+            "--harness",
+            "fake",
+        ])
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env(yardsort_core::coordinator::ENV, "1")
+        .env(yardsort_core::coordinator::CONFIRM_WAIT_ENV, "2000")
+        .env("YARDSORT_CONFIG_DIR", "leaked-config")
+        .env("SWITCHYARD_CONFIG_DIR", "leaked-old-config")
+        .env_remove("YARDSORT_NO_DAEMON");
+    #[cfg(unix)]
+    command.env("SHELL", "/bin/sh");
+    let output = command.output().expect("ys should run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let text = loop {
+        if let Ok(text) = std::fs::read_to_string(&seen) {
+            if text.contains("ran") {
+                break text;
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the harness never ran.\nstdout: {stdout}\nstderr: {stderr}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    };
+    assert_eq!(
+        text.lines().collect::<Vec<_>>(),
+        ["", "", "", "", "ran"],
+        "the agent must print an empty marker and an empty settings directory: {text:?}"
+    );
+}
+
+/// A harness that writes the Floor Manager's variables, then `ran`, and stays up.
+///
+/// An unset variable is a blank line.
+#[cfg(unix)]
+fn harness_that_prints_the_marker(dir: &std::path::Path, seen: &std::path::Path) -> PathBuf {
+    let agent = dir.join("fake-agent");
+    yardsort_core::program::testing::executable(
+        &agent,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"${{YARDSORT_COORDINATOR-}}\" > '{0}'\n\
+             printf '%s\\n' \"${{YARDSORT_COORDINATOR_CONFIRM_WAIT-}}\" >> '{0}'\n\
+             printf '%s\\n' \"${{YARDSORT_CONFIG_DIR-}}\" >> '{0}'\n\
+             printf '%s\\n' \"${{SWITCHYARD_CONFIG_DIR-}}\" >> '{0}'\n\
+             printf '%s\\n' ran >> '{0}'\nsleep 30\n",
+            seen.display(),
+        ),
+    );
+    agent
+}
+
+/// Stops the daemon this test started, including when an assertion fails first.
+#[cfg(unix)]
+struct DaemonStop(PathBuf);
+
+#[cfg(unix)]
+impl Drop for DaemonStop {
+    fn drop(&mut self) {
+        if let Some(client) =
+            yardsort_core::daemon::connect_existing(&self.0, std::sync::Arc::new(|_| {}))
+        {
+            let _ = client.shutdown(true);
+        }
     }
 }
 

@@ -29,6 +29,9 @@ pub struct Settings {
     pub usage: UsageSettings,
     #[serde(skip_serializing_if = "RemoteSettings::is_default")]
     pub remote: RemoteSettings,
+    /// How much the Floor Manager may do through `ys`. See [`FloorManagerSettings`].
+    #[serde(skip_serializing_if = "FloorManagerSettings::is_default")]
+    pub floor_manager: FloorManagerSettings,
     /// Overrides of built-in harnesses, and whole custom ones. See [`HarnessOverride`].
     #[serde(rename = "harness", skip_serializing_if = "Vec::is_empty")]
     pub harnesses: Vec<HarnessOverride>,
@@ -112,6 +115,30 @@ pub struct LeftHost {
 }
 
 impl RemoteSettings {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Floor Manager permission: how much that agent may do through `ys` without being asked.
+///
+/// The default, ask first, is what the first slice did by instruction alone. It is now also
+/// what `ys` enforces. Destructive commands are refused at every level.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FloorManagerSettings {
+    pub level: crate::coordinator::FloorManagerLevel,
+}
+
+impl Default for FloorManagerSettings {
+    fn default() -> Self {
+        Self {
+            level: crate::coordinator::FloorManagerLevel::Ask,
+        }
+    }
+}
+
+impl FloorManagerSettings {
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
@@ -632,6 +659,34 @@ mod tests {
         assert!(std::fs::read_to_string(&path)
             .unwrap()
             .contains("branch_prefix = \"x\""));
+    }
+
+    #[test]
+    fn floor_manager_permission_is_ask_until_it_is_changed_and_then_it_round_trips() {
+        let (_dir, path) = file();
+        let settings = SettingsFile::load(path.clone());
+        assert_eq!(
+            settings.get().floor_manager.level,
+            crate::coordinator::FloorManagerLevel::Ask
+        );
+        assert!(!path.exists(), "the default is not written");
+
+        settings
+            .update(|s| s.floor_manager.level = crate::coordinator::FloorManagerLevel::ReadOnly)
+            .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("level = \"read-only\""), "{text}");
+        assert_eq!(
+            SettingsFile::load(path.clone()).get().floor_manager.level,
+            crate::coordinator::FloorManagerLevel::ReadOnly
+        );
+
+        // Back to the default: the section leaves the file, as every other default does.
+        SettingsFile::load(path.clone())
+            .update(|s| s.floor_manager.level = crate::coordinator::FloorManagerLevel::Ask)
+            .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("floor_manager"), "{text}");
     }
 
     #[test]

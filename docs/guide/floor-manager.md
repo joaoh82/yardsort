@@ -2,7 +2,8 @@
 
 The Floor Manager is one agent with every project in view. Ask it what projects you have, what
 the agents in them are doing, which pull requests nobody has reviewed, or which tasks are
-waiting. Ask it to start work, and it suggests how, then starts it once you say yes.
+waiting. Ask it to start work, and it suggests how. Whether it may then start that itself
+is a setting: read only, ask first (the default), or trusted.
 
 It is an ordinary agent in an ordinary terminal. You pick the agent: Claude Code, Codex,
 OpenCode, or any other you have set up. It runs in a folder of its own rather than in a
@@ -55,37 +56,56 @@ It answers from `ys`: `ys project list`, `ys session list`, `ys pr list`, `ys ta
 [GitHub CLI](https://cli.github.com), so they need `gh` installed and logged in. With `gh`
 missing, it says so.
 
-## What it does, and what it asks first
+## What it may do
 
-The Floor Manager is told where the lines are:
+**Floor Manager permission**, in [Settings → General](settings.md#general), chooses how much it
+may do through `ys`. The choice is saved as soon as you make it. The next `ys` command follows
+it; you do not restart the Floor Manager for that. The instructions file is rewritten when you
+save, and one that is already running reads the new wording the next time it starts.
 
-- **It reads without asking.** Listing projects, workspaces, sessions, pull requests, tasks,
-  workflows, schedules and triggers, and what an agent has on its screen.
-- **It proposes, then waits for your yes,** before anything that starts an agent, makes a branch,
-  runs something or writes to GitHub. That covers a new workspace (`ys workspace new`), handing
-  a task to an agent (`ys task start`), opening a workspace on a pull request
-  (`ys pr checkout`), running a workflow or a smoke test, and commenting on or closing a task.
-  It says exactly what it will run. One yes covers what it proposed, not the next idea.
-- **It never** deletes or archives a workspace, deletes a branch, forces anything, merges,
-  closes or approves a pull request, edits files or commits in a project, types into another
-  agent's terminal, or approves [memory](memory.md). It tells you where in Yardsort to do those
-  yourself.
+| Level         | What `ys` does                                                                                                                                                                                                                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Read only** | Looking works. A command that starts something or writes is refused, and nothing is created.                                                                                                                                                                                                |
+| **Ask first** | The default. A start or a write waits until you press **Allow** in this window. **Don't allow**, and Escape, leave it unrun. The dialog appears even when the panel is closed. One Allow covers that command. If Yardsort is not open, or nobody answers within ten minutes, it is not run. |
+| **Trusted**   | It may start agents, workspaces, workflows, tests, schedules, triggers and checkouts, and other writes that are not destructive, without asking.                                                                                                                                            |
 
-These lines are what the agent is _told_, in its instructions. They are not a sandbox. The
-Floor Manager runs with the same access to your computer as any agent you start in a
-workspace, and the agent's own permission prompts still apply. Claude Code, for one, asks
-before it runs a command unless you have told it not to. An agent you run in auto mode does not
-ask.
+`ys` enforces this. The launch sets `YARDSORT_COORDINATOR`, and while that is set `ys` reads the
+level from settings and either refuses, waits for the button, or runs. An agent in auto mode
+does not get to skip that: the window is what allows a start, not the agent's own prompt.
+
+These `ys` commands are refused at every level, trusted included:
+
+- `ys workspace delete`, with or without `--force`
+- `ys task close`
+- `ys attach`, which would put another agent's terminal on this one
+
+There is no `ys` command for archiving a workspace, deleting a branch, merging, closing or
+approving a pull request, or editing a project's files. The instructions say never to do those.
+The gate cannot see them, because they are not `ys`. Commenting on a task, and the other
+`ys task` writes, follow the level above. Closing one does not.
+
+This is not a sandbox. The Floor Manager runs as you. A shell command that is not `ys` (`git`,
+`gh`, an editor) is outside the gate, unless the agent's own permission prompts block it.
+Unsetting `YARDSORT_COORDINATOR`, writing the answer file in the profile's
+`coordinator/confirm` folder, editing `settings.toml` so the level is `trusted`, or pointing
+`ys --data-dir` at a profile you made up, also gets around it. Those are the same kind of limit
+as any agent you start in a workspace. The harness's own prompts are a second line, useful, and
+not the one this setting is.
+
+The dialog does not run the command. It records yes or no, and the `ys` that is waiting is the
+one that runs it.
 
 ### Reviewing pull requests
 
-For a pull request that a Yardsort workspace opened, the Floor Manager proposes the built-in
+For a pull request that a Yardsort workspace opened, the Floor Manager names the built-in
 [code review](workflows.md#requesting-a-code-review) on that workspace.
 
-For one somebody else opened, it first proposes `ys pr checkout <number> --project <name>`. That
-makes a workspace on the pull request's branch, with no new branch and no agent. Then it proposes
-the code review on that workspace. You can agree to the first and not the second. A reviewer starts there, reads and runs the code without
-editing it, and posts its review on GitHub. You get a notification when it has.
+For one somebody else opened, it names `ys pr checkout <number> --project <name>` first. That
+makes a workspace on the pull request's branch, with no new branch and no agent. Then it names
+the code review on that workspace. At ask first, which is the default, each of those waits for
+**Allow**, and you can allow the first and not the second. At trusted it runs them. At read
+only it can tell you the command and cannot run it. A reviewer starts there, reads and runs the
+code without editing it, and posts its review on GitHub. You get a notification when it has.
 
 A pull request from a fork gets a branch named `pr/<number>`. The built-in review finds a pull
 request by its branch name, so it cannot review one of those yet. The Floor Manager says so.
@@ -126,17 +146,24 @@ In a folder named `coordinator` inside your profile's data directory:
 
 With `YARDSORT_DATA_DIR` set, it is `$YARDSORT_DATA_DIR/coordinator`.
 
-At every start Yardsort writes two files there. `AGENTS.md` holds the instructions, which most
-agents read. `CLAUDE.md` points Claude Code at them. **Both are replaced at every start**, so
-an edit to them does not last. Anything else you put in the folder is left alone.
+At every start, and again when you change [Floor Manager permission](#what-it-may-do), Yardsort
+writes two files there. `AGENTS.md` holds the instructions for the level that is set, which most
+agents read. `CLAUDE.md` points Claude Code at them. **Both are replaced**, so an edit to them
+does not last. Anything else you put in the folder is left alone.
 
 The agent is started with:
 
 - `YARDSORT_DATA_DIR` set to your profile, so `ys` reads the same projects the window shows;
+- `YARDSORT_CONFIG_DIR` set to the folder that holds `settings.toml`. On Linux that is not the
+  data directory. Yardsort removes a value set for it from every agent it launches, and from the
+  terminal daemon, so a data directory an agent sets for itself keeps that profile's own settings;
+- `YARDSORT_COORDINATOR` set, which is what makes `ys` enforce the permission. The value is
+  ignored: the level is the setting, read on every command;
 - the folder that holds this copy of Yardsort's own `ys` first on its `PATH`, so it uses the
   `ys` that matches the app, whether or not you [installed](cli.md#installing) one. A
   development build without `ys` built says so in the panel, and the agent then uses whichever
   `ys` it finds.
 
 After Yardsort updates itself, **Start again** gives the Floor Manager the new instructions and
-the new `ys`. The one already running keeps the old ones until it ends.
+the new `ys`. The one already running keeps the instructions it has already read until it ends.
+A permission you change still applies to its next `ys` command.
