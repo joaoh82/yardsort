@@ -335,10 +335,11 @@ pub async fn workflow_runs(
             Some(id) => state.store.workflow_runs_of(id, limit as usize)?,
             None => state.store.workflow_runs(None, limit as usize)?,
         };
+        let open = workflow::waits::open_by_run(&state.store).unwrap_or_default();
         Ok(rows
             .into_iter()
             .map(|row| {
-                let blocked_on = workflow::waits::waiting_on(&state.store, &row.id)
+                let blocked_on = workflow::waits::label_for(&state.store, &row.id, &open)
                     .ok()
                     .flatten();
                 let mut run = run_from(row);
