@@ -406,8 +406,9 @@ a pull request, from whatever its channel carries, by the same rules
   (`default_tools_approval_mode`); Cursor's shell takes `PATH` from the login shell, so the stand-in
   is named by path; Codex has its own GitHub app tool, `codex_apps`/`github_create_pull_request`;
   and **OpenCode 2 does not load Yardsort's plugin at all** — its plugins are folders with a new
-  module shape — so the OpenCode recording, and the adapter, are 1.x's
-  ([13 § 7](13-agent-events-stage-2-opencode.md#7--risks-and-the-next-slice)).
+  module shape — so the OpenCode recording, and the adapter, were 1.x's. Since ported, and
+  recorded against 2.2.6, whose shell tool is `shell` and whose MCP calls run inside its
+  `execute` tool ([13 § 8](13-agent-events-stage-2-opencode.md#8--opencode-2)).
 
 How it was checked: each adapter against its recording — the link on exactly the call that
 opened it, nothing of the command, output or answer anywhere in a payload; hand-made negatives

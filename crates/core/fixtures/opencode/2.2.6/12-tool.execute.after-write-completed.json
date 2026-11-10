@@ -1,0 +1,31 @@
+{
+  "api": 2,
+  "hook": "tool.execute.after",
+  "payload": {
+    "tool": "write",
+    "sessionID": "ses_00000000000fixture01",
+    "agent": "build",
+    "messageID": "msg_00000000000fixture02",
+    "id": "call_2dddbeb2e45347eabd3eec31",
+    "input": {
+      "path": "/tmp/yardsort-fixture/repo/hello.txt",
+      "content": "hello"
+    },
+    "status": "completed",
+    "result": {
+      "output": {
+        "operation": "write",
+        "target": "/tmp/yardsort-fixture/repo/hello.txt",
+        "resource": "hello.txt",
+        "existed": false
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Created file successfully: hello.txt"
+        }
+      ]
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

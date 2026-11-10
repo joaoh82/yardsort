@@ -172,7 +172,7 @@ told about it instead, and **tracks** it:
   `create_pull_request` tool, is tracked with its workspace as soon as Yardsort hears of it, with
   nobody typing its link; one opened while Yardsort was closed is tracked when it next starts.
   Only the link is kept from that tool call. One in the project's own repository is left to the
-  project's list, which has it already. pi has no MCP tools, and OpenCode 2 is not read yet.
+  project's list, which has it already. pi has no MCP tools.
 - **The agent says so.** An agent started with a first message in a project whose folder holds
   other repositories is told where each one is, by its whole path, outside its own worktree;
   that every workspace of the project shares them, so it should make a worktree of the clone for

@@ -14,6 +14,12 @@ has the downloads and the full commit lists.
   a workflow could not be a trigger's. A trigger about the workspace's own pull request still hears
   only that one. In the trigger dialog they are under **On a pull request it tracks elsewhere**.
   See [Pull requests elsewhere](docs/guide/triggers.md#pull-requests-elsewhere).
+- **OpenCode 2 reports to the activity timeline.** With **Capture what OpenCode reports** on,
+  OpenCode 2 now reports what it does, as OpenCode 1 does: before, its launches reported nothing,
+  as it no longer loaded Yardsort's plugin. Yardsort asks `opencode --version` which one it is
+  starting, and starts OpenCode 2 with `--standalone`, so that each launch's sessions run in a
+  server of its own and are reported on the right run, not in the background service every
+  OpenCode on the computer shares. OpenCode 1 needs 1.18.29 or later.
 
 ## 0.24.1
 

@@ -1,0 +1,29 @@
+{
+  "api": 2,
+  "hook": "event",
+  "payload": {
+    "id": "evt_00000000000fixture12",
+    "created": 1794296226036,
+    "type": "shell.created",
+    "location": {
+      "directory": "/tmp/yardsort-fixture/repo"
+    },
+    "data": {
+      "info": {
+        "id": "sh_00000000000fixture01",
+        "status": "running",
+        "command": "gh pr create --title Bump --body Bump",
+        "cwd": "/tmp/yardsort-fixture/repo",
+        "shell": "/usr/bin/bash",
+        "file": "/tmp/yardsort-fixture/data/opencode/shell/c51f6a15628e1dc74fca8ff9e1ecfca51c9e6074/sh_00000000000fixture01.out",
+        "metadata": {
+          "sessionID": "ses_00000000000fixture01"
+        },
+        "time": {
+          "started": 1794296226034
+        }
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

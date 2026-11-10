@@ -1,0 +1,21 @@
+{
+  "api": 2,
+  "hook": "event",
+  "payload": {
+    "id": "evt_00000000000fixture20",
+    "created": 1794296205945,
+    "type": "session.tool.progress",
+    "location": {
+      "directory": "/tmp/yardsort-fixture/repo"
+    },
+    "data": {
+      "sessionID": "ses_00000000000fixture01",
+      "assistantMessageID": "msg_00000000000fixture03",
+      "id": "call_f151158d52d34a73b44b0b7a",
+      "metadata": {
+        "shellID": "sh_00000000000fixture01"
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

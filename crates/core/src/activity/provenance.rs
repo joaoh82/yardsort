@@ -234,14 +234,22 @@ fn windows(runs: &[crate::store::RunRow], events: &[EventRow]) -> Vec<Window> {
 }
 
 /// Whether an event says a file was written. `file.reported_write` is the contract's own kind
-/// for it (Codex, OpenCode, Cursor) — unless the report itself says the change did not land:
+/// for it (Codex, OpenCode 1, Cursor) — unless the report itself says the change did not land:
 /// Codex writes a `FileChange` item's `status` through, and a failed patch is not a write. The
 /// hook and extension adapters that report a tool call instead name the harness's writing
-/// tools. Grok's log carries a tool name and no path, so it never reaches here with one — and a
-/// tool the list does not know is not a write.
-fn is_write(producer: &str, kind: &str, tool: Option<&str>, status: Option<&str>) -> bool {
+/// tools, and OpenCode 2's adapter marks the end of one as `wrote` (1's sends the file event
+/// as well, and its tool calls are not counted twice). Grok's log carries a tool name and no
+/// path, so it never reaches here with one — and a tool the list does not know is not a write.
+fn is_write(
+    producer: &str,
+    kind: &str,
+    tool: Option<&str>,
+    status: Option<&str>,
+    wrote: bool,
+) -> bool {
     match kind {
         "file.reported_write" => status.is_none_or(|status| status == "completed"),
+        "tool.completed" if producer == "opencode" => wrote,
         "tool.completed" => match (producer, tool) {
             ("claude", Some(tool)) => {
                 matches!(tool, "Write" | "Edit" | "MultiEdit" | "NotebookEdit")
@@ -345,7 +353,8 @@ pub fn join(
         }
         let tool = payload.get("tool").and_then(Value::as_str);
         let status = payload.get("status").and_then(Value::as_str);
-        if !is_write(&event.producer, &event.kind, tool, status) {
+        let wrote = payload.get("wrote").and_then(Value::as_bool) == Some(true);
+        if !is_write(&event.producer, &event.kind, tool, status, wrote) {
             continue;
         }
         // A path the adapter could not place inside the workspace was never recorded; a write

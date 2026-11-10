@@ -1,0 +1,14 @@
+{
+  "api": 2,
+  "hook": "session.prompt",
+  "payload": {
+    "sessionID": "ses_00000000000fixture01",
+    "messageID": "msg_00000000000fixture01",
+    "prompt": {
+      "text": "Create a file named hello.txt containing the single word hello using the write tool. Then read it back with the read tool. Then read a file named missing.txt, which does not exist. Then run `ls` with the bash tool. Reply with one word when done.",
+      "files": []
+    },
+    "delivery": "steer"
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

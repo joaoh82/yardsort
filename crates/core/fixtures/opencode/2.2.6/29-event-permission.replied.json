@@ -1,0 +1,18 @@
+{
+  "api": 2,
+  "hook": "event",
+  "payload": {
+    "id": "evt_00000000000fixture17",
+    "created": 1794296205941,
+    "type": "permission.replied",
+    "location": {
+      "directory": "/tmp/yardsort-fixture/repo"
+    },
+    "data": {
+      "sessionID": "ses_00000000000fixture01",
+      "requestID": "per_00000000000fixture01",
+      "reply": "once"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

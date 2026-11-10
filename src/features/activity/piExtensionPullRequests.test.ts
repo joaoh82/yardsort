@@ -74,9 +74,9 @@ describe("the two copies of the likely-call rule", () => {
   it("answer alike, in the plugin and in the extension", async () => {
     const { mayOpenPullRequest: extension } =
       await import("../../../crates/core/src/activity/pi-extension");
-    const { YardsortActivity } =
+    const { default: definition } =
       await import("../../../crates/core/src/activity/opencode-plugin.js");
-    const plugin = YardsortActivity.mayOpenPullRequest;
+    const plugin = definition.testing.mayOpenPullRequest;
     const calls: Array<[string, unknown, boolean]> = [
       ["bash", { command: "gh pr create --fill" }, true],
       ["bash", { command: "cd lib && gh.exe pr create" }, true],

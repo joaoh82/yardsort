@@ -1,0 +1,27 @@
+{
+  "api": 2,
+  "hook": "event",
+  "payload": {
+    "id": "evt_00000000000fixture18",
+    "created": 1794296227766,
+    "type": "session.tool.called",
+    "durable": {
+      "aggregateID": "ses_00000000000fixture01",
+      "seq": 19,
+      "version": 1
+    },
+    "location": {
+      "directory": "/tmp/yardsort-fixture/repo"
+    },
+    "data": {
+      "sessionID": "ses_00000000000fixture01",
+      "assistantMessageID": "msg_00000000000fixture03",
+      "id": "call_00_6pxjdviucm2xvc1rligerr3z",
+      "input": {
+        "code": "const r = await tools.github.create_pull_request({ owner: \"example\", repo: \"lib\", title: \"Bump\", head: \"bump\", base: \"main\" });\nreturn r;"
+      },
+      "executed": false
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

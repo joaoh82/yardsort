@@ -475,6 +475,16 @@ the hook binary end to end; covered by tests that fail without the change; `just
 `just bindings-check`, `just lint-windows` green; a real OpenCode launched through `ys` on Linux
 seen reporting live. Hands-on rows in [08 §14](08-manual-checklist.md#14--opencode-reporting).
 
+- [x] OpenCode 2 (2026-11-10, against 2.2.6): one module for both plugin APIs, given as a file to
+      1's `plugin` and as a folder to 2's `plugins`; a mapping of 2's hooks and bus events;
+      fixtures from `scripts/record-opencode.sh` and `scripts/record-pr-creation.sh`, both made
+      version-aware. Found: OpenCode 2 runs every launch's sessions in one background service
+      that keeps the environment of the launch that started it, so a second launch was reported
+      under the first's run. An OpenCode 2 launch is now given `--standalone`, told apart from 1
+      by `opencode --version`, and the plugin reports nothing from the shared service. Recorded
+      in [13 § 8](13-agent-events-stage-2-opencode.md#8--opencode-2); a real 2.2.6 through `ys` on
+      Linux seen reporting, and 1.18.34 still reporting through the same module.
+
 ## M15 — Agent events, stage 2: Grok ✅
 
 A fourth native adapter, recorded in [14-agent-events-stage-2-grok](14-agent-events-stage-2-grok.md).
@@ -1224,7 +1234,7 @@ requests that no project's list has.
 - [x] Slice 3: the same for Codex, OpenCode, pi, OMP, Grok and Cursor, each from what it can see
       — session files, the plugin and the extension handing on a likely call, Cursor's hooks —
       recorded with `scripts/record-pr-creation.sh` but for Grok, which was not signed in.
-      OpenCode 2 turned out not to load the plugin at all. Recorded in
+      OpenCode 2 turned out not to load the plugin at all; ported since (below). Recorded in
       [38 § slice 3](38-pull-requests-elsewhere.md#slice-3-what-shipped).
 - [x] Slice 4: merge, close, reopen and the reply box by link — in the Pull requests view, and
       the merges in the session toolbar — and **Code** from the nested clone, with its line
