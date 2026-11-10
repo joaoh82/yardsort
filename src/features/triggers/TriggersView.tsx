@@ -386,6 +386,28 @@ function TriggerDetail({
             </dd>
           </>
         )}
+        {trigger.filters.elsewhere && (
+          <>
+            <dt className="text-ink-faint">Pull requests</dt>
+            <dd className="select-text">
+              {trigger.watchingElsewhere.length === 0 ? (
+                "None tracked elsewhere yet. One tracked is news."
+              ) : (
+                <ul>
+                  {trigger.watchingElsewhere.map((tracked) => (
+                    <li key={tracked.url}>
+                      {tracked.problem
+                        ? `${tracked.name}: could not look: ${tracked.problem}`
+                        : tracked.closed
+                          ? `${tracked.name} is closed`
+                          : `Watching ${tracked.name}`}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </dd>
+          </>
+        )}
         <dt className="text-ink-faint">Quiet time</dt>
         <dd>
           {trigger.quietMs > 0

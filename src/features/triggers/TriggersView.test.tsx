@@ -147,6 +147,40 @@ describe("TriggersView", () => {
     expect(useWorkflowStore.getState().shownRun["address-review"]).toBe("run-7");
   });
 
+  it("names each pull request elsewhere a trigger about those watches", async () => {
+    core.triggerList.mockResolvedValue([
+      trigger("t3", {
+        name: "Address reviews elsewhere",
+        preset: null,
+        targetId: "address-review-elsewhere",
+        filters: { elsewhere: true },
+        when: "When a review comes in on a pull request it tracks elsewhere, run the workflow `address-review-elsewhere`",
+        watch: null,
+        watchingElsewhere: [
+          {
+            name: "acme/lib#212",
+            url: "https://github.com/acme/lib/pull/212",
+            closed: false,
+            problem: null,
+            lookedAt: Date.now(),
+          },
+          {
+            name: "acme/cloud#57",
+            url: "https://github.com/acme/cloud/pull/57",
+            closed: true,
+            problem: null,
+            lookedAt: Date.now(),
+          },
+        ],
+      }),
+    ]);
+    core.triggerFires.mockResolvedValue([]);
+    await opened("Address reviews elsewhere");
+    expect(await screen.findByText("Watching acme/lib#212")).toBeInTheDocument();
+    expect(screen.getByText("acme/cloud#57 is closed")).toBeInTheDocument();
+    expect(screen.queryByText(/Watching #/)).toBeNull();
+  });
+
   it("offers Reset on a capped trigger, and says why it stopped", async () => {
     core.triggerReset.mockResolvedValue({ ...smoke, standing: "listening", capped: false });
     const user = await opened("Smoke when done");

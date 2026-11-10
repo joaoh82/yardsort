@@ -68,6 +68,9 @@ pub struct TriggerItem {
     pub last: Option<TriggerFire>,
     /// What it knows of its workspace's pull request, for one on a `pr.*` event.
     pub watch: Option<PullRequestWatch>,
+    /// For one about pull requests elsewhere (`filters.elsewhere`): each the workspace tracks,
+    /// as its watch last saw it.
+    pub watching_elsewhere: Vec<TrackedWatch>,
     pub created_at: f64,
 }
 
@@ -78,6 +81,21 @@ pub struct PullRequestWatch {
     /// `None` until the branch has one.
     pub number: Option<u32>,
     /// It was merged or closed; the branch's next one is looked for.
+    pub closed: bool,
+    /// Why the last look could not be made.
+    pub problem: Option<String>,
+    /// When it was last looked at; 0 for never.
+    pub looked_at: f64,
+}
+
+/// A pull request the workspace tracks elsewhere, as a trigger's watch last saw it.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackedWatch {
+    /// `owner/name#7`.
+    pub name: String,
+    pub url: String,
+    /// It was merged or closed.
     pub closed: bool,
     /// Why the last look could not be made.
     pub problem: Option<String>,
@@ -217,8 +235,28 @@ fn item(store: &Store, row: TriggerRow, fires: &[TriggerFireRow]) -> IpcResult<T
         Some(id) => store.session(id)?,
         None => None,
     };
+    let filters = Filters::parse(&row.filters);
+    let on_pull_requests = events.iter().any(|event| event.of_a_pull_request());
+    let mut watching_elsewhere = Vec::new();
+    if let (Some(workspace), true, true) = (&row.workspace_id, on_pull_requests, filters.elsewhere)
+    {
+        for tracked in store.tracked_pull_requests(workspace)? {
+            let watch = store.tracked_pr_watch(&tracked.id)?;
+            let name = yardsort_core::tracked::repo_from_key(&tracked.repo).map_or_else(
+                || format!("{}#{}", tracked.repo, tracked.number),
+                |repo| format!("{}/{}#{}", repo.owner, repo.name, tracked.number),
+            );
+            watching_elsewhere.push(TrackedWatch {
+                name,
+                url: tracked.url,
+                closed: watch.as_ref().is_some_and(|w| w.closed),
+                problem: watch.as_ref().and_then(|w| w.problem.clone()),
+                looked_at: watch.map_or(0.0, |w| w.looked_at as f64),
+            });
+        }
+    }
     let watch = match &row.workspace_id {
-        Some(workspace) if events.iter().any(|event| event.of_a_pull_request()) => {
+        Some(workspace) if on_pull_requests && !filters.elsewhere => {
             store.pr_watch(workspace)?.map(|watch| PullRequestWatch {
                 number: watch.number,
                 closed: watch.closed,
@@ -243,7 +281,7 @@ fn item(store: &Store, row: TriggerRow, fires: &[TriggerFireRow]) -> IpcResult<T
             .iter()
             .find(|fire| fire.outcome != "gathering")
             .map(fire_item),
-        filters: Filters::parse(&row.filters),
+        filters,
         target: ScheduleTarget::parse(&row.target_kind).unwrap_or(ScheduleTarget::Workflow),
         notify: ScheduleNotify::parse(&row.notify).unwrap_or_default(),
         inputs: serde_json::from_str(&row.inputs).unwrap_or_default(),
@@ -253,6 +291,7 @@ fn item(store: &Store, row: TriggerRow, fires: &[TriggerFireRow]) -> IpcResult<T
         cap: row.cap.clamp(0, u32::MAX as i64) as u32,
         events,
         watch,
+        watching_elsewhere,
         id: row.id,
         name: row.name,
         preset: row.preset,

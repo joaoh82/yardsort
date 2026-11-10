@@ -1244,6 +1244,10 @@ requests that no project's list has.
       `pr.clone`, the checks run in a worktree of the nested clone, the review waited on by link
       and told to the agent that opened it. Recorded in
       [38 § slice 5](38-pull-requests-elsewhere.md#slice-5-what-shipped).
+- [x] Slice 6: triggers on them — a trigger whose workflow is about one elsewhere hears each
+      tracked pull request's `pr.*` events, watched by link (migration 0028), being tracked its
+      `pr.opened`; the built-in `address-review-elsewhere`. Recorded in
+      [38 § slice 6](38-pull-requests-elsewhere.md#slice-6-what-shipped).
 - [ ] The hands-on pass, [08 § 28](08-manual-checklist.md#28--pull-requests-in-other-repositories):
       a real agent in a real parent project, on Linux, macOS and Windows. **Linux done** on
       2026-11-09: rows 1–2 with a real Claude Code through `yardsort-host` (and the launch

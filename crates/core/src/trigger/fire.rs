@@ -53,6 +53,10 @@ pub struct Observation {
     pub status: Option<String>,
     /// For a review or a comment: who posted it, and what a review concluded.
     pub post: Option<Post>,
+    /// For a pull request's event: the link of the one the workspace tracks in another
+    /// repository it is about. `None` for the workspace's own pull request, and every other
+    /// event.
+    pub tracked: Option<String>,
 }
 
 /// A review or a comment on a pull request, as the filters see it.
@@ -85,12 +89,24 @@ impl Post {
 }
 
 /// What a trigger counts its runs for: one agent session, one pull request, or the workspace.
+/// One tracked elsewhere is counted by its link, which no number of the workspace's own can
+/// be.
 fn subject_of(seen: &Observation) -> Option<String> {
     match seen.event.subject() {
         Subject::Session => seen.session_id.as_ref().map(|id| format!("session:{id}")),
-        Subject::PullRequest => seen.facts.get("number").map(|n| format!("pr:{n}")),
+        Subject::PullRequest => match &seen.tracked {
+            Some(url) => Some(format!("pr:{url}")),
+            None => seen.facts.get("number").map(|n| format!("pr:{n}")),
+        },
         Subject::Workspace => Some(format!("workspace:{}", seen.workspace_id)),
     }
+}
+
+/// The link of the pull request tracked elsewhere a fire's subject is, if it is one.
+pub fn tracked_subject(subject: &str) -> Option<&str> {
+    subject
+        .strip_prefix("pr:")
+        .filter(|rest| rest.starts_with("https://") || rest.starts_with("http://"))
 }
 
 /// Whether a review or a comment is one the filters let through. Posts from the user's account
@@ -120,6 +136,11 @@ fn post_holds(filters: &Filters, event: TriggerEvent, post: Option<&Post>) -> bo
 /// Whether the filters a trigger has hold for what was seen. Those that need git — new commits,
 /// a clean worktree — are for when the fire is decided, after its quiet time.
 fn holds(filters: &Filters, seen: &Observation) -> bool {
+    // A trigger about pull requests elsewhere hears those, and one about the workspace's own
+    // hears that one.
+    if seen.event.of_a_pull_request() && filters.elsewhere != seen.tracked.is_some() {
+        return false;
+    }
     let status = seen.status.as_deref();
     match seen.event {
         TriggerEvent::AgentExited => match filters.exit {
@@ -561,6 +582,30 @@ fn decide(
                     }
                 }
             }
+            // One about a pull request tracked elsewhere is about the one that set it off, read
+            // now by its link: it must still be tracked, and open.
+            let tracked = match tracked_subject(&fire.subject) {
+                Some(url) => {
+                    let Some(row) = store
+                        .tracked_pull_requests(&workspace.id)?
+                        .into_iter()
+                        .find(|row| row.url == url)
+                    else {
+                        return Ok(refused(format!(
+                            "`{}` no longer tracks {url}.",
+                            workspace.name
+                        )));
+                    };
+                    if store.workflow_active_in(&trigger.target_id, &workspace.id)? {
+                        return Ok(waiting());
+                    }
+                    match look.tracked_pull_request(&workspace, &row) {
+                        Ok(pr) => Some(pr),
+                        Err(why) => return Ok(refused(why)),
+                    }
+                }
+                None => None,
+            };
             if store.workflow_active_in(&trigger.target_id, &workspace.id)? {
                 return Ok(waiting());
             }
@@ -580,7 +625,7 @@ fn decide(
                     origin_record: trigger.session_id.as_deref(),
                     depth: fire.depth,
                     event: Some(&facts),
-                    tracked: None,
+                    tracked: tracked.as_ref(),
                 },
                 look,
             );

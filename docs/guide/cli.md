@@ -713,6 +713,10 @@ stops (3 by default), and `--notify` is `failure`
 (the default), `always` or `never`. Everything a run would be refused for is checked before
 anything is written. A trigger on a `pr.*` event reads the workspace's pull request with `gh` as
 it is saved, so that what is on it already is not news, and says which pull request it watches.
+One whose workflow is about a pull request elsewhere (`context: tracked_pull_request`, such as
+`code-review-elsewhere`) reads, and watches, each one the workspace tracks with
+[`ys pr track`](#ys-pr) instead, and takes only `pr.*` events: see
+[Pull requests elsewhere](triggers.md#pull-requests-elsewhere).
 
 A trigger is named by its name, its id, or the start of its id, as `list` prints it. `--json`
 works as everywhere. Triggers fire while Yardsort is open, so `add`, `list`, `show` and `resume`

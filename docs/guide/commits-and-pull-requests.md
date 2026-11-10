@@ -201,6 +201,10 @@ toolbar. Up to 20
 per project are read, the most recently tracked first. **Stop tracking** removes only Yardsort's
 note of it; the pull request is left as it is. Deleting the workspace removes its notes too.
 
+[Triggers](triggers.md#pull-requests-elsewhere) can act on them: one whose workflow is about a
+pull request elsewhere — **Request code review elsewhere**, **Address reviews elsewhere** —
+hears each tracked one's `pr.*` events, and a pull request being tracked is its `pr.opened`.
+
 ### A workspace with several pull requests
 
 One workspace can open more than one pull request: a second PR on the same branch after the first

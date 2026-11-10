@@ -1129,13 +1129,32 @@ impl Gh {
         extra: &[&str],
         limit: Duration,
     ) -> ForgeResult<String> {
+        self.graphql_in(root, host, None, query, extra, limit)
+    }
+
+    /// [`Gh::graphql`] about the repository `owner/name` rather than the one at `root`, which
+    /// then need not be a repository at all.
+    pub(crate) fn graphql_in(
+        &self,
+        root: &Path,
+        host: Option<&str>,
+        repo: Option<(&str, &str)>,
+        query: &str,
+        extra: &[&str],
+        limit: Duration,
+    ) -> ForgeResult<String> {
         let query = format!("query={query}");
         let mut args = vec!["api", "graphql"];
         if let Some(host) = host {
             args.extend(["--hostname", host]);
         }
-        // `-F` fills the placeholders in; `-f` sends the rest exactly as written.
-        args.extend(["-F", "owner={owner}", "-F", "name={repo}", "-f", &query]);
+        // `-F` fills the placeholders in, or takes the value as given; `-f` sends the rest
+        // exactly as written.
+        let (owner, name) = match repo {
+            Some((owner, name)) => (format!("owner={owner}"), format!("name={name}")),
+            None => ("owner={owner}".to_owned(), "name={repo}".to_owned()),
+        };
+        args.extend(["-F", &owner, "-F", &name, "-f", &query]);
         args.extend(extra);
         self.run_within(root, &args, limit)
             .map_err(|error| match error {

@@ -99,6 +99,29 @@ impl Gh {
         let out = self.graphql(root, host, WATCH_QUERY, &["-F", &number], limit)?;
         pr_look(&out)
     }
+
+    /// Pull request `number` of `repo`, wherever that is, as a watch sees it: one a workspace
+    /// tracks in another repository. `root` is only where `gh` runs.
+    pub fn pr_look_in(
+        &self,
+        root: &Path,
+        repo: &super::Repo,
+        number: u32,
+        limit: Duration,
+    ) -> ForgeResult<PrLook> {
+        let number = format!("number={number}");
+        // `gh api` asks github.com unless told otherwise.
+        let host = Some(repo.host.as_str()).filter(|host| *host != "github.com");
+        let out = self.graphql_in(
+            root,
+            host,
+            Some((&repo.owner, &repo.name)),
+            WATCH_QUERY,
+            &["-F", &number],
+            limit,
+        )?;
+        pr_look(&out)
+    }
 }
 
 /// Read what GitHub answered to [`WATCH_QUERY`].
@@ -348,6 +371,52 @@ mod tests {
                  "author": null}
             ]}
         }}, "viewer": {"login": "me"}}})
+    }
+
+    /// One elsewhere is asked about by its own repository and host, from a folder that is no
+    /// repository at all: nothing is left for `gh` to fill in from the folder.
+    #[cfg(unix)]
+    #[test]
+    fn a_pull_request_elsewhere_is_asked_about_by_its_repository_on_its_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let here = dir.path().display().to_string();
+        std::fs::write(dir.path().join("answer.json"), answer().to_string()).unwrap();
+        let script = dir.path().join("gh");
+        crate::program::testing::executable(
+            &script,
+            format!("#!/bin/sh\necho \"$*\" >> '{here}/asked'\ncat '{here}/answer.json'\n"),
+        );
+        let env = crate::env::ShellEnv {
+            vars: std::env::vars().collect(),
+            source: crate::env::EnvSource::Process,
+            warning: None,
+        };
+        let gh = Gh::at(script, &env);
+        let limit = Duration::from_secs(10);
+        let on = |host: &str| crate::tracked::repo_from_key(&format!("{host}/acme/lib")).unwrap();
+        let look = gh
+            .pr_look_in(dir.path(), &on("github.com"), 142, limit)
+            .unwrap();
+        assert_eq!(look.number, 142);
+        gh.pr_look_in(dir.path(), &on("ghe.example.com"), 7, limit)
+            .unwrap();
+        let asked = std::fs::read_to_string(format!("{here}/asked")).unwrap();
+        let asked: Vec<&str> = asked.lines().collect();
+        assert!(
+            asked[0].starts_with("api graphql -F owner=acme -F name=lib -f query="),
+            "{}",
+            asked[0]
+        );
+        assert!(asked[0].ends_with("-F number=142"), "{}", asked[0]);
+        assert!(!asked[0].contains("--hostname"));
+        assert!(
+            asked[1].starts_with(
+                "api graphql --hostname ghe.example.com -F owner=acme -F name=lib -f query="
+            ),
+            "{}",
+            asked[1]
+        );
+        assert!(asked[1].ends_with("-F number=7"));
     }
 
     #[test]

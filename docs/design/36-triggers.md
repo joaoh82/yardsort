@@ -431,7 +431,9 @@ One migration, `0023_triggers.sql`, with four tables:
   comments and thread replies seen. It is written when a trigger is saved
   ([decision 10](#decisions)) and after each look. It is what makes "checks failed" an event once
   rather than a state seen every minute, and what lets an app that was closed find what changed
-  meanwhile.
+  meanwhile. Pull requests a workspace tracks in other repositories have one each in
+  `tracked_pr_watches`, for a trigger whose workflow is about one of them
+  ([38 § slice 6](38-pull-requests-elsewhere.md#slice-6-what-shipped)).
 - **`done_signals`**, one row per `ys workspace done`: the workspace, the session record, the
   `HEAD`, the note and the time.
 - **`custom_events`** (`0025`, slice 4), one row per `ys event emit`: the same, with the name and

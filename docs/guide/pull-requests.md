@@ -61,7 +61,8 @@ diff on GitHub. **Note on lines…** is for a project's own pull requests.
 **Request code review…** has a second agent review it: it reads the diff, runs the checks in a
 worktree of the clone of its own, and posts its review on GitHub, and the agent that opened the
 pull request is told when it is there. It needs the clone. See
-[A pull request in another repository](workflows.md#a-pull-request-in-another-repository). Its fetch leaves the
+[A pull request in another repository](workflows.md#a-pull-request-in-another-repository); a
+[trigger](triggers.md#pull-requests-elsewhere) on `pr.opened` can do it for each one tracked. Its fetch leaves the
 clone's own checkout, branches and `FETCH_HEAD` as they were, so someone working in it is not
 disturbed. **Stop tracking** also deletes the commits fetched for it, once no workspace of the
 project follows it.

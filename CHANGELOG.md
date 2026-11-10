@@ -5,6 +5,15 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Triggers on pull requests in other repositories.** A trigger whose workflow is about a pull
+  request a workspace tracks elsewhere — **Request code review elsewhere**, the new **Address
+  reviews elsewhere**, or one of your own with `context: tracked_pull_request` — now hears the
+  `pr.*` events of every pull request the workspace tracks with `ys pr track`, each on its own:
+  reviews, comments, checks, conflicts, and `pr.opened` when one is tracked. The run is about the
+  pull request that set it off. Before, no `pr.*` event fired for a tracked pull request, and such
+  a workflow could not be a trigger's. A trigger about the workspace's own pull request still hears
+  only that one. In the trigger dialog they are under **On a pull request it tracks elsewhere**.
+  See [Pull requests elsewhere](docs/guide/triggers.md#pull-requests-elsewhere).
 - **OpenCode 2 reports to the activity timeline.** With **Capture what OpenCode reports** on,
   OpenCode 2 now reports what it does, as OpenCode 1 does: before, its launches reported nothing,
   as it no longer loaded Yardsort's plugin. Yardsort asks `opencode --version` which one it is

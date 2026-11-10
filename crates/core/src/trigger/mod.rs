@@ -384,6 +384,12 @@ pub struct Filters {
     /// `custom`: the names it listens for, without `custom.`. At least one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub names: Vec<String>,
+    /// `pr.*`: the events of the pull requests the workspace tracks in other repositories
+    /// (`ys pr track`), each one apart, rather than of its own pull request. Not chosen: it is
+    /// set when the trigger is saved, from whether its workflow is about one elsewhere
+    /// (`context: tracked_pull_request`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub elsewhere: bool,
 }
 
 impl Filters {
@@ -492,6 +498,8 @@ struct Checked {
     events: String,
     filters: String,
     inputs: String,
+    /// See [`Filters::elsewhere`].
+    elsewhere: bool,
 }
 
 /// Everything that can be known to be wrong before anything happens: the workspace and the
@@ -588,6 +596,8 @@ fn check_draft(
             format!("A trigger starts from 1 to {MOST_CAP} runs before it stops and asks."),
         ));
     }
+    // Whether it is about the pull requests the workspace tracks elsewhere: its workflow's.
+    let mut elsewhere = false;
     let target_name = match draft.target {
         ScheduleTarget::Workflow => {
             let entry = crate::workflow::find(data_dir, draft.target_id).ok_or_else(|| {
@@ -608,6 +618,7 @@ fn check_draft(
             if let Some(why) = workflow_waits_for_ever(&workspace, workflow) {
                 return Err(IpcError::new("trigger_needs_person", why));
             }
+            elsewhere = check_elsewhere(workflow, &events)?;
             check_event_variables(workflow, &events)?;
             check_pull_request_gone(workflow, &events)?;
             workflow.name.clone()
@@ -632,12 +643,14 @@ fn check_draft(
     let mut filters = draft.filters.clone();
     filters.names.sort();
     filters.names.dedup();
+    filters.elsewhere = elsewhere;
     Ok(Checked {
         name,
         workspace,
         events: serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_owned()),
         filters: filters.to_json(),
         inputs: serde_json::to_string(draft.inputs).unwrap_or_else(|_| "{}".to_owned()),
+        elsewhere,
     })
 }
 
@@ -732,8 +745,32 @@ fn check_event_variables(
     Ok(())
 }
 
+/// Whether a workflow is about a pull request the workspace tracks elsewhere, and so runs on
+/// the events of those. Refused on any other event: such a run is always about one of them.
+fn check_elsewhere(
+    workflow: &crate::workflow::Workflow,
+    events: &[TriggerEvent],
+) -> IpcResult<bool> {
+    if workflow.trigger.context != crate::workflow::RunContext::TrackedPullRequest {
+        return Ok(false);
+    }
+    if events.iter().all(|event| event.of_a_pull_request()) {
+        return Ok(true);
+    }
+    Err(IpcError::new(
+        "trigger_events",
+        format!(
+            "`{}` is about a pull request the workspace tracks in another repository, so a \
+             trigger starts it on that pull request's events: `pr.opened`, `pr.review` and the \
+             other `pr.*`.",
+            workflow.id
+        ),
+    ))
+}
+
 /// Refuse a workflow that needs the workspace's open pull request on an event that comes after
-/// it stopped being open: the door would refuse it at every fire.
+/// it stopped being open: the door would refuse it at every fire. One about a pull request
+/// elsewhere always needs it open.
 fn check_pull_request_gone(
     workflow: &crate::workflow::Workflow,
     events: &[TriggerEvent],
@@ -741,6 +778,19 @@ fn check_pull_request_gone(
     let gone = events
         .iter()
         .find(|event| matches!(event, TriggerEvent::PrMerged | TriggerEvent::PrClosed));
+    if workflow.trigger.context == crate::workflow::RunContext::TrackedPullRequest {
+        if let Some(event) = gone {
+            return Err(IpcError::new(
+                "trigger_pull_request_gone",
+                format!(
+                    "`{}` is about an open pull request elsewhere, and after `{}` it is not \
+                     open. Use a workflow about the workspace instead, with `{{{{ event.url }}}}`.",
+                    workflow.id,
+                    event.as_str()
+                ),
+            ));
+        }
+    }
     match gone {
         Some(event) if crate::workflow::runs::needs_pull_request(workflow) => Err(IpcError::new(
             "trigger_pull_request_gone",
@@ -816,7 +866,11 @@ fn watch_if_asked(
     now: i64,
 ) -> IpcResult<()> {
     if draft.events.iter().any(|event| event.of_a_pull_request()) {
-        watch::seed(store, look, &checked.workspace, now)?;
+        if checked.elsewhere {
+            watch::seed_tracked(store, look, &checked.workspace, now)?;
+        } else {
+            watch::seed(store, look, &checked.workspace, now)?;
+        }
     }
     Ok(())
 }
@@ -985,6 +1039,23 @@ pub fn describe_on(trigger: &TriggerRow, pull_request: Option<u32>) -> String {
                     [rest @ .., last] => format!("{} or {last} is raised", rest.join(", ")),
                 }
             }
+            // Tracking one is its opening: an agent tracks the one it opened.
+            _ if filters.elsewhere && *event == TriggerEvent::PrOpened => {
+                "the workspace tracks a pull request elsewhere".to_owned()
+            }
+            _ if filters.elsewhere && event.of_a_pull_request() => event
+                .words()
+                .replace(
+                    "the workspace's pull request",
+                    "a pull request it tracks elsewhere",
+                )
+                // "the pull request's checks" first: the possessive of the long name reads
+                // as "the checks on" it.
+                .replace(
+                    "the pull request's checks",
+                    "the checks on a pull request it tracks elsewhere",
+                )
+                .replace("the pull request", "a pull request it tracks elsewhere"),
             Some(number) => event
                 .words()
                 .replace("the workspace's pull request", &format!("#{number}"))

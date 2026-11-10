@@ -11,8 +11,8 @@
 //! A thread of its own, for the schedules thread's reason: queueing a workflow that works with
 //! a pull request asks the forge, and a slow forge must not stall every run in the profile.
 //!
-//! The watched pull requests are looked at by a second thread, once a minute each
-//! (`yardsort_core::trigger::watch`): every look is a question to GitHub that may take up to
+//! The watched pull requests — a workspace's own, and those it tracks elsewhere — are looked at
+//! by a second thread, once a minute each (`yardsort_core::trigger::watch`): every look is a question to GitHub that may take up to
 //! its 20-second limit, and the first thread's one-second tick must not wait for it. What a look
 //! finds is handed to the first thread, which is the only one that gathers and decides.
 
@@ -167,10 +167,10 @@ fn watch_pull_requests(handle: &AppHandle) {
                 continue;
             }
         };
-        for workspace in due {
+        for watched in due {
             // The time of this look, not of the tick: a look before it may have taken a while.
             let now = clock::now().timestamp_millis();
-            match watch::look_at(store, &AppLook(&state), &git, &workspace, now) {
+            match watch::look_at_watched(store, &AppLook(&state), &git, &watched, now) {
                 Ok(seen) if seen.is_empty() => {}
                 Ok(seen) => {
                     listener
@@ -181,8 +181,10 @@ fn watch_pull_requests(handle: &AppHandle) {
                     listener.wake();
                 }
                 Err(error) => eprintln!(
-                    "triggers: cannot look at {}'s pull request: {}",
-                    workspace.name, error.message
+                    "triggers: cannot look at {}'s pull request {}: {}",
+                    watched.workspace.name,
+                    watched.tracked.as_ref().map_or("", |t| t.url.as_str()),
+                    error.message
                 ),
             }
         }
