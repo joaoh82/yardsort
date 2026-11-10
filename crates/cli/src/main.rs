@@ -24,6 +24,7 @@ macro_rules! sayln {
 }
 
 mod commands;
+mod coordinator;
 mod target;
 mod yardsort;
 
@@ -170,46 +171,59 @@ fn main() {
 
     let cli = Cli::parse();
     let out = Output { json: cli.json };
-    let result =
-        match cli.command {
-            Command::Doctor => commands::doctor::run(cli.data_dir, &out),
-            Command::Attach { target, no_resize } => Yardsort::open(cli.data_dir)
-                .and_then(|ys| commands::attach::run(&ys, target, no_resize, &out)),
-            Command::Logs { target, raw, lines } => Yardsort::open(cli.data_dir)
-                .and_then(|ys| commands::logs::run(&ys, target, raw, lines, &out)),
-            Command::Project(command) => Yardsort::open(cli.data_dir)
-                .and_then(|ys| commands::project::run(&ys, command, &out)),
-            Command::Workspace(command) => Yardsort::open(cli.data_dir)
-                .and_then(|ys| commands::workspace::run(&ys, command, &out)),
-            Command::Session(command) => Yardsort::open(cli.data_dir)
-                .and_then(|ys| commands::session::run(&ys, command, &out)),
-            Command::Activity(command) => Yardsort::open(cli.data_dir)
-                .and_then(|ys| commands::activity::run(&ys, command, &out)),
-            Command::Memory(command) => Yardsort::open(cli.data_dir)
-                .and_then(|ys| commands::memory::run(&ys, command, &out)),
-            Command::Task(command) => {
-                Yardsort::open(cli.data_dir).and_then(|ys| commands::task::run(&ys, command, &out))
-            }
-            Command::Pr(command) => {
-                Yardsort::open(cli.data_dir).and_then(|ys| commands::pr::run(&ys, command, &out))
-            }
-            Command::Schedule(command) => Yardsort::open(cli.data_dir)
-                .and_then(|ys| commands::schedule::run(&ys, command, &out)),
-            Command::Trigger(command) => Yardsort::open(cli.data_dir)
-                .and_then(|ys| commands::trigger::run(&ys, command, &out)),
-            Command::Event(command) => {
-                Yardsort::open(cli.data_dir).and_then(|ys| commands::event::run(&ys, command, &out))
-            }
-            // `validate` needs no profile, so this one opens it only when it has to.
-            Command::Workflow(command) => commands::workflow::run(cli.data_dir, command, &out),
-            // So do `validate`, `example` and `guide`.
-            Command::Test(command) => commands::test::run(cli.data_dir, command, &out),
-        };
+    // The borrow ends before `run` takes the command. The gate has to see it first, and a
+    // refusal must not run any of it.
+    let result = coordinator::enforce(&cli.data_dir, &cli.command);
+    let result = result.and_then(|()| run(cli, &out));
     if let Err(Failure { message, code }) = result {
         if !message.is_empty() {
             eprintln!("{message}");
         }
         std::process::exit(code);
+    }
+}
+
+fn run(cli: Cli, out: &Output) -> Result<(), Failure> {
+    match cli.command {
+        Command::Doctor => commands::doctor::run(cli.data_dir, out),
+        Command::Attach { target, no_resize } => Yardsort::open(cli.data_dir)
+            .and_then(|ys| commands::attach::run(&ys, target, no_resize, out)),
+        Command::Logs { target, raw, lines } => Yardsort::open(cli.data_dir)
+            .and_then(|ys| commands::logs::run(&ys, target, raw, lines, out)),
+        Command::Project(command) => {
+            Yardsort::open(cli.data_dir).and_then(|ys| commands::project::run(&ys, command, out))
+        }
+        Command::Workspace(command) => {
+            Yardsort::open(cli.data_dir).and_then(|ys| commands::workspace::run(&ys, command, out))
+        }
+        Command::Session(command) => {
+            Yardsort::open(cli.data_dir).and_then(|ys| commands::session::run(&ys, command, out))
+        }
+        Command::Activity(command) => {
+            Yardsort::open(cli.data_dir).and_then(|ys| commands::activity::run(&ys, command, out))
+        }
+        Command::Memory(command) => {
+            Yardsort::open(cli.data_dir).and_then(|ys| commands::memory::run(&ys, command, out))
+        }
+        Command::Task(command) => {
+            Yardsort::open(cli.data_dir).and_then(|ys| commands::task::run(&ys, command, out))
+        }
+        Command::Pr(command) => {
+            Yardsort::open(cli.data_dir).and_then(|ys| commands::pr::run(&ys, command, out))
+        }
+        Command::Schedule(command) => {
+            Yardsort::open(cli.data_dir).and_then(|ys| commands::schedule::run(&ys, command, out))
+        }
+        Command::Trigger(command) => {
+            Yardsort::open(cli.data_dir).and_then(|ys| commands::trigger::run(&ys, command, out))
+        }
+        Command::Event(command) => {
+            Yardsort::open(cli.data_dir).and_then(|ys| commands::event::run(&ys, command, out))
+        }
+        // `validate` needs no profile, so this one opens it only when it has to.
+        Command::Workflow(command) => commands::workflow::run(cli.data_dir, command, out),
+        // So do `validate`, `example` and `guide`.
+        Command::Test(command) => commands::test::run(cli.data_dir, command, out),
     }
 }
 

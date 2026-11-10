@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { errorMessage, ipc, type SettingsInfo } from "@/lib/ipc";
+import { errorMessage, ipc, type FloorManagerLevel, type SettingsInfo } from "@/lib/ipc";
 import { YsCommand } from "@/features/ys/YsCommand";
 import { useAppStore } from "@/stores/app";
 import { usePreflightStore } from "@/stores/preflight";
@@ -41,6 +41,64 @@ function UpdateNow() {
   );
 }
 
+const PERMISSIONS: { level: FloorManagerLevel; label: string; hint: string }[] = [
+  {
+    level: "read-only",
+    label: "Read only",
+    hint: "It can look. ys refuses every command that starts something or writes.",
+  },
+  {
+    level: "ask",
+    label: "Ask first",
+    hint: "Starts and writes wait until you press Allow in this window.",
+  },
+  {
+    level: "trusted",
+    label: "Trusted",
+    hint: "It may start agents, workspaces, workflows, tests and checkouts without asking.",
+  },
+];
+
+/**
+ * How much the Floor Manager may do on its own. Saved on its own, the moment it changes:
+ * the next `ys` command follows it, and the instructions file is rewritten now.
+ */
+function FloorManagerPermission({
+  level,
+  onChange,
+}: {
+  level: FloorManagerLevel;
+  onChange: (level: FloorManagerLevel) => void;
+}) {
+  return (
+    <fieldset className="grid gap-2 rounded border border-line px-3 py-2">
+      <legend className="px-1 text-ink-muted">Floor Manager permission</legend>
+      {PERMISSIONS.map((choice) => (
+        <label key={choice.level} className="flex items-start gap-2">
+          <input
+            type="radio"
+            name="floor-manager-level"
+            value={choice.level}
+            checked={level === choice.level}
+            onChange={() => onChange(choice.level)}
+            className="mt-0.5 accent-(--color-accent)"
+          />
+          <span>
+            {choice.label}
+            <span className="block text-ink-faint">{choice.hint}</span>
+          </span>
+        </label>
+      ))}
+      <p className="text-ink-faint">
+        The next ys command follows this. The instructions file is updated now; a Floor Manager that
+        is already running reads the new wording the next time it starts. Deleting a workspace,
+        closing a task and attaching stay refused at every level. This is not a sandbox: a shell
+        command that is not ys is outside this.
+      </p>
+    </fieldset>
+  );
+}
+
 /** The `ys` command: where it is, and a button to install or update it. */
 function CommandLine() {
   const ys = usePreflightStore((s) => s.report?.ys);
@@ -59,6 +117,7 @@ export function GeneralSettings() {
   const [notify, setNotify] = useState(true);
   const [autoCheck, setAutoCheck] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [levelError, setLevelError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
   const adopt = (next: SettingsInfo) => {
@@ -95,6 +154,18 @@ export function GeneralSettings() {
       setSaved(true);
     } catch (reason) {
       setError(errorMessage(reason));
+    }
+  };
+
+  const setLevel = async (level: FloorManagerLevel) => {
+    const previous = info.floorManager;
+    setInfo({ ...info, floorManager: level });
+    setLevelError(null);
+    try {
+      await ipc.settingsSaveFloorManager(level);
+    } catch (reason) {
+      setInfo({ ...info, floorManager: previous });
+      setLevelError(errorMessage(reason));
     }
   };
 
@@ -158,6 +229,15 @@ export function GeneralSettings() {
         </span>
       </label>
       <UpdateNow />
+      <FloorManagerPermission
+        level={info.floorManager}
+        onChange={(level) => void setLevel(level)}
+      />
+      {levelError && (
+        <p role="alert" className="text-red-400 select-text">
+          {levelError}
+        </p>
+      )}
       <CommandLine />
       {error && (
         <p role="alert" className="text-red-400 select-text">

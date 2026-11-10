@@ -5,11 +5,13 @@
 //! what it is told and what it can reach:
 //!
 //! - **Told:** that folder holds `AGENTS.md`, the instructions every harness Yardsort ships reads,
-//!   and a `CLAUDE.md` that points at it. They are written afresh at every start, so a new
-//!   version's instructions reach the next start.
+//!   and a `CLAUDE.md` that points at it. They are written afresh at every start, and again when
+//!   the permission setting changes, so they describe the level that is actually in force.
 //! - **Reach:** `ys`, the command line, which reads the same database the app does. Its `PATH`
 //!   begins with the folder this copy's own `ys` is in, and `YARDSORT_DATA_DIR` names this
 //!   profile, so `ys` answers about the projects the window shows and nobody else's.
+//!   `YARDSORT_COORDINATOR` is set too. While it is set, `ys` enforces the permission level from
+//!   settings: it is not enough that the instructions say where the lines are.
 //!
 //! Nothing here reads what it prints: the window shows its terminal, and the user talks to it
 //! there. It has no workspace, no session record and no activity run — it is not work on a
@@ -23,14 +25,23 @@ use crate::env::ShellEnv;
 use crate::error::{IpcError, IpcResult};
 use crate::launch::{resolve_launch, HarnessRequest, Launch, Launcher, HARNESS_LABEL};
 
+mod confirm;
+mod level;
+
+pub use confirm::{answer, ask, pending, CoordinatorConfirmation};
+pub use level::{decide, instructions, Action, Decision, FloorManagerLevel};
+
 /// Label on the coordinator's PTY session. Its value is the harness it runs.
 pub const LABEL: &str = "coordinator";
 
 /// Its folder, inside the profile's data directory.
 pub const DIR: &str = "coordinator";
 
-/// The instructions, as written into `AGENTS.md`.
-pub const INSTRUCTIONS: &str = include_str!("coordinator/AGENTS.md");
+/// Set on the Floor Manager's process. `ys` enforces the permission level only when this is
+/// present. The value is ignored: the level is read from settings on every command, so changing
+/// it applies to the next command without a restart. Unsetting it, or running something that is
+/// not `ys`, is outside the gate — the guide says so, and it is not a sandbox.
+pub const ENV: &str = "YARDSORT_COORDINATOR";
 
 /// What `CLAUDE.md` says: Claude Code reads that file, not `AGENTS.md`, and `@` imports one.
 const CLAUDE_MD: &str = "@AGENTS.md\n";
@@ -40,14 +51,31 @@ pub fn home(data_dir: &Path) -> PathBuf {
     data_dir.join(DIR)
 }
 
-/// Make the folder and write the instructions into it, replacing whatever an earlier version
-/// wrote. Anything else the user or the agent put there is left alone.
-pub fn prepare(data_dir: &Path) -> std::io::Result<PathBuf> {
+/// Make the folder and write the instructions for `level` into it, replacing whatever an earlier
+/// version or an earlier level wrote. Anything else the user or the agent put there is left alone.
+pub fn prepare(data_dir: &Path, level: FloorManagerLevel) -> std::io::Result<PathBuf> {
     let dir = home(data_dir);
     std::fs::create_dir_all(&dir)?;
-    std::fs::write(dir.join("AGENTS.md"), INSTRUCTIONS)?;
-    std::fs::write(dir.join("CLAUDE.md"), CLAUDE_MD)?;
+    write_instructions(&dir, level)?;
     Ok(dir)
+}
+
+/// Rewrite the instructions when the folder already exists, so saving the setting updates the
+/// file at once. A Floor Manager that has not been started yet has no folder, and the next start
+/// writes the level then. A running one has already read the old file; it reads this one the
+/// next time it starts. The gate itself does not wait for that: `ys` reads the setting.
+pub fn rewrite_if_present(data_dir: &Path, level: FloorManagerLevel) -> std::io::Result<()> {
+    let dir = home(data_dir);
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    write_instructions(&dir, level)
+}
+
+fn write_instructions(dir: &Path, level: FloorManagerLevel) -> std::io::Result<()> {
+    std::fs::write(dir.join("AGENTS.md"), instructions(level))?;
+    std::fs::write(dir.join("CLAUDE.md"), CLAUDE_MD)?;
+    Ok(())
 }
 
 /// The coordinator the daemon holds, if any: the running one, or else the last to end, so the
@@ -78,10 +106,15 @@ pub fn environment(
     data_dir: &Path,
     ys_dir: Option<&Path>,
 ) -> Vec<(String, String)> {
-    let mut vars = vec![(
-        "YARDSORT_DATA_DIR".to_owned(),
-        data_dir.to_string_lossy().into_owned(),
-    )];
+    let mut vars = vec![
+        (
+            "YARDSORT_DATA_DIR".to_owned(),
+            data_dir.to_string_lossy().into_owned(),
+        ),
+        // Presence is the marker. The level is not put here: `ys` reads it from settings, and
+        // a value the agent can edit would be a level the agent can edit.
+        (ENV.to_owned(), "1".to_owned()),
+    ];
     if let Some(dir) = ys_dir {
         // Windows spells it `Path` as often as `PATH`, and a second spelling would be a second
         // variable to the child: use the one the environment already has.
@@ -113,6 +146,7 @@ impl Launcher<'_> {
         harness: HarnessRequest,
         ys_dir: Option<&Path>,
         size: TermSize,
+        level: FloorManagerLevel,
     ) -> IpcResult<SessionInfo> {
         for session in self
             .host
@@ -127,7 +161,7 @@ impl Launcher<'_> {
                 }
             }
         }
-        let home = prepare(self.data_dir).map_err(|e| {
+        let home = prepare(self.data_dir, level).map_err(|e| {
             IpcError::new(
                 "coordinator_folder",
                 format!(
@@ -184,11 +218,11 @@ mod tests {
     #[test]
     fn the_instructions_are_written_for_every_harness_and_rewritten_each_time() {
         let data = tempfile::tempdir().unwrap();
-        let dir = prepare(data.path()).unwrap();
+        let dir = prepare(data.path(), FloorManagerLevel::Ask).unwrap();
         assert_eq!(dir, data.path().join("coordinator"));
         assert_eq!(
             std::fs::read_to_string(dir.join("AGENTS.md")).unwrap(),
-            INSTRUCTIONS
+            instructions(FloorManagerLevel::Ask)
         );
         assert_eq!(
             std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap(),
@@ -196,33 +230,21 @@ mod tests {
         );
 
         // An old version's words are replaced; a note of the user's own is not touched.
+        // A new level replaces the wording too, which is what saving the setting does.
         std::fs::write(dir.join("AGENTS.md"), "stale").unwrap();
         std::fs::write(dir.join("notes.md"), "mine").unwrap();
-        prepare(data.path()).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(dir.join("AGENTS.md")).unwrap(),
-            INSTRUCTIONS
-        );
+        prepare(data.path(), FloorManagerLevel::ReadOnly).unwrap();
+        let written = std::fs::read_to_string(dir.join("AGENTS.md")).unwrap();
+        assert_eq!(written, instructions(FloorManagerLevel::ReadOnly));
+        assert!(written.contains("## Read only"), "{written}");
         assert_eq!(
             std::fs::read_to_string(dir.join("notes.md")).unwrap(),
             "mine"
         );
-    }
-
-    #[test]
-    fn the_instructions_draw_the_lines_they_are_there_to_draw() {
-        // What the user is promised in docs/guide/floor-manager.md, in the words the agent reads.
-        for promise in [
-            "ys project list",
-            "ys pr list",
-            "ys pr checkout",
-            "ys workflow run code-review",
-            "Ask first",
-            "Never",
-            "cloud",
-        ] {
-            assert!(INSTRUCTIONS.contains(promise), "missing {promise:?}");
-        }
+        // No folder yet: saving the setting does not create one. The next start does.
+        let fresh = tempfile::tempdir().unwrap();
+        rewrite_if_present(fresh.path(), FloorManagerLevel::Trusted).unwrap();
+        assert!(!home(fresh.path()).exists());
     }
 
     #[test]
@@ -238,12 +260,16 @@ mod tests {
         let vars = environment(&env, Path::new("/tmp/profile"), Some(Path::new(ys)));
         assert_eq!(vars[0].0, "YARDSORT_DATA_DIR");
         assert_eq!(vars[0].1, "/tmp/profile");
+        // Present, and not the level: the agent must not be able to edit its permission by
+        // editing the value.
+        assert_eq!(vars[1], (ENV.to_owned(), "1".to_owned()));
         // The spelling the environment has, and the folder once, at the front.
-        assert_eq!(vars[1], ("Path".to_owned(), format!("{ys}{sep}{other}")));
+        assert_eq!(vars[2], ("Path".to_owned(), format!("{ys}{sep}{other}")));
 
-        // No `ys` of its own: `PATH` is left as it is.
+        // No `ys` of its own: `PATH` is left as it is. The marker is still set.
         let vars = environment(&env, Path::new("/tmp/profile"), None);
-        assert_eq!(vars.len(), 1);
+        assert_eq!(vars.len(), 2);
+        assert_eq!(vars[1].0, ENV);
     }
 
     /// A harness that is a shell script, so a real process runs in a real PTY.
@@ -294,7 +320,7 @@ mod tests {
             bin.path(),
             &format!(
                 "pwd > '{0}'; echo \"$YARDSORT_DATA_DIR\" >> '{0}'; echo \"$PATH\" >> '{0}'; \
-                 sleep 30",
+                 echo \"$YARDSORT_COORDINATOR\" >> '{0}'; sleep 30",
                 out.display()
             ),
         )];
@@ -318,11 +344,11 @@ mod tests {
         let size = TermSize { cols: 80, rows: 24 };
 
         let first = launcher
-            .coordinator(request(), Some(ys_dir.path()), size)
+            .coordinator(request(), Some(ys_dir.path()), size, FloorManagerLevel::Ask)
             .unwrap();
         assert_eq!(first.labels.get(LABEL).map(String::as_str), Some("fake"));
         assert!(!first.labels.contains_key(crate::launch::WORKSPACE_LABEL));
-        wait_until(|| std::fs::read_to_string(&out).is_ok_and(|seen| seen.lines().count() >= 3));
+        wait_until(|| std::fs::read_to_string(&out).is_ok_and(|seen| seen.lines().count() >= 4));
         let seen = std::fs::read_to_string(&out).unwrap();
         let lines: Vec<&str> = seen.lines().collect();
         let home = std::fs::canonicalize(home(data.path())).unwrap();
@@ -333,13 +359,22 @@ mod tests {
             "ys first on PATH: {}",
             lines[2]
         );
+        assert_eq!(
+            lines[3], "1",
+            "the gate's marker, not a level the agent can edit"
+        );
         assert!(home.join("AGENTS.md").is_file());
         // Not a workspace's conversation, so nothing was recorded as one.
         assert!(store.workspaces().unwrap().is_empty());
 
         // Asked again while it runs: the same one, whatever harness is asked for.
         let again = launcher
-            .coordinator(request(), Some(ys_dir.path()), size)
+            .coordinator(
+                request(),
+                Some(ys_dir.path()),
+                size,
+                FloorManagerLevel::Trusted,
+            )
             .unwrap();
         assert_eq!(again.id, first.id);
         assert_eq!(current(&host).map(|s| s.id), Some(first.id.clone()));
@@ -354,7 +389,7 @@ mod tests {
         });
         assert_eq!(current(&host).map(|s| s.id), Some(first.id.clone()));
         let next = launcher
-            .coordinator(request(), Some(ys_dir.path()), size)
+            .coordinator(request(), Some(ys_dir.path()), size, FloorManagerLevel::Ask)
             .unwrap();
         assert_ne!(next.id, first.id);
         assert!(host.info(&first.id).is_err(), "the ended one is forgotten");

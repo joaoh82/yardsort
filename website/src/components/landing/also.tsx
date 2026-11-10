@@ -31,7 +31,7 @@ const POINTS = [
   },
   {
     title: "One agent that sees everything",
-    body: "The Floor Manager, in the bottom bar's corner or Mod+J, is an agent you pick with every project in view through ys. Ask what is running, which pull requests nobody has reviewed or which need attention, or to start a task. It suggests a workflow, opens workspaces on other people's pull requests and starts reviewers on them, each only after you say yes. It never deletes, merges or closes anything.",
+    body: "The Floor Manager, in the bottom bar's corner or Mod+J, is an agent you pick with every project in view through ys. Ask what is running, which pull requests nobody has reviewed or which need attention, or to start a task. It suggests a workflow, opens workspaces on other people's pull requests and starts reviewers on them. How much it may do on its own is a setting — read only, ask first (the default) or trusted — and ys enforces it. Deleting a workspace, closing a task and attaching stay refused. A shell command that is not ys is outside that gate.",
   },
   {
     title: "Your issues, where the agents are",

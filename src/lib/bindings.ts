@@ -58,9 +58,14 @@ export const commands = {
 	 *  whether it comes up. The caller shows the session and closes it.
 	 */
 	harnessTest: (def: HarnessDef, size: TermSize) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("harness_test", { def, size })),
-	settingsGet: () => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_get")),
-	settingsSaveWorkspaces: (workspaces: WorkspaceSettingsDto) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_workspaces", { workspaces })),
-	settingsSaveGeneral: (editorCommand: string | null, notifyWhenQuiet: boolean, checkForUpdates: boolean) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_general", { editorCommand, notifyWhenQuiet, checkForUpdates })),
+	settingsGet: () => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_get")),
+	settingsSaveWorkspaces: (workspaces: WorkspaceSettingsDto) => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_save_workspaces", { workspaces })),
+	settingsSaveGeneral: (editorCommand: string | null, notifyWhenQuiet: boolean, checkForUpdates: boolean) => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_save_general", { editorCommand, notifyWhenQuiet, checkForUpdates })),
+	/**
+	 *  The Floor Manager's permission. The next `ys` command it runs follows this. Its instructions
+	 *  are rewritten now when its folder exists; a running one reads them the next time it starts.
+	 */
+	settingsSaveFloorManager: (level: FloorManagerLevel_Deserialize) => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_save_floor_manager", { level })),
 	projectBranches: (projectId: string) => typedError<BranchList, IpcError>(__TAURI_INVOKE("project_branches", { projectId })),
 	/**
 	 *  The core loop: make a worktree — on a new branch, or for an existing one — and start a harness in it with the user's
@@ -466,7 +471,7 @@ export const commands = {
 	outcomeLabel: (id: string, label: string | null) => typedError<ProjectOutcomes, IpcError>(__TAURI_INVOKE("outcome_label", { id, label })),
 	/**  Per-agent history across every project, for the composer: counted from outcomes only. */
 	outcomesAgents: () => typedError<AgentOutcomes[], IpcError>(__TAURI_INVOKE("outcomes_agents")),
-	settingsSaveActivity: (activity: ActivitySettingsDto) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { activity })),
+	settingsSaveActivity: (activity: ActivitySettingsDto) => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_save_activity", { activity })),
 	sessionsList: (workspaceId: string) => typedError<SessionRecord[], IpcError>(__TAURI_INVOKE("sessions_list", { workspaceId })),
 	/**
 	 *  How full a conversation's context is, as the agent last reported it, and what to type to
@@ -544,6 +549,16 @@ export const commands = {
 	coordinatorStart: (harness: string, size: TermSize) => typedError<CoordinatorStatus, IpcError>(__TAURI_INVOKE("coordinator_start", { harness, size })),
 	/**  End the running Floor Manager. Its last screen stays until it is started again. */
 	coordinatorStop: () => typedError<CoordinatorStatus, IpcError>(__TAURI_INVOKE("coordinator_stop")),
+	/**
+	 *  Commands the Floor Manager has asked to run and is waiting on. Oldest first. Empty when
+	 *  nothing is waiting, which is the usual answer: the window polls this.
+	 */
+	coordinatorConfirmations: () => typedError<CoordinatorConfirmation[], IpcError>(__TAURI_INVOKE("coordinator_confirmations")),
+	/**
+	 *  The user pressed Allow or Don't allow. This writes the answer the waiting `ys` reads. It
+	 *  does not run the command: that process already has it, and runs it only after a yes.
+	 */
+	coordinatorAnswer: (id: string, allow: boolean) => typedError<boolean, IpcError>(__TAURI_INVOKE("coordinator_answer", { id, allow })),
 	ptySpawn: (request: SpawnRequest) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("pty_spawn", { request })),
 	/**  Stream a session into `output`: first a snapshot that repaints the terminal, then live bytes. */
 	ptyAttach: (id: SessionId, output: Channel<RawBytes>) => typedError<number, IpcError>(__TAURI_INVOKE("pty_attach", { id, output })),
@@ -685,7 +700,7 @@ export const commands = {
 	 */
 	usageTokens: (days: number, utcOffsetMinutes: number) => typedError<UsageReport, IpcError>(__TAURI_INVOKE("usage_tokens", { days, utcOffsetMinutes })),
 	/**  Whether Usage is offered at the foot of the sidebar. */
-	settingsSaveUsage: (showInSidebar: boolean) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_usage", { showInSidebar })),
+	settingsSaveUsage: (showInSidebar: boolean) => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_save_usage", { showInSidebar })),
 	/**  Every schedule of every project, by name. */
 	scheduleList: () => typedError<Schedule[], IpcError>(__TAURI_INVOKE("schedule_list")),
 	/**  A schedule's history, newest first. */
@@ -1081,6 +1096,20 @@ export type ConversationContext = {
 	digest: string,
 };
 
+/**  One command waiting for a yes in the window. */
+export type CoordinatorConfirmation = {
+	id: string,
+	/**  The command line, for the dialog. Display only: answering does not run it. */
+	command: string,
+	/**
+	 *  When the request was written, in milliseconds, so the oldest is asked first.
+	 * 
+	 *  A float rather than an integer: the binding generator refuses a 64-bit integer, and a
+	 *  millisecond count is exact in a float for centuries.
+	 */
+	createdUnixMs: number | null,
+};
+
 /**  What the panel needs to draw itself. */
 export type CoordinatorStatus = {
 	/**  The one the daemon holds: running, or the last to end. `None` before the first start. */
@@ -1449,6 +1478,49 @@ export type Filters_Serialize = {
 	 */
 	elsewhere?: boolean,
 };
+
+/**
+ *  How much the Floor Manager may do through `ys` on its own.
+ * 
+ *  Destructive commands are refused at every level. See [`crate::coordinator::Action`].
+ */
+export type FloorManagerLevel = FloorManagerLevel_Serialize | FloorManagerLevel_Deserialize;
+
+/**
+ *  How much the Floor Manager may do through `ys` on its own.
+ * 
+ *  Destructive commands are refused at every level. See [`crate::coordinator::Action`].
+ */
+export type FloorManagerLevel_Deserialize = 
+/**  Look. Every command that starts something or writes is refused. */
+"read-only" | 
+/**  Look. Every command that starts something or writes is refused. */
+"read_only" | 
+/**  Look. Every command that starts something or writes is refused. */
+"readonly" | 
+/**  Starts and writes wait for a yes in the app. The default. */
+"ask" | 
+/**
+ *  May start agents, workspaces, workflows, tests and checkouts, and other writes that
+ *  are not destructive, without asking.
+ */
+"trusted";
+
+/**
+ *  How much the Floor Manager may do through `ys` on its own.
+ * 
+ *  Destructive commands are refused at every level. See [`crate::coordinator::Action`].
+ */
+export type FloorManagerLevel_Serialize = 
+/**  Look. Every command that starts something or writes is refused. */
+"read-only" | 
+/**  Starts and writes wait for a yes in the app. The default. */
+"ask" | 
+/**
+ *  May start agents, workspaces, workflows, tests and checkouts, and other writes that
+ *  are not destructive, without asking.
+ */
+"trusted";
 
 /**  Which forge a host is, as far as the shape of its URLs goes. */
 export type ForgeKind = "github" | "gitlab" | "bitbucket" | 
@@ -3029,7 +3101,9 @@ export type SessionStarted = {
 
 export type SessionState = { status: "running" } | { status: "exited"; exit: ExitInfo };
 
-export type SettingsInfo = {
+export type SettingsInfo = SettingsInfo_Serialize | SettingsInfo_Deserialize;
+
+export type SettingsInfo_Deserialize = {
 	/**  The "Open in editor" command; `None` tries the common editors in turn. */
 	editorCommand: string | null,
 	notifyWhenQuiet: boolean,
@@ -3044,6 +3118,27 @@ export type SettingsInfo = {
 	activity: ActivitySettingsDto,
 	/**  Offer Usage at the foot of the sidebar. */
 	showUsageInSidebar: boolean,
+	/**  How much the Floor Manager may do through `ys`. */
+	floorManager: FloorManagerLevel_Deserialize,
+};
+
+export type SettingsInfo_Serialize = {
+	/**  The "Open in editor" command; `None` tries the common editors in turn. */
+	editorCommand: string | null,
+	notifyWhenQuiet: boolean,
+	checkForUpdates: boolean,
+	workspaces: WorkspaceSettingsDto,
+	defaultWorktreeRoot: string,
+	/**  Set while `YARDSORT_WORKTREE_ROOT` overrides the setting. */
+	worktreeRootOverride: string | null,
+	filePath: string,
+	/**  Why the settings file was ignored, if it was (it is kept, never overwritten). */
+	problem: string | null,
+	activity: ActivitySettingsDto,
+	/**  Offer Usage at the foot of the sidebar. */
+	showUsageInSidebar: boolean,
+	/**  How much the Floor Manager may do through `ys`. */
+	floorManager: FloorManagerLevel_Serialize,
 };
 
 /**  Where a workflow came from. */

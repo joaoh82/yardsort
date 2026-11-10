@@ -3,6 +3,16 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Floor Manager permission is a setting, and `ys` enforces it.** Settings → General chooses
+  read only, ask first (the default) or trusted. The next `ys` command the Floor Manager runs
+  follows it. Ask first waits for **Allow** in the window, even when the panel is closed, and
+  auto mode does not skip that. Read only refuses a start or a write. Trusted may start agents,
+  workspaces, workflows, tests and checkouts without asking. Deleting a workspace, closing a
+  task and attaching stay refused at every level. This is not a sandbox: a shell command that
+  is not `ys` is outside the gate. See [What it may do](docs/guide/floor-manager.md#what-it-may-do).
+
 ## 0.25.0
 
 - **Triggers on pull requests in other repositories.** A trigger whose workflow is about a pull

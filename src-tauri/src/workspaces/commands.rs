@@ -68,6 +68,8 @@ pub struct SettingsInfo {
     pub activity: ActivitySettingsDto,
     /// Offer Usage at the foot of the sidebar.
     pub show_usage_in_sidebar: bool,
+    /// How much the Floor Manager may do through `ys`.
+    pub floor_manager: yardsort_core::coordinator::FloorManagerLevel,
 }
 
 /// The activity switches, as Settings → General shows them. See `crate::activity`.
@@ -292,6 +294,7 @@ pub(crate) fn settings_info(state: &AppState) -> IpcResult<SettingsInfo> {
             .map(|dir| dir.to_string_lossy().into_owned()),
         file_path: state.settings.path().to_string_lossy().into_owned(),
         problem: state.settings.problem(),
+        floor_manager: settings.floor_manager.level,
     })
 }
 
@@ -596,6 +599,33 @@ pub async fn settings_save_general(
                 settings.general.check_for_updates = check_for_updates;
             })
             .map_err(save_failed)?;
+        settings_info(state)
+    })
+    .await
+}
+
+/// The Floor Manager's permission. The next `ys` command it runs follows this. Its instructions
+/// are rewritten now when its folder exists; a running one reads them the next time it starts.
+#[tauri::command]
+#[specta::specta]
+pub async fn settings_save_floor_manager(
+    app: AppHandle,
+    level: yardsort_core::coordinator::FloorManagerLevel,
+) -> IpcResult<SettingsInfo> {
+    blocking(app, move |state| {
+        let previous = state.settings.get().floor_manager.level;
+        state
+            .settings
+            .update(|settings| settings.floor_manager.level = level)
+            .map_err(save_failed)?;
+        if let Err(error) = yardsort_core::coordinator::rewrite_if_present(&state.data_dir, level) {
+            // The gate reads the setting, so a failed rewrite must not leave the two apart:
+            // put the previous level back and say the save did not take.
+            let _ = state
+                .settings
+                .update(|settings| settings.floor_manager.level = previous);
+            return Err(save_failed(error));
+        }
         settings_info(state)
     })
     .await

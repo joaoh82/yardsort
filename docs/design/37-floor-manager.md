@@ -1,7 +1,9 @@
 # 37 — The Floor Manager
 
-**Status:** first slice built (M30). _Floor Manager_ is a working name; _Floor Planner_ was the
-other one offered.
+**Status:** first slice built (M30). Permission is a setting `ys` enforces, settled
+2026-11-10 ([open question 53](06-open-questions.md#floor-manager)). _Floor Manager_ is a working
+name; _Floor Planner_ was the other one offered. The owner called the third level "god mode";
+the setting is named Trusted.
 
 The idea, as captured on 2026-11-07: an always-available coordinator inside the client, with a
 persistent button in the lower-right corner. It sees every project, with its resources,
@@ -18,15 +20,17 @@ The Floor Manager follows that rule. It is whichever harness the user picks, sta
 other, with no output parsed. What makes it a coordinator is two things:
 
 1. **Where it runs and what it is told.** It runs in `<data dir>/coordinator`, which belongs to no
-   project. That folder holds an `AGENTS.md` (`crates/core/src/coordinator/AGENTS.md`) and a
-   `CLAUDE.md` that imports it. Both are rewritten at every start, so a new version's
-   instructions arrive with the next start. They say what to run for each kind of question, and
-   where the confirmation lines are.
+   project. That folder holds an `AGENTS.md`, assembled for the active permission from the pieces
+   in `crates/core/src/coordinator/`, and a `CLAUDE.md` that imports it. Both are rewritten at
+   every start and again when the setting is saved, so they describe the level that is set. A
+   running agent has already read the old file; it reads the new one the next time it starts.
+   The gate does not wait for that.
 2. **What it can reach.** It reaches `ys`. The launch puts the folder of the app's own `ys` first
-   on `PATH`, and sets `YARDSORT_DATA_DIR` to the profile, so `ys` sees exactly what the window
-   sees, a development profile included. `ys` already covered projects, workspaces, sessions,
-   logs, activity, tasks, workflows, tests, schedules and triggers. What it lacked was pull
-   requests, so this slice adds `ys pr` (below).
+   on `PATH`, sets `YARDSORT_DATA_DIR` to the profile, and sets `YARDSORT_COORDINATOR`. The
+   variable's value is ignored. While it is set, `ys` reads the permission from settings on
+   every command and enforces it. `ys` already covered projects, workspaces, sessions, logs,
+   activity, tasks, workflows, tests, schedules and triggers. What it lacked was pull requests,
+   so this slice adds `ys pr` (below).
 
 It has a `coordinator` label on its PTY session and no `workspace` label. The tab strip, the
 session records, the activity timeline and every per-workspace list therefore leave it out,
@@ -48,21 +52,44 @@ the window keep working beside it. **×** hides it and leaves the agent running.
 before ending it, as the rule against destroying work silently asks of anything that ends work
 in progress. An ended Floor Manager keeps its last screen, with **Start again**.
 
-## Confirmation boundaries
+## Permission
 
-These are drawn in the instructions, and the guide states them to the user as instructions, not
-as enforcement:
+The level is `[floor_manager] level` in `settings.toml`: `read-only`, `ask` (the default, and
+omitted from the file) or `trusted`. Settings → General saves it on its own, the moment it
+changes. `ys` reads the file on every command, so the next one follows it. The instructions are
+rewritten then too, when the coordinator folder already exists.
 
-- **Free:** anything that only reads.
-- **Proposed, then a yes:** anything that starts an agent, makes a branch or a workspace, runs a
-  workflow, a test or a schedule, or writes to GitHub. The proposal names the exact command. A yes
-  covers that proposal only.
-- **Never:** delete or archive a workspace, delete a branch, force anything, merge, close or
-  approve a pull request, edit or commit in a project, type into or stop another agent, approve
-  memory, read secrets.
+Classification lives in the `ys` binary and is exhaustive over its subcommands, so a new one
+does not compile until it is named as a read, a start or write, or something never allowed:
 
-The harness's own permission prompts are a second line, and the only one with teeth. Making the
-first line enforced rather than told is [open question 53](06-open-questions.md#floor-manager).
+- **Read.** Allowed at every level. Listing, showing, logs, handoff, validate, and the forms of
+  `ys task close` and `ys task reopen` that only say what they would do.
+- **Act.** Read only refuses. Ask first confirms. Trusted allows. A new workspace, a checkout,
+  a workflow, a test, a schedule, a trigger, a task comment, and the rest of the starts and
+  writes.
+- **Deny.** Refused at every level, with no confirmation: `ys workspace delete` with or without
+  `--force`, `ys task close --yes`, `ys attach`.
+
+Ask first does not trust the agent to ask, and it does not read stdin: the agent would answer
+itself. `ys` checks that the desktop app holds the profile lock. If it does not, the command is
+refused at once. If it does, `ys` writes `<data dir>/coordinator/confirm/<uuid>.json` and polls
+for `<uuid>.answer` (`yes` or `no`) until the app writes it, the lock drops, or ten minutes
+pass. The window polls the same folder and shows **Allow** / **Don't allow**. Answering writes
+the file. It does not run the command: the process that is waiting is the one that parsed it.
+The id has to be a uuid whose stem matches the request, so an answer cannot name a path outside
+that folder.
+
+This is not a security boundary against a Floor Manager that wants to get around it. It runs as
+the user. It can write the answer file, unset `YARDSORT_COORDINATOR`, or run `git`, `gh` or an
+editor. The instructions tell it not to. The guide says the same to the user. There is no `ys`
+command for archiving a workspace, deleting a branch, merging, closing or approving a pull
+request, or editing project files, so those stay instructions: the gate cannot see them. The
+harness's own permission file would be a second line. It is not this one, because it has to
+work for every harness, and a user's own Claude Code settings have already been seen to run
+commands without asking.
+
+The variable is a marker of which process is the Floor Manager, not a secret. The user's own
+`ys` does not have it, and is not gated, including after the setting is changed.
 
 ## `ys pr`
 
@@ -77,9 +104,9 @@ first line enforced rather than told is [open question 53](06-open-questions.md#
   It then calls `Workspaces::open_branch`. A workspace already on the branch is returned, not
   duplicated.
 
-Reviewing someone else's pull request then takes two proposals:
-`ys pr checkout` → `ys workflow run code-review`. A fork's `pr/<number>` branch is not one the
-review can find by branch name, which is open question 54.
+Reviewing someone else's pull request then takes two commands: `ys pr checkout`, then
+`ys workflow run code-review`. At ask first each waits for Allow. A fork's `pr/<number>` branch
+is not one the review can find by branch name, which is open question 54.
 
 ## Not in this slice
 

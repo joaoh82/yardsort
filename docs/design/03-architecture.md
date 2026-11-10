@@ -724,15 +724,19 @@ remote ever talks to it directly. Instead:
   a start answers from a thread of its own, and an upload goes to the profile's `uploads` folder,
   outside every worktree ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)).
 
-## The Floor Manager (`crates/core/src/coordinator.rs`, `src-tauri/src/coordinator.rs`)
+## The Floor Manager (`crates/core/src/coordinator/`, `src-tauri/src/coordinator.rs`)
 
 One harness session with a `coordinator` label and no `workspace` label. It is started in
-`<data dir>/coordinator`, whose `AGENTS.md` and `CLAUDE.md` Yardsort rewrites at each start. Its
-environment adds `YARDSORT_DATA_DIR` for the profile, and puts the folder of the bundled `ys`
-first on `PATH`. It reaches the rest of Yardsort only through `ys`: no new IPC surface for the
-agent, and no output read. Everything keyed on a workspace leaves it out because it has none. The
-window draws it in a non-modal panel over the status bar's corner. See
-[37-floor-manager](37-floor-manager.md).
+`<data dir>/coordinator`, whose `AGENTS.md` and `CLAUDE.md` Yardsort rewrites at each start and
+again when the permission setting changes, describing the level that is set. Its environment
+adds `YARDSORT_DATA_DIR` for the profile, `YARDSORT_COORDINATOR` so `ys` enforces that level, and
+puts the folder of the bundled `ys` first on `PATH`. The level is read from settings on every
+`ys` command: read only refuses a start or a write, ask first waits for a yes the window
+records, and trusted allows the ones that are not destructive. Delete, close and attach are
+refused at every level. It reaches the rest of Yardsort only through `ys`: no new IPC surface
+for the agent, and no output read. Everything keyed on a workspace leaves it out because it has
+none. The window draws it in a non-modal panel over the status bar's corner, and a confirmation
+dialog when one of its commands is waiting. See [37-floor-manager](37-floor-manager.md).
 
 ## Assist (optional, off by default)
 

@@ -72,6 +72,16 @@ xattr -d com.apple.quarantine ys
 
 A copy installed this way does not update itself.
 
+## When the Floor Manager runs it
+
+The [Floor Manager](floor-manager.md) is started with `YARDSORT_COORDINATOR` set. While that
+variable is set, `ys` enforces **Floor Manager permission** from Settings: read only refuses a
+start or a write, ask first (the default) waits until the window records Allow, and trusted runs
+the ones that are not destructive. `ys workspace delete` (with or without `--force`),
+`ys task close` and `ys attach` are refused at every level. Your own `ys`, without that
+variable, is not gated. A shell command that is not `ys` is outside the gate. See
+[What it may do](floor-manager.md#what-it-may-do).
+
 ## Commands
 
 Run `ys --help`, or `ys <command> --help`, for the full list. Every command takes `--json`, which

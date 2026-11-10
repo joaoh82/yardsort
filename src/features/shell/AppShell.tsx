@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { ChangesPanel } from "@/features/changes/ChangesPanel";
+import { FloorManagerConfirmations } from "@/features/coordinator/Confirmations";
 import { FloorManagerPanel } from "@/features/coordinator/FloorManager";
 import { CommandPalette } from "@/features/keyboard/CommandPalette";
 import { StartFromLinkDialog } from "@/features/sidebar/StartFromLinkDialog";
@@ -148,6 +149,7 @@ export function AppShell() {
         <StartFromLinkDialog onClose={() => useProjectsStore.getState().openLink(false)} />
       )}
       {floorOpen && <FloorManagerPanel />}
+      <FloorManagerConfirmations />
       <WelcomeTour />
       <QuitDialog />
     </div>

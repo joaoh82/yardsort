@@ -68,6 +68,9 @@ impl Fixture {
             yardsort_core::activity::RUN_ENV,
             yardsort_core::activity::WORKSPACE_ENV,
             yardsort_core::activity::RECORD_ENV,
+            // A Floor Manager's gate must not leak into a test that is the user running `ys`.
+            yardsort_core::coordinator::ENV,
+            "YARDSORT_COORDINATOR_CONFIRM_WAIT",
         ] {
             command.env_remove(name);
         }
@@ -84,6 +87,80 @@ impl Fixture {
 
     fn git(&self) -> Git {
         git()
+    }
+
+    /// Write the Floor Manager permission. Ask is the default, and it is not stored.
+    fn set_floor(&self, level: &str) {
+        std::fs::write(
+            self.data_dir.join("settings.toml"),
+            format!("[floor_manager]\nlevel = \"{level}\"\n"),
+        )
+        .unwrap();
+    }
+
+    /// Run `ys` as the Floor Manager: the gate is on. `answer` is what the app would press.
+    /// `None` means the app is not open, so ask-first refuses at once.
+    fn ys_floor(&self, args: &[&str], answer: Option<&str>) -> Run {
+        let held = answer.map(|_| {
+            yardsort_core::presence::AppLock::take(&self.data_dir)
+                .unwrap()
+                .expect("the profile's lock is free")
+        });
+        let waiter = answer.map(|word| {
+            let data = self.data_dir.clone();
+            let word = word.to_owned();
+            std::thread::spawn(move || answer_when_asked(&data, &word))
+        });
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+        command
+            .args(["--data-dir", &self.data_dir.to_string_lossy()])
+            .args(args)
+            .env("YARDSORT_WORKTREE_ROOT", &self.worktree_root)
+            .env("YARDSORT_NO_DAEMON", "1")
+            .env(yardsort_core::coordinator::ENV, "1")
+            // A missed answer should fail the test in a second or two, not ten minutes.
+            .env("YARDSORT_COORDINATOR_CONFIRM_WAIT", "2000");
+        for name in [
+            yardsort_core::activity::RUN_ENV,
+            yardsort_core::activity::WORKSPACE_ENV,
+            yardsort_core::activity::RECORD_ENV,
+        ] {
+            command.env_remove(name);
+        }
+        let output = command.output().expect("ys should run");
+        if let Some(waiter) = waiter {
+            waiter.join().expect("the confirmation waiter");
+        }
+        drop(held);
+        Run {
+            code: output.status.code(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }
+    }
+}
+
+/// Write `word` (`yes` or `no`) against the request `ys` is waiting on.
+fn answer_when_asked(data_dir: &std::path::Path, word: &str) {
+    let dir = data_dir.join("coordinator").join("confirm");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "json") {
+                    let stem = path.file_stem().unwrap().to_string_lossy();
+                    std::fs::write(dir.join(format!("{stem}.answer")), format!("{word}\n"))
+                        .unwrap();
+                    return;
+                }
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the Floor Manager's command never asked for a confirmation"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }
 
@@ -114,6 +191,143 @@ impl Run {
             self.stderr
         );
         self.stderr
+    }
+}
+
+fn worktree_count(fx: &Fixture) -> usize {
+    let json = fx.ys(&["workspace", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    worktrees_in(&listed).len()
+}
+
+/// The gate is the variable the launch sets, not the setting on its own: the user's own `ys`
+/// stays able to delete a workspace after they set the Floor Manager to read only.
+#[test]
+fn the_floor_manager_gate_is_its_own_environment_not_every_ys() {
+    let fx = Fixture::new();
+    fx.set_floor("read-only");
+    fx.ys(&[
+        "workspace",
+        "new",
+        &fx.project_name,
+        "the user, not the floor manager",
+        "--no-agent",
+    ])
+    .ok();
+    assert_eq!(worktree_count(&fx), 1);
+}
+
+#[test]
+fn read_only_refuses_a_start_and_still_lists_and_the_next_command_can_be_trusted() {
+    let fx = Fixture::new();
+    fx.set_floor("read-only");
+    let listed = fx.ys_floor(&["project", "list"], None).ok();
+    assert!(listed.contains("Demo"), "{listed}");
+
+    let refused = fx
+        .ys_floor(
+            &[
+                "workspace",
+                "new",
+                &fx.project_name,
+                "fix the login bug",
+                "--no-agent",
+            ],
+            None,
+        )
+        .failed();
+    assert!(
+        refused.contains("read only") && refused.contains("was not run"),
+        "{refused}"
+    );
+    assert_eq!(
+        worktree_count(&fx),
+        0,
+        "a refused start must not create a worktree"
+    );
+
+    // The level is read from settings on every command, so this does not wait for a restart.
+    fx.set_floor("trusted");
+    fx.ys_floor(
+        &[
+            "workspace",
+            "new",
+            &fx.project_name,
+            "fix the login bug",
+            "--no-agent",
+        ],
+        None,
+    )
+    .ok();
+    assert_eq!(worktree_count(&fx), 1);
+}
+
+#[test]
+fn ask_first_requires_a_confirmation_the_app_records() {
+    let fx = Fixture::new();
+    let start = [
+        "workspace",
+        "new",
+        &fx.project_name,
+        "fix the login bug",
+        "--no-agent",
+    ];
+
+    // The default level is ask first, and with the app closed there is nobody to ask.
+    let closed = fx.ys_floor(&start, None).failed();
+    assert!(
+        closed.contains("ask first") && closed.contains("not open"),
+        "{closed}"
+    );
+    assert_eq!(worktree_count(&fx), 0);
+
+    let refused = fx.ys_floor(&start, Some("no")).failed();
+    assert!(refused.contains("refused"), "{refused}");
+    assert_eq!(worktree_count(&fx), 0, "a no must not create a worktree");
+
+    fx.ys_floor(&start, Some("yes")).ok();
+    assert_eq!(worktree_count(&fx), 1);
+}
+
+#[test]
+fn destructive_commands_are_refused_at_every_permission() {
+    let fx = Fixture::new();
+    fx.ys(&[
+        "workspace",
+        "new",
+        &fx.project_name,
+        "keep this workspace",
+        "--no-agent",
+    ])
+    .ok();
+    let json = fx.ys(&["workspace", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let name = worktrees_in(&listed)[0]["name"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    for level in ["read-only", "ask", "trusted"] {
+        fx.set_floor(level);
+        for args in [
+            vec!["workspace", "delete", name.as_str()],
+            vec!["workspace", "delete", name.as_str(), "--force"],
+            vec!["task", "close", "1", "--yes"],
+            vec!["attach"],
+        ] {
+            let error = fx.ys_floor(&args, None).failed();
+            assert!(
+                error.contains("at any permission"),
+                "{level} {args:?}: {error}"
+            );
+            // Ask first must not turn a delete into a confirmation. There is no app here, and
+            // the message is the refusal, not "Yardsort is not open".
+            assert!(
+                !error.contains("not open"),
+                "{level} asked instead of refusing: {error}"
+            );
+        }
+        assert_eq!(worktree_count(&fx), 1, "{level} deleted the workspace");
     }
 }
 
