@@ -53,7 +53,15 @@ pub fn check_path(path: &str) -> Result<(), String> {
         return Ok(());
     }
     let rel = Path::new(trimmed);
-    if rel.is_absolute() || rel.components().any(|c| matches!(c, Component::ParentDir)) {
+    // `is_absolute` is not enough. On Windows `/etc/passwd` and `\Windows\win.ini` have a root
+    // without being absolute, and `C:secret` has a drive prefix. Joining either onto the
+    // workspace replaces part of that path and can leave the folder.
+    if rel.components().any(|component| {
+        matches!(
+            component,
+            Component::Prefix(_) | Component::RootDir | Component::ParentDir
+        )
+    }) {
         return Err(format!(
             "`{trimmed}` is outside the workspace. An artifact file is a path inside it."
         ));
