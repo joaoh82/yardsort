@@ -157,6 +157,34 @@ describe("liveness", () => {
     expect((await channel.ended).reason).toBe("closedHere");
   });
 
+  test("checked at once, a dead link is found without waiting out the quiet spell", async () => {
+    const { client, asked } = relay(() => {});
+    const channel = await openChannel(client, access, HOST, {
+      client: "test/1",
+      probeAfterMs: 60_000,
+      probeTimeoutMs: 60_000,
+    });
+    const started = Date.now();
+    channel.check(100);
+    expect((await channel.ended).reason).toBe("silent");
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(asked.map((r) => r.op)).toEqual(["host.describe"]);
+  });
+
+  test("checked at once, a link that answers is kept", async () => {
+    const { client } = relay((request, socket) =>
+      answer(socket, request, { kind: "host", ...WELCOME.welcome.host }),
+    );
+    const channel = await openChannel(client, access, HOST, {
+      client: "test/1",
+      probeAfterMs: 60_000,
+    });
+    channel.check(100);
+    await Bun.sleep(300);
+    expect(channel.open).toBe(true);
+    channel.close();
+  });
+
   test("a lease's renewals going unanswered do not keep a dead channel open", async () => {
     // The computer grants the lease and then hears nothing more: renewals go out, nothing comes.
     const { client, asked } = relay((request, socket) => {

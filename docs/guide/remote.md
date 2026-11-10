@@ -80,6 +80,14 @@ is then pasted into the terminal, as dropping a file on a terminal here does, wi
 you can go on and type the message. Claude Code, for one, reads a pasted path to a picture as the
 picture. Pictures are deleted after seven days, when another one comes.
 
+## When the phone changes network
+
+Moving from Wi-Fi to cellular, or back, can leave the phone's connection to the server dead without a
+word. When the phone's network changes, it asks each computer it has open whether it still answers,
+and opens the connection again within a few seconds if not, rather than waiting until it notices by
+itself. One it was already waiting to reach again is tried at once. Nothing typed is sent again, and
+control is not taken back: press **Take control** again once it is back.
+
 ## Scrolling on the phone
 
 Drag down on a terminal to go back through what scrolled off its screen, as far as this computer keeps

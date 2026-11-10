@@ -14,7 +14,15 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { type Computer, type ComputerList, messageOf } from "../lib/accounts";
 import { useApp, useSnapshot } from "../lib/context";
 import { Presence, type Reach } from "../lib/presence";
-import { describeReach, PARTED, reachDot, SeenComputers, UNREACHABLE, useLive } from "./live";
+import {
+  describeReach,
+  PARTED,
+  reachDot,
+  SeenComputers,
+  UNREACHABLE,
+  useLive,
+  useNetworkChanges,
+} from "./live";
 import { Body, Button, Card, Dot, Group, Problem, Row, Section, Waiting } from "./parts";
 
 /** How often the list is asked again while a request waits at a computer (31 §5). */
@@ -33,6 +41,7 @@ export function Computers({ asked }: { asked: number }) {
     [accounts],
   );
   const reach = useSyncExternalStore(presence.subscribe, presence.getSnapshot);
+  useNetworkChanges(presence);
   const [list, setList] = useState<ComputerList | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const live = useLive();

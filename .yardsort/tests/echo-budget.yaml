@@ -1,0 +1,92 @@
+id: echo-budget
+name: A keystroke comes back within R4's budget at 100 ms of round trip
+description: >-
+  A yardsort-host on the stand-in server, running cat as its agent. A pretend phone is let watch and
+  type, and the timing tool takes control of cat through a proxy that holds every byte back 50 ms
+  each way, types 200 letters one at a time, and times each to its echo. It passes when p95 is under
+  300 ms. Linux only, as the other headless tests are. Nothing opens; nothing needs clicking.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_the_host
+    action: shell
+    # The stand-in server too, and the host's bin folder in $YS_RUN_DIR/bin.
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: a_repository_and_cat
+    action: shell
+    # cat as the host's agent: what is typed into it comes straight back.
+    line: >-
+      mkdir -p "$YS_RUN_DIR/repo" "$YS_RUN_DIR/profile" && git -C "$YS_RUN_DIR/repo" init -q && git -C
+      "$YS_RUN_DIR/repo" -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false
+      commit -q --allow-empty -m first && printf '[[harness]]\nid = "cat"\nbuiltin = false\nlabel =
+      "cat"\ncommand = "cat"\nprompt_args = []\n' > "$YS_RUN_DIR/profile/settings.toml"
+
+steps:
+  - id: the_host_signs_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", sign-in, Smoke box]
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: serve
+    action: shell
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: add_the_project
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, project, add, "{{ run.dir }}/repo"]
+    expect:
+      stdout_contains: Added repo
+  - id: start_cat
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, workspace, new, repo, timing, --harness, cat]
+    expect:
+      stdout_contains: agent  cat
+  - id: a_phone_is_let_type
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+  - id: keystrokes_through_100_ms_of_round_trip
+    action: shell
+    # The phone's sign-in, and the stand-in server's address from its ready line.
+    line: >-
+      bun packages/remote-client/tools/echo-time.ts "$(bun -e
+      'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8").split("\n")[0]).ready.server)'
+      "$YS_RUN_DIR/stand-in.json")" --kept "$YS_RUN_DIR/phone-sign-in" --delay 50 --count 200 --budget 300
+    timeout: 5m
+    expect:
+      stdout_contains: Within the budget of 300 ms at p95.
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      kill "$(cat "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

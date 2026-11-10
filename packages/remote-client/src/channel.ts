@@ -466,13 +466,25 @@ export class Channel {
     this.#probeTimer = setTimeout(() => this.#probe(), this.#probeAfterMs);
   }
 
-  #probe(): void {
+  /**
+   * Ask now whether the link still answers, rather than once it has been quiet a while: after the
+   * phone's network changed under it, a socket on the old one can be dead without a word. One that
+   * hears nothing within `timeoutMs` is closed as `silent`.
+   */
+  check(timeoutMs: number = this.#probeTimeoutMs): void {
+    if (this.#phase !== "open") return;
+    clearTimeout(this.#probeTimer);
+    clearTimeout(this.#silentTimer);
+    this.#probe(timeoutMs);
+  }
+
+  #probe(timeoutMs: number = this.#probeTimeoutMs): void {
     if (this.#phase !== "open") return;
     // Anything heard first clears this, the answer or not.
     this.#silentTimer = setTimeout(() => {
       this.#end ??= { reason: "silent", code: null, text: "the computer stopped answering" };
       this.#shut(4000);
-    }, this.#probeTimeoutMs);
+    }, timeoutMs);
     this.ask({ op: "host.describe" }).catch(() => {});
   }
 

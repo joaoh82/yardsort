@@ -97,6 +97,7 @@ export class TerminalControl {
   #settling: ReturnType<typeof setTimeout> | null = null;
   #controller: Controller | null = null;
   #listeners = new Set<() => void>();
+  #sent = new Set<() => void>();
 
   constructor(
     readonly terminal: TerminalId,
@@ -110,6 +111,12 @@ export class TerminalControl {
   };
 
   getSnapshot = (): Hold => this.#hold;
+
+  /** Hear each piece of input as it goes, for a development build's timing readout. */
+  whenSent = (listener: () => void): (() => void) => {
+    this.#sent.add(listener);
+    return () => this.#sent.delete(listener);
+  };
 
   /**
    * Ask for control. From another device that is a take-over, which is why the person sees whose it
@@ -260,6 +267,7 @@ export class TerminalControl {
       if (piece.pause) await new Promise((resolve) => setTimeout(resolve, piece.pause));
       if (this.#control !== control) return this.#notSent();
       try {
+        for (const listener of this.#sent) listener();
         await control.input(piece.data, piece.paste ? { paste: true } : {});
       } catch (error) {
         if (error instanceof ChannelClosed) {

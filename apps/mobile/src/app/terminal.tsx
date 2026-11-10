@@ -22,13 +22,14 @@ import {
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { KeyboardAvoidingView, StyleSheet, Text, View } from "react-native";
+import { AppState, KeyboardAvoidingView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { messageOf } from "../lib/accounts";
 import { pastedPath } from "../lib/attach";
 import { useApp } from "../lib/context";
 import { deviceName, fitted, TerminalControl } from "../lib/control";
+import { Timings, timingWords } from "../lib/timing";
 import { type Sight, PageFeed, TerminalWatch } from "../lib/watch";
 import { Composer } from "../ui/composer";
 import {
@@ -99,15 +100,32 @@ function Watching({
   const [sendProblem, setSendProblem] = useState<string | null>(null);
   const headerHeight = useHeaderHeight();
 
+  const timings = useMemo(() => new Timings(), []);
+  const timed = useSyncExternalStore(timings.subscribe, timings.getSnapshot);
   const { feed, watch } = useMemo(() => {
     const feed = new PageFeed(
       () => watch.startOver(),
-      () => watch.pageCaughtUp(),
+      () => {
+        watch.pageCaughtUp();
+        // A live screen again only once a new attachment's screen is drawn.
+        if (watch.getSnapshot().following) timings.drawn();
+      },
+      () => timings.heard(),
     );
     const watch = new TerminalWatch(terminal, feed);
     return { feed, watch };
-  }, [terminal]);
+  }, [terminal, timings]);
   const sight = useSyncExternalStore(watch.subscribe, watch.getSnapshot);
+  useEffect(() => {
+    const stopHearing = control.whenSent(() => timings.typed());
+    const coming = AppState.addEventListener("change", (state) => {
+      if (state === "active") timings.back();
+    });
+    return () => {
+      stopHearing();
+      coming.remove();
+    };
+  }, [control, timings]);
 
   useEffect(() => control.seen(sight), [control, sight]);
 
@@ -227,6 +245,11 @@ function Watching({
               {statusLine(sight, describeReach(reach, null), hold.holding)}
             </Text>
           </View>
+          {__DEV__ && (
+            <Text testID="timings" style={[styles.timings, { color: colors.faint }]}>
+              {timingWords(timed)}
+            </Text>
+          )}
           {canTake && (
             <Button
               title={
@@ -301,6 +324,7 @@ const styles = StyleSheet.create({
   },
   status: { flexDirection: "row", alignItems: "center", gap: 8 },
   statusWords: { flex: 1, fontFamily: FONTS.regular, fontSize: 13, lineHeight: 18 },
+  timings: { fontFamily: FONTS.mono, fontSize: 11, lineHeight: 16 },
   uncertain: { gap: 8 },
   choices: { flexDirection: "row", gap: 8 },
 });

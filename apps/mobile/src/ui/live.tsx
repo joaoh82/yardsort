@@ -16,12 +16,14 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { addNetworkStateListener } from "expo-network";
 import { AppState, StyleSheet, View } from "react-native";
 
 import { messageOf, type Parted } from "../lib/accounts";
 import { useApp, useSnapshot } from "../lib/context";
 import { moment } from "../lib/format";
 import type { ObservedComputer } from "../lib/observed";
+import { NetworkChanges } from "../lib/network";
 import { Presence, type Reach } from "../lib/presence";
 import { Body, Button, Dot, Group, Mono, Problem, Row, Screen } from "./parts";
 
@@ -85,6 +87,17 @@ export function useLive(): boolean {
   return focused && foreground;
 }
 
+/** The phone's network, for every screen holding channels. */
+const network = new NetworkChanges((heard) => {
+  const subscription = addNetworkStateListener(heard);
+  return () => subscription.remove();
+});
+
+/** Tell `presence` each time the phone's network changes, while this screen is there. */
+export function useNetworkChanges(presence: Presence): void {
+  useEffect(() => network.listen(() => presence.networkChanged()), [presence]);
+}
+
 export interface Link {
   reach: Reach | undefined;
   /** Open, or `null`: a new one each time it is reached again, to read everything through anew. */
@@ -104,6 +117,7 @@ export function useChannelTo(host: HostId): Link {
   );
   const reaches = useSyncExternalStore(presence.subscribe, presence.getSnapshot);
   const live = useLive();
+  useNetworkChanges(presence);
 
   useEffect(() => {
     if (live) presence.watch([host]);

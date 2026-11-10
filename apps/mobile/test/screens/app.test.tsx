@@ -1121,6 +1121,20 @@ describe("A computer", () => {
         return () => measure.mock.calls.map(([answer]) => answer);
       };
 
+      test("a development build times a keystroke to what comes back", async () => {
+        const { server } = await inControl();
+        expect(screen.getByTestId("timings")).toHaveTextContent(
+          "Echo not yet · back to live not yet",
+        );
+        await type("ls");
+        await fireEvent.press(screen.getByRole("button", { name: "Send" }));
+        await waitFor(() => expect(typed(server).length).toBeGreaterThan(0));
+        await act(async () => server.print("ls"));
+        await waitFor(() =>
+          expect(screen.getByTestId("timings")).toHaveTextContent(/^Echo \d+ ms/),
+        );
+      });
+
       test("is only ever asked for, and nothing can be typed until then", async () => {
         const { server } = await watching();
         await screen.findByText("Watching. Nobody has control.");
@@ -1702,6 +1716,20 @@ describe("A computer", () => {
       expect(await screen.findByText(/now answers as another server/)).toBeTruthy();
       expect(screen.queryByTestId("terminal")).toBeNull();
     });
+  });
+
+  test("a channel lost as the network changes is opened again at once, not after its wait", async () => {
+    const networkIs = (globalThis as unknown as { networkIs: (state: object) => void }).networkIs;
+    const { server } = await paired();
+    await open();
+    await act(async () => networkIs({ type: "WIFI", isConnected: true }));
+    expect(server.sockets.open).toBe(1);
+    await act(async () => server.closeChannelsTo("host-work", 1006));
+    expect(await screen.findByText(/^Reconnecting/)).toBeTruthy();
+    // The first wait is two seconds; the change has it tried well within one.
+    await act(async () => networkIs({ type: "CELLULAR", isConnected: true }));
+    expect(await screen.findByText("Online", undefined, { timeout: 900 })).toBeTruthy();
+    expect(server.sockets.open).toBe(1);
   });
 
   describe("no longer reached", () => {
