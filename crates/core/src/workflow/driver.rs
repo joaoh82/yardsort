@@ -181,8 +181,8 @@ impl Driver {
     /// Nothing when the step is already decided, or when `force` is false and this process
     /// already holds the code. The bool is whether a code row existed before this issue.
     ///
-    /// The slow hash runs on a helper thread, and neither the code lock nor the database is
-    /// held while it runs. `force` is Show a new code, which resets the wrong-try count. A
+    /// The slow hash runs before the code lock is taken again, so the lock is not held
+    /// while the hash runs. `force` is Show a new code, which resets the wrong-try count. A
     /// restart reissue (`force` false) keeps that count, so a lockout survives the restart.
     pub fn issue_approval_code(
         &self,
@@ -198,10 +198,7 @@ impl Driver {
                 return Ok(None);
             }
         }
-        let prepared = std::thread::spawn(crate::workflow::code::issue);
-        let (code, salt, hash) = prepared
-            .join()
-            .unwrap_or_else(|error| std::panic::resume_unwind(error));
+        let (code, salt, hash) = crate::workflow::code::issue();
         let mut codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
         if !force && codes.contains_key(&key) {
             return Ok(None);
