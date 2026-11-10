@@ -339,6 +339,45 @@ fn a_run_test_step_can_be_marked_as_a_gate() {
 }
 
 #[test]
+fn an_approval_is_a_gate_and_a_pull_request_wait_is_not() {
+    let workflow = parse(&with_steps(
+        "  - id: sign-off\n    action: approve\n    prompt: \"Look at {{ inputs.note }}.\"\n",
+    ))
+    .unwrap();
+    let step = workflow
+        .steps
+        .iter()
+        .find(|step| step.id == "sign-off")
+        .unwrap();
+    assert!(matches!(step.action, Action::Approve { .. }));
+    assert!(step.is_gate());
+    assert!(step.gate);
+
+    let refused = problem(&with_steps(
+        "  - id: sign-off\n    action: approve\n    gate: false\n",
+    ));
+    assert!(refused.contains("An approval step is a gate"), "{refused}");
+
+    let waiting = parse(&with_steps("  - id: watch\n    action: wait_pr_activity\n")).unwrap();
+    let watch = waiting
+        .steps
+        .iter()
+        .find(|step| step.id == "watch")
+        .unwrap();
+    assert!(matches!(watch.action, Action::WaitPrActivity { .. }));
+    assert!(!watch.is_gate());
+}
+
+#[test]
+fn a_changes_prefix_is_reserved_for_the_request_artifact() {
+    let found = problem(&with_steps(
+        "  - id: sign-off\n    action: approve\n    produces:\n      - name: changes-sign-off\n        text: notes\n",
+    ));
+    assert!(found.contains("is reserved"), "{found}");
+    assert!(found.contains("changes-sign-off"), "{found}");
+}
+
+#[test]
 fn gate_on_another_action_is_named_as_misplaced() {
     let found = problem(&with_steps(
         "  - id: go\n    action: notify\n    title: Hi\n    gate: true\n",

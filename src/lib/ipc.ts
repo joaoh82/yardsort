@@ -19,6 +19,7 @@ import {
   type FloorManagerLevel,
   type ConversationContext,
   type AgentOutcomes,
+  type ApprovalDecision,
   type Attempt,
   type FileReports,
   type MemoryCheck,
@@ -1033,6 +1034,12 @@ export const ipc = {
     trackedId: string | null = null,
   ) => unwrap(commands.workflowStart(workflowId, workspaceId, inputs, trackedId)),
   workflowCancel: (runId: string) => unwrap(commands.workflowCancel(runId)),
+  workflowDecide: (
+    runId: string,
+    stepId: string,
+    decision: ApprovalDecision,
+    feedback: string | null,
+  ) => unwrap(commands.workflowDecide(runId, stepId, decision, feedback)),
   /** A model writes a workflow from a description, through Drafting; checked, never saved. */
   workflowDescribe: (description: string): Promise<Described> =>
     unwrap(commands.workflowDescribe(description)),

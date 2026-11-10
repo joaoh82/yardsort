@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { timeAgo } from "@/features/terminal/sessionText";
-import { errorMessage, ipc, type WorkflowRun } from "@/lib/ipc";
+import { errorMessage, ipc, type WorkflowRun, type WorkflowStepRun } from "@/lib/ipc";
 import { scheduleOf, useSchedulesStore } from "@/stores/schedules";
 import { triggerOf, useTriggersStore } from "@/stores/triggers";
 import { statusColour, useWorkflowStore } from "@/stores/workflows";
@@ -137,6 +137,20 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                               {step.note}
                             </span>
                           )}
+                          {step.action === "approve" && step.status === "waiting" && active && (
+                            <ApprovalBox
+                              runId={run.id}
+                              step={step}
+                              onError={setError}
+                              onDone={() => useWorkflowStore.getState().refresh()}
+                            />
+                          )}
+                          {step.outcome?.decision && (
+                            <span className="pl-1 text-[11px] text-ink-muted select-text">
+                              {decisionWord(step.outcome.decision)}
+                              {step.outcome.feedback ? `: ${step.outcome.feedback}` : ""}
+                            </span>
+                          )}
                           {step.artifacts.map((artifact) => (
                             <span key={artifact.name} className="mt-1 flex flex-col gap-0.5 pl-1">
                               <span className="text-[11px] text-ink-muted">
@@ -172,5 +186,99 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
         </ul>
       )}
     </section>
+  );
+}
+
+function decisionWord(decision: string): string {
+  if (decision === "approved") return "Approved";
+  if (decision === "rejected") return "Rejected";
+  if (decision === "changes_requested") return "Changes requested";
+  return decision;
+}
+
+/** The pending approval: the documents it reads, and the three decisions. */
+function ApprovalBox({
+  runId,
+  step,
+  onError,
+  onDone,
+}: {
+  runId: string;
+  step: WorkflowStepRun;
+  onError: (message: string | null) => void;
+  onDone: () => Promise<void>;
+}) {
+  const [feedback, setFeedback] = useState("");
+  const [busy, setBusy] = useState(false);
+  const consumed = step.consumed ?? [];
+
+  async function decide(decision: "approved" | "rejected" | "changes_requested") {
+    onError(null);
+    setBusy(true);
+    try {
+      await ipc.workflowDecide(runId, step.stepId, decision, feedback.trim() || null);
+      setFeedback("");
+      await onDone();
+    } catch (failed) {
+      onError(errorMessage(failed));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-1 flex flex-col gap-1 pl-1">
+      <span className="text-[11px] text-ink-muted">Waiting for your approval</span>
+      {step.approvalCode ? (
+        <span className="text-[11px] text-ink select-text">
+          Code {step.approvalCode}. A terminal needs this. This window does not.
+        </span>
+      ) : null}
+      {consumed.map((artifact) => (
+        <span key={artifact.name} className="flex flex-col gap-0.5">
+          <span className="text-[11px] text-ink-muted">
+            To review {artifact.name}
+            {artifact.truncated ? " (cut short)" : ""}
+          </span>
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-[11px] text-ink select-text">
+            {artifact.body}
+          </pre>
+        </span>
+      ))}
+      <textarea
+        aria-label={`Feedback for ${step.stepId}`}
+        value={feedback}
+        onChange={(event) => setFeedback(event.target.value)}
+        rows={2}
+        className="rounded border border-line bg-canvas px-1.5 py-1 text-[11px] text-ink"
+        placeholder="A note, if you have one. Required when you request changes."
+      />
+      <span className="flex gap-1">
+        <button
+          type="button"
+          disabled={busy}
+          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          onClick={() => void decide("approved")}
+        >
+          Approve
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          onClick={() => void decide("rejected")}
+        >
+          Reject
+        </button>
+        <button
+          type="button"
+          disabled={busy || feedback.trim() === ""}
+          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          onClick={() => void decide("changes_requested")}
+        >
+          Request changes
+        </button>
+      </span>
+    </div>
   );
 }

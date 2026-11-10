@@ -596,6 +596,11 @@ export const commands = {
 	/**  Cancel a run. Agents it started keep running. */
 	workflowCancel: (runId: string) => typedError<boolean, IpcError>(__TAURI_INVOKE("workflow_cancel", { runId })),
 	/**
+	 *  Record an approval. The driver applies it on its next tick. Only the person at this
+	 *  window calls this. The Floor Manager's `ys` is refused before it can.
+	 */
+	workflowDecide: (runId: string, stepId: string, decision: ApprovalDecision, feedback: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("workflow_decide", { runId, stepId, decision, feedback })),
+	/**
 	 *  Have a model write a workflow from `description`, through Drafting: the agent the user has
 	 *  in its non-interactive mode, or their Anthropic key. The answer is checked as a typed file
 	 *  is, and sent back once with its problems when it has any.
@@ -799,7 +804,12 @@ export type Action =
 /**  Values for the test's inputs, by input id; may hold `{{ variables }}`. */
 inputs: { [key in string]: string }; timeoutSecs: number | null } | 
 /**  Tell the person who started the run. */
-{ action: "notify"; title: string; body: string | null };
+{ action: "notify"; title: string; body: string | null } | 
+/**
+ *  Wait until a person approves, rejects, or requests changes. Always a gate. Waiting for
+ *  a GitHub review is [`Action::WaitPrActivity`], not this. Leaves `decision` and `feedback`.
+ */
+{ action: "approve"; prompt: string | null; timeoutSecs: number | null };
 
 /**  New events were recorded for these workspaces; a timeline showing one should ask again. */
 export type ActivityChanged = {
@@ -945,6 +955,14 @@ export type AppPart = {
 	part: string,
 	load: Load,
 };
+
+/**
+ *  What a person decided on an approval step.
+ * 
+ *  `changes_requested` is its own decision, not a rejection. Until a later ticket can send
+ *  the work back around, both a rejection and a request for changes stop the run.
+ */
+export type ApprovalDecision = "approved" | "rejected" | "changes_requested";
 
 /**  A named document a step hands to later steps of the same run. */
 export type ArtifactDecl = {
@@ -3203,9 +3221,9 @@ export type Step = {
 	/**
 	 *  Whether a failed verdict fails this step and stops the run.
 	 * 
-	 *  Only some actions accept it. Today that is `run_test`. Absent means it is not a gate,
-	 *  so a failed verdict still succeeds the step. A later action that judges something, an
-	 *  approval for example, uses the same flag.
+	 *  `run_test` accepts the flag. Absent means that step is not a gate, so a failed verdict
+	 *  still succeeds it. An `approve` step is always a gate: a rejection or a request for
+	 *  changes stops the run. `is_gate` is what the engine reads.
 	 */
 	gate?: boolean,
 	/**  Named documents this step leaves when it succeeds. A later step reads one by name. */
@@ -3230,6 +3248,17 @@ export type StepOutcome = {
 	 *  field omits it, and that reads the same as null.
 	 */
 	reason?: string | null,
+	/**
+	 *  Set when a person decided an approval. Absent on a smoke-test verdict, and on a row
+	 *  saved before approvals existed.
+	 */
+	decision?: ApprovalDecision | null,
+	/**  What they wrote with the decision. Null when they wrote nothing. */
+	feedback?: string | null,
+	/**  Who decided: `app` from the window, or the name of the account `ys` ran as. */
+	actor?: string | null,
+	/**  When they decided, in milliseconds since the epoch. */
+	decidedAt?: number | null,
 };
 
 /**  Passed or failed. The words match a smoke test's verdict. */
@@ -4059,6 +4088,10 @@ export type WorkflowStepRun = {
 	outcome: StepOutcome | null,
 	/**  Named documents this step handed on. Empty when it left none. */
 	artifacts: WorkflowArtifact[],
+	/**  Named documents this step reads, from earlier steps. An approval shows these. */
+	consumed: WorkflowArtifact[],
+	/**  The one-time code for a waiting approval. Shown only in this window. Absent otherwise. */
+	approvalCode: string | null,
 };
 
 /**  Workflow writing has its own harness preference; commit and PR writers stay workspace-based. */

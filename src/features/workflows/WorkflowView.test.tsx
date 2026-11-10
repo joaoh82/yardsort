@@ -11,6 +11,7 @@ const core = vi.hoisted(() => ({
   workflowRemove: vi.fn(),
   workflowRuns: vi.fn(),
   workflowRunSteps: vi.fn(),
+  workflowDecide: vi.fn(),
   workflowWriterStatus: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
@@ -311,6 +312,7 @@ describe("WorkflowView", () => {
             truncated: false,
           },
         ],
+        consumed: [],
       },
     ]);
     // A schedule started this run: the list says so, and the open run says which.
@@ -367,6 +369,7 @@ describe("WorkflowView", () => {
         note: "told it",
         outcome: null,
         artifacts: [],
+        consumed: [],
       },
     ]);
     // Open run, on a trigger's history.
@@ -377,5 +380,62 @@ describe("WorkflowView", () => {
     expect(core.workflowRunSteps).toHaveBeenCalledWith("run-1");
     // Taken: the view opened from the sidebar next time starts with no run picked.
     expect(useWorkflowStore.getState().shownRun.demo).toBeUndefined();
+  });
+
+  it("shows a pending approval and records the decision", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    core.workflowRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "demo",
+        workflowName: "Demo",
+        workspaceId: "w",
+        workspaceName: "fix-login",
+        status: "running",
+        requestedBy: "app",
+        error: null,
+        inputs: {},
+        pullRequest: null,
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+      },
+    ]);
+    core.workflowRunSteps.mockResolvedValue([
+      {
+        stepId: "sign-off",
+        action: "approve",
+        status: "waiting",
+        startedAt: null,
+        endedAt: null,
+        outputs: { prompt: "Ship this plan?" },
+        note: "Waiting for your approval.",
+        outcome: null,
+        artifacts: [],
+        consumed: [
+          {
+            name: "plan",
+            source: "output",
+            detail: "brief",
+            body: "Split the migration.",
+            truncated: false,
+          },
+        ],
+        approvalCode: "ABCD2345",
+      },
+    ]);
+    core.workflowDecide.mockResolvedValue(undefined);
+    render(<WorkflowView workflowId="demo" />);
+    const runs = await screen.findByRole("region", { name: "Runs" });
+    await userEvent
+      .setup()
+      .click(await within(runs).findByRole("button", { name: "Run in fix-login, running" }));
+    expect(await within(runs).findByText("Waiting for your approval")).toBeInTheDocument();
+    expect(within(runs).getByText(/ABCD2345/)).toBeInTheDocument();
+    expect(within(runs).getByText("To review plan")).toBeInTheDocument();
+    expect(within(runs).getByText("Split the migration.")).toBeInTheDocument();
+    expect(within(runs).getByRole("button", { name: "Request changes" })).toBeDisabled();
+    await userEvent.setup().click(within(runs).getByRole("button", { name: "Approve" }));
+    expect(core.workflowDecide).toHaveBeenCalledWith("run-1", "sign-off", "approved", null);
   });
 });

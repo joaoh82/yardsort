@@ -583,7 +583,10 @@ ys workflow copy code-review     # your own copy to edit, used instead of the bu
 ys workflow validate fix-ci.yaml # each problem as file:line:column: message; exit 1 if any
 ys workflow validate -           # the same, reading the file from standard input
 ys workflow run ping --workspace fix-login --input note=hi   # queue a run; Yardsort must be open
-ys workflow runs                 # runs, newest first; --run <id> shows steps and artifacts
+ys workflow runs                 # runs, newest first; --run <id> shows steps, artifacts and approvals
+ys workflow approve 3f2a9c1e sign-off --code <code> --feedback "ship it"
+ys workflow reject 3f2a9c1e sign-off --code <code>
+ys workflow request-changes 3f2a9c1e sign-off --code <code> --feedback "split the migration"
 ys workflow cancel 3f2a9c1e      # stop a run; agents it started keep running
 ```
 
@@ -598,7 +601,20 @@ profile and carries no runs out yet; so do `ys test run` and `ys schedule run`. 
 or in an agent's terminal there, `--workspace` can be left out. It prints the run's id and
 returns at once. A workflow that uses the pull request needs the GitHub CLI (`gh`), logged in,
 and an open pull request for the workspace's branch. A run id can be shortened to its first
-characters, as `runs` prints it. `--json` works as everywhere. See
+characters, as `runs` prints it. `--json` works as everywhere.
+
+`approve`, `reject` and `request-changes` record your decision on a step that is waiting
+for approval. Each needs `--code`, the code Yardsort showed on the run and in the
+notification. `runs` does not print that code. Yardsort does not have to be open: a
+correct code is stored, and the app applies it on its next tick. Five wrong codes stop
+`ys` until the app shows a new one. `--feedback` is a note. It is required for
+`request-changes`. A decision is recorded once, and one on a run that has already ended
+is refused. A session Yardsort started cannot use these, and neither can the Floor
+Manager. This is not a sandbox: a process running as you that writes the database
+directly is not stopped. `runs --run <id>` shows a step that is still waiting, the
+artifacts it reads, and the decision once it is recorded. `--json` includes
+`pendingApprovals` and `decisions`, and not the code. See
+[An approval](workflows.md#an-approval). See
 [Running a workflow](workflows.md#running-a-workflow) and
 [Requesting a code review](workflows.md#requesting-a-code-review).
 

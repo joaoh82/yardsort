@@ -46,6 +46,7 @@ const ACTIONS: &[&str] = &[
     "wait_pr_activity",
     "run_test",
     "notify",
+    "approve",
 ];
 
 /// The keys a step of each action may have, besides `id`, `action` and `needs`.
@@ -57,6 +58,7 @@ fn allowed(action: &str) -> &'static [&'static str] {
         "wait_pr_activity" => &["kind", "timeout"],
         "run_test" => &["test", "inputs", "timeout", "gate"],
         "notify" => &["title", "body"],
+        "approve" => &["prompt", "timeout", "gate"],
         _ => &[],
     }
 }
@@ -537,6 +539,16 @@ impl Checker<'_> {
                     );
                     continue;
                 }
+                if name.starts_with("changes-") {
+                    self.problem(
+                        &item.value.name.referenced,
+                        format!(
+                            "`{name}` is reserved. A request for changes stores \
+                             `changes-<step>` itself."
+                        ),
+                    );
+                    continue;
+                }
                 if let Some(other) = map.get(name) {
                     self.problem(
                         &item.value.name.referenced,
@@ -753,6 +765,19 @@ impl Checker<'_> {
                 inputs: self.test_inputs(raw, scope),
                 timeout_secs: self.timeout(raw),
             },
+            "approve" => {
+                if let Some(gate) = raw.gate.as_ref().filter(|gate| !gate.value) {
+                    self.problem(
+                        &gate.referenced,
+                        "An approval step is a gate. A rejection stops the run. Leave `gate` out, \
+                         or set it to true.",
+                    );
+                }
+                Action::Approve {
+                    prompt: self.text(&raw.prompt, scope),
+                    timeout_secs: self.timeout(raw),
+                }
+            }
             _ => Action::Notify {
                 title: self.required(
                     &raw.title,
@@ -764,9 +789,10 @@ impl Checker<'_> {
                 body: self.text(&raw.body, scope),
             },
         };
-        // `allowed` already rejects `gate` on an action that does not take it. Only
-        // `run_test` does, today, so a later action can become a gate without a new field.
-        let gate = action_name == "run_test" && raw.gate.as_ref().is_some_and(|gate| gate.value);
+        // `allowed` already rejects `gate` on an action that does not take it. An approval is
+        // always a gate. `gate: false` on one is reported above and still stored as a gate.
+        let gate = action_name == "approve"
+            || (action_name == "run_test" && raw.gate.as_ref().is_some_and(|gate| gate.value));
         let produces = self.artifact_decls(raw, action_name, &action, scope);
         Step {
             id,

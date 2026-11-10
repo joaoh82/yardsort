@@ -1154,7 +1154,14 @@ impl Hands for Filed {
         unreachable!("this workflow waits on no pull request")
     }
 
-    fn conversation(&self, _: &str, _: &str, _: bool) -> Result<Option<String>, String> {
+    fn conversation(
+        &self,
+        _: &str,
+        _: &str,
+        _: bool,
+        _: &str,
+        _: &str,
+    ) -> Result<Conversation, String> {
         panic!("a file artifact must not read a conversation");
     }
 }
@@ -1196,9 +1203,18 @@ impl Hands for Talks {
         unreachable!("this workflow waits on no pull request")
     }
 
-    fn conversation(&self, _: &str, pty: &str, raw: bool) -> Result<Option<String>, String> {
+    fn conversation(
+        &self,
+        _: &str,
+        pty: &str,
+        raw: bool,
+        _: &str,
+        _: &str,
+    ) -> Result<Conversation, String> {
         self.asked.lock().unwrap().push((pty.to_owned(), raw));
-        Ok(Some(if raw { "RAW TEXT" } else { "DIGEST" }.into()))
+        Ok(Conversation::Ready(Some(
+            if raw { "RAW TEXT" } else { "DIGEST" }.into(),
+        )))
     }
 }
 
@@ -1318,6 +1334,11 @@ fn a_missing_file_fails_the_step_and_keeps_an_older_artifact() {
         .find(|step| step.step_id == "draft")
         .unwrap();
     assert_eq!(draft.status, "failed");
+    assert!(
+        !draft.outputs.contains("artifact_pending"),
+        "a failed capture does not keep the pending marker: {}",
+        draft.outputs
+    );
     assert!(draft.note.unwrap().contains("not in the workspace"));
     let plan = store
         .workflow_steps(&run)
@@ -1426,4 +1447,343 @@ fn a_transcript_is_the_digest_unless_the_step_asks_for_raw() {
         saved.iter().find(|row| row.name == "rawtalk").unwrap().body,
         "RAW TEXT"
     );
+}
+
+const SIGN_OFF: &str = r#"id: sign
+name: Sign
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: brief
+    action: notify
+    title: Brief
+    produces:
+      - name: plan
+        text: Ship it
+  - id: sign-off
+    needs: [brief]
+    action: approve
+    consumes: [plan]
+    prompt: Look at the plan.
+  - id: next
+    needs: [sign-off]
+    action: notify
+    title: Go
+"#;
+
+fn step(store: &Store, run: &str, id: &str) -> crate::store::WorkflowStepRow {
+    store
+        .workflow_steps(run)
+        .unwrap()
+        .into_iter()
+        .find(|step| step.step_id == id)
+        .unwrap_or_else(|| panic!("no step {id}"))
+}
+
+#[test]
+fn approving_continues_and_the_next_step_does_not_start_while_it_waits() {
+    let (_dir, store, run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "sign-off").status, "waiting");
+    assert_eq!(step(&store, &run, "next").status, "pending");
+    assert_eq!(store.workflow_run(&run).unwrap().unwrap().status, "running");
+    assert!(
+        hands
+            .sent
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|title| title == "Waiting for your approval"),
+        "a run a person started is told: {:?}",
+        hands.sent.lock().unwrap()
+    );
+    assert!(recover_is_a_no_op(&store, &run));
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "sign-off").status, "waiting");
+    assert_eq!(step(&store, &run, "next").status, "pending");
+    assert_eq!(
+        store
+            .record_workflow_approval(&run, "sign-off", "approved", Some("ship it"), "ada", None)
+            .unwrap(),
+        crate::store::ApprovalWrite::Recorded
+    );
+    assert_eq!(
+        store
+            .record_workflow_approval(&run, "sign-off", "rejected", Some("no"), "ada", None)
+            .unwrap(),
+        crate::store::ApprovalWrite::AlreadyDecided
+    );
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "sign-off").status, "succeeded");
+    let outcome: serde_json::Value =
+        serde_json::from_str(step(&store, &run, "sign-off").outcome.unwrap().as_str()).unwrap();
+    assert_eq!(outcome["decision"], "approved");
+    assert_eq!(outcome["feedback"], "ship it");
+    assert_eq!(outcome["actor"], "ada");
+    assert_eq!(step(&store, &run, "next").status, "succeeded");
+    assert_eq!(
+        store.workflow_run(&run).unwrap().unwrap().status,
+        "succeeded"
+    );
+    assert!(hands.sent.lock().unwrap().iter().any(|title| title == "Go"));
+}
+
+#[test]
+fn rejecting_stops_the_run_and_a_request_for_changes_is_stored_apart_from_it() {
+    let (_dir, store, run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    assert_eq!(
+        store
+            .record_workflow_approval(&run, "sign-off", "changes_requested", None, "ada", None)
+            .unwrap(),
+        crate::store::ApprovalWrite::FeedbackRequired
+    );
+    assert_eq!(step(&store, &run, "sign-off").status, "waiting");
+    store
+        .record_workflow_approval(
+            &run,
+            "sign-off",
+            "changes_requested",
+            Some("split the migration"),
+            "ada",
+            None,
+        )
+        .unwrap();
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "sign-off").status, "failed");
+    assert_eq!(step(&store, &run, "next").status, "skipped");
+    assert_eq!(store.workflow_run(&run).unwrap().unwrap().status, "failed");
+    let outcome: serde_json::Value =
+        serde_json::from_str(step(&store, &run, "sign-off").outcome.unwrap().as_str()).unwrap();
+    assert_eq!(outcome["decision"], "changes_requested");
+    assert_ne!(outcome["decision"], "rejected");
+    let saved = store.workflow_artifacts(&run).unwrap();
+    let changes = saved
+        .iter()
+        .find(|row| row.name == "changes-sign-off")
+        .expect("the request is an artifact a later revision can consume");
+    assert_eq!(changes.body, "split the migration");
+    assert_eq!(changes.source, "decision");
+    assert!(!hands.sent.lock().unwrap().iter().any(|title| title == "Go"));
+}
+
+#[test]
+fn a_decision_on_a_finished_run_is_refused() {
+    let (_dir, store, run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    assert!(store.cancel_workflow_run(&run, "Cancelled.").unwrap());
+    let refused = store
+        .record_workflow_approval(&run, "sign-off", "approved", None, "ada", None)
+        .unwrap();
+    assert!(
+        matches!(refused, crate::store::ApprovalWrite::RunEnded { .. }),
+        "{refused:?}"
+    );
+}
+
+#[test]
+fn a_schedule_set_to_never_is_not_told_that_an_approval_is_waiting() {
+    let (_dir, store, run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
+    let row = store.workflow_run(&run).unwrap().unwrap();
+    let spec = crate::schedule::ScheduleSpec::Daily {
+        time: crate::schedule::TimeOfDay { hour: 9, minute: 0 },
+    }
+    .to_json();
+    let schedule = store
+        .add_schedule(
+            &crate::store::ScheduleFields {
+                name: "Nightly",
+                target_kind: "workflow",
+                target_id: "sign",
+                project_id: row.project_id.as_deref().unwrap(),
+                workspace_id: row.workspace_id.as_deref().unwrap(),
+                workspace_name: &row.workspace_name,
+                inputs: "{}",
+                spec: &spec,
+                missed: "run_once",
+                notify: "never",
+                next_at: Some(1),
+            },
+            "cli",
+        )
+        .unwrap();
+    store
+        .record_schedule_run(&crate::store::NewScheduleRun {
+            schedule_id: &schedule.id,
+            due_at: 1,
+            fired_at: 1,
+            outcome: "started",
+            manual: false,
+            run_id: Some(&run),
+            note: None,
+        })
+        .unwrap();
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "sign-off").status, "waiting");
+    assert!(
+        !hands
+            .sent
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|title| title == "Waiting for your approval"),
+        "notify never stays quiet: {:?}",
+        hands.sent.lock().unwrap()
+    );
+}
+
+#[test]
+fn a_capture_that_fails_after_a_restart_drops_the_pending_marker() {
+    let (_dir, store, run, _worktree) = queue_folder(FILE_HANDOFF, "hand", &BTreeMap::new());
+    store
+        .replace_step_artifacts(
+            &run,
+            "draft",
+            &[crate::store::NewWorkflowArtifact {
+                name: "spec".into(),
+                source: "file".into(),
+                detail: Some("SPEC.md".into()),
+                body: "v1".into(),
+                truncated: false,
+            }],
+        )
+        .unwrap();
+    assert!(store.start_workflow_run(&run, None).unwrap());
+    assert!(store
+        .move_workflow_step(
+            &run,
+            "draft",
+            &[crate::store::StepStatus::Pending],
+            crate::store::StepStatus::Running,
+            Some(r#"{"artifact_pending":"1"}"#),
+            Some("Told."),
+            None,
+            false,
+        )
+        .unwrap());
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    let draft = step(&store, &run, "draft");
+    assert_eq!(draft.status, "failed");
+    assert!(
+        !draft.outputs.contains("artifact_pending"),
+        "{}",
+        draft.outputs
+    );
+    assert_eq!(store.workflow_artifacts(&run).unwrap()[0].body, "v1");
+    assert_eq!(step(&store, &run, "plan").status, "skipped");
+}
+
+/// Returns Later once, then the digest, so a slow transcript is retried instead of failed.
+struct SlowTalk {
+    calls: Mutex<u32>,
+}
+
+impl Hands for SlowTalk {
+    fn start(&self, _: &str, _: HarnessRequest) -> Result<SessionInfo, String> {
+        Ok(SessionInfo {
+            id: pty_host::SessionId("pty-9".into()),
+            program: "claude".into(),
+            args: Vec::new(),
+            cwd: None,
+            pid: None,
+            size: pty_host::TermSize::DEFAULT,
+            labels: BTreeMap::new(),
+            state: pty_host::SessionState::Running,
+            has_output: false,
+            busy: false,
+            busy_ms: 0,
+            idle_ms: 0,
+        })
+    }
+
+    fn notify(&self, _: &str, _: Option<&str>) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn handoff(&self, _: &str) -> Option<String> {
+        None
+    }
+
+    fn pr_posts(&self, _: &str, _: &crate::workflow::runs::PrFacts) -> PrAsk {
+        unreachable!("this workflow waits on no pull request")
+    }
+
+    fn conversation(
+        &self,
+        _: &str,
+        _: &str,
+        _: bool,
+        _: &str,
+        _: &str,
+    ) -> Result<Conversation, String> {
+        let mut calls = self.calls.lock().unwrap();
+        *calls += 1;
+        if *calls == 1 {
+            Ok(Conversation::Later)
+        } else {
+            Ok(Conversation::Ready(Some("DIGEST".into())))
+        }
+    }
+}
+
+#[test]
+fn a_transcript_that_is_not_ready_is_read_again_on_the_next_tick() {
+    let yaml = r#"id: talk
+name: Talk
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: start
+    action: start_session
+    harness: claude
+    prompt: Hello
+  - id: note
+    action: notify
+    needs: [start]
+    title: Noted
+    produces:
+      - name: discussion
+        from: transcript
+        session: "{{ steps.start.session }}"
+"#;
+    let (_dir, store, run, _worktree) = queue_folder(yaml, "talk", &BTreeMap::new());
+    let hands = SlowTalk {
+        calls: Mutex::new(0),
+    };
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "note").status, "waiting");
+    assert!(
+        step(&store, &run, "note")
+            .outputs
+            .contains("artifact_pending"),
+        "the read is resumed, not started as a new action: {}",
+        step(&store, &run, "note").outputs
+    );
+    assert_eq!(store.workflow_run(&run).unwrap().unwrap().status, "running");
+    assert_eq!(*hands.calls.lock().unwrap(), 1);
+    tick(&store, &hands);
+    assert_eq!(step(&store, &run, "note").status, "succeeded");
+    assert_eq!(store.workflow_artifacts(&run).unwrap()[0].body, "DIGEST");
+    assert!(*hands.calls.lock().unwrap() >= 2);
+}
+
+fn recover_is_a_no_op(store: &Store, run: &str) -> bool {
+    crate::workflow::engine::recover(&store.workflow_steps(run).unwrap()).is_empty()
 }

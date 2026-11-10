@@ -25,8 +25,10 @@ const CUT_NOTE: &str = "\n\n[Yardsort cut this artifact at 32000 characters.]";
 
 /// Cut `text` to [`MAX_CHARS`], noting the cut in the stored body.
 ///
-/// C0 and C1 controls are dropped first, except newline and tab. A body is typed into a
-/// later session, and a control there can close a paste or hide the rest of the text.
+/// C0 and C1 controls are dropped first, except newline and tab, and so are bidi overrides
+/// and zero-width characters. A body is typed into a later session, and a control there can
+/// close a paste or hide the rest of the text. A bidi override can make the rest of the
+/// text read backwards.
 pub fn cap(text: &str) -> (String, bool) {
     let text = strip_controls(text);
     if text.chars().count() <= MAX_CHARS {
@@ -48,14 +50,43 @@ pub fn require_text(name: &str, text: String) -> Result<(String, bool), String> 
     Ok((body, truncated))
 }
 
-/// Drop C0 and C1 controls. Newline and tab stay, so a document keeps its lines.
-fn strip_controls(text: &str) -> String {
-    text.chars()
-        .filter(|ch| {
-            let code = u32::from(*ch);
-            *ch == '\n' || *ch == '\t' || !((code <= 0x1F) || (0x80..=0x9F).contains(&code))
-        })
-        .collect()
+/// Drop C0 and C1 controls, bidi controls, U+200B, U+2060 and U+FEFF. Newline and tab stay,
+/// and so do U+200C and U+200D, which are part of words in some languages.
+pub(crate) fn strip_controls(text: &str) -> String {
+    text.chars().filter(|ch| !is_hidden(*ch)).collect()
+}
+
+/// A character that must not be stored in an artifact or a decision.
+///
+/// Controls other than newline and tab, bidi overrides and isolates (U+202A through U+202E,
+/// U+2066 through U+2069), bidi marks, U+200B, U+2060 and U+FEFF. U+200C and U+200D stay.
+/// Left in, a control can close a paste and a bidi override can reverse the text a person
+/// reads before they approve it.
+fn is_hidden(ch: char) -> bool {
+    if ch == '\n' || ch == '\t' {
+        return false;
+    }
+    let code = u32::from(ch);
+    code <= 0x1F
+        || (0x80..=0x9F).contains(&code)
+        || (0x202A..=0x202E).contains(&code)
+        || (0x2066..=0x2069).contains(&code)
+        || matches!(code, 0x200B | 0x200E | 0x200F | 0x061C | 0x2060 | 0xFEFF)
+}
+
+/// Who decided, with controls and bidi marks removed, kept short. Empty becomes `cli`.
+pub(crate) fn actor_name(raw: &str) -> String {
+    let cleaned: String = strip_controls(raw).trim().chars().take(200).collect();
+    if cleaned.is_empty() {
+        "cli".to_owned()
+    } else {
+        cleaned
+    }
+}
+
+/// The artifact a request for changes leaves, so a later revision can consume it by name.
+pub fn changes_artifact_name(step_id: &str) -> String {
+    format!("changes-{step_id}")
 }
 
 /// Why `path` cannot be an artifact file, before it is read. A path that still has
@@ -392,12 +423,43 @@ mod tests {
         assert!(error.contains("secret"), "{error}");
     }
 
+    /// The same case on Windows. A directory junction needs no privilege, so this runs on CI
+    /// and fails if the junction cannot be created. The written path is not itself a secret
+    /// name; the resolved path is, under `.ssh`.
+    #[cfg(windows)]
+    #[test]
+    fn a_link_to_a_secret_file_is_not_read_on_windows() {
+        let root = tempfile::tempdir().unwrap();
+        let secret = root.path().join(".ssh");
+        std::fs::create_dir(&secret).unwrap();
+        std::fs::write(secret.join("readme.txt"), "KEY").unwrap();
+        let link = root.path().join("notes");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&secret)
+            .output()
+            .expect("cmd should run");
+        assert!(
+            made.status.success(),
+            "junction was not created: {}",
+            String::from_utf8_lossy(&made.stderr)
+        );
+        let error = read_file(root.path(), "notes/readme.txt").unwrap_err();
+        assert!(error.contains("secret"), "{error}");
+    }
+
     #[test]
     fn control_characters_are_dropped_from_an_artifact() {
-        let (text, truncated) =
-            require_text("spec", "be\u{0007} kind\r\n\tline\u{009b}".into()).unwrap();
+        let (text, truncated) = require_text(
+            "spec",
+            "be\u{0007} kind\r\n\tline\u{009b}\u{202E}abc\u{200B}\u{2066}x\u{FEFF}".into(),
+        )
+        .unwrap();
         assert!(!truncated);
-        assert_eq!(text, "be kind\n\tline");
+        assert_eq!(text, "be kind\n\tlineabcx");
+        let (kept, _) = require_text("spec", "na\u{200C}me\u{200D}s".into()).unwrap();
+        assert_eq!(kept, "na\u{200C}me\u{200D}s");
         let error = require_text("spec", "\u{0001}\r".into()).unwrap_err();
         assert!(error.contains("empty"), "{error}");
     }
