@@ -1049,6 +1049,41 @@ fn a_failed_gate_cancels_the_smoke_test_a_parallel_step_is_waiting_on() {
 }
 
 #[test]
+fn a_halt_still_finishes_when_cancelling_the_smoke_test_fails() {
+    let (dir, store, run, _, _) = queued_workflow(TWO_TESTS);
+    std::fs::write(
+        crate::smoke::dir(&dir.path().join("wt")).join("other.yaml"),
+        OTHER_SMOKE,
+    )
+    .unwrap();
+    tick(&store, &NoHands);
+    let gate_run = step_test_id(&store, &run, "gate");
+    let side_run = step_test_id(&store, &run, "side");
+    // The cancel writes `status = 'cancelled'`. This makes that write fail, the way a broken
+    // database would, so the halt has to finish the workflow anyway.
+    rusqlite::Connection::open(dir.path().join("yardsort.db"))
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER fail_cancel BEFORE UPDATE OF status ON test_runs
+             WHEN NEW.status = 'cancelled'
+             BEGIN
+               SELECT RAISE(ABORT, 'cancel refused');
+             END;",
+        )
+        .unwrap();
+    finish_one(&store, &gate_run, "failed", Some("wanted 200, got 500"));
+    tick(&store, &NoHands);
+
+    let steps = store.workflow_steps(&run).unwrap();
+    let side_step = steps.iter().find(|step| step.step_id == "side").unwrap();
+    assert_eq!(side_step.status, "skipped");
+    let ended = store.workflow_run(&run).unwrap().unwrap();
+    assert_eq!(ended.status, "failed");
+    let still = store.test_run(&side_run).unwrap().unwrap();
+    assert_ne!(still.status, "cancelled");
+}
+
+#[test]
 fn a_passing_verdict_on_a_gate_runs_the_step_after_it() {
     let (_dir, store, run, _, _) = queued_workflow(GATED_TEST);
     let hands = Told {

@@ -423,31 +423,37 @@ To write `{{` literally, for example in a prompt about a template language, writ
 
 A step can hand a named document to a later step, so the next agent does not start from nothing.
 `produces` lists what this step leaves when it succeeds. `consumes` lists what a later step is
-given. The step that produces a name must be among the consumer's `needs`.
+given. The step that produces a name must be among its needs, directly or through other steps.
 
-| Key       | What it is                                                                      |
-| --------- | ------------------------------------------------------------------------------- |
-| `name`    | A lowercase name, like a step id: `spec`, `plan`, `report`.                     |
-| `path`    | A file inside the workspace, read when the step succeeds.                       |
-| `text`    | Text written here, with variables filled in.                                    |
-| `field`   | One field this step already leaves, such as `summary`.                          |
-| `from`    | `file`, `text`, `output` or `transcript`. Optional when only one source is set. |
-| `session` | For a transcript. `origin`, or a session this workflow started.                 |
-| `raw`     | For a transcript only. Keeps each turn's text. Otherwise the digest.            |
+| Key       | What it is                                                                       |
+| --------- | -------------------------------------------------------------------------------- |
+| `name`    | A lowercase name, like a step id: `spec`, `plan`, `report`.                      |
+| `path`    | A file inside the workspace, read when the step succeeds.                        |
+| `text`    | Text written here, with variables filled in.                                     |
+| `field`   | One field this step already leaves, such as `summary`.                           |
+| `from`    | `file`, `text`, `output` or `transcript`. A transcript needs `from: transcript`. |
+| `session` | For a transcript. `origin`, or a session this workflow started.                  |
+| `raw`     | For a transcript only. Keeps each turn's text. Otherwise the digest.             |
 
 A `start_session` or `send_to_session` that consumes an artifact, and does not write
 `{{ artifacts.<name> }}` in its own prompt, is given the text under a heading. A notification is
 not. Put the variable in the title or the body if you want a short piece of it there.
 
-Read a file on the step that finishes the work, usually the `wait_session`. The `start_session`
-has only just opened the agent, and the file may not be there yet. A missing file fails the step.
+Read a file on the step that finishes the work, usually the `wait_session`. A `start_session`
+or `send_to_session` cannot hand on a file or a transcript: it succeeds before the agent has
+written or replied. Text written in the step, and a field the step leaves, can still be handed
+on. A `notify` step can hand on a file or a transcript that is already there when the notice
+is sent. It does not wait for an agent to write one. A missing file fails the step.
 
-Nothing secret is copied. A path that leaves the workspace, or that looks like a secret (`.env`,
-a key, a credential file, `.ssh`, `.git`), is refused. The text is cut at 32000 characters, and
-the stored copy says so. A transcript is copied only when the step says `from: transcript`. It is
-the same digest Yardsort uses elsewhere, not the terminal scrollback, and not tool output.
-`raw: true` keeps each turn's own text in full, still without tool output, and it is still cut
-at 32000 characters.
+Nothing secret is copied. A path that leaves the workspace is refused, and so is a link that
+resolves outside it or onto a secret. A name that looks like a secret is refused too: `.env`
+and `.envrc`, a key or a credential file, `.ssh`, `.git`, `.kube`, `.docker`, `secrets.*`,
+and a `.tfvars` file. A name with a colon, or one that ends in a dot or a space, is refused.
+Control characters in a body are dropped, except newlines and tabs. The text is cut at 32000
+characters, and the stored copy says so. A transcript is copied only when the step says
+`from: transcript`. It is the same digest Yardsort uses elsewhere, not the terminal
+scrollback, and not tool output. `raw: true` keeps each turn's own text in full, still
+without tool output, and it is still cut at 32000 characters.
 
 The run keeps what was handed on. Open the run to read it, or use `ys workflow runs --run <id>`.
 `--json` includes each artifact's name, step, source and body. A step that succeeds again

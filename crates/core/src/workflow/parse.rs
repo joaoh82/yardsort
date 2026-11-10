@@ -823,6 +823,23 @@ impl Checker<'_> {
             },
             _ => return None,
         };
+        // These two succeed as soon as the session is open or the text is typed. A file or a
+        // conversation read then is whatever was already there, not what this step asked for.
+        if matches!(action_name, "start_session" | "send_to_session")
+            && matches!(
+                source,
+                ArtifactSource::File { .. } | ArtifactSource::Transcript { .. }
+            )
+        {
+            self.problem(
+                &item.name.referenced,
+                format!(
+                    "A `{action_name}` step cannot hand on a file or a transcript. It succeeds \
+                     before the agent has written or replied. Put it on the `wait_session` after \
+                     this step."
+                ),
+            );
+        }
         Some(ArtifactDecl {
             name: name.to_owned(),
             source,
@@ -841,9 +858,7 @@ impl Checker<'_> {
             (true, false, false) => Some("file"),
             (false, true, false) => Some("text"),
             (false, false, true) => Some("output"),
-            (false, false, false) if item.session.is_some() || item.raw.is_some() => {
-                Some("transcript")
-            }
+            // `session` or `raw` alone does not mean a transcript. That copy is opt-in.
             _ => None,
         };
         let kind = match item.from.as_ref() {
@@ -863,6 +878,13 @@ impl Checker<'_> {
                     return "";
                 }
             },
+            None if guessed.is_none() && (item.session.is_some() || item.raw.is_some()) => {
+                self.problem(
+                    &item.name.referenced,
+                    "A transcript is copied only when the step says `from: transcript`.",
+                );
+                return "";
+            }
             None => guessed.unwrap_or_else(|| {
                 self.problem(
                     &item.name.referenced,

@@ -31,6 +31,10 @@ pub mod commands;
 /// timeouts are this precise.
 const TICK: Duration = Duration::from_secs(1);
 
+/// How long the driver waits for one transcript. Past this, the step fails and the read is
+/// left to finish on its own, so one large conversation cannot stall every run.
+const TRANSCRIPT_WAIT: Duration = Duration::from_secs(5);
+
 /// The size an agent is started at. Its tab resizes it when the window shows it.
 const SIZE: TermSize = TermSize {
     cols: 120,
@@ -128,6 +132,37 @@ fn drive(handle: &AppHandle, woken: &Receiver<()>) {
     }
 }
 
+/// One session's conversation, read from the harness files. Called off the driver thread.
+fn read_transcript(
+    handle: &AppHandle,
+    workspace_id: &str,
+    record: &str,
+    raw: bool,
+) -> Result<Option<String>, String> {
+    use yardsort_core::activity::digest;
+    use yardsort_core::workflow::artifact;
+    let Some(state) = handle.try_state::<AppState>() else {
+        return Err("Yardsort is not ready to read that conversation.".into());
+    };
+    let workspace = state
+        .store
+        .workspace(workspace_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "The workspace is gone.".to_owned())?;
+    let conversation = digest::one(
+        &state.store,
+        &workspace,
+        record,
+        &crate::conversations::sources(&state),
+        crate::conversations::now(),
+    )
+    .map_err(|error| error.to_string())?;
+    let Some(conversation) = conversation else {
+        return Ok(None);
+    };
+    artifact::conversation_text(std::slice::from_ref(&conversation), record, raw)
+}
+
 struct AppHands<'a> {
     handle: &'a AppHandle,
     state: &'a AppState,
@@ -189,9 +224,7 @@ impl Hands for AppHands<'_> {
         pty_id: &str,
         raw: bool,
     ) -> Result<Option<String>, String> {
-        use yardsort_core::activity::digest;
         use yardsort_core::launch::RECORD_LABEL;
-        use yardsort_core::workflow::artifact;
         // The terminal id is not the session record. The record is what the transcript is filed
         // under. Tool output is not in those turns, and this does not read the terminal scrollback.
         let record = self
@@ -204,21 +237,30 @@ impl Hands for AppHands<'_> {
         let Some(record) = record else {
             return Ok(None);
         };
-        let workspace = self
-            .state
-            .store
-            .workspace(workspace_id)
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| "The workspace is gone.".to_owned())?;
-        let conversations = digest::gather(
-            &self.state.store,
-            &workspace,
-            None,
-            &crate::conversations::sources(self.state),
-            crate::conversations::now(),
-        )
-        .map_err(|error| error.to_string())?;
-        artifact::conversation_text(&conversations, &record, raw)
+        // Reading a transcript walks the harness's files. That stays off this thread, which is
+        // also what moves every other run on, and it does not wait on it forever.
+        let handle = self.handle.clone();
+        let workspace_id = workspace_id.to_owned();
+        let (tx, rx) = mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("artifact-transcript".into())
+            .spawn(move || {
+                let _ = tx.send(read_transcript(&handle, &workspace_id, &record, raw));
+            });
+        if let Err(error) = spawned {
+            return Err(format!(
+                "Could not read that session's conversation: {error}"
+            ));
+        }
+        match rx.recv_timeout(TRANSCRIPT_WAIT) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Timeout) => {
+                Err("Reading that conversation took too long, so it was not copied.".into())
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                Err("Could not read that session's conversation.".into())
+            }
+        }
     }
 
     fn pr_posts(&self, workspace_id: &str, pr: &yardsort_core::workflow::runs::PrFacts) -> PrAsk {

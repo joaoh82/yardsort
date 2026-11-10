@@ -116,10 +116,12 @@ pub struct Step {
     #[serde(default)]
     pub gate: bool,
     /// Named documents this step leaves when it succeeds. A later step reads one by name.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    // Always serialized, including when empty. Skipping the empty list makes the generated
+    // TypeScript a pair of types, one for writing and one for reading.
+    #[serde(default)]
     pub produces: Vec<ArtifactDecl>,
     /// Named documents from earlier steps that this step is given.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub consumes: Vec<String>,
     /// Flattened, so a step reads `{ id, needs, action: "notify", title }` as the file does.
     #[serde(flatten)]

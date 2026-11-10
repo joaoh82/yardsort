@@ -385,9 +385,12 @@ fn move_on(
                 ..
             } = &effect
             {
-                let change = finishing.finish(&step, outputs, note.clone(), outcome.clone());
-                delivered |= change.to != StepStatus::Waiting;
-                apply(driver, store, &run.id, &change)?;
+                delivered |= deliver(
+                    driver,
+                    store,
+                    &run.id,
+                    finishing.finish(&step, outputs, note.clone(), outcome.clone()),
+                )?;
                 continue;
             }
             let outcome = carry_out(
@@ -400,7 +403,15 @@ fn move_on(
                 &mut typed_to,
             );
             let change = match outcome {
-                Outcome::Done(outputs) => finishing.finish(&step, &outputs, None, None),
+                Outcome::Done(outputs) => {
+                    delivered |= deliver(
+                        driver,
+                        store,
+                        &run.id,
+                        finishing.finish(&step, &outputs, None, None),
+                    )?;
+                    continue;
+                }
                 Outcome::Queued(outputs) => engine::queued(&step, &outputs),
                 Outcome::Failed(why) => engine::failed(&step, &why),
                 Outcome::Skipped(why) => engine::skipped(&step, &why),
@@ -425,6 +436,23 @@ fn move_on(
         }
     }
     Ok(())
+}
+
+/// Apply `change`, unless the artifacts and the success were already written together.
+/// True when the step moved on, so a later step in this run may be able to start.
+fn deliver(
+    driver: &Driver,
+    store: &Store,
+    run_id: &str,
+    (change, committed): (Move, bool),
+) -> IpcResult<bool> {
+    let moved = change.to != StepStatus::Waiting;
+    if committed {
+        driver.touch();
+        return Ok(moved);
+    }
+    apply(driver, store, run_id, &change)?;
+    Ok(moved)
 }
 
 /// A halted plan skipped these steps after they had already queued a smoke test. Cancel
@@ -647,16 +675,17 @@ impl Finishing<'_> {
         outputs: &Outputs,
         note: Option<String>,
         outcome: Option<String>,
-    ) -> Move {
+    ) -> (Move, bool) {
         let Some(step) = self.workflow.steps.iter().find(|step| step.id == step_id) else {
-            return engine::done(step_id, outputs);
+            return (engine::done(step_id, outputs), false);
         };
         if step.produces.is_empty() {
-            return if note.is_none() && outcome.is_none() {
+            let change = if note.is_none() && outcome.is_none() {
                 engine::done(step_id, outputs)
             } else {
                 engine::recorded(step_id, outputs, note, outcome)
             };
+            return (change, false);
         }
         let capture = Capture {
             store: self.store,
@@ -670,11 +699,35 @@ impl Finishing<'_> {
             outputs,
         };
         match capture.record() {
-            Ok(()) => engine::recorded(step_id, outputs, note, outcome),
+            Ok(saved) => {
+                let change = engine::recorded(step_id, outputs, note, outcome);
+                match self.store.finish_step_with_artifacts(
+                    self.run_id,
+                    step_id,
+                    &[StepStatus::Running],
+                    change.to,
+                    &saved,
+                    change.outputs.as_deref(),
+                    change.note.as_deref(),
+                    change.outcome.as_deref(),
+                    change.clear_outcome,
+                ) {
+                    Ok(true) => (change, true),
+                    // The run stopped, or the step moved. The artifacts were not kept. Putting
+                    // the step back to wait, when it is still running, lets the next tick try
+                    // the capture again. A success applied on its own would finish with no body.
+                    Ok(false) => (engine::not_yet(step_id), false),
+                    Err(error) => {
+                        let mut change = engine::failed(step_id, &error.to_string());
+                        change.clear_outcome = true;
+                        (change, false)
+                    }
+                }
+            }
             Err(why) => {
                 let mut change = engine::failed(step_id, &why);
                 change.clear_outcome = true;
-                change
+                (change, false)
             }
         }
     }
@@ -694,8 +747,8 @@ struct Capture<'a> {
 }
 
 impl Capture<'_> {
-    /// Read every artifact first, then write them all. One failure writes none.
-    fn record(&self) -> Result<(), String> {
+    /// Read every artifact first. One failure returns none, so nothing is written.
+    fn record(&self) -> Result<Vec<NewWorkflowArtifact>, String> {
         let memory = OnceCell::new();
         let handoff = OnceCell::new();
         let mut saved = Vec::with_capacity(self.step.produces.len());
@@ -710,9 +763,7 @@ impl Capture<'_> {
                 truncated,
             });
         }
-        self.store
-            .replace_step_artifacts(self.run_id, &self.step.id, &saved)
-            .map_err(|error| error.to_string())
+        Ok(saved)
     }
 
     fn read(

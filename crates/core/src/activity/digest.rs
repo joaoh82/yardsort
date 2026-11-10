@@ -83,14 +83,50 @@ pub fn gather(
     now: i64,
 ) -> StoreResult<Vec<Conversation>> {
     let sessions = store.sessions(&workspace.id)?;
-    let located = Located::find(store, workspace, &sessions, sources, now)?;
+    let mut out = conversations(store, workspace, &sessions, except, sources, now)?;
+    // Newest activity first; those that cannot be read after the rest.
+    out.sort_by(|a, b| {
+        (a.unreadable.is_some(), b.last_at(), &a.id).cmp(&(
+            b.unreadable.is_some(),
+            a.last_at(),
+            &b.id,
+        ))
+    });
+    Ok(out)
+}
+
+/// One conversation in `workspace`, by its session record id. `None` when that session is not
+/// there, or it has not said anything. This does not read the workspace's other transcripts.
+pub fn one(
+    store: &Store,
+    workspace: &WorkspaceRow,
+    record_id: &str,
+    sources: &Sources,
+    now: i64,
+) -> StoreResult<Option<Conversation>> {
+    let sessions = store.sessions(&workspace.id)?;
+    let Some(session) = sessions.into_iter().find(|session| session.id == record_id) else {
+        return Ok(None);
+    };
+    Ok(conversations(store, workspace, &[session], None, sources, now)?.pop())
+}
+
+fn conversations(
+    store: &Store,
+    workspace: &WorkspaceRow,
+    sessions: &[SessionRow],
+    except: Option<&str>,
+    sources: &Sources,
+    now: i64,
+) -> StoreResult<Vec<Conversation>> {
+    let located = Located::find(store, workspace, sessions, sources, now)?;
     let prompted = store.prompted_sessions(&workspace.id)?;
     let mut out = Vec::new();
     for session in sessions {
         if Some(session.id.as_str()) == except {
             continue;
         }
-        let read = read_session(&session, sources, &located);
+        let read = read_session(session, sources, &located);
         let (mut turns, unreadable) = match read {
             Ok(turns) => (turns, None),
             // An agent writes nothing down until it is asked something.
@@ -116,24 +152,16 @@ pub fn gather(
             continue;
         }
         out.push(Conversation {
-            id: session.id,
-            harness: session.harness_id,
-            model: session.model,
+            id: session.id.clone(),
+            harness: session.harness_id.clone(),
+            model: session.model.clone(),
             started_at: session.began_at,
             running: session.running,
-            forked_from: session.forked_from,
+            forked_from: session.forked_from.clone(),
             turns,
             unreadable,
         });
     }
-    // Newest activity first; those that cannot be read after the rest.
-    out.sort_by(|a, b| {
-        (a.unreadable.is_some(), b.last_at(), &a.id).cmp(&(
-            b.unreadable.is_some(),
-            a.last_at(),
-            &b.id,
-        ))
-    });
     Ok(out)
 }
 

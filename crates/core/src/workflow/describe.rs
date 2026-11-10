@@ -79,11 +79,14 @@ pub const SYSTEM: &str = concat!(
      `produces` is a list. Each item has `name` and where the text comes from when the step \
      succeeds: `path` for a file in the workspace, `text` for text written here, `field` for \
      one field this step leaves (such as `summary`), or `from: transcript` with `session` and \
-     optional `raw: true`. The step that produces a name must be in the consumer's `needs`. A \
-     `start_session` or `send_to_session` that consumes an artifact and does not place \
-     `{{ artifacts.<name> }}` in its own prompt is given the text under a heading. Use \
-     `from: transcript` only when the person asked for the conversation. Put a file on the \
-     step that finishes the work, usually `wait_session`, so the file exists when it is read.\n\n\
+     optional `raw: true`. `session` or `raw` alone does not copy a transcript: the step must \
+     say `from: transcript`. The step that produces a name must be among the consumer's \
+     `needs`, directly or through other steps. A `start_session` or `send_to_session` that \
+     consumes an artifact and does not place `{{ artifacts.<name> }}` in its own prompt is \
+     given the text under a heading. Those two steps cannot hand on a file or a transcript, \
+     because they succeed before the agent has written or replied. Put that on the \
+     `wait_session`. A `notify` step may hand on a file or a transcript that is already \
+     there. Use `from: transcript` only when the person asked for the conversation.\n\n\
      Keep it small: the fewest steps that do what was asked, a `wait_session` after each \
      `start_session` whose finish matters, and a `notify` at the end so the person knows. \
      Write prompts to an agent as clear instructions, in the second person, saying what to do \

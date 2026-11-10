@@ -10,9 +10,10 @@ has the downloads and the full commit lists.
   text, and the run keeps it so you can read what was passed on, in the app and in
   `ys workflow runs --run <id>`. A file, a short text, or a field the step already leaves is
   copied. A conversation is copied only when the step asks, and then as a digest unless it asks
-  for the turns themselves. Secret-looking paths are refused, and a long document is cut short.
-  A step that succeeds again replaces what it left. A file written before this still loads. See
-  [Artifacts](docs/guide/workflows.md#artifacts).
+  for the turns themselves. Secret-looking paths are refused, including a link that points at
+  one, and a long document is cut short. A `start_session` or `send_to_session` cannot hand on
+  a file or a transcript. A step that succeeds again replaces what it left. A file written
+  before this still loads. See [Artifacts](docs/guide/workflows.md#artifacts).
 - **Floor Manager permission is a setting, and `ys` enforces it.** Settings → General chooses
   read only, ask first (the default) or trusted. The next `ys` command the Floor Manager runs
   follows it. Ask first waits for **Allow** in the window, even when the panel is closed, and

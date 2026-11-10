@@ -751,7 +751,17 @@ fn pasted(text: &str, bracketed: bool) -> String {
     let normalized = text.replace("\r\n", "\n");
     if bracketed {
         // The end marker inside the text would end the paste early; no program needs it.
-        format!("\x1b[200~{}\x1b[201~", normalized.replace("\x1b[201~", ""))
+        // One pass is not enough: `\x1b[\x1b[201~201~` becomes `\x1b[201~` after a single
+        // removal, which is the marker again. Repeat until the body no longer has it.
+        let mut body = normalized;
+        loop {
+            let stripped = body.replace("\x1b[201~", "");
+            if stripped == body {
+                break;
+            }
+            body = stripped;
+        }
+        format!("\x1b[200~{body}\x1b[201~")
     } else {
         normalized.replace('\n', "\r")
     }
@@ -794,4 +804,22 @@ fn command_for(plan: &LaunchPlan) -> CommandBuilder {
         cmd.env(key, value);
     }
     cmd
+}
+
+#[cfg(test)]
+mod paste_tests {
+    use super::pasted;
+
+    #[test]
+    fn a_nested_paste_end_marker_does_not_survive() {
+        let text = "\u{1b}[\u{1b}[201~201~hello";
+        let pasted = pasted(text, true);
+        let start = "\u{1b}[200~";
+        let end = "\u{1b}[201~";
+        assert!(pasted.starts_with(start), "{pasted:?}");
+        assert!(pasted.ends_with(end), "{pasted:?}");
+        let body = &pasted[start.len()..pasted.len() - end.len()];
+        assert!(!body.contains(end), "{body:?}");
+        assert_eq!(body, "hello");
+    }
 }

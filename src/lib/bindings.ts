@@ -570,9 +570,9 @@ export const commands = {
 	ptyClose: (id: SessionId) => typedError<null, IpcError>(__TAURI_INVOKE("pty_close", { id })),
 	ptyList: () => typedError<SessionInfo[], IpcError>(__TAURI_INVOKE("pty_list")),
 	/**  Every workflow, built in and the user's, with how many runs of each are going now. */
-	workflowList: () => typedError<WorkflowItem_Serialize[], IpcError>(__TAURI_INVOKE("workflow_list")),
+	workflowList: () => typedError<WorkflowItem[], IpcError>(__TAURI_INVOKE("workflow_list")),
 	/**  Check a file's text as it is being written: the editor's marks and the chart come from this. */
-	workflowCheck: (text: string) => __TAURI_INVOKE<WorkflowCheck_Serialize>("workflow_check", { text }),
+	workflowCheck: (text: string) => __TAURI_INVOKE<WorkflowCheck>("workflow_check", { text }),
 	/**
 	 *  Save a file: `path` is the user's file being edited, or `None` for a new one. Returns the id
 	 *  it was saved under.
@@ -1295,10 +1295,7 @@ export type Elsewhere_Serialize = {
 };
 
 /**  One workflow as the catalog lists it: runnable, or not, and why. */
-export type Entry = Entry_Serialize | Entry_Deserialize;
-
-/**  One workflow as the catalog lists it: runnable, or not, and why. */
-export type Entry_Deserialize = {
+export type Entry = {
 	id: string,
 	name: string,
 	description: string | null,
@@ -1306,21 +1303,7 @@ export type Entry_Deserialize = {
 	/**  Empty when the workflow can run. */
 	problems: Problem[],
 	/**  The checked workflow; `None` when there are problems. */
-	workflow: Workflow_Deserialize | null,
-	/**  The file exactly as written. */
-	text: string,
-};
-
-/**  One workflow as the catalog lists it: runnable, or not, and why. */
-export type Entry_Serialize = {
-	id: string,
-	name: string,
-	description: string | null,
-	source: Source,
-	/**  Empty when the workflow can run. */
-	problems: Problem[],
-	/**  The checked workflow; `None` when there are problems. */
-	workflow: Workflow_Serialize | null,
+	workflow: Workflow | null,
 	/**  The file exactly as written. */
 	text: string,
 };
@@ -3210,7 +3193,26 @@ export type SpawnRequest = {
 };
 
 /**  One node of the graph. */
-export type Step = Step_Serialize | Step_Deserialize;
+export type Step = {
+	id: string,
+	/**
+	 *  The steps that must have succeeded before this one starts. Steps whose needs are all met
+	 *  run together.
+	 */
+	needs: string[],
+	/**
+	 *  Whether a failed verdict fails this step and stops the run.
+	 * 
+	 *  Only some actions accept it. Today that is `run_test`. Absent means it is not a gate,
+	 *  so a failed verdict still succeeds the step. A later action that judges something, an
+	 *  approval for example, uses the same flag.
+	 */
+	gate?: boolean,
+	/**  Named documents this step leaves when it succeeds. A later step reads one by name. */
+	produces?: ArtifactDecl[],
+	/**  Named documents from earlier steps that this step is given. */
+	consumes?: string[],
+} & Action;
 
 /**
  *  What a step concluded, apart from whether its row succeeded or failed.
@@ -3243,50 +3245,6 @@ export type StepWords = {
 	/**  What the step does, in a sentence. */
 	words: string,
 };
-
-/**  One node of the graph. */
-export type Step_Deserialize = {
-	id: string,
-	/**
-	 *  The steps that must have succeeded before this one starts. Steps whose needs are all met
-	 *  run together.
-	 */
-	needs: string[],
-	/**
-	 *  Whether a failed verdict fails this step and stops the run.
-	 * 
-	 *  Only some actions accept it. Today that is `run_test`. Absent means it is not a gate,
-	 *  so a failed verdict still succeeds the step. A later action that judges something, an
-	 *  approval for example, uses the same flag.
-	 */
-	gate?: boolean,
-	/**  Named documents this step leaves when it succeeds. A later step reads one by name. */
-	produces?: ArtifactDecl[],
-	/**  Named documents from earlier steps that this step is given. */
-	consumes?: string[],
-} & Action;
-
-/**  One node of the graph. */
-export type Step_Serialize = {
-	id: string,
-	/**
-	 *  The steps that must have succeeded before this one starts. Steps whose needs are all met
-	 *  run together.
-	 */
-	needs: string[],
-	/**
-	 *  Whether a failed verdict fails this step and stops the run.
-	 * 
-	 *  Only some actions accept it. Today that is `run_test`. Absent means it is not a gate,
-	 *  so a failed verdict still succeeds the step. A later action that judges something, an
-	 *  approval for example, uses the same flag.
-	 */
-	gate: boolean,
-	/**  Named documents this step leaves when it succeeds. A later step reads one by name. */
-	produces?: ArtifactDecl[],
-	/**  Named documents from earlier steps that this step is given. */
-	consumes?: string[],
-} & Action;
 
 export type Suggestion = {
 	/**  The harness whose "Good at" fits best, when one clearly does. */
@@ -4002,7 +3960,15 @@ export type VerdictFilter = "any" | "passed" |
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 
 /**  A workflow file, checked and ready to run. */
-export type Workflow = Workflow_Serialize | Workflow_Deserialize;
+export type Workflow = {
+	id: string,
+	name: string,
+	description: string | null,
+	version: number,
+	trigger: Trigger,
+	inputs: Input[],
+	steps: Step[],
+};
 
 /**  A named document stored on a run, as the run view shows it. */
 export type WorkflowArtifact = {
@@ -4017,42 +3983,20 @@ export type WorkflowArtifact = {
 };
 
 /**  What checking a file's text found. */
-export type WorkflowCheck = WorkflowCheck_Serialize | WorkflowCheck_Deserialize;
-
-/**  What checking a file's text found. */
-export type WorkflowCheck_Deserialize = {
+export type WorkflowCheck = {
 	/**  Step id to its current YAML source line, for chart navigation. */
 	stepLines: { [key in string]: number },
 	/**  The workflow, when the text checks out. */
-	workflow: Workflow_Deserialize | null,
-	id: string | null,
-	problems: Problem[],
-};
-
-/**  What checking a file's text found. */
-export type WorkflowCheck_Serialize = {
-	/**  Step id to its current YAML source line, for chart navigation. */
-	stepLines: { [key in string]: number },
-	/**  The workflow, when the text checks out. */
-	workflow: Workflow_Serialize | null,
+	workflow: Workflow | null,
 	id: string | null,
 	problems: Problem[],
 };
 
 /**  A workflow as the sidebar and the view list it. */
-export type WorkflowItem = WorkflowItem_Serialize | WorkflowItem_Deserialize;
-
-/**  A workflow as the sidebar and the view list it. */
-export type WorkflowItem_Deserialize = {
+export type WorkflowItem = {
 	/**  Its runs queued or running now, in any workspace. */
 	activeRuns: number,
-} & Entry_Deserialize;
-
-/**  A workflow as the sidebar and the view list it. */
-export type WorkflowItem_Serialize = {
-	/**  Its runs queued or running now, in any workspace. */
-	activeRuns: number,
-} & Entry_Serialize;
+} & Entry;
 
 /**  One run, as the view lists it. */
 export type WorkflowRun = WorkflowRun_Serialize | WorkflowRun_Deserialize;
@@ -4121,28 +4065,6 @@ export type WorkflowStepRun = {
 export type WorkflowWriterStatus = {
 	harnessId: string | null,
 	status: DraftStatus,
-};
-
-/**  A workflow file, checked and ready to run. */
-export type Workflow_Deserialize = {
-	id: string,
-	name: string,
-	description: string | null,
-	version: number,
-	trigger: Trigger,
-	inputs: Input[],
-	steps: Step_Deserialize[],
-};
-
-/**  A workflow file, checked and ready to run. */
-export type Workflow_Serialize = {
-	id: string,
-	name: string,
-	description: string | null,
-	version: number,
-	trigger: Trigger,
-	inputs: Input[],
-	steps: Step_Serialize[],
 };
 
 export type Workspace = {

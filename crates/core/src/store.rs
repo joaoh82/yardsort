@@ -2337,6 +2337,78 @@ impl Store {
         Ok(())
     }
 
+    /// Store `artifacts` and move the step, or change neither. The move is taken only while the
+    /// run is still running and the step is in one of `from`. False, and the artifacts are not
+    /// written, when that move does not apply: the run stopped, or the step moved first.
+    #[allow(clippy::too_many_arguments)]
+    pub fn finish_step_with_artifacts(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        from: &[StepStatus],
+        to: StepStatus,
+        artifacts: &[NewWorkflowArtifact],
+        outputs: Option<&str>,
+        note: Option<&str>,
+        outcome: Option<&str>,
+        clear_outcome: bool,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let now = now_ms();
+        tx.execute(
+            "DELETE FROM workflow_artifacts WHERE run_id = ? AND step_id = ?",
+            params![run_id, step_id],
+        )?;
+        for artifact in artifacts {
+            tx.execute(
+                "INSERT INTO workflow_artifacts
+                 (run_id, name, step_id, source, detail, body, truncated, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    run_id,
+                    artifact.name,
+                    step_id,
+                    artifact.source,
+                    artifact.detail,
+                    artifact.body,
+                    i64::from(artifact.truncated),
+                    now,
+                ],
+            )?;
+        }
+        let marks = from.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "UPDATE workflow_step_runs
+             SET status = ?1,
+                 started_at = CASE WHEN ?2 THEN started_at ELSE COALESCE(started_at, ?3) END,
+                 ended_at = CASE WHEN ?2 THEN ?3 ELSE ended_at END,
+                 outputs = COALESCE(?4, outputs),
+                 note = COALESCE(?5, note),
+                 outcome = CASE WHEN ?6 THEN NULL ELSE COALESCE(?7, outcome) END
+             WHERE run_id = ?8 AND step_id = ?9 AND status IN ({marks})
+               AND EXISTS (SELECT 1 FROM workflow_runs WHERE id = ?8 AND status = 'running')"
+        );
+        let mut values: Vec<rusqlite::types::Value> = vec![
+            to.as_str().to_owned().into(),
+            i64::from(to.is_final()).into(),
+            now.into(),
+            outputs.map(str::to_owned).into(),
+            note.map(str::to_owned).into(),
+            i64::from(clear_outcome).into(),
+            outcome.map(str::to_owned).into(),
+            run_id.to_owned().into(),
+            step_id.to_owned().into(),
+        ];
+        values.extend(from.iter().map(|status| status.as_str().to_owned().into()));
+        let moved = tx.execute(&sql, rusqlite::params_from_iter(values))? > 0;
+        if !moved {
+            return Ok(false);
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
     /// A queued run starts, with `context` replacing what it knew, when given. False when it was
     /// not queued any more — cancelled in between.
     pub fn start_workflow_run(&self, id: &str, context: Option<&str>) -> StoreResult<bool> {
@@ -3601,6 +3673,88 @@ steps:
         assert_eq!(rows[0].body, "v2");
         assert!(rows[0].truncated);
         assert_eq!(rows[0].step_id, "draft");
+    }
+
+    #[test]
+    fn artifacts_and_the_success_are_one_change() {
+        let store = Store::in_memory();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_runs
+                 (id, workflow_id, workflow_name, definition, workspace_name, inputs, status,
+                  requested_by, created_at)
+                 VALUES ('run-1', 'demo', 'Demo', 'id: demo\n', 'fix', '{}', 'running', 'cli', 1)",
+                [],
+            )
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_step_runs (run_id, step_id, position, action, status)
+                 VALUES ('run-1', 'draft', 0, 'notify', 'running')",
+                [],
+            )
+            .unwrap();
+        let spec = |body: &str| NewWorkflowArtifact {
+            name: "spec".into(),
+            source: "text".into(),
+            detail: None,
+            body: body.into(),
+            truncated: false,
+        };
+        assert!(store
+            .finish_step_with_artifacts(
+                "run-1",
+                "draft",
+                &[StepStatus::Running],
+                StepStatus::Succeeded,
+                &[spec("v1")],
+                Some(r#"{"outcome":"settled"}"#),
+                Some("done"),
+                None,
+                false,
+            )
+            .unwrap());
+        assert_eq!(
+            store.workflow_steps("run-1").unwrap()[0].status,
+            "succeeded"
+        );
+        assert_eq!(store.workflow_artifacts("run-1").unwrap()[0].body, "v1");
+
+        store
+            .conn()
+            .execute(
+                "UPDATE workflow_runs SET status = 'cancelled' WHERE id = 'run-1'",
+                [],
+            )
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "UPDATE workflow_step_runs SET status = 'running' WHERE run_id = 'run-1'",
+                [],
+            )
+            .unwrap();
+        assert!(!store
+            .finish_step_with_artifacts(
+                "run-1",
+                "draft",
+                &[StepStatus::Running],
+                StepStatus::Succeeded,
+                &[spec("v2")],
+                Some("{}"),
+                None,
+                None,
+                false,
+            )
+            .unwrap());
+        assert_eq!(
+            store.workflow_artifacts("run-1").unwrap()[0].body,
+            "v1",
+            "a stopped run keeps the previous body"
+        );
+        assert_eq!(store.workflow_steps("run-1").unwrap()[0].status, "running");
     }
 
     #[test]

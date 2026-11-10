@@ -1101,6 +1101,42 @@ fn an_artifact_source_is_checked_before_the_run() {
     ));
     assert!(field.contains("leaves nothing"), "{field}");
 
+    let bare = problem(&handoff(
+        "  - id: wait\n    action: wait_session\n    session: origin\n    produces:\n      \
+         - name: discussion\n        session: origin\n",
+    ));
+    assert!(
+        bare.contains("only when the step says `from: transcript`"),
+        "{bare}"
+    );
+
+    let raw_only = problem(&handoff(
+        "  - id: wait\n    action: wait_session\n    session: origin\n    produces:\n      \
+         - name: discussion\n        raw: true\n",
+    ));
+    assert!(
+        raw_only.contains("only when the step says `from: transcript`"),
+        "{raw_only}"
+    );
+
+    let early = problem(&handoff(
+        "  - id: start\n    action: start_session\n    harness: claude\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n",
+    ));
+    assert!(
+        early.contains("cannot hand on a file or a transcript"),
+        "{early}"
+    );
+
+    let sent = problem(&handoff(
+        "  - id: nudge\n    action: send_to_session\n    session: origin\n    prompt: Go\n    \
+         produces:\n      - name: discussion\n        from: transcript\n",
+    ));
+    assert!(
+        sent.contains("cannot hand on a file or a transcript"),
+        "{sent}"
+    );
+
     let workflow = parse(&handoff(
         "  - id: wait\n    action: wait_session\n    session: origin\n    produces:\n      \
          - name: discussion\n        from: transcript\n",

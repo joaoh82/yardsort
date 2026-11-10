@@ -417,20 +417,41 @@ fn gate_failure_line(note: &str) -> String {
     out
 }
 
+/// On a running step whose work already finished and is only waiting for its artifacts to be
+/// stored. A restart puts that step back to waiting, so the capture runs again.
+const ARTIFACT_PENDING: &str = "artifact_pending";
+
 /// Steps the driver was in the middle of when it stopped. Whether the session started or the
 /// text was typed cannot be known now, so they fail, saying why, rather than happen twice.
+/// A step that already finished and was only waiting for its artifacts to be stored goes back
+/// to waiting: that capture is safe to do again, and failing it would skip the steps after it.
 pub fn recover(rows: &[WorkflowStepRow]) -> Vec<Move> {
     rows.iter()
         .filter(|row| row.status == StepStatus::Running.as_str())
-        .map(|row| Move {
-            step: row.step_id.clone(),
-            from: vec![StepStatus::Running],
-            to: StepStatus::Failed,
-            outputs: None,
-            note: Some("Yardsort stopped while this step was running.".to_owned()),
-            outcome: None,
-            clear_outcome: false,
-            halt: false,
+        .map(|row| {
+            let mut outputs = parse_outputs(&row.outputs);
+            if outputs.remove(ARTIFACT_PENDING).is_some() {
+                return Move {
+                    step: row.step_id.clone(),
+                    from: vec![StepStatus::Running],
+                    to: StepStatus::Waiting,
+                    outputs: Some(serde_json::to_string(&outputs).unwrap_or_else(|_| "{}".into())),
+                    note: row.note.clone(),
+                    outcome: row.outcome.clone(),
+                    clear_outcome: false,
+                    halt: false,
+                };
+            }
+            Move {
+                step: row.step_id.clone(),
+                from: vec![StepStatus::Running],
+                to: StepStatus::Failed,
+                outputs: None,
+                note: Some("Yardsort stopped while this step was running.".to_owned()),
+                outcome: None,
+                clear_outcome: false,
+                halt: false,
+            }
         })
         .collect()
 }
@@ -889,16 +910,19 @@ fn hold_for_artifacts(step: &super::Step, change: Move, effects: &mut Vec<Effect
         .unwrap_or_default();
     effects.push(Effect::Capture {
         step: step.id.clone(),
-        outputs,
+        outputs: outputs.clone(),
         note: change.note.clone(),
         outcome: change.outcome.clone(),
     });
+    // The marker is how a restart tells this hold apart from a step whose effect was still
+    // going. The capture above keeps the outputs without it, and those are what get stored.
+    let mut marked = outputs;
+    marked.insert(ARTIFACT_PENDING.to_owned(), "1".to_owned());
+    let clear_outcome = change.outcome.is_none();
     Move {
         to: StepStatus::Running,
-        outputs: None,
-        note: None,
-        outcome: None,
-        clear_outcome: change.outcome.is_none(),
+        outputs: Some(serde_json::to_string(&marked).unwrap_or_else(|_| "{}".to_owned())),
+        clear_outcome,
         halt: false,
         ..change
     }
