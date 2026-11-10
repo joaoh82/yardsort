@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.25.0
 
 - **Triggers on pull requests in other repositories.** A trigger whose workflow is about a pull
   request a workspace tracks elsewhere — **Request code review elsewhere**, the new **Address
