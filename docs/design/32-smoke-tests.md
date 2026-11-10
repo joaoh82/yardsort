@@ -440,7 +440,9 @@ later steps. A `send_to_session` after it can hand `{{ steps.smoke.summary }}` t
 Approval is needed as anywhere; a workflow run waits for it. The built-in workflow
 **Smoke test, then tell the agent** is two steps: `run_test` on an input of kind `test`, and
 `send_to_session` to `origin` with the summary — the shape of "automate it later" once a trigger
-other than manual exists.
+other than manual exists. A `run_test` step can also be a gate: `gate: true` makes a failed
+verdict fail the step and stop the run. See
+[Test verdict gates](21-workflows.md#test-verdict-gates).
 
 ## Three platforms
 

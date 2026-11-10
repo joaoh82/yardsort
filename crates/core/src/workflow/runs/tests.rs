@@ -405,6 +405,7 @@ fn a_cancelled_run_cannot_be_moved_on_by_a_driver_that_had_not_heard() {
             &[StepStatus::Pending],
             StepStatus::Running,
             None,
+            None,
             None
         )
         .unwrap());
@@ -425,6 +426,7 @@ fn a_cancelled_run_cannot_be_moved_on_by_a_driver_that_had_not_heard() {
             "start",
             &[StepStatus::Running],
             StepStatus::Succeeded,
+            None,
             None,
             None
         )
@@ -447,7 +449,7 @@ fn a_step_move_keeps_its_first_start_time_and_records_what_it_left() {
     fx.store.start_workflow_run(&id, None).unwrap();
     let moved = |from, to, outputs| {
         fx.store
-            .move_workflow_step(&id, "start", &[from], to, outputs, None)
+            .move_workflow_step(&id, "start", &[from], to, outputs, None, None)
             .unwrap()
     };
     assert!(moved(StepStatus::Pending, StepStatus::Running, None));
@@ -475,7 +477,8 @@ fn a_step_move_keeps_its_first_start_time_and_records_what_it_left() {
             &[StepStatus::Pending],
             StepStatus::Skipped,
             None,
-            Some("x")
+            Some("x"),
+            None
         )
         .unwrap());
     let tell = &fx.store.workflow_steps(&id).unwrap()[1];

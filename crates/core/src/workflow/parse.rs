@@ -55,7 +55,7 @@ fn allowed(action: &str) -> &'static [&'static str] {
         "wait_session" => &["session", "until", "timeout"],
         "send_to_session" => &["session", "prompt", "timeout"],
         "wait_pr_activity" => &["kind", "timeout"],
-        "run_test" => &["test", "inputs", "timeout"],
+        "run_test" => &["test", "inputs", "timeout", "gate"],
         "notify" => &["title", "body"],
         _ => &[],
     }
@@ -133,6 +133,8 @@ struct RawStep {
     title: Option<Spanned<String>>,
     #[serde(default)]
     body: Option<Spanned<String>>,
+    #[serde(default)]
+    gate: Option<Spanned<bool>>,
 }
 
 impl RawStep {
@@ -155,6 +157,7 @@ impl RawStep {
             ("inputs", at(&self.inputs)),
             ("title", at(&self.title)),
             ("body", at(&self.body)),
+            ("gate", at(&self.gate)),
         ]
         .into_iter()
         .filter_map(|(key, at)| at.map(|at| (key, at)))
@@ -619,6 +622,7 @@ impl Checker<'_> {
                 test: self.test(raw, scope),
                 inputs: self.test_inputs(raw, scope),
                 timeout_secs: self.timeout(raw),
+                gate: raw.gate.as_ref().is_some_and(|gate| gate.value),
             },
             _ => Action::Notify {
                 title: self.required(

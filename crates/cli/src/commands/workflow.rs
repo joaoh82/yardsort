@@ -407,6 +407,9 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
         ended_at: Option<i64>,
         outputs: serde_json::Value,
         note: Option<&'a str>,
+        /// Passed or failed, with a reason when it failed. Absent when the step judged nothing.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        outcome: Option<serde_json::Value>,
     }
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -429,6 +432,10 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                 ended_at: s.ended_at,
                 outputs: serde_json::from_str(&s.outputs).unwrap_or_default(),
                 note: s.note.as_deref(),
+                outcome: s
+                    .outcome
+                    .as_deref()
+                    .and_then(|raw| serde_json::from_str(raw).ok()),
             })
             .collect(),
     };

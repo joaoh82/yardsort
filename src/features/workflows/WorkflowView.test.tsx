@@ -316,7 +316,8 @@ describe("WorkflowView", () => {
     expect(row).toHaveTextContent("scheduled");
     expect(row).toHaveTextContent("triggered");
     await userEvent.setup().click(row);
-    expect(await within(runs).findByText("no way")).toBeInTheDocument();
+    expect(await within(runs).findByText("no way")).toHaveClass("whitespace-pre-wrap");
+    expect(within(runs).getByText("Step `tell` failed: no way")).toHaveClass("whitespace-pre-wrap");
     expect(within(runs).getByText("Notify you")).toBeInTheDocument();
     expect(within(runs).getByText("Scheduled · Nightly")).toBeInTheDocument();
     expect(within(runs).getByText("Triggered · Address reviews")).toBeInTheDocument();

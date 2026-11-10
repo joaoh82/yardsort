@@ -431,6 +431,7 @@ fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResu
         change.to,
         change.outputs.as_deref(),
         change.note.as_deref(),
+        change.outcome.as_deref(),
     )?;
     if moved {
         driver.touch();

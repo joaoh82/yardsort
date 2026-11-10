@@ -468,7 +468,9 @@ short paragraph pointing it at `ys test list`, `ys test run` and `ys test guide`
 explain the commands each time.
 
 A [workflow](workflows.md) can run a test too, with its `run_test` step, which queues a run and
-waits for its verdict — passing or failing with it, so a later step can act on either. The
-built-in **Smoke test, then tell the agent** is exactly that followed by a message to the
-workspace's agent with the result, whether it passed or failed — the shape of "when the agent is
-done, smoke test it and tell it what broke."
+waits for its verdict. The step succeeds whether the test passed or failed, so a later step can
+act on either. With `gate: true` a failed verdict stops the workflow instead. See
+[A test that must pass](workflows.md#a-test-that-must-pass). The built-in **Smoke test, then
+tell the agent** is a test followed by a message to the workspace's agent with the result,
+whether it passed or failed. That is the shape of "when the agent is done, smoke test it and
+tell it what broke."

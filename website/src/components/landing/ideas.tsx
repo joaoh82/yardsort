@@ -253,7 +253,9 @@ export function Ideas() {
             request, and notify you. A step names the steps it needs, so the ones that need nothing
             of each other run side by side. Every name and every{" "}
             <code className={code}>{"{{ variable }}"}</code> is checked before anything runs, with
-            the line and column of each mistake.
+            the line and column of each mistake. A <code className={code}>run_test</code> step
+            marked <code className={code}>gate: true</code> stops the run when the smoke test fails,
+            and the run says why.
           </p>
           <p>
             <strong className={strong}>Workflows</strong>, above Projects, lists the built-in ones

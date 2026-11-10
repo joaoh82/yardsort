@@ -13,6 +13,29 @@ use super::template;
 use super::{Action, PrActivity, SessionRef, Until, Workflow};
 use crate::store::{StepStatus, WorkflowStepRow};
 
+/// What a step concluded, apart from whether its row succeeded or failed.
+///
+/// A step that judges something produces one: a smoke test's verdict today, and later an
+/// approval or anything a branch will switch on. [`react`] is the one place the run takes
+/// that verdict. It is stored on the step row, not in `outputs`. `outputs` stay the strings
+/// a later step reads as `{{ steps.<id>.<field> }}`, and this is not `wait_session`'s
+/// `outcome` field.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StepOutcome {
+    pub verdict: StepVerdict,
+    /// Why, when the verdict is failed. Absent when it passed and there is nothing to add.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Passed or failed. The words match a smoke test's verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepVerdict {
+    Passed,
+    Failed,
+}
+
 /// What a session is doing, as the driver sees it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SessionFacts {
@@ -81,6 +104,8 @@ pub struct Move {
     /// Replaces the step's outputs, as a JSON object of strings.
     pub outputs: Option<String>,
     pub note: Option<String>,
+    /// Replaces the step's structured outcome, as JSON. Absent leaves whatever is stored.
+    pub outcome: Option<String>,
 }
 
 /// Something only the driver can do. Each belongs to a step the plan has just moved to
@@ -282,8 +307,59 @@ pub fn recover(rows: &[WorkflowStepRow]) -> Vec<Move> {
             to: StepStatus::Failed,
             outputs: None,
             note: Some("Yardsort stopped while this step was running.".to_owned()),
+            outcome: None,
         })
         .collect()
+}
+
+/// How the run takes a step's [`StepOutcome`].
+///
+/// A gate whose verdict is [`StepVerdict::Failed`] fails the step, and the run then stops
+/// with `reason`, the same way any failed step stops it. A schedule or trigger that asks to
+/// be told on failure sends that reason. Any other verdict succeeds the step, so a later
+/// step can still read what happened. `success_note` is what that succeeded step says.
+/// Actions that judge something call this instead of deciding a stop of their own.
+pub fn react(
+    step_id: &str,
+    from: StepStatus,
+    gate: bool,
+    outcome: &StepOutcome,
+    outputs: &Outputs,
+    success_note: String,
+) -> Move {
+    let stop = gate && outcome.verdict == StepVerdict::Failed;
+    let note = if stop {
+        outcome
+            .reason
+            .clone()
+            .filter(|reason| !reason.trim().is_empty())
+            .unwrap_or_else(|| "Failed.".to_owned())
+    } else {
+        success_note
+    };
+    Move {
+        step: step_id.to_owned(),
+        from: vec![from],
+        to: if stop {
+            StepStatus::Failed
+        } else {
+            StepStatus::Succeeded
+        },
+        outputs: Some(serde_json::to_string(outputs).unwrap_or_else(|_| "{}".to_owned())),
+        note: Some(note),
+        outcome: Some(serde_json::to_string(outcome).unwrap_or_else(|_| "{}".to_owned())),
+    }
+}
+
+/// The words a failed test verdict leaves as its reason: the report `ys test wait` prints,
+/// under a line that says the test failed.
+pub fn test_failure_reason(summary: &str) -> String {
+    let summary = summary.trim();
+    if summary.is_empty() {
+        "The test failed.".to_owned()
+    } else {
+        format!("The test failed:\n{summary}")
+    }
 }
 
 /// The driver carried out a step's effect.
@@ -294,6 +370,7 @@ pub fn done(step: &str, outputs: &Outputs) -> Move {
         to: StepStatus::Succeeded,
         outputs: Some(serde_json::to_string(outputs).unwrap_or_else(|_| "{}".to_owned())),
         note: None,
+        outcome: None,
     }
 }
 
@@ -306,6 +383,7 @@ pub fn queued(step: &str, outputs: &Outputs) -> Move {
         to: StepStatus::Waiting,
         outputs: Some(serde_json::to_string(outputs).unwrap_or_else(|_| "{}".to_owned())),
         note: None,
+        outcome: None,
     }
 }
 
@@ -317,6 +395,7 @@ pub fn skipped(step: &str, why: &str) -> Move {
         to: StepStatus::Skipped,
         outputs: None,
         note: Some(format!("Skipped: {why}.")),
+        outcome: None,
     }
 }
 
@@ -329,6 +408,7 @@ pub fn not_yet(step: &str) -> Move {
         to: StepStatus::Waiting,
         outputs: None,
         note: None,
+        outcome: None,
     }
 }
 
@@ -340,6 +420,7 @@ pub fn failed(step: &str, why: &str) -> Move {
         to: StepStatus::Failed,
         outputs: None,
         note: Some(why.to_owned()),
+        outcome: None,
     }
 }
 
@@ -528,7 +609,9 @@ fn wait(
             )),
             _ => None,
         },
-        Action::RunTest { timeout_secs, .. } => {
+        Action::RunTest {
+            timeout_secs, gate, ..
+        } => {
             // The run's id was left when the driver queued it; wait for that run to end.
             let run = lookup(&["steps".to_owned(), id.to_owned(), "run".to_owned()])?;
             match world.test_run(&run) {
@@ -551,22 +634,38 @@ fn wait(
                     let mut left = Outputs::new();
                     left.insert("run".into(), run);
                     left.insert("verdict".into(), test.status.clone());
-                    left.insert("summary".into(), test.summary);
-                    let outputs =
-                        Some(serde_json::to_string(&left).unwrap_or_else(|_| "{}".into()));
-                    // A test that reached a verdict — passed or failed — succeeds the step, so a
-                    // later step can read `verdict` and act on either outcome; that is how "Smoke
-                    // test, then tell the agent" reports a failure for the agent to repair. A run
-                    // that reached no verdict (cancelled, errored) fails the step, so `needs`
-                    // gates downstream on it.
+                    left.insert("summary".into(), test.summary.clone());
+                    // A verdict, passed or failed, is a step outcome. A gate whose verdict
+                    // failed stops the run; any other verdict succeeds the step, so a later
+                    // step can read `verdict` and act on either. That is how "Smoke test,
+                    // then tell the agent" reports a failure for the agent to repair. A run
+                    // that reached no verdict (cancelled, errored) fails the step and leaves
+                    // no outcome, because there was nothing to react to.
                     match test.status.as_str() {
-                        "passed" | "failed" => Some(Move {
-                            outputs,
-                            note: Some(format!("The test {}.", test.status)),
-                            ..to(id, StepStatus::Waiting, StepStatus::Succeeded)
-                        }),
+                        "passed" | "failed" => {
+                            let outcome = match test.status.as_str() {
+                                "passed" => StepOutcome {
+                                    verdict: StepVerdict::Passed,
+                                    reason: None,
+                                },
+                                _ => StepOutcome {
+                                    verdict: StepVerdict::Failed,
+                                    reason: Some(test_failure_reason(&test.summary)),
+                                },
+                            };
+                            Some(react(
+                                id,
+                                StepStatus::Waiting,
+                                *gate,
+                                &outcome,
+                                &left,
+                                format!("The test {}.", test.status),
+                            ))
+                        }
                         other => Some(Move {
-                            outputs,
+                            outputs: Some(
+                                serde_json::to_string(&left).unwrap_or_else(|_| "{}".into()),
+                            ),
                             note: Some(format!("The test run {other}.")),
                             ..to(id, StepStatus::Waiting, StepStatus::Failed)
                         }),
@@ -618,6 +717,7 @@ fn to(step: &str, from: StepStatus, to: StepStatus) -> Move {
         to,
         outputs: None,
         note: None,
+        outcome: None,
     }
 }
 

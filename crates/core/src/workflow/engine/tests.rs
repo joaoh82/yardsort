@@ -102,6 +102,7 @@ impl Run {
                 ended_at: None,
                 outputs: "{}".into(),
                 note: None,
+                outcome: None,
             })
             .collect();
         Self {
@@ -138,6 +139,7 @@ impl Run {
                 ended_at: None,
                 outputs: "{}".into(),
                 note: None,
+                outcome: None,
             })
             .collect();
         run
@@ -178,6 +180,9 @@ impl Run {
         }
         if let Some(note) = &change.note {
             row.note = Some(note.clone());
+        }
+        if let Some(outcome) = &change.outcome {
+            row.outcome = Some(outcome.clone());
         }
         true
     }
@@ -538,6 +543,7 @@ fn review_run(origin: Option<&str>) -> Run {
             ended_at: None,
             outputs: "{}".into(),
             note: None,
+            outcome: None,
         })
         .collect();
     run.world.origin = origin.map(str::to_owned);
@@ -690,6 +696,105 @@ fn a_failed_test_succeeds_the_step_with_a_failed_verdict() {
     assert_eq!(out.get("verdict").map(String::as_str), Some("failed"));
     assert!(out.get("summary").unwrap().contains("failed  login"));
     assert_eq!(run.note("smoke"), Some("The test failed."));
+    let outcome = step_outcome(&run, "smoke");
+    assert_eq!(outcome.verdict, StepVerdict::Failed);
+    assert!(outcome.reason.unwrap().contains("failed  login"));
+    assert_eq!(run.finished, Some(Finish::Succeeded));
+}
+
+const GATED: &str = r#"id: t
+name: T
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: smoke
+    action: run_test
+    test: login
+    gate: true
+    timeout: 30m
+  - id: tell
+    action: notify
+    needs: [smoke]
+    title: Tests passed
+"#;
+
+fn step_outcome(run: &Run, step: &str) -> StepOutcome {
+    let row = run.rows.iter().find(|r| r.step_id == step).unwrap();
+    serde_json::from_str(row.outcome.as_deref().expect("an outcome")).unwrap()
+}
+
+fn finish_test(run: &mut Run, id: &str, status: &str, summary: &str) {
+    run.advance();
+    let queued_out: Outputs = [("run".to_owned(), id.to_owned())].into();
+    assert!(run.apply(&queued("smoke", &queued_out)));
+    run.world.test_runs.insert(
+        id.to_owned(),
+        TestRun {
+            status: status.to_owned(),
+            summary: summary.to_owned(),
+        },
+    );
+    run.advance();
+}
+
+#[test]
+fn a_failed_verdict_on_a_gate_stops_the_run_with_the_reason() {
+    let mut run = Run::from(GATED);
+    finish_test(
+        &mut run,
+        "tr-gate",
+        "failed",
+        "failed  login  (2 of 6 steps passed)",
+    );
+    assert_eq!(run.status("smoke"), "failed");
+    assert_eq!(run.status("tell"), "skipped");
+    let note = run.note("smoke").unwrap();
+    assert!(note.contains("The test failed:"), "{note}");
+    assert!(note.contains("failed  login"), "{note}");
+    assert!(note.contains("2 of 6 steps passed"), "{note}");
+    let outcome = step_outcome(&run, "smoke");
+    assert_eq!(outcome.verdict, StepVerdict::Failed);
+    assert_eq!(outcome.reason.as_deref(), Some(note));
+    match &run.finished {
+        Some(Finish::Failed(why)) => {
+            assert!(why.contains("Step `smoke` failed:"), "{why}");
+            assert!(why.contains("failed  login"), "{why}");
+        }
+        other => panic!("expected the run to fail, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_passing_verdict_on_a_gate_continues() {
+    let mut run = Run::from(GATED);
+    finish_test(
+        &mut run,
+        "tr-ok",
+        "passed",
+        "passed  login  (6 of 6 steps passed)",
+    );
+    assert_eq!(run.status("smoke"), "succeeded");
+    assert_eq!(run.note("smoke"), Some("The test passed."));
+    assert_eq!(step_outcome(&run, "smoke").verdict, StepVerdict::Passed);
+    assert_eq!(run.status("tell"), "running");
+    assert!(
+        run.finished.is_none(),
+        "the notify step is still to be done"
+    );
+    assert!(run.apply(&done("tell", &Outputs::new())));
+    run.advance();
+    assert_eq!(run.status("tell"), "succeeded");
+    assert_eq!(run.finished, Some(Finish::Succeeded));
+}
+
+#[test]
+fn an_explicit_false_gate_keeps_a_failed_verdict_from_stopping_the_run() {
+    let mut run = Run::from(&RUN_TEST_WF.replace("timeout: 30m", "gate: false\n    timeout: 30m"));
+    finish_test(&mut run, "tr-no", "failed", "failed  login");
+    assert_eq!(run.status("smoke"), "succeeded");
+    assert_eq!(run.note("smoke"), Some("The test failed."));
+    assert_eq!(step_outcome(&run, "smoke").verdict, StepVerdict::Failed);
     assert_eq!(run.finished, Some(Finish::Succeeded));
 }
 
@@ -710,6 +815,7 @@ fn a_run_test_step_fails_when_the_run_reaches_no_verdict() {
     run.advance();
     assert_eq!(run.status("smoke"), "failed");
     assert_eq!(run.note("smoke"), Some("The test run cancelled."));
+    assert!(run.rows[0].outcome.is_none(), "no verdict, so no outcome");
     assert!(matches!(run.finished, Some(Finish::Failed(_))));
 }
 

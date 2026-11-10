@@ -789,13 +789,19 @@ export type Action =
 { action: "wait_pr_activity"; kind: PrActivity; timeoutSecs: number | null } | 
 /**
  *  Run a smoke test in the run's workspace and wait for its verdict. The step succeeds once
- *  the test passed or failed — a later step reads `verdict` and acts on either — and fails
- *  only when the run reaches no verdict (cancelled, errored) or does not end in time. Leaves
- *  `run`, `verdict` and `summary` (the text `ys test wait` prints) for later steps.
+ *  the test passed or failed, so a later step can read `verdict` and act on either, and
+ *  fails only when the run reaches no verdict (cancelled, errored) or does not end in time.
+ *  With `gate`, a failed verdict fails the step instead and the run stops. Leaves `run`,
+ *  `verdict` and `summary` (the text `ys test wait` prints) for later steps.
  */
 { action: "run_test"; test: string; 
 /**  Values for the test's inputs, by input id; may hold `{{ variables }}`. */
-inputs: { [key in string]: string }; timeoutSecs: number | null } | 
+inputs: { [key in string]: string }; timeoutSecs: number | null; 
+/**
+ *  When true, a failed test verdict fails this step and stops the run. When false,
+ *  the default, the step succeeds either way.
+ */
+gate: boolean } | 
 /**  Tell the person who started the run. */
 { action: "notify"; title: string; body: string | null };
 

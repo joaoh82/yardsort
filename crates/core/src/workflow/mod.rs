@@ -146,20 +146,35 @@ pub enum Action {
         timeout_secs: Option<u32>,
     },
     /// Run a smoke test in the run's workspace and wait for its verdict. The step succeeds once
-    /// the test passed or failed — a later step reads `verdict` and acts on either — and fails
-    /// only when the run reaches no verdict (cancelled, errored) or does not end in time. Leaves
-    /// `run`, `verdict` and `summary` (the text `ys test wait` prints) for later steps.
+    /// the test passed or failed, so a later step can read `verdict` and act on either, and
+    /// fails only when the run reaches no verdict (cancelled, errored) or does not end in time.
+    /// With `gate`, a failed verdict fails the step instead and the run stops. Leaves `run`,
+    /// `verdict` and `summary` (the text `ys test wait` prints) for later steps.
     RunTest {
         test: String,
         /// Values for the test's inputs, by input id; may hold `{{ variables }}`.
         inputs: BTreeMap<String, String>,
         timeout_secs: Option<u32>,
+        /// When true, a failed test verdict fails this step and stops the run. When false,
+        /// the default, the step succeeds either way.
+        gate: bool,
     },
     /// Tell the person who started the run.
     Notify { title: String, body: Option<String> },
 }
 
 impl Action {
+    /// Whether a failed [`engine::StepOutcome`] fails this step and stops the run.
+    ///
+    /// Only `run_test` can say so today. A later action that judges something, an approval
+    /// for example, uses the same flag and the same reaction in the engine.
+    pub fn is_gate(&self) -> bool {
+        match self {
+            Action::RunTest { gate, .. } => *gate,
+            _ => false,
+        }
+    }
+
     /// The name a file uses for this action.
     pub fn name(&self) -> &'static str {
         match self {
