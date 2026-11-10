@@ -149,6 +149,15 @@ pub enum Effect {
         title: String,
         body: Option<String>,
     },
+    /// The step succeeded in the engine, and it leaves named artifacts. The driver reads them
+    /// and then marks the step succeeded with [`recorded`]. Until then the step stays running,
+    /// so a later step does not start on an empty handoff.
+    Capture {
+        step: String,
+        outputs: Outputs,
+        note: Option<String>,
+        outcome: Option<String>,
+    },
 }
 
 /// How a run ended.
@@ -264,6 +273,7 @@ pub fn advance(
                 _ => None,
             };
             if let Some(change) = moved {
+                let change = hold_for_artifacts(step, change, &mut plan.effects);
                 status.insert(id, change.to);
                 if let Some(left) = &change.outputs {
                     outputs.insert(id, parse_outputs(left));
@@ -407,20 +417,41 @@ fn gate_failure_line(note: &str) -> String {
     out
 }
 
+/// On a running step whose work already finished and is only waiting for its artifacts to be
+/// stored. A restart puts that step back to waiting, so the capture runs again.
+const ARTIFACT_PENDING: &str = "artifact_pending";
+
 /// Steps the driver was in the middle of when it stopped. Whether the session started or the
 /// text was typed cannot be known now, so they fail, saying why, rather than happen twice.
+/// A step that already finished and was only waiting for its artifacts to be stored goes back
+/// to waiting: that capture is safe to do again, and failing it would skip the steps after it.
 pub fn recover(rows: &[WorkflowStepRow]) -> Vec<Move> {
     rows.iter()
         .filter(|row| row.status == StepStatus::Running.as_str())
-        .map(|row| Move {
-            step: row.step_id.clone(),
-            from: vec![StepStatus::Running],
-            to: StepStatus::Failed,
-            outputs: None,
-            note: Some("Yardsort stopped while this step was running.".to_owned()),
-            outcome: None,
-            clear_outcome: false,
-            halt: false,
+        .map(|row| {
+            let mut outputs = parse_outputs(&row.outputs);
+            if outputs.remove(ARTIFACT_PENDING).is_some() {
+                return Move {
+                    step: row.step_id.clone(),
+                    from: vec![StepStatus::Running],
+                    to: StepStatus::Waiting,
+                    outputs: Some(serde_json::to_string(&outputs).unwrap_or_else(|_| "{}".into())),
+                    note: row.note.clone(),
+                    outcome: row.outcome.clone(),
+                    clear_outcome: false,
+                    halt: false,
+                };
+            }
+            Move {
+                step: row.step_id.clone(),
+                from: vec![StepStatus::Running],
+                to: StepStatus::Failed,
+                outputs: None,
+                note: Some("Yardsort stopped while this step was running.".to_owned()),
+                outcome: None,
+                clear_outcome: false,
+                halt: false,
+            }
         })
         .collect()
 }
@@ -475,6 +506,25 @@ pub fn test_failure_reason(summary: &str) -> String {
         "The test failed.".to_owned()
     } else {
         format!("The test failed:\n{summary}")
+    }
+}
+
+/// The driver stored the artifacts a step leaves, so the step can finish.
+pub fn recorded(
+    step: &str,
+    outputs: &Outputs,
+    note: Option<String>,
+    outcome: Option<String>,
+) -> Move {
+    Move {
+        step: step.to_owned(),
+        from: vec![StepStatus::Running],
+        to: StepStatus::Succeeded,
+        outputs: Some(serde_json::to_string(outputs).unwrap_or_else(|_| "{}".to_owned())),
+        note,
+        outcome,
+        clear_outcome: false,
+        halt: false,
     }
 }
 
@@ -599,7 +649,11 @@ fn begin(
                 harness: render(harness),
                 prompt: prompt
                     .as_deref()
-                    .map(render)
+                    .map(|text| handoff_prompt(text, &step.consumes, lookup))
+                    .or_else(|| {
+                        let only = handoff_prompt("", &step.consumes, lookup);
+                        (!only.trim().is_empty()).then_some(only)
+                    })
                     .filter(|p| !p.trim().is_empty()),
                 model: model
                     .as_deref()
@@ -645,7 +699,7 @@ fn begin(
                     effects.push(Effect::Paste {
                         step: id.to_owned(),
                         pty_id: pty,
-                        text: render(prompt),
+                        text: handoff_prompt(prompt, &step.consumes, lookup),
                     });
                     to(id, StepStatus::Pending, StepStatus::Running)
                 }
@@ -822,7 +876,7 @@ fn wait(
                 effects.push(Effect::Paste {
                     step: id.to_owned(),
                     pty_id: pty,
-                    text: template::render(prompt, lookup),
+                    text: handoff_prompt(prompt, &step.consumes, lookup),
                 });
                 Some(to(id, StepStatus::Waiting, StepStatus::Running))
             } else if timed_out(timeout_secs) {
@@ -840,6 +894,75 @@ fn wait(
         }
         _ => None,
     }
+}
+
+/// A producing step that just succeeded waits until its artifacts are stored. The success
+/// itself is kept on the effect, and the step stays running so nothing that needs it starts
+/// in this same plan.
+fn hold_for_artifacts(step: &super::Step, change: Move, effects: &mut Vec<Effect>) -> Move {
+    if change.to != StepStatus::Succeeded || step.produces.is_empty() {
+        return change;
+    }
+    let outputs = change
+        .outputs
+        .as_deref()
+        .map(parse_outputs)
+        .unwrap_or_default();
+    effects.push(Effect::Capture {
+        step: step.id.clone(),
+        outputs: outputs.clone(),
+        note: change.note.clone(),
+        outcome: change.outcome.clone(),
+    });
+    // The marker is how a restart tells this hold apart from a step whose effect was still
+    // going. The capture above keeps the outputs without it, and those are what get stored.
+    let mut marked = outputs;
+    marked.insert(ARTIFACT_PENDING.to_owned(), "1".to_owned());
+    let clear_outcome = change.outcome.is_none();
+    Move {
+        to: StepStatus::Running,
+        outputs: Some(serde_json::to_string(&marked).unwrap_or_else(|_| "{}".to_owned())),
+        clear_outcome,
+        halt: false,
+        ..change
+    }
+}
+
+/// Render `template`, then append each consumed artifact the template did not place itself.
+/// A start or a send uses this, so the next agent does not start cold. A notification does
+/// not: its title would otherwise grow by the whole document.
+fn handoff_prompt(
+    template: &str,
+    consumes: &[String],
+    lookup: &dyn Fn(&[String]) -> Option<String>,
+) -> String {
+    let mut out = if template.is_empty() {
+        String::new()
+    } else {
+        template::render(template, lookup)
+    };
+    for name in consumes {
+        let placed = template::placeholders(template)
+            .iter()
+            .any(|var| var.path.len() == 2 && var.path[0] == "artifacts" && var.path[1] == *name);
+        if placed {
+            continue;
+        }
+        let Some(body) = lookup(&["artifacts".to_owned(), name.clone()]) else {
+            continue;
+        };
+        if !out.is_empty() {
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+        out.push_str("## Artifact: ");
+        out.push_str(name);
+        out.push_str("\n\n");
+        out.push_str(&body);
+    }
+    out
 }
 
 fn to(step: &str, from: StepStatus, to: StepStatus) -> Move {

@@ -396,6 +396,7 @@ fn runs(ys: &Yardsort, workspace: Option<&str>, limit: usize, out: &Output) -> R
 fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
     let run = find_run(ys, wanted)?;
     let steps = ys.store.workflow_steps(&run.id)?;
+    let artifacts = ys.store.workflow_artifacts(&run.id)?;
 
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -413,11 +414,22 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
     }
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
+    struct Artifact<'a> {
+        name: &'a str,
+        step_id: &'a str,
+        source: &'a str,
+        detail: Option<&'a str>,
+        body: &'a str,
+        truncated: bool,
+    }
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
     struct Shown<'a> {
         #[serde(flatten)]
         run: RunListed,
         inputs: serde_json::Value,
         steps: Vec<Step<'a>>,
+        artifacts: Vec<Artifact<'a>>,
     }
     let shown = Shown {
         run: RunListed::from(&run),
@@ -436,6 +448,17 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                     .outcome
                     .as_deref()
                     .and_then(|raw| serde_json::from_str(raw).ok()),
+            })
+            .collect(),
+        artifacts: artifacts
+            .iter()
+            .map(|artifact| Artifact {
+                name: &artifact.name,
+                step_id: &artifact.step_id,
+                source: &artifact.source,
+                detail: artifact.detail.as_deref(),
+                body: &artifact.body,
+                truncated: artifact.truncated,
             })
             .collect(),
     };
@@ -476,6 +499,35 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                 sayln!();
                 sayln!("{}:", step.step_id);
                 sayln!("{note}");
+            }
+        }
+        // Only when the run handed something on, so a run with none prints what it did before.
+        if !artifacts.is_empty() {
+            sayln!();
+            sayln!("Artifacts");
+            for artifact in &artifacts {
+                let cut = if artifact.truncated {
+                    ", cut short"
+                } else {
+                    ""
+                };
+                match &artifact.detail {
+                    Some(detail) => {
+                        sayln!(
+                            "{} from {} ({} {detail}{cut})",
+                            artifact.name,
+                            artifact.step_id,
+                            artifact.source
+                        );
+                    }
+                    None => sayln!(
+                        "{} from {} ({}{cut})",
+                        artifact.name,
+                        artifact.step_id,
+                        artifact.source
+                    ),
+                }
+                sayln!("{}", artifact.body);
             }
         }
     })

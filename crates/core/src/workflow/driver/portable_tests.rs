@@ -1049,6 +1049,41 @@ fn a_failed_gate_cancels_the_smoke_test_a_parallel_step_is_waiting_on() {
 }
 
 #[test]
+fn a_halt_still_finishes_when_cancelling_the_smoke_test_fails() {
+    let (dir, store, run, _, _) = queued_workflow(TWO_TESTS);
+    std::fs::write(
+        crate::smoke::dir(&dir.path().join("wt")).join("other.yaml"),
+        OTHER_SMOKE,
+    )
+    .unwrap();
+    tick(&store, &NoHands);
+    let gate_run = step_test_id(&store, &run, "gate");
+    let side_run = step_test_id(&store, &run, "side");
+    // The cancel writes `status = 'cancelled'`. This makes that write fail, the way a broken
+    // database would, so the halt has to finish the workflow anyway.
+    rusqlite::Connection::open(dir.path().join("yardsort.db"))
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER fail_cancel BEFORE UPDATE OF status ON test_runs
+             WHEN NEW.status = 'cancelled'
+             BEGIN
+               SELECT RAISE(ABORT, 'cancel refused');
+             END;",
+        )
+        .unwrap();
+    finish_one(&store, &gate_run, "failed", Some("wanted 200, got 500"));
+    tick(&store, &NoHands);
+
+    let steps = store.workflow_steps(&run).unwrap();
+    let side_step = steps.iter().find(|step| step.step_id == "side").unwrap();
+    assert_eq!(side_step.status, "skipped");
+    let ended = store.workflow_run(&run).unwrap().unwrap();
+    assert_eq!(ended.status, "failed");
+    let still = store.test_run(&side_run).unwrap().unwrap();
+    assert_ne!(still.status, "cancelled");
+}
+
+#[test]
 fn a_passing_verdict_on_a_gate_runs_the_step_after_it() {
     let (_dir, store, run, _, _) = queued_workflow(GATED_TEST);
     let hands = Told {
@@ -1093,4 +1128,302 @@ fn a_failed_verdict_without_a_gate_still_lets_the_run_succeed() {
     let ended = store.workflow_run(&run).unwrap().unwrap();
     assert_eq!(ended.status, "succeeded");
     assert_eq!(hands.sent.lock().unwrap()[0].0, "Tests passed");
+}
+
+/// Remembers notifications, and fails the test if a conversation is read. A file or a piece of
+/// text is not a transcript.
+struct Filed {
+    sent: Mutex<Vec<String>>,
+}
+
+impl Hands for Filed {
+    fn start(&self, _: &str, _: HarnessRequest) -> Result<SessionInfo, String> {
+        unreachable!("this workflow starts no agent")
+    }
+
+    fn notify(&self, title: &str, _: Option<&str>) -> Result<(), String> {
+        self.sent.lock().unwrap().push(title.to_owned());
+        Ok(())
+    }
+
+    fn handoff(&self, _: &str) -> Option<String> {
+        None
+    }
+
+    fn pr_posts(&self, _: &str, _: &crate::workflow::runs::PrFacts) -> PrAsk {
+        unreachable!("this workflow waits on no pull request")
+    }
+
+    fn conversation(&self, _: &str, _: &str, _: bool) -> Result<Option<String>, String> {
+        panic!("a file artifact must not read a conversation");
+    }
+}
+
+/// Starts one stand-in session and answers for its conversation.
+struct Talks {
+    sent: Mutex<Vec<String>>,
+    asked: Mutex<Vec<(String, bool)>>,
+}
+
+impl Hands for Talks {
+    fn start(&self, _: &str, _: HarnessRequest) -> Result<SessionInfo, String> {
+        Ok(SessionInfo {
+            id: pty_host::SessionId("pty-9".into()),
+            program: "claude".into(),
+            args: Vec::new(),
+            cwd: None,
+            pid: None,
+            size: pty_host::TermSize::DEFAULT,
+            labels: BTreeMap::new(),
+            state: pty_host::SessionState::Running,
+            has_output: false,
+            busy: false,
+            busy_ms: 0,
+            idle_ms: 0,
+        })
+    }
+
+    fn notify(&self, title: &str, _: Option<&str>) -> Result<(), String> {
+        self.sent.lock().unwrap().push(title.to_owned());
+        Ok(())
+    }
+
+    fn handoff(&self, _: &str) -> Option<String> {
+        None
+    }
+
+    fn pr_posts(&self, _: &str, _: &crate::workflow::runs::PrFacts) -> PrAsk {
+        unreachable!("this workflow waits on no pull request")
+    }
+
+    fn conversation(&self, _: &str, pty: &str, raw: bool) -> Result<Option<String>, String> {
+        self.asked.lock().unwrap().push((pty.to_owned(), raw));
+        Ok(Some(if raw { "RAW TEXT" } else { "DIGEST" }.into()))
+    }
+}
+
+/// Queue `yaml` in a real workspace folder and return that folder.
+fn queue_folder(
+    yaml: &str,
+    id: &str,
+    inputs: &BTreeMap<String, String>,
+) -> (tempfile::TempDir, Store, String, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("yardsort.db")).unwrap();
+    let project = store.add_project("app", "/code/app").unwrap();
+    let worktree = dir.path().join("wt");
+    std::fs::create_dir_all(&worktree).unwrap();
+    let workspace = store
+        .add_worktree(
+            &project.id,
+            "fix-login",
+            &worktree.to_string_lossy(),
+            None,
+            None,
+        )
+        .unwrap();
+    let folder = crate::workflow::user_dir(dir.path());
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join(format!("{id}.yaml")), yaml).unwrap();
+    let run = queue(
+        &store,
+        dir.path(),
+        &Request {
+            workflow_id: id,
+            workspace_id: &workspace.id,
+            inputs,
+            requested_by: "cli",
+            unattended: false,
+            origin_record: None,
+            depth: 0,
+            event: None,
+            tracked: None,
+        },
+        &crate::workflow::runs::Accepting::default(),
+    )
+    .unwrap();
+    (dir, store, run, worktree)
+}
+
+const FILE_HANDOFF: &str = r#"id: hand
+name: Hand
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: draft
+    action: notify
+    title: Drafted
+    produces:
+      - name: spec
+        path: SPEC.md
+  - id: plan
+    action: notify
+    needs: [draft]
+    consumes: [spec]
+    title: "got {{ artifacts.spec }}"
+"#;
+
+#[test]
+fn a_file_is_handed_to_the_next_step_and_kept_on_the_run() {
+    let (_dir, store, run, worktree) = queue_folder(FILE_HANDOFF, "hand", &BTreeMap::new());
+    std::fs::write(worktree.join("SPEC.md"), "Be kind.").unwrap();
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    assert_eq!(
+        *hands.sent.lock().unwrap(),
+        vec!["Drafted".to_owned(), "got Be kind.".to_owned()]
+    );
+    let saved = store.workflow_artifacts(&run).unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].name, "spec");
+    assert_eq!(saved[0].step_id, "draft");
+    assert_eq!(saved[0].source, "file");
+    assert_eq!(saved[0].detail.as_deref(), Some("SPEC.md"));
+    assert_eq!(saved[0].body, "Be kind.");
+    assert!(!saved[0].truncated);
+    assert_eq!(
+        store.workflow_run(&run).unwrap().unwrap().status,
+        "succeeded"
+    );
+}
+
+#[test]
+fn a_missing_file_fails_the_step_and_keeps_an_older_artifact() {
+    let (_dir, store, run, _worktree) = queue_folder(FILE_HANDOFF, "hand", &BTreeMap::new());
+    store
+        .replace_step_artifacts(
+            &run,
+            "draft",
+            &[crate::store::NewWorkflowArtifact {
+                name: "spec".into(),
+                source: "file".into(),
+                detail: Some("SPEC.md".into()),
+                body: "v1".into(),
+                truncated: false,
+            }],
+        )
+        .unwrap();
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    assert_eq!(*hands.sent.lock().unwrap(), vec!["Drafted".to_owned()]);
+    let draft = store
+        .workflow_steps(&run)
+        .unwrap()
+        .into_iter()
+        .find(|step| step.step_id == "draft")
+        .unwrap();
+    assert_eq!(draft.status, "failed");
+    assert!(draft.note.unwrap().contains("not in the workspace"));
+    let plan = store
+        .workflow_steps(&run)
+        .unwrap()
+        .into_iter()
+        .find(|step| step.step_id == "plan")
+        .unwrap();
+    assert_eq!(plan.status, "skipped");
+    assert_eq!(store.workflow_artifacts(&run).unwrap()[0].body, "v1");
+}
+
+#[test]
+fn a_rendered_secret_path_is_not_copied() {
+    let mut inputs = BTreeMap::new();
+    inputs.insert("file".into(), ".env".into());
+    let yaml = r#"id: hand
+name: Hand
+version: 1
+trigger:
+  kind: manual
+inputs:
+  - id: file
+    kind: text
+steps:
+  - id: draft
+    action: notify
+    title: Drafted
+    produces:
+      - name: spec
+        path: "{{ inputs.file }}"
+"#;
+    let (_dir, store, run, worktree) = queue_folder(yaml, "hand", &inputs);
+    std::fs::write(worktree.join(".env"), "TOKEN=1").unwrap();
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    let draft = store
+        .workflow_steps(&run)
+        .unwrap()
+        .into_iter()
+        .find(|step| step.step_id == "draft")
+        .unwrap();
+    assert_eq!(draft.status, "failed");
+    assert!(draft.note.unwrap().contains("secret"));
+    assert!(store.workflow_artifacts(&run).unwrap().is_empty());
+}
+
+const TALK: &str = r#"id: talk
+name: Talk
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: start
+    action: start_session
+    harness: claude
+    prompt: Hello
+  - id: note
+    action: notify
+    needs: [start]
+    title: Noted
+    produces:
+      - name: discussion
+        from: transcript
+        session: "{{ steps.start.session }}"
+      - name: rawtalk
+        from: transcript
+        session: "{{ steps.start.session }}"
+        raw: true
+  - id: say
+    action: notify
+    needs: [note]
+    consumes: [discussion, rawtalk]
+    title: "{{ artifacts.discussion }} / {{ artifacts.rawtalk }}"
+"#;
+
+#[test]
+fn a_transcript_is_the_digest_unless_the_step_asks_for_raw() {
+    let (_dir, store, run, _worktree) = queue_folder(TALK, "talk", &BTreeMap::new());
+    let hands = Talks {
+        sent: Mutex::new(Vec::new()),
+        asked: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    assert_eq!(
+        *hands.asked.lock().unwrap(),
+        vec![("pty-9".to_owned(), false), ("pty-9".to_owned(), true)]
+    );
+    assert_eq!(
+        hands.sent.lock().unwrap().last().map(String::as_str),
+        Some("DIGEST / RAW TEXT")
+    );
+    let saved = store.workflow_artifacts(&run).unwrap();
+    assert_eq!(saved.len(), 2);
+    assert_eq!(
+        saved
+            .iter()
+            .find(|row| row.name == "discussion")
+            .unwrap()
+            .detail
+            .as_deref(),
+        Some("digest")
+    );
+    assert_eq!(
+        saved.iter().find(|row| row.name == "rawtalk").unwrap().body,
+        "RAW TEXT"
+    );
 }

@@ -10,7 +10,7 @@ use specta::Type;
 use tauri::AppHandle;
 use tauri_specta::Event;
 use yardsort_core::forge::{Gh, PullRequest};
-use yardsort_core::store::{WorkflowRunRow, WorkflowStepRow, WorkspaceRow};
+use yardsort_core::store::{WorkflowArtifactRow, WorkflowRunRow, WorkflowStepRow, WorkspaceRow};
 use yardsort_core::workflow::engine::StepOutcome;
 use yardsort_core::workflow::runs::{self, Facts, Look, PrFacts};
 use yardsort_core::workflow::{self, Entry, Problem, Workflow};
@@ -81,6 +81,22 @@ pub struct WorkflowStepRun {
     pub note: Option<String>,
     /// A verdict the step recorded, when it judged something. Absent otherwise.
     pub outcome: Option<StepOutcome>,
+    /// Named documents this step handed on. Empty when it left none.
+    pub artifacts: Vec<WorkflowArtifact>,
+}
+
+/// A named document stored on a run, as the run view shows it.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowArtifact {
+    pub name: String,
+    /// `file`, `text`, `output` or `transcript`.
+    pub source: String,
+    /// The path, the field, or `digest` / `raw`. Absent for text written in the file.
+    pub detail: Option<String>,
+    pub body: String,
+    /// The body was cut at the size cap.
+    pub truncated: bool,
 }
 
 /// What the Run dialog shows before starting: what the run would find.
@@ -118,10 +134,10 @@ fn run_from(row: WorkflowRunRow) -> WorkflowRun {
     }
 }
 
-fn step_from(row: WorkflowStepRow) -> WorkflowStepRun {
+fn step_from(row: WorkflowStepRow, artifacts: &[WorkflowArtifactRow]) -> WorkflowStepRun {
     WorkflowStepRun {
         outputs: serde_json::from_str(&row.outputs).unwrap_or_default(),
-        step_id: row.step_id,
+        step_id: row.step_id.clone(),
         action: row.action,
         status: row.status,
         started_at: row.started_at.map(|t| t as f64),
@@ -131,6 +147,17 @@ fn step_from(row: WorkflowStepRow) -> WorkflowStepRun {
             .outcome
             .as_deref()
             .and_then(|raw| serde_json::from_str(raw).ok()),
+        artifacts: artifacts
+            .iter()
+            .filter(|artifact| artifact.step_id == row.step_id)
+            .map(|artifact| WorkflowArtifact {
+                name: artifact.name.clone(),
+                source: artifact.source.clone(),
+                detail: artifact.detail.clone(),
+                body: artifact.body.clone(),
+                truncated: artifact.truncated,
+            })
+            .collect(),
     }
 }
 
@@ -244,11 +271,12 @@ pub async fn workflow_runs(
 #[specta::specta]
 pub async fn workflow_run_steps(app: AppHandle, run_id: String) -> IpcResult<Vec<WorkflowStepRun>> {
     blocking(app, move |state| {
+        let artifacts = state.store.workflow_artifacts(&run_id)?;
         Ok(state
             .store
             .workflow_steps(&run_id)?
             .into_iter()
-            .map(step_from)
+            .map(|row| step_from(row, &artifacts))
             .collect())
     })
     .await

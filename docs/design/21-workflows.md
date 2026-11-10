@@ -598,7 +598,8 @@ clicking the background clears the mark. Built-in read-only files support the sa
 ## Test verdict gates
 
 A step that judges something records a structured outcome on its row, separate from the strings
-later steps read as `{{ steps.<id>.<field> }}`. The outcome is JSON, `{"verdict":"passed","reason":null}` or
+later steps read as `{{ steps.<id>.<field> }}`. The outcome is JSON,
+`{"verdict":"passed","reason":null}` or
 `{"verdict":"failed","reason":"..."}`. `verdict` is `passed` or `failed`. `reason` is the
 text when it failed, and null when it passed. This is not `wait_session`'s `outcome` output,
 which stays the string `settled` or `exited`.
@@ -633,7 +634,8 @@ the first line of that report after the line that says the test failed, such as
 view shows the short line on the run and the report on the step. `ys workflow runs` lists
 runs and does not include either. `ys workflow runs --run <id>` prints the short line, the
 first line of each note in the table, and the full note under the table when it continues.
-`ys workflow runs --run <id> --json` includes the full note and the outcome on the step when there is one.
+`ys workflow runs --run <id> --json` includes the full note and the outcome on the step
+when there is one.
 
 Starting a step again, from pending to running or waiting, clears its outcome. A later
 revision can re-run the step and record a new verdict. Leaving the outcome out of a move does
@@ -642,9 +644,9 @@ not clear it.
 A schedule or a trigger whose `notify` is `failure` (the default) or `always` sends the first
 line of the run's error, kept to about 200 characters. When that reason is more than one
 line, or the line was cut short, it adds `Open Yardsort for the report.` A one-line reason
-is sent as it is. The full text stays on the run. `never` sends nothing. A `notify` step in the file that needs
-the gate does not run when the gate fails: its title was written for a pass, and a step runs
-only when every step it needs succeeded. A run started by hand, with no schedule and no
+is sent as it is. The full text stays on the run. `never` sends nothing. A `notify` step that
+needs the gate does not run when the gate fails. Its title was written for a pass, and a step
+runs only when every step it needs succeeded. A run started by hand, with no schedule and no
 trigger, is not sent as a system notification. The failure is still on the run.
 
 Migration `0029_workflow_step_outcome` adds a nullable `outcome` column. Rows from before it,
@@ -652,6 +654,51 @@ and steps that judged nothing, read as none. A workflow file that does not menti
 still parses. A run that was queued before this change keeps the definition it was queued
 with, which has no gate, so it keeps the old behaviour.
 
-What this leaves for later, and does not do: named artifact handoffs, a human approval that
-calls the same `react`, a durable wait, a branch that switches on the verdict, a question
-mid-run, and controls from a phone. Those read the same outcome and the same failed run error.
+What this leaves for later, and does not do: a human approval that calls the same `react`,
+a durable wait, a branch that switches on the verdict, a question mid-run, and controls from
+a phone. Those read the same outcome and the same failed run error. An approval or a revision
+can also name an artifact, which [Named artifacts](#named-artifacts) stores on the run.
+
+## Named artifacts
+
+A step may declare `produces`, a list of named documents, and a later step may list those
+names under `consumes`. Parse time refuses an unknown name, a duplicate, a consumer that does
+not have the producer among its needs (directly or through other steps), and a
+`{{ artifacts.<name> }}` that the step does not list under `consumes`. A transcript is copied
+only when the step says `from: transcript`. A `start_session` or `send_to_session` cannot hand
+on a file or a transcript, because that read happens before the agent has written or replied.
+A `notify` step may hand on a file or a transcript that is already there.
+
+The body is stored on the run when the producing step succeeds, in `workflow_artifacts`
+(migration `0030`, index 29). The engine does not read files. A step that would succeed inside
+`advance` stays running until the driver has stored the body, so a consumer in the same plan
+does not start on an empty handoff. The artifacts and that move to succeeded are one database
+change, and only while the run is still running. If Yardsort stops after the step has finished
+and before those artifacts are stored, the step goes back to waiting and the capture runs
+again. A step that was still doing its own work fails instead, so it does not happen twice.
+An effect that finishes in the driver, such as a notification, a started session or a paste,
+stores its artifacts in that same change, before the step is marked succeeded.
+
+Sources are a workspace file, text from the workflow file, one output field the step already
+leaves, or a transcript. The transcript is opt-in. Without `raw`, it is the budgeted
+conversation digest: tool output and reasoning are not part of a turn, and older turns are
+shortened. `raw: true` keeps each turn's own text, still without tool output, and still not
+the terminal scrollback. The driver does not attach to the session to copy it.
+
+A file path must stay inside the workspace after links are resolved. The resolved path is
+checked again, so `notes.md` pointing at `.env` is still a secret. A component containing `:`,
+or ending in a dot or a space, is refused. A secret-looking path is refused when it is written
+literally, and again when a variable in it is filled in. The body is cut at 32000 characters,
+and the stored copy says it was cut. Control characters other than newline and tab are dropped
+before that. An empty body fails the step, so the next phase does not start with a blank
+handoff.
+
+A re-run replaces that step's rows only after the new bodies have been read. A failed attempt
+leaves the last good ones. A consumer reads the stored body when its prompt is rendered, so it
+sees the latest version. A `start_session` or `send_to_session` that consumes an artifact and
+does not place `{{ artifacts.<name> }}` itself is given the text under a heading. A later
+approval, a revision loop, or a control on a phone can point at the same name without parsing
+the prompt.
+
+A workflow file from before this has no `produces` or `consumes`, and still parses. A run
+saved before the table still opens, and lists no artifacts. The schema version stays 1.

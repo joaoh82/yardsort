@@ -9,6 +9,7 @@
 //! sent to the user's agents. That is the line project automation drew too. See
 //! `docs/design/21-workflows.md`.
 
+pub mod artifact;
 pub mod describe;
 pub mod driver;
 pub mod engine;
@@ -114,6 +115,14 @@ pub struct Step {
     /// approval for example, uses the same flag.
     #[serde(default)]
     pub gate: bool,
+    /// Named documents this step leaves when it succeeds. A later step reads one by name.
+    // Always serialized, including when empty. Skipping the empty list makes the generated
+    // TypeScript a pair of types, one for writing and one for reading.
+    #[serde(default)]
+    pub produces: Vec<ArtifactDecl>,
+    /// Named documents from earlier steps that this step is given.
+    #[serde(default)]
+    pub consumes: Vec<String>,
     /// Flattened, so a step reads `{ id, needs, action: "notify", title }` as the file does.
     #[serde(flatten)]
     pub action: Action,
@@ -208,6 +217,34 @@ pub enum SessionRef {
     Origin,
     /// The session an earlier `start_session` step started, by that step's id.
     Step(String),
+}
+
+/// A named document a step hands to later steps of the same run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactDecl {
+    pub name: String,
+    /// Where the text comes from when the step succeeds.
+    pub source: ArtifactSource,
+}
+
+/// Where an artifact's text comes from. A conversation is copied only when the file asks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(
+    tag = "from",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ArtifactSource {
+    /// A file in the workspace, read when the step succeeds.
+    File { path: String },
+    /// Text from the workflow file, with its variables filled in.
+    Text { text: String },
+    /// One field this step already leaves, such as `summary`.
+    Output { field: String },
+    /// One session's conversation. Without `raw`, the budgeted digest. With `raw`, each turn's
+    /// own text. Tool output is not part of either: a turn does not keep it.
+    Transcript { session: SessionRef, raw: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]

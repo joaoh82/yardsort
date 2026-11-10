@@ -11,6 +11,7 @@
 
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
@@ -20,12 +21,14 @@ use super::engine::{
     self, Effect, Finish, Inputs, Move, Outputs, Plan, PrSeen, SessionFacts, TestRun, World,
 };
 use super::runs::{self, Facts, Place};
-use super::PrActivity;
+use super::{artifact, ArtifactSource, PrActivity, SessionRef};
 use crate::error::IpcResult;
 use crate::forge::{PrPost, PrPostKind};
 use crate::git::Git;
 use crate::launch::{HarnessRequest, HARNESS_LABEL, RECORD_LABEL, RUN_LABEL, WORKSPACE_LABEL};
-use crate::store::{now_ms, StepStatus, Store, WorkflowRunRow, WorkflowStepRow};
+use crate::store::{
+    now_ms, NewWorkflowArtifact, StepStatus, Store, WorkflowRunRow, WorkflowStepRow,
+};
 
 /// A quiet after at least this much output counts as an agent having settled. The same bar the
 /// window uses to tell finished work from the echo of a keystroke, or of a paste.
@@ -49,6 +52,18 @@ pub trait Hands {
     /// once: the job it returns is what does the asking, on a thread of its own, and must give
     /// up by itself — the app's stops `gh` after [`FORGE_LIMIT`].
     fn pr_posts(&self, workspace_id: &str, pr: &super::runs::PrFacts) -> PrAsk;
+
+    /// One session's conversation, for a step that asked for a transcript. `raw` asks for each
+    /// turn's own text. Without it, the budgeted digest. `Ok(None)` when that session has no
+    /// conversation to copy. The default is none, so a driver test that never asks is unchanged.
+    fn conversation(
+        &self,
+        _workspace_id: &str,
+        _pty_id: &str,
+        _raw: bool,
+    ) -> Result<Option<String>, String> {
+        Ok(None)
+    }
 }
 
 /// Asking the forge, as a job for a thread of its own.
@@ -338,9 +353,20 @@ fn move_on(
             }
         }
         if plan.moves.iter().any(|change| change.halt) {
-            cancel_tests_a_halt_skipped(store, &workflow, &steps, &plan)?;
+            // Best effort. A failure here must not skip finishing the run on this tick.
+            cancel_tests_a_halt_skipped(store, &workflow, &steps, &plan);
         }
         let mut delivered = false;
+        let finishing = Finishing {
+            store,
+            hands,
+            place: &place,
+            facts: &facts,
+            inputs: &inputs,
+            steps: &steps,
+            workflow: &workflow,
+            run_id: &run.id,
+        };
         for effect in plan.effects {
             let step = step_of(&effect).to_owned();
             let Some(claim) = claims.remove(&step) else {
@@ -352,7 +378,22 @@ fn move_on(
                 }
                 continue; // The step moved on without us.
             }
-            let change = match carry_out(
+            if let Effect::Capture {
+                outputs,
+                note,
+                outcome,
+                ..
+            } = &effect
+            {
+                delivered |= deliver(
+                    driver,
+                    store,
+                    &run.id,
+                    finishing.finish(&step, outputs, note.clone(), outcome.clone()),
+                )?;
+                continue;
+            }
+            let outcome = carry_out(
                 store,
                 host,
                 hands,
@@ -360,8 +401,17 @@ fn move_on(
                 effect,
                 facts.unattended,
                 &mut typed_to,
-            ) {
-                Outcome::Done(outputs) => engine::done(&step, &outputs),
+            );
+            let change = match outcome {
+                Outcome::Done(outputs) => {
+                    delivered |= deliver(
+                        driver,
+                        store,
+                        &run.id,
+                        finishing.finish(&step, &outputs, None, None),
+                    )?;
+                    continue;
+                }
                 Outcome::Queued(outputs) => engine::queued(&step, &outputs),
                 Outcome::Failed(why) => engine::failed(&step, &why),
                 Outcome::Skipped(why) => engine::skipped(&step, &why),
@@ -388,6 +438,23 @@ fn move_on(
     Ok(())
 }
 
+/// Apply `change`, unless the artifacts and the success were already written together.
+/// True when the step moved on, so a later step in this run may be able to start.
+fn deliver(
+    driver: &Driver,
+    store: &Store,
+    run_id: &str,
+    (change, committed): (Move, bool),
+) -> IpcResult<bool> {
+    let moved = change.to != StepStatus::Waiting;
+    if committed {
+        driver.touch();
+        return Ok(moved);
+    }
+    apply(driver, store, run_id, &change)?;
+    Ok(moved)
+}
+
 /// A halted plan skipped these steps after they had already queued a smoke test. Cancel
 /// that test, so it does not keep running or keep asking for approval. A test that has
 /// already ended is left as it is.
@@ -396,7 +463,7 @@ fn cancel_tests_a_halt_skipped(
     workflow: &super::Workflow,
     steps: &[WorkflowStepRow],
     plan: &Plan,
-) -> IpcResult<()> {
+) {
     for change in &plan.moves {
         if change.to != StepStatus::Skipped {
             continue;
@@ -413,9 +480,14 @@ fn cancel_tests_a_halt_skipped(
         let Some(test_run) = engine::parse_outputs(&row.outputs).get("run").cloned() else {
             continue;
         };
-        store.cancel_test_run(&test_run, "The workflow stopped because a gate failed.")?;
+        if let Err(error) =
+            store.cancel_test_run(&test_run, "The workflow stopped because a gate failed.")
+        {
+            eprintln!(
+                "workflows: could not cancel smoke test {test_run} after a gate failed: {error}"
+            );
+        }
     }
-    Ok(())
 }
 
 fn still_running(store: &Store, run_id: &str) -> IpcResult<bool> {
@@ -478,7 +550,8 @@ fn step_of(effect: &Effect) -> &str {
         Effect::Start { step, .. }
         | Effect::Paste { step, .. }
         | Effect::Notify { step, .. }
-        | Effect::RunTest { step, .. } => step,
+        | Effect::RunTest { step, .. }
+        | Effect::Capture { step, .. } => step,
     }
 }
 
@@ -573,6 +646,220 @@ fn carry_out(
                 Err(error) => Outcome::Failed(error.message),
             }
         }
+        // Recorded before `carry_out`, from the effect loop.
+        Effect::Capture { .. } => {
+            Outcome::Failed("An artifact was recorded in the wrong place.".into())
+        }
+    }
+}
+
+/// What a step needs in order to store the artifacts it leaves and then finish.
+struct Finishing<'a> {
+    store: &'a Store,
+    hands: &'a dyn Hands,
+    place: &'a Place,
+    facts: &'a Facts,
+    inputs: &'a Inputs,
+    steps: &'a [WorkflowStepRow],
+    workflow: &'a super::Workflow,
+    run_id: &'a str,
+}
+
+impl Finishing<'_> {
+    /// Mark a step succeeded once any artifact it leaves has been stored. A step that leaves
+    /// none just finishes. A capture that fails fails the step and leaves the previous bodies
+    /// in place, so a retry that does not succeed does not wipe the last good handoff.
+    fn finish(
+        &self,
+        step_id: &str,
+        outputs: &Outputs,
+        note: Option<String>,
+        outcome: Option<String>,
+    ) -> (Move, bool) {
+        let Some(step) = self.workflow.steps.iter().find(|step| step.id == step_id) else {
+            return (engine::done(step_id, outputs), false);
+        };
+        if step.produces.is_empty() {
+            let change = if note.is_none() && outcome.is_none() {
+                engine::done(step_id, outputs)
+            } else {
+                engine::recorded(step_id, outputs, note, outcome)
+            };
+            return (change, false);
+        }
+        let capture = Capture {
+            store: self.store,
+            hands: self.hands,
+            place: self.place,
+            facts: self.facts,
+            inputs: self.inputs,
+            steps: self.steps,
+            run_id: self.run_id,
+            step,
+            outputs,
+        };
+        match capture.record() {
+            Ok(saved) => {
+                let change = engine::recorded(step_id, outputs, note, outcome);
+                match self.store.finish_step_with_artifacts(
+                    self.run_id,
+                    step_id,
+                    &[StepStatus::Running],
+                    change.to,
+                    &saved,
+                    change.outputs.as_deref(),
+                    change.note.as_deref(),
+                    change.outcome.as_deref(),
+                    change.clear_outcome,
+                ) {
+                    Ok(true) => (change, true),
+                    // The run stopped, or the step moved. The artifacts were not kept. Putting
+                    // the step back to wait, when it is still running, lets the next tick try
+                    // the capture again. A success applied on its own would finish with no body.
+                    Ok(false) => (engine::not_yet(step_id), false),
+                    Err(error) => {
+                        let mut change = engine::failed(step_id, &error.to_string());
+                        change.clear_outcome = true;
+                        (change, false)
+                    }
+                }
+            }
+            Err(why) => {
+                let mut change = engine::failed(step_id, &why);
+                change.clear_outcome = true;
+                (change, false)
+            }
+        }
+    }
+}
+
+/// What reading one step's artifacts needs. The engine stays free of files and transcripts.
+struct Capture<'a> {
+    store: &'a Store,
+    hands: &'a dyn Hands,
+    place: &'a Place,
+    facts: &'a Facts,
+    inputs: &'a Inputs,
+    steps: &'a [WorkflowStepRow],
+    run_id: &'a str,
+    step: &'a super::Step,
+    outputs: &'a Outputs,
+}
+
+impl Capture<'_> {
+    /// Read every artifact first. One failure returns none, so nothing is written.
+    fn record(&self) -> Result<Vec<NewWorkflowArtifact>, String> {
+        let memory = OnceCell::new();
+        let handoff = OnceCell::new();
+        let mut saved = Vec::with_capacity(self.step.produces.len());
+        for decl in &self.step.produces {
+            let (source, detail, text) = self.read(&decl.source, &memory, &handoff)?;
+            let (body, truncated) = artifact::require_text(&decl.name, text)?;
+            saved.push(NewWorkflowArtifact {
+                name: decl.name.clone(),
+                source,
+                detail,
+                body,
+                truncated,
+            });
+        }
+        Ok(saved)
+    }
+
+    fn read(
+        &self,
+        source: &ArtifactSource,
+        memory: &OnceCell<Option<String>>,
+        handoff: &OnceCell<Option<String>>,
+    ) -> Result<(String, Option<String>, String), String> {
+        let lookup = |path: &[String]| self.lookup(path, memory, handoff);
+        match source {
+            ArtifactSource::File { path } => {
+                let path = super::template::render(path, lookup);
+                let text = artifact::read_file(Path::new(&self.place.workspace.path), &path)?;
+                Ok(("file".into(), Some(path), text))
+            }
+            ArtifactSource::Text { text } => {
+                Ok(("text".into(), None, super::template::render(text, lookup)))
+            }
+            ArtifactSource::Output { field } => {
+                let text = self
+                    .outputs
+                    .get(field)
+                    .cloned()
+                    .ok_or_else(|| format!("The step left no `{field}` to hand on."))?;
+                Ok(("output".into(), Some(field.clone()), text))
+            }
+            ArtifactSource::Transcript { session, raw } => {
+                let pty = self
+                    .session_pty(session)
+                    .ok_or_else(|| "There is no session to copy a conversation from.".to_owned())?;
+                let text = self
+                    .hands
+                    .conversation(&self.place.workspace.id, &pty, *raw)?
+                    .ok_or_else(|| {
+                        "There is no conversation to copy for that session.".to_owned()
+                    })?;
+                Ok((
+                    "transcript".into(),
+                    Some(if *raw { "raw" } else { "digest" }.into()),
+                    text,
+                ))
+            }
+        }
+    }
+
+    fn session_pty(&self, reference: &SessionRef) -> Option<String> {
+        match reference {
+            SessionRef::Origin => self.facts.origin.clone(),
+            SessionRef::Step(id) if id == &self.step.id => self.outputs.get("session").cloned(),
+            SessionRef::Step(id) => self
+                .steps
+                .iter()
+                .find(|row| &row.step_id == id)
+                .and_then(|row| engine::parse_outputs(&row.outputs).get("session").cloned()),
+        }
+    }
+
+    fn lookup(
+        &self,
+        path: &[String],
+        memory: &OnceCell<Option<String>>,
+        handoff: &OnceCell<Option<String>>,
+    ) -> Option<String> {
+        match path {
+            [namespace, id] if namespace == "inputs" => self.inputs.get(id).cloned(),
+            [namespace, id, field] if namespace == "steps" => {
+                if id == &self.step.id {
+                    self.outputs.get(field).cloned()
+                } else {
+                    self.steps
+                        .iter()
+                        .find(|row| &row.step_id == id)
+                        .and_then(|row| engine::parse_outputs(&row.outputs).get(field).cloned())
+                }
+            }
+            [namespace, name] if namespace == "artifacts" => self
+                .store
+                .workflow_artifacts(self.run_id)
+                .ok()
+                .and_then(|rows| {
+                    rows.into_iter()
+                        .find(|row| row.name == *name)
+                        .map(|row| row.body)
+                }),
+            [whole] if whole == "memory" => memory
+                .get_or_init(|| {
+                    crate::memory::notes_section(self.store, &self.place.project.id)
+                        .ok()
+                        .flatten()
+                })
+                .clone(),
+            [whole] if whole == "handoff" => handoff
+                .get_or_init(|| self.hands.handoff(&self.place.workspace.id))
+                .clone(),
+            other => self.place.var(other).or_else(|| self.facts.var(other)),
+        }
     }
 }
 
@@ -627,6 +914,15 @@ impl World for Seen<'_> {
                 .get_or_init(|| self.hands.handoff(&self.place.workspace.id))
                 .clone(),
             [namespace, _] if namespace == "pr" || namespace == "event" => self.facts.var(path),
+            [namespace, name] if namespace == "artifacts" => self
+                .store
+                .workflow_artifacts(self.run_id)
+                .ok()
+                .and_then(|rows| {
+                    rows.into_iter()
+                        .find(|row| row.name == *name)
+                        .map(|row| row.body)
+                }),
             _ => self.place.var(path),
         }
     }

@@ -994,3 +994,159 @@ fn chart_source_lines_follow_yaml_ids_not_lookalikes_in_prompts() {
     assert!(super::step_lines("steps: [").is_empty());
     assert!(super::step_lines("steps: [{id: same}, {id: same}]").is_empty());
 }
+
+fn handoff(steps: &str) -> String {
+    format!("id: demo\nname: Demo\nversion: 1\ntrigger:\n  kind: manual\nsteps:\n{steps}")
+}
+
+#[test]
+fn a_step_hands_a_named_artifact_to_one_that_names_it() {
+    let workflow = parse(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n  - id: plan\n    action: notify\n    \
+         needs: [draft]\n    consumes: [spec]\n    title: \"Read {{ artifacts.spec }}\"\n",
+    ))
+    .unwrap();
+    assert!(workflow.steps[0].consumes.is_empty());
+    assert_eq!(workflow.steps[0].produces.len(), 1);
+    assert_eq!(workflow.steps[0].produces[0].name, "spec");
+    assert_eq!(
+        workflow.steps[0].produces[0].source,
+        super::ArtifactSource::File {
+            path: "SPEC.md".into()
+        }
+    );
+    assert_eq!(workflow.steps[1].consumes, ["spec"]);
+    assert!(problems(BASE).is_empty());
+    assert!(workflow
+        .steps
+        .iter()
+        .all(|step| step.produces.is_empty() || step.id == "draft"));
+}
+
+#[test]
+fn an_artifact_name_has_to_be_produced_by_a_step_this_one_needs() {
+    let unknown = problem(&handoff(
+        "  - id: plan\n    action: notify\n    consumes: [plan]\n    title: Next\n",
+    ));
+    assert!(unknown.contains("no artifact `plan`"), "{unknown}");
+
+    let unneeded = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n  - id: plan\n    action: notify\n    \
+         consumes: [spec]\n    title: Next\n",
+    ));
+    assert!(unneeded.contains("not sure to have run"), "{unneeded}");
+
+    let twice = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: A.md\n      - name: spec\n        path: B.md\n",
+    ));
+    assert!(twice.contains("listed twice"), "{twice}");
+
+    let shared = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: A.md\n  - id: other\n    action: notify\n    \
+         title: Other\n    produces:\n      - name: spec\n        path: B.md\n",
+    ));
+    assert!(shared.contains("already produces `spec`"), "{shared}");
+
+    let again = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n  - id: plan\n    action: notify\n    \
+         needs: [draft]\n    consumes: [spec, spec]\n    title: Next\n",
+    ));
+    assert!(again.contains("listed twice"), "{again}");
+
+    let itself = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n    consumes: [spec]\n",
+    ));
+    assert!(itself.contains("produces itself"), "{itself}");
+
+    let bare = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n  - id: plan\n    action: notify\n    \
+         needs: [draft]\n    title: \"{{ artifacts.spec }}\"\n",
+    ));
+    assert!(
+        bare.contains("does not list `spec` under `consumes`"),
+        "{bare}"
+    );
+}
+
+#[test]
+fn an_artifact_source_is_checked_before_the_run() {
+    let secret = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: .env\n",
+    ));
+    assert!(secret.contains("looks like a secret"), "{secret}");
+
+    let outside = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: ../secret.md\n",
+    ));
+    assert!(outside.contains("outside the workspace"), "{outside}");
+
+    let raw = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n        raw: true\n",
+    ));
+    assert!(raw.contains("`raw` is only for a transcript"), "{raw}");
+
+    let field = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: report\n        field: summary\n",
+    ));
+    assert!(field.contains("leaves nothing"), "{field}");
+
+    let bare = problem(&handoff(
+        "  - id: wait\n    action: wait_session\n    session: origin\n    produces:\n      \
+         - name: discussion\n        session: origin\n",
+    ));
+    assert!(
+        bare.contains("only when the step says `from: transcript`"),
+        "{bare}"
+    );
+
+    let raw_only = problem(&handoff(
+        "  - id: wait\n    action: wait_session\n    session: origin\n    produces:\n      \
+         - name: discussion\n        raw: true\n",
+    ));
+    assert!(
+        raw_only.contains("only when the step says `from: transcript`"),
+        "{raw_only}"
+    );
+
+    let early = problem(&handoff(
+        "  - id: start\n    action: start_session\n    harness: claude\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n",
+    ));
+    assert!(
+        early.contains("cannot hand on a file or a transcript"),
+        "{early}"
+    );
+
+    let sent = problem(&handoff(
+        "  - id: nudge\n    action: send_to_session\n    session: origin\n    prompt: Go\n    \
+         produces:\n      - name: discussion\n        from: transcript\n",
+    ));
+    assert!(
+        sent.contains("cannot hand on a file or a transcript"),
+        "{sent}"
+    );
+
+    let workflow = parse(&handoff(
+        "  - id: wait\n    action: wait_session\n    session: origin\n    produces:\n      \
+         - name: discussion\n        from: transcript\n",
+    ))
+    .unwrap();
+    assert_eq!(
+        workflow.steps[0].produces[0].source,
+        super::ArtifactSource::Transcript {
+            session: super::SessionRef::Origin,
+            raw: false,
+        }
+    );
+}

@@ -946,6 +946,27 @@ export type AppPart = {
 	load: Load,
 };
 
+/**  A named document a step hands to later steps of the same run. */
+export type ArtifactDecl = {
+	name: string,
+	/**  Where the text comes from when the step succeeds. */
+	source: ArtifactSource,
+};
+
+/**  Where an artifact's text comes from. A conversation is copied only when the file asks. */
+export type ArtifactSource = 
+/**  A file in the workspace, read when the step succeeds. */
+{ from: "file"; path: string } | 
+/**  Text from the workflow file, with its variables filled in. */
+{ from: "text"; text: string } | 
+/**  One field this step already leaves, such as `summary`. */
+{ from: "output"; field: string } | 
+/**
+ *  One session's conversation. Without `raw`, the budgeted digest. With `raw`, each turn's
+ *  own text. Tool output is not part of either: a turn does not keep it.
+ */
+{ from: "transcript"; session: SessionRef; raw: boolean };
+
 export type AssistStatus = {
 	keySource: KeySource,
 	/**  The end of the key in force, so it can be told apart without being shown. */
@@ -3187,6 +3208,10 @@ export type Step = {
 	 *  approval for example, uses the same flag.
 	 */
 	gate?: boolean,
+	/**  Named documents this step leaves when it succeeds. A later step reads one by name. */
+	produces?: ArtifactDecl[],
+	/**  Named documents from earlier steps that this step is given. */
+	consumes?: string[],
 } & Action;
 
 /**
@@ -3945,6 +3970,18 @@ export type Workflow = {
 	steps: Step[],
 };
 
+/**  A named document stored on a run, as the run view shows it. */
+export type WorkflowArtifact = {
+	name: string,
+	/**  `file`, `text`, `output` or `transcript`. */
+	source: string,
+	/**  The path, the field, or `digest` / `raw`. Absent for text written in the file. */
+	detail: string | null,
+	body: string,
+	/**  The body was cut at the size cap. */
+	truncated: boolean,
+};
+
 /**  What checking a file's text found. */
 export type WorkflowCheck = {
 	/**  Step id to its current YAML source line, for chart navigation. */
@@ -4020,6 +4057,8 @@ export type WorkflowStepRun = {
 	note: string | null,
 	/**  A verdict the step recorded, when it judged something. Absent otherwise. */
 	outcome: StepOutcome | null,
+	/**  Named documents this step handed on. Empty when it left none. */
+	artifacts: WorkflowArtifact[],
 };
 
 /**  Workflow writing has its own harness preference; commit and PR writers stay workspace-based. */
