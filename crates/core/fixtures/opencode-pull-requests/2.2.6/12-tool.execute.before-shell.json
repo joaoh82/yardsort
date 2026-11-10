@@ -1,0 +1,15 @@
+{
+  "api": 2,
+  "hook": "tool.execute.before",
+  "payload": {
+    "tool": "shell",
+    "sessionID": "ses_00000000000fixture01",
+    "agent": "build",
+    "messageID": "msg_00000000000fixture02",
+    "id": "call_00_6pb52kbqa4w52chjly13vewd",
+    "input": {
+      "command": "gh pr create --title Bump --body Bump"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

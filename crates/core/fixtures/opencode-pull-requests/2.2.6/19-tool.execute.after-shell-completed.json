@@ -1,0 +1,35 @@
+{
+  "api": 2,
+  "hook": "tool.execute.after",
+  "payload": {
+    "tool": "shell",
+    "sessionID": "ses_00000000000fixture01",
+    "agent": "build",
+    "messageID": "msg_00000000000fixture02",
+    "id": "call_00_6pb52kbqa4w52chjly13vewd",
+    "input": {
+      "command": "gh pr create --title Bump --body Bump"
+    },
+    "status": "completed",
+    "result": {
+      "output": {
+        "exit": 0,
+        "truncated": false,
+        "output": "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n",
+        "status": "completed"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n"
+        }
+      ],
+      "metadata": {
+        "status": "completed",
+        "truncated": false,
+        "exit": 0
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

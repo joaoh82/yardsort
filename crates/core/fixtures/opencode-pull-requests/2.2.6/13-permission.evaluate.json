@@ -1,0 +1,17 @@
+{
+  "api": 2,
+  "hook": "permission.evaluate",
+  "payload": {
+    "sessionID": "ses_00000000000fixture01",
+    "agent": "build",
+    "action": "shell",
+    "resources": ["gh pr create --title Bump --body Bump"],
+    "source": {
+      "type": "tool",
+      "messageID": "msg_00000000000fixture02",
+      "id": "call_00_6pb52kbqa4w52chjly13vewd"
+    },
+    "effect": "ask"
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

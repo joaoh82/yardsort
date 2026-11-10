@@ -1,0 +1,25 @@
+{
+  "api": 2,
+  "hook": "event",
+  "payload": {
+    "id": "evt_00000000000fixture10",
+    "created": 1794296226031,
+    "type": "permission.asked",
+    "location": {
+      "directory": "/tmp/yardsort-fixture/repo"
+    },
+    "data": {
+      "id": "per_00000000000fixture01",
+      "sessionID": "ses_00000000000fixture01",
+      "action": "shell",
+      "resources": ["gh pr create --title Bump --body Bump"],
+      "save": ["gh pr create *"],
+      "source": {
+        "type": "tool",
+        "messageID": "msg_00000000000fixture02",
+        "id": "call_00_6pb52kbqa4w52chjly13vewd"
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

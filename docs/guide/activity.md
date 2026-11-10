@@ -155,29 +155,39 @@ Yardsort gives its launches one, for that launch alone, through OpenCode's envir
 `activity/hooks/` in your data directory. Your `opencode.json` is not edited, and your own
 plugins keep running beside it.
 
-| Timeline row                              | What OpenCode reported                                                                                                  |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| _agent session started_                   | A session began, and which OpenCode version.                                                                            |
-| _prompt submitted · 216 characters_       | Your message. The length, never the text.                                                                               |
-| _write started_, _write done · hello.txt_ | A tool ran: its name and, for a file tool, the path relative to the workspace. A `bash` done row carries the exit code. |
-| _read failed · missing.txt · 5 ms_        | A tool failed, and how long it took. No error text.                                                                     |
-| _file changed · hello.txt_                | OpenCode edited a file.                                                                                                 |
-| _permission asked for bash_               | It is waiting for your yes.                                                                                             |
-| _tokens used · 10,814 total · 2 out_      | What each of its replies cost, with the model. OpenCode reports this per step, so a turn has several.                   |
-| _agent finished its turn_                 | It went idle: your turn.                                                                                                |
+| Timeline row                              | What OpenCode reported                                                                                                 |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| _agent session started_                   | A session began, and which OpenCode version.                                                                           |
+| _prompt submitted · 216 characters_       | Your message. The length, never the text.                                                                              |
+| _write started_, _write done · hello.txt_ | A tool ran: its name and, for a file tool, the path relative to the workspace. A shell done row carries the exit code. |
+| _read failed · missing.txt · 5 ms_        | A tool failed, and how long it took. No error text.                                                                    |
+| _file changed · hello.txt_                | OpenCode 1 edited a file. OpenCode 2 has no such report: its `write` and `edit` rows stand for the change.             |
+| _permission asked for bash_               | It is waiting for your yes.                                                                                            |
+| _tokens used · 10,814 total · 2 out_      | What each of its replies cost, with the model. OpenCode reports this per step, so a turn has several.                  |
+| _agent finished its turn_                 | It went idle: your turn.                                                                                               |
 
 **What is kept, and what is not.** Names, ids, relative paths, exit codes, counts, the failed
 tool's duration. Not your message, not a command, not a tool's output, not a file's contents,
 not an error message, not OpenCode's reply, not a path outside the workspace. The plugin keeps
 only those fields before anything leaves OpenCode's process, and hands them to the Yardsort
 executable, which writes one small file to the inbox. One exception, as for Claude Code: a
-`bash` call naming `gh`, `pr` and `create`, or a GitHub MCP tool whose name ends
-`create_pull_request`, also hands on its command and its output, and the executable keeps the
-link of the pull request it opened and nothing else. Recorded against OpenCode **1.18.31**, and
-the pull request rule against **1.18.34**. **OpenCode 2** changed how plugins are given — as a
-folder, with a different module shape — and Yardsort's plugin does not load there yet, so an
-OpenCode 2 launch reports nothing to the timeline. An
-OpenCode harness whose arguments carry `--pure` — OpenCode's own "no external plugins" — is left
+shell call (`bash` in OpenCode 1, `shell` in 2) naming `gh`, `pr` and `create`, or a GitHub MCP
+tool whose name ends `create_pull_request`, also hands on its command and its output, and the
+executable keeps the link of the pull request it opened and nothing else.
+
+**OpenCode 1 and 2.** The one plugin serves both: OpenCode 1 (**1.18.29** or later) loads it as
+a file, OpenCode 2 as a folder, and each reports in its own shapes. Recorded against
+**1.18.31** and **2.2.6**, the pull request rule against **1.18.34** and **2.2.6**. Before each
+launch Yardsort runs `opencode --version`, in the workspace's folder, to tell which it is.
+OpenCode 2 normally runs every session in one background service that all its launches share,
+and that service keeps the
+environment of whichever launch started it, so what it saw would be put on the wrong run. So
+when **Capture what OpenCode reports** is on, an OpenCode 2 launch is started with
+`--standalone`: its sessions run in a private server that ends with it, and are kept with the
+others, so `--continue` and `-s` find them as before. If the version cannot be told, the launch
+goes ahead without `--standalone`, and the plugin, finding itself in the shared service,
+reports nothing. An OpenCode harness whose arguments carry `--pure` (OpenCode's own "no
+external plugins"), or, for OpenCode 2, `--server` (sessions in a server you run), is left
 alone, and the timeline's settings count it under `hooks_not_armed`.
 
 ## What Grok records

@@ -539,13 +539,19 @@ finished is retried for five minutes, then recorded from the trigger alone. Prod
 method `session_file` (or `notify`). See [12-agent-events-stage-2-codex](12-agent-events-stage-2-codex.md).
 
 **OpenCode** is given a plugin. A recorded `opencode` launch gets `OPENCODE_CONFIG_CONTENT`
-in its environment — `{"plugin":["file://<data-dir>/activity/hooks/opencode.js"]}`, merged by
-OpenCode with the user's configuration and with whatever the variable already held — and the
-plugin, written from a template in the binary before each launch (`activity/opencode-plugin.js`),
-runs inside OpenCode's process: it keeps a whitelist of fields from a few hooks and bus events
-and hands each to the executable in hook mode on stdin. `ResolvedLaunch::env` is how a launch
-carries variables of its own. Producer `opencode`, method `plugin`. `--pure` means no plugin.
-See [13-agent-events-stage-2-opencode](13-agent-events-stage-2-opencode.md).
+in its environment — `{"plugin":["file://<data-dir>/activity/hooks/opencode/index.js"],
+"plugins":["file://<data-dir>/activity/hooks/opencode"]}`, the file for OpenCode 1 and the folder
+for OpenCode 2, merged by OpenCode with the user's configuration and with whatever the variable
+already held — and the plugin, written from a template in the binary before each launch
+(`activity/opencode-plugin.js`, one module whose default export both versions start), runs
+inside OpenCode's process: it keeps a whitelist of fields from a few hooks and bus events and
+hands each to the executable in hook mode on stdin, 2's marked `api: 2`. Which version it is,
+`opencode --version` says before arming; OpenCode 2 is also given `--standalone`, so its
+sessions run in a server of the launch's own and not in the background service all its launches
+share, whose environment is another launch's. `ResolvedLaunch::env` is how a launch carries
+variables of its own. Producer `opencode`, method `plugin`. `--pure` means no plugin, and so,
+for OpenCode 2, does `--server`. See
+[13-agent-events-stage-2-opencode](13-agent-events-stage-2-opencode.md).
 
 **Grok** is given nothing. Its session directory, `$GROK_HOME/sessions/<encoded cwd>/<id>/`,
 holds an `events.jsonl` that is metadata by Grok's own design and a `usage.json` of tokens per

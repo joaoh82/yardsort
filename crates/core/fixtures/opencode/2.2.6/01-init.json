@@ -1,0 +1,50 @@
+{
+  "api": 2,
+  "hook": "init",
+  "payload": {
+    "keys": [
+      "app",
+      "location",
+      "options",
+      "agent",
+      "aisdk",
+      "command",
+      "credential",
+      "event",
+      "experimental",
+      "generate",
+      "model",
+      "provider",
+      "integration",
+      "mcp",
+      "permission",
+      "plugin",
+      "reference",
+      "rpc",
+      "skill",
+      "storage",
+      "tool",
+      "vcs",
+      "websearch",
+      "worktree",
+      "session",
+      "shell"
+    ],
+    "location": {
+      "directory": "/tmp/yardsort-fixture/repo",
+      "project": {
+        "id": "ad2d1629887c477b9352996a7d7c947eee1eeda0",
+        "directory": "/tmp/yardsort-fixture/repo",
+        "canonical": "/tmp/yardsort-fixture/repo"
+      }
+    },
+    "version": "2.2.6",
+    "argv": ["serve", "--stdio", "--port", "0"],
+    "env": {
+      "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+      "YARDSORT_SESSION_RECORD_ID": "record-fixture",
+      "YARDSORT_RUN_ID": "run-fixture"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

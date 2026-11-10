@@ -1,0 +1,22 @@
+{
+  "api": 2,
+  "hook": "event",
+  "payload": {
+    "id": "evt_00000000000fixture19",
+    "created": 1794296227767,
+    "type": "session.step.streamed",
+    "durable": {
+      "aggregateID": "ses_00000000000fixture01",
+      "seq": 20,
+      "version": 1
+    },
+    "location": {
+      "directory": "/tmp/yardsort-fixture/repo"
+    },
+    "data": {
+      "sessionID": "ses_00000000000fixture01",
+      "assistantMessageID": "msg_00000000000fixture03"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

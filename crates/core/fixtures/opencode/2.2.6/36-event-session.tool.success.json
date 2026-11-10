@@ -1,0 +1,35 @@
+{
+  "api": 2,
+  "hook": "event",
+  "payload": {
+    "id": "evt_00000000000fixture22",
+    "created": 1794296205949,
+    "type": "session.tool.success",
+    "durable": {
+      "aggregateID": "ses_00000000000fixture01",
+      "seq": 29,
+      "version": 2
+    },
+    "location": {
+      "directory": "/tmp/yardsort-fixture/repo"
+    },
+    "data": {
+      "sessionID": "ses_00000000000fixture01",
+      "assistantMessageID": "msg_00000000000fixture03",
+      "id": "call_f151158d52d34a73b44b0b7a",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello.txt\n"
+        }
+      ],
+      "metadata": {
+        "status": "completed",
+        "truncated": false,
+        "exit": 0
+      },
+      "executed": false
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

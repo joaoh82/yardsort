@@ -1,0 +1,19 @@
+{
+  "api": 2,
+  "hook": "tool.execute.before",
+  "payload": {
+    "tool": "github_create_pull_request",
+    "sessionID": "ses_00000000000fixture01",
+    "agent": "build",
+    "messageID": "msg_00000000000fixture03",
+    "id": "call_00_6pxjdviucm2xvc1rligerr3z",
+    "input": {
+      "owner": "example",
+      "repo": "lib",
+      "title": "Bump",
+      "head": "bump",
+      "base": "main"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}
