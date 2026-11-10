@@ -116,6 +116,7 @@ impl Run {
                 outputs: "{}".into(),
                 note: None,
                 outcome: None,
+                attempts: 0,
             })
             .collect();
         Self {
@@ -155,6 +156,7 @@ impl Run {
                 outputs: "{}".into(),
                 note: None,
                 outcome: None,
+                attempts: 0,
             })
             .collect();
         run
@@ -175,14 +177,59 @@ impl Run {
     /// As `Store::move_workflow_step` does it: only from an expected state.
     fn apply(&mut self, change: &Move) -> bool {
         let now = self.world.now;
+        let current = self
+            .rows
+            .iter()
+            .find(|r| r.step_id == change.step)
+            .and_then(|row| StepStatus::parse(&row.status))
+            .unwrap();
+        if !change.from.contains(&current) {
+            return false;
+        }
+        if let Some(rewind) = &change.rewind {
+            let seen = self
+                .rows
+                .iter()
+                .find(|r| r.step_id == change.step)
+                .map(|row| row.attempts)
+                .unwrap_or(0);
+            if seen != rewind.seen {
+                return false;
+            }
+            let steps = rewind.steps.clone();
+            let feedback = rewind.feedback.clone();
+            for id in &steps {
+                if let Some(target) = self
+                    .rows
+                    .iter_mut()
+                    .find(|candidate| candidate.step_id == *id)
+                {
+                    target.status = "pending".into();
+                    target.started_at = None;
+                    target.ended_at = None;
+                    target.outputs = "{}".into();
+                    target.note = None;
+                    target.outcome = None;
+                }
+                self.world.approvals.remove(id);
+            }
+            if let Some(copy) = feedback {
+                self.world.artifacts.insert(copy.name, copy.body);
+            }
+            return true;
+        }
         let row = self
             .rows
             .iter_mut()
             .find(|r| r.step_id == change.step)
             .unwrap();
-        let current = StepStatus::parse(&row.status).unwrap();
-        if !change.from.contains(&current) {
-            return false;
+        if current == StepStatus::Pending
+            && matches!(
+                change.to,
+                StepStatus::Running | StepStatus::Waiting | StepStatus::Succeeded
+            )
+        {
+            row.attempts += 1;
         }
         row.status = change.to.as_str().into();
         if change.to.is_final() {
@@ -561,6 +608,7 @@ fn review_run(origin: Option<&str>) -> Run {
             outputs: "{}".into(),
             note: None,
             outcome: None,
+            attempts: 0,
         })
         .collect();
     run.world.origin = origin.map(str::to_owned);
@@ -1654,4 +1702,214 @@ steps:
         "the notification already happened: {effects:?}"
     );
     assert_eq!(run.status("draft"), "running");
+}
+
+const BRANCHED: &str = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: plan
+    action: notify
+    title: Plan
+  - id: sign-off
+    needs: [plan]
+    action: approve
+    prompt: Look at the plan.
+    on:
+      approved: implement
+      rejected: abandon
+      changes_requested: plan
+    max_attempts: 2
+  - id: implement
+    needs: [sign-off]
+    action: notify
+    title: Build
+  - id: abandon
+    needs: [sign-off]
+    action: notify
+    title: Stop
+  - id: verify
+    needs: [implement]
+    action: run_test
+    test: login
+    gate: true
+    on:
+      passed: stop
+      failed: implement
+    max_attempts: 3
+"#;
+
+fn finish_notify(run: &mut Run, id: &str) {
+    assert!(run.apply(&done(id, &Outputs::new())));
+}
+
+fn attempts(run: &Run, id: &str) -> u32 {
+    run.rows
+        .iter()
+        .find(|row| row.step_id == id)
+        .unwrap()
+        .attempts
+}
+
+#[test]
+fn an_approved_plan_runs_implementation_and_skips_the_other_path() {
+    let mut run = Run::from(BRANCHED);
+    run.advance();
+    finish_notify(&mut run, "plan");
+    run.advance();
+    assert_eq!(attempts(&run, "sign-off"), 1);
+    run.world
+        .approvals
+        .insert("sign-off".into(), decided(ApprovalDecision::Approved, None));
+    run.advance();
+    assert_eq!(run.status("sign-off"), "succeeded");
+    assert_eq!(run.status("implement"), "running");
+    assert_eq!(run.status("abandon"), "skipped");
+    assert!(run.note("abandon").unwrap().contains("went to `implement`"));
+    assert!(run.finished.is_none());
+}
+
+#[test]
+fn a_rejection_follows_its_path_and_stop_ends_the_run() {
+    let mut run = Run::from(BRANCHED);
+    run.advance();
+    finish_notify(&mut run, "plan");
+    run.advance();
+    run.world
+        .approvals
+        .insert("sign-off".into(), decided(ApprovalDecision::Rejected, None));
+    run.advance();
+    assert_eq!(run.status("sign-off"), "succeeded");
+    assert_eq!(run.status("abandon"), "running");
+    assert_eq!(run.status("implement"), "skipped");
+
+    let mut stopped = Run::from(&BRANCHED.replace("rejected: abandon", "rejected: stop"));
+    stopped.advance();
+    finish_notify(&mut stopped, "plan");
+    stopped.advance();
+    stopped
+        .world
+        .approvals
+        .insert("sign-off".into(), decided(ApprovalDecision::Rejected, None));
+    stopped.advance();
+    assert_eq!(stopped.status("sign-off"), "failed");
+    assert_eq!(stopped.status("implement"), "skipped");
+    assert_eq!(stopped.status("abandon"), "skipped");
+    assert!(matches!(stopped.finished, Some(Finish::Failed(_))));
+}
+
+#[test]
+fn changes_requested_returns_the_feedback_and_asks_again() {
+    let mut run = Run::from(BRANCHED);
+    run.advance();
+    finish_notify(&mut run, "plan");
+    run.advance();
+    run.world.approvals.insert(
+        "sign-off".into(),
+        decided(
+            ApprovalDecision::ChangesRequested,
+            Some("name the edge cases"),
+        ),
+    );
+    run.advance();
+    assert_eq!(run.status("plan"), "pending");
+    assert_eq!(run.status("sign-off"), "pending");
+    assert_eq!(attempts(&run, "sign-off"), 1);
+    assert_eq!(attempts(&run, "plan"), 1);
+    assert!(run.world.approvals.is_empty());
+    assert_eq!(
+        run.world
+            .artifacts
+            .get("changes-sign-off")
+            .map(String::as_str),
+        Some("name the edge cases")
+    );
+    assert!(run.finished.is_none());
+
+    // The old decision is gone, so the next pass waits. It does not approve itself.
+    run.advance();
+    finish_notify(&mut run, "plan");
+    run.advance();
+    assert_eq!(run.status("sign-off"), "waiting");
+    assert_eq!(attempts(&run, "sign-off"), 2);
+    assert!(run.world.approvals.is_empty());
+}
+
+#[test]
+fn a_loop_stops_at_its_limit_and_says_what_to_do() {
+    let mut run = Run::from(BRANCHED);
+    run.advance();
+    finish_notify(&mut run, "plan");
+    run.advance();
+    run.world.approvals.insert(
+        "sign-off".into(),
+        decided(ApprovalDecision::ChangesRequested, Some("once")),
+    );
+    run.advance();
+    run.advance();
+    finish_notify(&mut run, "plan");
+    run.advance();
+    assert_eq!(attempts(&run, "sign-off"), 2);
+    run.world.approvals.insert(
+        "sign-off".into(),
+        decided(ApprovalDecision::ChangesRequested, Some("twice")),
+    );
+    run.advance();
+    assert_eq!(run.status("sign-off"), "failed");
+    assert_eq!(attempts(&run, "sign-off"), 2);
+    assert_eq!(run.status("plan"), "succeeded");
+    let Finish::Failed(error) = run.finished.clone().unwrap() else {
+        panic!("the run should stop: {:?}", run.finished);
+    };
+    assert!(
+        error.contains("changes were requested 2 times, which is the limit (2)"),
+        "{error}"
+    );
+    assert!(error.contains("Start a new run to try again."), "{error}");
+}
+
+#[test]
+fn a_failed_verification_returns_to_implementation_and_keeps_the_approval() {
+    let mut run = Run::from(BRANCHED);
+    run.advance();
+    finish_notify(&mut run, "plan");
+    run.advance();
+    run.world
+        .approvals
+        .insert("sign-off".into(), decided(ApprovalDecision::Approved, None));
+    run.advance();
+    finish_notify(&mut run, "implement");
+    let effects = run.advance();
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::RunTest { step, .. } if step == "verify")),
+        "{effects:?}"
+    );
+    assert!(run.apply(&queued(
+        "verify",
+        &Outputs::from([("run".to_owned(), "tr-1".to_owned())])
+    )));
+    run.world.test_runs.insert(
+        "tr-1".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "login: the button is missing".into(),
+        },
+    );
+    let approval = run.world.approvals.get("sign-off").cloned();
+    run.advance();
+    assert_eq!(run.status("implement"), "pending");
+    assert_eq!(run.status("verify"), "pending");
+    assert_eq!(run.status("sign-off"), "succeeded");
+    assert_eq!(attempts(&run, "verify"), 1);
+    assert_eq!(run.world.approvals.get("sign-off"), approval.as_ref());
+    assert!(run
+        .world
+        .artifacts
+        .get("failure-verify")
+        .is_some_and(|body| body.contains("the button is missing")));
+    assert!(run.finished.is_none());
 }

@@ -970,8 +970,8 @@ export type AppPart = {
 /**
  *  What a person decided on an approval step.
  * 
- *  `changes_requested` is its own decision, not a rejection. Until a later ticket can send
- *  the work back around, both a rejection and a request for changes stop the run.
+ *  `changes_requested` is its own decision, not a rejection. With no `on` routes, both a
+ *  rejection and a request for changes stop the run. A route can send either somewhere else.
  */
 export type ApprovalDecision = "approved" | "rejected" | "changes_requested";
 
@@ -2175,6 +2175,9 @@ export type OutcomeFilter = "any" | "succeeded" |
 /**  Failed or cancelled. */
 "failed";
 
+/**  The only outcomes a branch may name. Free text is not one of these. */
+export type OutcomeName = "passed" | "failed" | "approved" | "rejected" | "changes_requested";
+
 /**  A piece of a step's output, from where the last piece ended. */
 export type OutputChunk = {
 	text: string,
@@ -2854,6 +2857,12 @@ export type ReviewState = "approved" | "changesRequested" | "commented" | "dismi
 /**  What a review concluded. */
 export type ReviewStateFilter = "approved" | "changes_requested" | "commented";
 
+/**  One structured outcome and where the run goes next. `to` is a step id, or `stop`. */
+export type Route = {
+	when: OutcomeName,
+	to: string,
+};
+
 /**
  *  What a run is about. A workspace run knows the workspace, its branch and its pull request.
  *  A tracked pull request's run is about one the workspace follows in another repository
@@ -3243,22 +3252,33 @@ export type Step = {
 	 *  Whether a failed verdict fails this step and stops the run.
 	 * 
 	 *  `run_test` accepts the flag. Absent means that step is not a gate, so a failed verdict
-	 *  still succeeds it. An `approve` step is always a gate: a rejection or a request for
-	 *  changes stops the run. `is_gate` is what the engine reads.
+	 *  still succeeds it. An `approve` step is always a gate. With no `on` routes, a rejection
+	 *  or a request for changes stops the run. `is_gate` is what the engine reads when the
+	 *  step has no routes.
 	 */
 	gate?: boolean,
 	/**  Named documents this step leaves when it succeeds. A later step reads one by name. */
 	produces?: ArtifactDecl[],
 	/**  Named documents from earlier steps that this step is given. */
 	consumes?: string[],
+	/**
+	 *  Where each structured outcome goes. Empty means a failed gate stops the run and a
+	 *  success lets every step that needs this one start.
+	 */
+	routes?: Route[],
+	/**
+	 *  How many times this step may run, including the first. Required when a route comes
+	 *  back to it. From 2 to 10.
+	 */
+	maxAttempts?: number | null,
 } & Action;
 
 /**
  *  What a step concluded, apart from whether its row succeeded or failed.
  * 
- *  A step that judges something produces one: a smoke test's verdict today, and later an
- *  approval or anything a branch will switch on. [`react`] is the one place the run takes
- *  that verdict. It is stored on the step row, not in `outputs`. `outputs` stay the strings
+ *  A step that judges something produces one: a smoke test's verdict, or an approval.
+ *  A branch reads this, not free text. With no routes, [`react`] is the one place the
+ *  run takes that verdict. It is stored on the step row, not in `outputs`. `outputs` stay the strings
  *  a later step reads as `{{ steps.<id>.<field> }}`, and this is not `wait_session`'s
  *  `outcome` field.
  */

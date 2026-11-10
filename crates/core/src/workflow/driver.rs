@@ -670,6 +670,34 @@ enum Outcome {
 }
 
 fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResult<bool> {
+    // A loop is one change: the steps go back to pending, the old decision is removed, and
+    // the feedback is kept. It is not the path that records a decision. Checked first, so a
+    // request for changes that routes back is not also applied as a finished decision.
+    if let Some(rewind) = &change.rewind {
+        let feedback = rewind.feedback.as_ref().map(|copy| NewWorkflowArtifact {
+            name: copy.name.clone(),
+            source: copy.source.clone(),
+            detail: None,
+            body: copy.body.clone(),
+            truncated: false,
+        });
+        let moved = store.rewind_workflow(
+            run_id,
+            &change.step,
+            &change.from,
+            rewind.seen,
+            &rewind.steps,
+            feedback.as_ref(),
+        )?;
+        if !moved {
+            return Ok(false);
+        }
+        for step in &rewind.steps {
+            driver.forget_code(run_id, step);
+        }
+        driver.touch();
+        return Ok(true);
+    }
     // A person's decision, the wait's applied mark, and the decision's artifacts are one
     // change. The step is no longer waiting, so the decision is not applied a second time,
     // and the artifact is not written again on the next start.

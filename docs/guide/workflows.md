@@ -303,9 +303,10 @@ not a decision you make here.
 
 The run shows the artifacts the step consumes, so you can read the plan or the review
 before you decide. You approve, reject, or request changes, and you can leave a note.
-Requesting changes needs a note. Until a later change can send that note back around,
-a request for changes stops the run. The note is kept as an artifact named
-`changes-<step id>`, source `decision`, for that later change to read. The step also
+Requesting changes needs a note. With no `on` routes, a request for changes stops the
+run. The note is kept as an artifact named `changes-<step id>`, source `decision`, for
+a later revision to read. [Conditional paths](#conditional-paths) can send that note
+back to an earlier step. The step also
 leaves `decision` and `feedback` for a later step to read as
 `{{ steps.<id>.decision }}` and `{{ steps.<id>.feedback }}`.
 
@@ -368,6 +369,62 @@ waits until you decide. A timeout fails that step, records no decision, and does
 stop a step that does not need it. `gate: false` is refused, because an approval is a
 gate. Leaving `gate` out is the same as writing `gate: true`.
 
+### Conditional paths
+
+`on` sends a step to a different place depending on its outcome. It is only for `approve`
+and `run_test`. The keys are the outcomes that step can produce, and each value is a
+step id or `stop`. Yardsort does not branch on the text of a note or a report.
+
+```yaml
+  - id: sign-off
+    needs: [plan]
+    action: approve
+    prompt: Look at the plan.
+    on:
+      approved: implement
+      changes_requested: plan
+      rejected: stop
+    max_attempts: 3
+  - id: verify
+    needs: [implement]
+    action: run_test
+    test: "{{ inputs.check }}"
+    gate: true
+    on:
+      passed: ship
+      failed: implement
+    max_attempts: 3
+```
+
+`approved` goes on to `implement`. `changes_requested` runs `plan` again and gives it the
+note as `changes-sign-off`. `rejected` stops the run. A failed `verify` runs `implement`
+again and gives it `failure-verify`, the report. A pass goes on to `ship`.
+
+Leave `on` out and the step behaves as before: a failed gate stops the run, and a success
+lets every step that needs this one start.
+
+An `approve` step must say where `approved`, `rejected` and `changes_requested` go. A
+`run_test` step must say where `passed` and `failed` go. A target has to be a later step
+that needs this one, or an earlier step this one needs, or `stop`. A step that no path
+can reach is refused when the file is checked, and so is a loop with no `max_attempts`.
+
+`max_attempts` counts every entry, including the first. It is at least 2 and at most 10.
+The count is stored on the step. Quitting and opening Yardsort again does not add one
+and does not start the count over. When the limit is reached the run stops, names the
+outcome and the limit, and says to start a new run. You see that on the run in the app
+and in `ys workflow runs`.
+
+Sending the work back does not reuse an approval. Each pass waits again, shows a new
+one-time code, and needs a new decision. A session Yardsort started still cannot decide,
+and neither can the Floor Manager. The note or the failed report is an artifact the
+step being run again can `consumes`. Each attempt is kept. A later attempt does not
+overwrite an earlier one. The step reads the latest.
+
+`stop` on a failure stops the run. `stop` on a pass ends the run successfully and skips
+steps that have not finished.
+
+A file written before `on` existed still loads.
+
 A file written before approvals existed still loads. A run that was queued before this
 change has no approval step, and it keeps running as it did.
 
@@ -379,7 +436,9 @@ waiting keeps waiting, and a gate is not approved or skipped. A decision you rec
 was closed is applied once. A step Yardsort was in the middle of, such as starting an agent,
 fails saying so rather than being done twice. A notification already sent is not sent again,
 and an artifact already written is not written again. A request for changes writes its
-artifact in the same change as the decision, so a restart does not write it later. The
+artifact in the same change as the decision, or in the same change as sending the work
+back, so a restart does not write it later. A loop's attempt count is kept, and a
+rewind that already happened is not applied again. The
 one-time approval code is replaced, because it was only in memory, and you are told. Wrong
 tries are kept: five of them stay locked until **Show a new code**. An agent that settled while Yardsort was
 closed is only noticed if its harness reported the finished turn.
@@ -547,9 +606,12 @@ scrollback, and not tool output. `raw: true` keeps each turn's own text in full,
 without tool output, and it is still cut at 32000 characters.
 
 The run keeps what was handed on. Open the run to read it, or use `ys workflow runs --run <id>`.
-`--json` includes each artifact's name, step, source and body. A step that succeeds again
-replaces what it left. A failed attempt leaves the previous text, and a later step reads whatever
-is stored when it starts.
+`--json` includes each artifact's name, step, source, body and which attempt wrote it.
+A step that succeeds again replaces the latest copy. Each attempt is also kept, so a
+revision does not overwrite the previous one. A failed attempt leaves the previous text,
+and a later step reads the latest copy stored when it starts. A name starting with
+`changes-` or `failure-` is reserved for the note a revision hands back. See
+[Conditional paths](#conditional-paths).
 
 A file written before this, and a run saved before it, still load. They simply have no artifacts.
 

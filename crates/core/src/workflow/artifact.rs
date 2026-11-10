@@ -89,6 +89,19 @@ pub fn changes_artifact_name(step_id: &str) -> String {
     format!("changes-{step_id}")
 }
 
+/// The artifact a failed verdict leaves when a branch runs that step again.
+pub fn failure_artifact_name(step_id: &str) -> String {
+    format!("failure-{step_id}")
+}
+
+/// The step id in `changes-<step>` or `failure-<step>`, when `name` is one of those.
+/// A step id may itself contain `-`.
+pub fn feedback_step(name: &str) -> Option<&str> {
+    name.strip_prefix("changes-")
+        .or_else(|| name.strip_prefix("failure-"))
+        .filter(|id| !id.is_empty())
+}
+
 /// Why `path` cannot be an artifact file, before it is read. A path that still has
 /// `{{ variables }}` is checked again once those are filled in.
 pub fn check_path(path: &str) -> Result<(), String> {

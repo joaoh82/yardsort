@@ -21,7 +21,7 @@ pub mod waits;
 /// Shared with smoke tests: `{{ variables }}` are written the same way in both.
 pub use crate::template;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -34,6 +34,10 @@ pub use parse::{parse, step_lines};
 
 /// The schema version this build reads. A file asking for a later one is listed, not run.
 pub const SCHEMA_VERSION: u32 = 1;
+
+/// The most times a looping step may run, including the first. A file that asks for more
+/// is refused, and the engine will not loop past this either.
+pub const MAX_ATTEMPTS: u32 = 10;
 
 /// Why a decision was not recorded, in the words the window and `ys` show. `None` when it was.
 pub fn approval_refusal(
@@ -148,8 +152,9 @@ pub struct Step {
     /// Whether a failed verdict fails this step and stops the run.
     ///
     /// `run_test` accepts the flag. Absent means that step is not a gate, so a failed verdict
-    /// still succeeds it. An `approve` step is always a gate: a rejection or a request for
-    /// changes stops the run. `is_gate` is what the engine reads.
+    /// still succeeds it. An `approve` step is always a gate. With no `on` routes, a rejection
+    /// or a request for changes stops the run. `is_gate` is what the engine reads when the
+    /// step has no routes.
     #[serde(default)]
     pub gate: bool,
     /// Named documents this step leaves when it succeeds. A later step reads one by name.
@@ -160,9 +165,116 @@ pub struct Step {
     /// Named documents from earlier steps that this step is given.
     #[serde(default)]
     pub consumes: Vec<String>,
+    /// Where each structured outcome goes. Empty means a failed gate stops the run and a
+    /// success lets every step that needs this one start.
+    #[serde(default)]
+    pub routes: Vec<Route>,
+    /// How many times this step may run, including the first. Required when a route comes
+    /// back to it. From 2 to 10.
+    #[serde(default)]
+    pub max_attempts: Option<u32>,
     /// Flattened, so a step reads `{ id, needs, action: "notify", title }` as the file does.
     #[serde(flatten)]
     pub action: Action,
+}
+
+/// One structured outcome and where the run goes next. `to` is a step id, or `stop`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Route {
+    pub when: OutcomeName,
+    pub to: String,
+}
+
+impl Route {
+    pub fn stops(&self) -> bool {
+        self.to == "stop"
+    }
+}
+
+/// The only outcomes a branch may name. Free text is not one of these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum OutcomeName {
+    Passed,
+    Failed,
+    Approved,
+    Rejected,
+    ChangesRequested,
+}
+
+impl OutcomeName {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+            Self::Approved => "approved",
+            Self::Rejected => "rejected",
+            Self::ChangesRequested => "changes_requested",
+        }
+    }
+
+    /// The words in a limit message: "changes were requested 3 times".
+    pub fn limit_phrase(self) -> &'static str {
+        match self {
+            Self::Passed => "the verdict was a pass",
+            Self::Failed => "the verdict was a failure",
+            Self::Approved => "it was approved",
+            Self::Rejected => "it was rejected",
+            Self::ChangesRequested => "changes were requested",
+        }
+    }
+
+    /// The outcomes `action` can branch on, in the order a file should list them.
+    pub fn for_action(action: &str) -> &'static [Self] {
+        match action {
+            "approve" => &[Self::Approved, Self::Rejected, Self::ChangesRequested],
+            "run_test" => &[Self::Passed, Self::Failed],
+            _ => &[],
+        }
+    }
+
+    pub fn parse(action: &str, key: &str) -> Option<Self> {
+        Self::for_action(action)
+            .iter()
+            .copied()
+            .find(|name| name.as_str() == key)
+    }
+}
+
+/// Steps that must run again when `target` is entered: `target` itself, and every step
+/// that needs it, directly or through other steps.
+pub fn steps_from(steps: &[Step], target: &str) -> Vec<String> {
+    let before = ancestors(steps);
+    let mut ids = vec![target.to_owned()];
+    for step in steps {
+        if step.id != target && before.get(&step.id).is_some_and(|set| set.contains(target)) {
+            ids.push(step.id.clone());
+        }
+    }
+    ids
+}
+
+/// What each step needs, transitively, including through other steps.
+pub fn ancestors(steps: &[Step]) -> BTreeMap<String, BTreeSet<String>> {
+    let needs: BTreeMap<&str, &[String]> = steps
+        .iter()
+        .map(|step| (step.id.as_str(), step.needs.as_slice()))
+        .collect();
+    let mut out = BTreeMap::new();
+    for step in steps {
+        let mut seen = BTreeSet::new();
+        let mut stack: Vec<&str> = step.needs.iter().map(String::as_str).collect();
+        while let Some(next) = stack.pop() {
+            if seen.insert(next.to_owned()) {
+                if let Some(more) = needs.get(next) {
+                    stack.extend(more.iter().map(String::as_str));
+                }
+            }
+        }
+        out.insert(step.id.clone(), seen);
+    }
+    out
 }
 
 impl Step {
