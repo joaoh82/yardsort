@@ -557,6 +557,7 @@ mod serving {
                 host: &self.identity,
                 interactive: self.terminals.shares_control(),
                 starting: None,
+                workflow: None,
             });
         }
 

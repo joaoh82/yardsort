@@ -1,0 +1,7 @@
+{
+  "requestId": "r-22",
+  "result": {
+    "kind": "workflowChallenge",
+    "code": "ABCD2345"
+  }
+}

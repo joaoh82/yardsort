@@ -328,6 +328,8 @@ pub enum AnswerWrite {
     CodeLocked,
     NoCode,
     CodeUnusable,
+    /// This decision id was already used for a different action, step or note.
+    Conflict,
 }
 
 /// Store a clarification's answer from a terminal or a remote caller. The code is required.

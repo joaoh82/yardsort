@@ -34,6 +34,13 @@ pub enum Scope {
     /// Seeing and revoking enrolled devices.
     #[serde(rename = "device:manage")]
     DeviceManage,
+    /// Listing workflow runs and reading one run. Not deciding it.
+    #[serde(rename = "workflow:read")]
+    WorkflowRead,
+    /// Approving, answering, or resuming a workflow the desktop is running.
+    /// A host token is still refused, even with this scope.
+    #[serde(rename = "workflow:decide")]
+    WorkflowDecide,
 }
 
 /// Which projects a grant reaches.

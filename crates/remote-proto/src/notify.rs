@@ -63,6 +63,13 @@ pub struct NoticeSubmission {
     pub event_key: String,
     pub category: NoticeCategory,
     pub kind: String,
+    /// The run a workflow notice is about. Absent for every other category, and omitted
+    /// when an older server would refuse the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    /// The step that notice is about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_id: Option<String>,
 }
 
 /// Whether `key` may name an event of `category`. Upper case is refused, so a one-time code
@@ -160,6 +167,15 @@ pub struct NoticeView {
     pub title: String,
     pub body: String,
     pub deep_link: String,
+    /// Set for a workflow notice, so the phone can open that decision. The deep link itself
+    /// stays `yardsort://notice/{category}/{id}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_id: Option<String>,
+    /// The computer that submitted it, as the server knows that computer. A client cannot set this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
 }
 
 /// How many queued notices were handed to a push provider on this call.

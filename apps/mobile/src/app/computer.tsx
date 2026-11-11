@@ -161,6 +161,10 @@ function Computer({ host }: { host: HostId }) {
           onPress={() => router.push({ pathname: "/start", params: { host } })}
         />
       )}
+      <Button
+        title="Workflows"
+        onPress={() => router.push({ pathname: "/workflows", params: { host } })}
+      />
       {projects.map((project) => {
         const here = shown?.filter((workspace) => workspace.project === project.id) ?? [];
         if (here.length === 0) return null;

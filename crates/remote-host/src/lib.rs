@@ -419,16 +419,22 @@ fn visit(
     };
     let mut opened = None;
     serving.with(&mut |context| {
-        opened = Some(Visitor::open(
-            context.store,
-            open.device.clone(),
-            open.grant.clone(),
-            Arc::new(ChannelOut {
-                channel: out.channel,
-                link: out.link.clone(),
-                queued: Arc::clone(&out.queued),
+        opened = Some(
+            Visitor::open(
+                context.store,
+                open.device.clone(),
+                open.grant.clone(),
+                Arc::new(ChannelOut {
+                    channel: out.channel,
+                    link: out.link.clone(),
+                    queued: Arc::clone(&out.queued),
+                }),
+            )
+            .map(|mut visitor| {
+                visitor.set_kind(open.kind);
+                visitor
             }),
-        ));
+        );
     });
     let visitor = match opened {
         Some(Ok(visitor)) => visitor,

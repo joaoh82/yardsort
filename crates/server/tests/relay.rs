@@ -493,6 +493,7 @@ async fn rule_breakers(records: impl Records + Clone + 'static) {
                 remote_proto::relay::ChannelOpen {
                     device: p.phone.device.clone(),
                     grant: p.grant.clone(),
+                    kind: remote_proto::account::DeviceKind::Phone,
                 },
             )
             .encode(),

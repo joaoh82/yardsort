@@ -134,6 +134,8 @@ export const ASKED_SCOPES: Scope[] = [
   "memory:read",
   "terminal:read",
   "terminal:control",
+  "workflow:read",
+  "workflow:decide",
 ];
 
 /** A server looked up, before signing in to it. */

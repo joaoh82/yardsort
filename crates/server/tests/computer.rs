@@ -85,6 +85,7 @@ impl Serving for Here {
             host: &self.identity,
             interactive: true,
             starting: self.starting.clone(),
+            workflow: None,
         });
     }
 }

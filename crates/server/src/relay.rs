@@ -154,6 +154,7 @@ enum Role {
         host: HostId,
         device: DeviceId,
         grant: GrantId,
+        kind: DeviceKind,
     },
 }
 
@@ -526,6 +527,12 @@ impl<R: Records> ControlService<R> {
                 }
             }
             TicketRequest::Device { .. } => {
+                if caller.kind == DeviceKind::Host {
+                    return Err(RemoteError::new(
+                        ErrorCode::Forbidden,
+                        "A host token cannot open a device channel.",
+                    ));
+                }
                 let grant = self
                     .records
                     .grants(
@@ -554,6 +561,7 @@ impl<R: Records> ControlService<R> {
                     host: host.id,
                     device: caller.device.clone(),
                     grant: grant.grant.id,
+                    kind: caller.kind,
                 }
             }
         };
@@ -665,6 +673,7 @@ impl<R: Records> ControlService<R> {
                 host,
                 device,
                 grant,
+                kind,
             } => {
                 let Some(link) = lock(&self.relay.hub.hosts).get(&host).cloned() else {
                     return refuse(
@@ -709,6 +718,7 @@ impl<R: Records> ControlService<R> {
                 let open = ChannelOpen {
                     device: device.clone(),
                     grant,
+                    kind,
                 };
                 if !link.out.push(link_message(&LinkFrame::Open(channel, open))) {
                     joined.out.close(CloseReason::Overloaded);

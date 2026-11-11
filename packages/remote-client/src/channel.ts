@@ -71,6 +71,12 @@ import {
   type WorkspaceId,
   type WorkspaceListParams,
   type WorkspacePage,
+  type WorkflowChallenge,
+  type WorkflowDecideParams,
+  type WorkflowDecision,
+  type WorkflowRunDetail,
+  type WorkflowRunListParams,
+  type WorkflowRunPage,
   type WorkspaceStartParams,
 } from "./protocol.ts";
 import { closeReason, type CloseReason, closeText, greeting as greetingDecoder } from "./relay.ts";
@@ -337,6 +343,53 @@ export class Channel {
       "started",
     );
     return started;
+  }
+
+  /** Workflow runs this computer is driving, newest first. */
+  async workflowRuns(
+    params: WorkflowRunListParams = { cursor: null, limit: null },
+  ): Promise<WorkflowRunPage> {
+    const { kind: _, ...page } = expect(
+      await this.ask({ op: "workflow.run.list", params }),
+      "workflowRuns",
+    );
+    return page;
+  }
+
+  /** One workflow run: its steps, why it is waiting, and the artifacts a phone may see. */
+  async workflowRun(runId: WorkflowRunDetail["runId"]): Promise<WorkflowRunDetail> {
+    const { kind: _, ...run } = expect(
+      await this.ask({ op: "workflow.run.get", params: { runId } }),
+      "workflowRun",
+    );
+    return run;
+  }
+
+  /**
+   * The one-time code for a waiting step. Held by the caller and sent back with the decision.
+   * It is not shown, and it is not stored.
+   */
+  async workflowChallenge(
+    runId: WorkflowRunDetail["runId"],
+    stepId: string,
+  ): Promise<WorkflowChallenge> {
+    const { kind: _, ...challenge } = expect(
+      await this.ask({
+        op: "workflow.challenge",
+        params: { runId, stepId: stepId as WorkflowRunDetail["runId"] },
+      }),
+      "workflowChallenge",
+    );
+    return challenge;
+  }
+
+  /** Approve, reject, request changes, answer, or resume. A retry of `decisionId` applies once. */
+  async workflowDecide(params: WorkflowDecideParams): Promise<WorkflowDecision> {
+    const { kind: _, ...decision } = expect(
+      await this.ask({ op: "workflow.decide", params }),
+      "workflowDecision",
+    );
+    return decision;
   }
 
   /** An ended conversation again, under its own record: one whose summary says `resumable`. */

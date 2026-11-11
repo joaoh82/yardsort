@@ -41,11 +41,11 @@ pub fn copy(category: NoticeCategory, kind: &str) -> Option<(&'static str, &'sta
         ),
         (NoticeCategory::Workflow, "question") => (
             "A workflow has a question",
-            "Answering it stays on the computer.",
+            "Open it on this phone to answer.",
         ),
         (NoticeCategory::Workflow, "approval") => (
             "A workflow is waiting for approval",
-            "Approving it stays on the computer.",
+            "Open it on this phone to approve.",
         ),
         _ => return None,
     })
@@ -105,6 +105,15 @@ impl<R: Records + Clone + 'static> ControlService<R> {
             .await
             .map_err(unreadable)?;
         let id = uuid::Uuid::new_v4().to_string();
+        let (run_id, step_id) = workflow_subject(&submission);
+        let host_id = self
+            .records
+            .hosts(&caller.account)
+            .await
+            .map_err(unreadable)?
+            .into_iter()
+            .find(|host| host.device == caller.device)
+            .map(|host| host.id.as_str().to_owned());
         let record = self
             .records
             .accept_notice(
@@ -118,6 +127,9 @@ impl<R: Records + Clone + 'static> ControlService<R> {
                     body: body.to_owned(),
                     expires_at: now.saturating_add(NOTICE_TTL_MS),
                     suppressed: !preferences.allows(submission.category),
+                    run_id,
+                    step_id,
+                    host_id,
                 },
                 now,
             )
@@ -240,8 +252,40 @@ impl<R: Records> ControlService<R> {
             kind: page.kind,
             title: page.title,
             body: page.body,
+            run_id: page.run_id,
+            step_id: page.step_id,
+            host_id: page.host_id,
         })
     }
+}
+
+/// A workflow notice may name its run and step. Anything else, or a value that is not an id,
+/// or one that looks like a one-time code, is dropped. The notice itself is still accepted.
+fn workflow_subject(submission: &NoticeSubmission) -> (Option<String>, Option<String>) {
+    if submission.category != NoticeCategory::Workflow {
+        return (None, None);
+    }
+    let (Some(run), Some(step)) = (submission.run_id.as_deref(), submission.step_id.as_deref())
+    else {
+        return (None, None);
+    };
+    if !subject_ok(run) || !subject_ok(step) {
+        return (None, None);
+    }
+    (Some(run.to_owned()), Some(step.to_owned()))
+}
+
+fn subject_ok(text: &str) -> bool {
+    remote_proto::ids::check_id(text).is_ok() && !looks_like_code(text)
+}
+
+/// Eight characters from the alphabet a one-time code uses. Such a value is not kept as a subject.
+fn looks_like_code(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() == 8
+        && bytes
+            .iter()
+            .all(|byte| b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".contains(byte))
 }
 
 async fn deliver<R: Records>(

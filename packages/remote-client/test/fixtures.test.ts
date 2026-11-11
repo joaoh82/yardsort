@@ -113,6 +113,17 @@ const FIXTURES: Record<string, (name: string) => void> = {
   "request-upload-chunk.json": (name) => {
     expect(scopeOf(pinned<Request>(request, name).op)).toBe("terminal:control");
   },
+  "request-workflow-run-list.json": (name) => {
+    expect(scopeOf(pinned<Request>(request, name).op)).toBe("workflow:read");
+  },
+  "request-workflow-decide.json": (name) => {
+    const decide = pinned<Request>(request, name);
+    expect(decide.op).toBe("workflow.decide");
+    expect(scopeOf(decide.op)).toBe("workflow:decide");
+  },
+  "request-workflow-challenge.json": (name) => {
+    expect(scopeOf(pinned<Request>(request, name).op)).toBe("workflow:decide");
+  },
   "response-harnesses.json": (name) => {
     const listed = result(name);
     if (listed.kind !== "harnesses") throw new Error("not harnesses");
@@ -125,6 +136,27 @@ const FIXTURES: Record<string, (name: string) => void> = {
   "response-uploaded.json": (name) => {
     const uploaded = result(name);
     expect(uploaded.kind === "uploaded" && uploaded.path).toEndWith("-photo.jpg");
+  },
+  "response-workflow-runs.json": (name) => {
+    const page = result(name);
+    if (page.kind !== "workflowRuns") throw new Error("not workflow runs");
+    expect(page.runs[0]?.waitingOn).toBe("sign-off");
+  },
+  "response-workflow-run.json": (name) => {
+    const run = result(name);
+    if (run.kind !== "workflowRun") throw new Error("not a workflow run");
+    expect(run.waitingKind).toBe("approval");
+    expect(run.artifacts[0]?.body).toBe("Looks good");
+  },
+  "response-workflow-decision.json": (name) => {
+    const decision = result(name);
+    if (decision.kind !== "workflowDecision") throw new Error("not a decision");
+    expect(decision.outcome).toBe("recorded");
+  },
+  "response-workflow-challenge.json": (name) => {
+    const challenge = result(name);
+    if (challenge.kind !== "workflowChallenge") throw new Error("not a challenge");
+    expect(challenge.code).toBe("ABCD2345");
   },
   "hello.json": (name) => {
     expect(negotiate(pinned(hello, name))).toEqual(CURRENT);

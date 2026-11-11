@@ -814,6 +814,9 @@ fn incoming(key: &str) -> IncomingNotice {
         body: "Open it on this phone. The work stays on the computer.".into(),
         expires_at: 1_000 + NOTICE_TTL_MS,
         suppressed: false,
+        run_id: None,
+        step_id: None,
+        host_id: None,
     }
 }
 
@@ -894,6 +897,9 @@ async fn an_expired_notice_is_not_delivered(records: impl Records + Clone + 'sta
                 body: "Open it on this phone. The work stays on the computer.".into(),
                 expires_at: 1_000 + NOTICE_TTL_MS,
                 suppressed: false,
+                run_id: None,
+                step_id: None,
+                host_id: None,
             },
             1_000,
         )

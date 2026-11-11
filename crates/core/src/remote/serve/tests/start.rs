@@ -179,6 +179,7 @@ impl Started {
             host: &self.identity,
             interactive: true,
             starting: starting.then(|| Arc::clone(&self.lent) as Arc<dyn Starting>),
+            workflow: None,
         }
     }
 

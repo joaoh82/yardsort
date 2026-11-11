@@ -250,6 +250,50 @@ impl Driver {
         Ok(Some((code, present)))
     }
 
+    /// The code a signed-in phone may submit. The one this process already holds, when it
+    /// still matches the stored hash, so the desktop and the phone share it. Otherwise a
+    /// restart reissue, which does not reset the wrong-try count. Nothing when the step is
+    /// not waiting, or the code is locked: the computer has to show a new one.
+    ///
+    /// The plain code stays in this process. It is not written, and a caller must not log it.
+    pub fn code_for_phone(
+        &self,
+        store: &Store,
+        run_id: &str,
+        step_id: &str,
+    ) -> crate::store::StoreResult<Option<String>> {
+        if store.approval_code_locked(run_id, step_id)?
+            || store.answer_code_locked(run_id, step_id)?
+        {
+            return Ok(None);
+        }
+        let key = (run_id.to_owned(), step_id.to_owned());
+        let held = {
+            let codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
+            codes.get(&key).cloned()
+        };
+        if let Some(code) = held {
+            if store.presented_code_matches(run_id, step_id, &code)? {
+                return Ok(Some(code));
+            }
+            self.codes
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&key);
+        }
+        if store.approval_is_open(run_id, step_id)? {
+            return Ok(self
+                .issue_approval_code(store, run_id, step_id, false)?
+                .map(|(code, _)| code));
+        }
+        if store.question_is_open(run_id, step_id)? {
+            return Ok(self
+                .issue_answer_code(store, run_id, step_id, false)?
+                .map(|(code, _)| code));
+        }
+        Ok(None)
+    }
+
     fn holds_code(&self, run_id: &str, step_id: &str) -> bool {
         self.codes
             .lock()

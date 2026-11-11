@@ -72,6 +72,11 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         "push_routes",
         include_str!("../migrations/0006_push_routes.sql"),
     ),
+    (
+        7,
+        "notice_subjects",
+        include_str!("../migrations/0007_notice_subjects.sql"),
+    ),
 ];
 
 /// Held while migrating, so instances starting together take turns. Any constant will do, as
@@ -1347,8 +1352,9 @@ impl Records for PgRecords {
         let inserted = tx
             .query_opt(
                 "INSERT INTO mobile_notices
-                     (id, account, event_key, category, kind, title, body, created_at, expires_at, suppressed)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                     (id, account, event_key, category, kind, title, body, created_at, expires_at, suppressed,
+                      run_id, step_id, host_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                  ON CONFLICT (account, event_key) DO NOTHING
                  RETURNING id, suppressed",
                 &[
@@ -1362,6 +1368,9 @@ impl Records for PgRecords {
                     &now,
                     &notice.expires_at,
                     &suppressed,
+                    &notice.run_id,
+                    &notice.step_id,
+                    &notice.host_id,
                 ],
             )
             .await
@@ -1582,7 +1591,7 @@ impl Records for PgRecords {
             .client()
             .await?
             .query_opt(
-                "SELECT id, category, kind, title, body FROM mobile_notices
+                "SELECT id, category, kind, title, body, run_id, step_id, host_id FROM mobile_notices
                  WHERE id = $1 AND account = $2",
                 &[&id, &account.0],
             )
@@ -1594,6 +1603,9 @@ impl Records for PgRecords {
             kind: row.get(2),
             title: row.get(3),
             body: row.get(4),
+            run_id: row.get(5),
+            step_id: row.get(6),
+            host_id: row.get(7),
         }))
     }
 }

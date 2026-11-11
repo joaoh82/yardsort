@@ -37,6 +37,7 @@ pub mod pairing;
 pub mod relay;
 pub mod start;
 pub mod terminal;
+pub mod workflow;
 
 use serde::{Deserialize, Serialize};
 
@@ -68,7 +69,8 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// - 4: `terminalsLater` in `host.describe`, saying why terminals are not offered yet.
 /// - 5: `harness.list`, `workspace.start`, `session.start`, `upload.begin` and `upload.chunk`.
 /// - 6: `session.resume`, and `resumable` in a session's summary.
-pub const PROTOCOL_MINOR: u16 = 6;
+/// - 7: `workflow.run.list`, `workflow.run.get`, `workflow.challenge` and `workflow.decide`.
+pub const PROTOCOL_MINOR: u16 = 7;
 
 /// The largest JSON message either side reads, requests and responses alike. Checked before
 /// parsing. A host keeps its responses within it: a page holds fewer items than asked when they
@@ -373,11 +375,12 @@ pub struct MemoryListParams {
 /// Everything a client can ask a host. On the wire, `op` names it and `params` carries its
 /// parameters.
 ///
-/// There is deliberately no operation that approves, edits or proposes memory, launches a
+/// There is deliberately no operation that edits or proposes memory, launches a
 /// program the device names, deletes or archives a workspace, or reads a file. Each of those is
 /// its own scoped increment, if it ever comes. Starting one of the host's own harnesses, and
 /// putting a file in the host's uploads folder, came in minor 5, and resuming one of its
-/// conversations in minor 6 ([`start`]).
+/// conversations in minor 6 ([`start`]). Deciding a workflow the desktop is running came in
+/// minor 7 ([`workflow`]): a signed-in phone, with the one-time code, and not a host token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", content = "params")]
 pub enum Operation {
@@ -423,6 +426,18 @@ pub enum Operation {
     UploadChunk(UploadChunkParams),
     #[serde(rename = "session.resume")]
     SessionResume(SessionResumeParams),
+    /// Since minor 7.
+    #[serde(rename = "workflow.run.list")]
+    WorkflowRunList(workflow::WorkflowRunListParams),
+    /// Since minor 7.
+    #[serde(rename = "workflow.run.get")]
+    WorkflowRunGet(workflow::WorkflowRunRef),
+    /// Since minor 7. The reply is the one-time code, and only for a signed-in phone.
+    #[serde(rename = "workflow.challenge")]
+    WorkflowChallenge(workflow::WorkflowStepRef),
+    /// Since minor 7.
+    #[serde(rename = "workflow.decide")]
+    WorkflowDecide(workflow::WorkflowDecideParams),
 }
 
 /// Every operation's wire name, in [`Operation`]'s order.
@@ -448,6 +463,10 @@ pub const OPERATIONS: &[&str] = &[
     "upload.begin",
     "upload.chunk",
     "session.resume",
+    "workflow.run.list",
+    "workflow.run.get",
+    "workflow.challenge",
+    "workflow.decide",
 ];
 
 impl Operation {
@@ -474,6 +493,10 @@ impl Operation {
             Self::UploadBegin(_) => 18,
             Self::UploadChunk(_) => 19,
             Self::SessionResume(_) => 20,
+            Self::WorkflowRunList(_) => 21,
+            Self::WorkflowRunGet(_) => 22,
+            Self::WorkflowChallenge(_) => 23,
+            Self::WorkflowDecide(_) => 24,
         };
         OPERATIONS[index]
     }
@@ -502,6 +525,8 @@ impl Operation {
             | Self::UploadBegin(_)
             | Self::UploadChunk(_)
             | Self::SessionResume(_) => Scope::TerminalControl,
+            Self::WorkflowRunList(_) | Self::WorkflowRunGet(_) => Scope::WorkflowRead,
+            Self::WorkflowChallenge(_) | Self::WorkflowDecide(_) => Scope::WorkflowDecide,
         })
     }
 
@@ -534,6 +559,22 @@ impl Operation {
             Self::UploadBegin(upload) => upload.validate(),
             Self::UploadChunk(chunk) => chunk.validate(),
             Self::SessionResume(resume) => resume.validate(),
+            Self::WorkflowRunList(params) if params.limit == Some(0) => {
+                invalid("A page holds at least one item.")
+            }
+            Self::WorkflowRunGet(params) if crate::ids::check_id(&params.run_id).is_err() => {
+                invalid("That run id is not one Yardsort uses.")
+            }
+            Self::WorkflowChallenge(params)
+                if crate::ids::check_id(&params.run_id).is_err()
+                    || crate::ids::check_id(&params.step_id).is_err() =>
+            {
+                invalid("That run or step is not one Yardsort uses.")
+            }
+            Self::WorkflowDecide(params) => match params.invalid() {
+                Some(message) => invalid(message),
+                None => Ok(()),
+            },
             _ => Ok(()),
         }
     }
@@ -574,6 +615,14 @@ pub enum Reply {
     Upload(Upload),
     /// Since minor 5.
     Uploaded(Uploaded),
+    /// Since minor 7.
+    WorkflowRuns(workflow::WorkflowRunPage),
+    /// Since minor 7.
+    WorkflowRun(workflow::WorkflowRunDetail),
+    /// Since minor 7. The one-time code, for the phone that asked.
+    WorkflowChallenge(workflow::WorkflowChallenge),
+    /// Since minor 7.
+    WorkflowDecision(workflow::WorkflowDecision),
     Done,
 }
 

@@ -116,6 +116,7 @@ impl Home for HostHome {
             host: &HostIdentity { id, name: row.name },
             interactive: terminals.host.shares_control(),
             starting: Some(Arc::clone(&self.starting) as Arc<dyn Starting>),
+            workflow: None,
         });
     }
 

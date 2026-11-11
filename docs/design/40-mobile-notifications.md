@@ -3,9 +3,10 @@
 Built for YARD-4. One shared way for a computer to tell the phone that something happened.
 Workflows and desktop updates keep doing their own work. This delivers a notice and opens the item.
 
-A workflow question or approval is answered on the computer (YARD-8 owns doing that on the phone).
-A desktop update is installed on the computer (YARD-2 owns installing it from the phone). The
-notice says the thing is waiting. The phone opens it. That is the whole action.
+A workflow question or approval can be answered on the phone
+([Mobile workflow controls](41-mobile-workflow-controls.md)). A desktop update is installed on
+the computer (YARD-2 owns installing it from the phone). The notice says the thing is waiting.
+The phone opens it. The one-time code is not in the notice.
 
 ## Event model
 
@@ -43,8 +44,8 @@ An event key is at most 200 characters, starts with the category's prefix, and u
 case letters, digits, and `:._-`. Upper case is refused, so a one-time code cannot be hidden in
 the key. A field the server does not know, including `code`, is refused.
 
-The body is a fixed sentence. It says to open the item on the phone, and that the work, the
-answer, the approval, or the install stays on the computer.
+The body is a fixed sentence. It says to open the item on the phone. A workflow question or
+approval says to answer or approve there. Installing a desktop update stays on the computer.
 
 ## Delivery
 
@@ -73,9 +74,10 @@ after that, so the computer is not held open for the provider.
 The deep link is `yardsort://notice/{category}/{id}`. `id` is the server's notice id. The category
 in the path is `task`, `review`, `failure`, `desktop-update`, or `workflow`. The phone's screen
 shows the title and the body. It asks every account the phone is signed in to, the one in use
-first, so a notice for another signed-in account still opens. Answering, approving, and
-installing stay on the computer. A link with a query string is left alone, so a code cannot ride
-on it.
+first, so a notice for another signed-in account still opens. A workflow notice then opens the
+decision for that run. `GET` may add `runId`, `stepId`, and `hostId` for that. The push payload
+does not. Installing a desktop update stays on the computer. A link with a query string is left
+alone, so a code cannot ride on it.
 
 Permission is asked once, from Settings → Notifications, not when the app launches and not
 when a person signs in. Once it has been granted, the token is registered for every account

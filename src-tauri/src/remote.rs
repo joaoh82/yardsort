@@ -36,6 +36,7 @@ use tauri_specta::Event;
 use yardsort_core::remote::host::{self, CredentialStore, FileCredentials, LocalGrant};
 use yardsort_core::remote::serve::Context;
 use yardsort_core::remote::start::{Starter, Starting};
+use yardsort_core::remote::workflow::WorkflowGate;
 use yardsort_core::remote::HostIdentity;
 use yardsort_core::settings::SettingsFile;
 use yardsort_core::store::Store;
@@ -114,6 +115,7 @@ impl Home for AppHome {
             host: &HostIdentity { id, name: row.name },
             interactive: state.host.shares_control(),
             starting: Some(Arc::clone(&self.starting) as Arc<dyn Starting>),
+            workflow: Some(Arc::new(AppWorkflows(self.app.clone())) as Arc<dyn WorkflowGate>),
         });
     }
 
@@ -122,6 +124,30 @@ impl Home for AppHome {
             request: request.into(),
         }
         .emit(&self.app);
+    }
+}
+
+/// The desktop workflow driver, as a phone's channel reaches it. The code stays in the
+/// driver. This only hands it to the phone that asked, over the relay.
+struct AppWorkflows(AppHandle);
+
+impl WorkflowGate for AppWorkflows {
+    fn challenge(
+        &self,
+        store: &Store,
+        run_id: &str,
+        step_id: &str,
+    ) -> yardsort_core::store::StoreResult<Option<String>> {
+        match self.0.try_state::<crate::workflows::Driver>() {
+            Some(driver) => driver.code_for_phone(store, run_id, step_id),
+            None => Ok(None),
+        }
+    }
+
+    fn wake(&self) {
+        if let Some(driver) = self.0.try_state::<crate::workflows::Driver>() {
+            driver.wake();
+        }
     }
 }
 

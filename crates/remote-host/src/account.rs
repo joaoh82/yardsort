@@ -29,11 +29,12 @@ use yardsort_core::store::{RemoteHostRow, Store};
 use crate::{Access, AccessError, AccessFuture, Connector, Serving, Status};
 
 /// What viewing gives: everything a device can read, nothing it can type.
-pub const VIEW: [Scope; 4] = [
+pub const VIEW: [Scope; 5] = [
     Scope::WorkspaceRead,
     Scope::ActivityRead,
     Scope::MemoryRead,
     Scope::TerminalRead,
+    Scope::WorkflowRead,
 ];
 
 /// Where a host keeps what it is: its records, its settings and its credential, and what a
@@ -274,10 +275,38 @@ async fn flush_notices(home: &impl Home) {
             event_key: notice.event_key.clone(),
             category,
             kind: notice.kind,
+            run_id: notice.run_id.clone(),
+            step_id: notice.step_id.clone(),
         };
         match client.submit_notice(&access, &submission).await {
             Ok(_) => {
                 let _ = yardsort_core::notify::settle(home.store(), &notice.event_key, true);
+            }
+            Err(ClientError::Remote(error))
+                if error.code == ErrorCode::InvalidRequest && submission.run_id.is_some() =>
+            {
+                // An older server refuses the subject fields. Send the notice without them.
+                let bare = remote_proto::notify::NoticeSubmission {
+                    run_id: None,
+                    step_id: None,
+                    ..submission
+                };
+                match client.submit_notice(&access, &bare).await {
+                    Ok(_) => {
+                        let _ =
+                            yardsort_core::notify::settle(home.store(), &notice.event_key, true);
+                    }
+                    Err(ClientError::Remote(error))
+                        if matches!(
+                            error.code,
+                            ErrorCode::InvalidRequest | ErrorCode::Forbidden | ErrorCode::NotFound
+                        ) =>
+                    {
+                        let _ =
+                            yardsort_core::notify::settle(home.store(), &notice.event_key, false);
+                    }
+                    Err(_) => break,
+                }
             }
             Err(ClientError::Remote(error))
                 if matches!(
@@ -618,6 +647,9 @@ pub async fn answer(home: &impl Home, grant_id: String, answer: Answer) -> Resul
             if control {
                 offered.insert(Scope::TerminalControl);
             }
+            // A phone that asks may decide a workflow. A view-only pairing still offers it,
+            // and one that does not ask does not receive it. Terminal control does not grant it.
+            offered.insert(Scope::WorkflowDecide);
             let scopes: BTreeSet<Scope> = asked.requested.intersection(&offered).copied().collect();
             if scopes.is_empty() {
                 return Err(Failure::new(

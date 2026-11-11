@@ -71,6 +71,9 @@ pub fn approval_refusal(
         ApprovalWrite::CodeUnusable => {
             "That code cannot be checked. Open Yardsort to be shown a new one.".to_owned()
         }
+        ApprovalWrite::Conflict => {
+            "That decision was already sent with different contents.".to_owned()
+        }
     };
     Some(message)
 }

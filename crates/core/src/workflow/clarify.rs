@@ -333,6 +333,7 @@ pub fn answer_refusal(result: &AnswerWrite, run: &str, step: &str) -> Option<Str
         AnswerWrite::CodeUnusable => {
             "That code cannot be checked. Open Yardsort to be shown a new one.".to_owned()
         }
+        AnswerWrite::Conflict => "That answer was already sent with different contents.".to_owned(),
     };
     Some(message)
 }

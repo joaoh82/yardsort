@@ -67,6 +67,7 @@ impl Fixture {
             subscriptions: false,
             starting: None,
             terminals_later: None,
+            workflow: false,
         }
     }
 

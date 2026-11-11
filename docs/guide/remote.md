@@ -191,11 +191,18 @@ With Remote on, this computer can tell your phone when something needs a look.
 - A workflow run failed.
 - A newer desktop version is available. The same version can be mentioned again after a week.
   Installing it stays on this computer.
-- A workflow is waiting for a question or an approval. You answer and approve on this computer.
+- A workflow is waiting for a question or an approval. Open it on the phone to answer or
+  approve, while this computer is online. The action is not sent, and is not sent later, when
+  this computer is offline.
 
-The notification opens that item in the phone app. The phone does not answer, approve, or install.
-A one-time code stays on this computer. It can still appear in a notification here when
-Settings → General includes it. It is never in the one the phone receives.
+The notification opens that item in the phone app. A workflow question or approval opens the
+decision. Installing a desktop update stays on this computer. A one-time code can still appear
+in a notification here when Settings → General includes it. It is never in the one the phone
+receives. The phone asks this computer for the code when you decide, over the connection you
+signed in on, and it does not show the code.
+
+A phone paired before this needs to be unpaired and paired again. Saying yes at this computer
+offers the workflow permission. Being allowed to type in a terminal does not include it.
 
 On the phone, Settings → Notifications asks once for permission to send notifications. After
 that, the token is registered for every account this phone is signed in to, when the app starts

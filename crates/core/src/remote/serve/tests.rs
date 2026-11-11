@@ -176,6 +176,7 @@ impl Fixture {
             host: &self.identity,
             interactive: true,
             starting: None,
+            workflow: None,
         }
     }
 

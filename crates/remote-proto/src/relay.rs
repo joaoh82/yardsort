@@ -45,7 +45,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::account::Secret;
+use crate::account::{DeviceKind, Secret};
 use crate::ids::{DeviceId, GrantId, HostId};
 use crate::RemoteError;
 
@@ -140,11 +140,20 @@ pub enum Greeting {
 
 /// Sent to a host when a device connects: which device, and the grant the server has in force
 /// for it. The host lets it in only if its own record agrees.
+///
+/// `kind` is the signed-in device that asked for the ticket. A missing kind is [`DeviceKind::Other`],
+/// which cannot decide a workflow. An old relay that does not send it fails closed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelOpen {
     pub device: DeviceId,
     pub grant: GrantId,
+    #[serde(default = "unknown_kind")]
+    pub kind: DeviceKind,
+}
+
+fn unknown_kind() -> DeviceKind {
+    DeviceKind::Other
 }
 
 /// Why a socket or a channel was closed. On a socket, the WebSocket close code is
@@ -358,6 +367,7 @@ mod tests {
         let open = ChannelOpen {
             device: DeviceId::new("phone").unwrap(),
             grant: GrantId::new("g1").unwrap(),
+            kind: DeviceKind::Phone,
         };
         let output = [1u8, 1, 0, 0, 0xff];
         for frame in [

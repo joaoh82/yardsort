@@ -633,6 +633,11 @@ pub struct IncomingNotice {
     pub expires_at: i64,
     /// Preferences refused it. Kept so a later change does not send it after the fact.
     pub suppressed: bool,
+    /// A workflow notice's run. Absent otherwise, and dropped when it is not an id.
+    pub run_id: Option<String>,
+    pub step_id: Option<String>,
+    /// The host row of the computer that submitted it. The client does not choose this.
+    pub host_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -661,6 +666,9 @@ pub struct NoticePage {
     pub kind: String,
     pub title: String,
     pub body: String,
+    pub run_id: Option<String>,
+    pub step_id: Option<String>,
+    pub host_id: Option<String>,
 }
 
 /// What a delivery attempt came to.
@@ -690,6 +698,9 @@ struct NoticeRow {
     body: String,
     expires_at: i64,
     suppressed: bool,
+    run_id: Option<String>,
+    step_id: Option<String>,
+    host_id: Option<String>,
 }
 
 struct DeliveryRow {
@@ -1391,6 +1402,9 @@ impl Records for MemoryRecords {
                 body: notice.body.clone(),
                 expires_at: notice.expires_at,
                 suppressed,
+                run_id: notice.run_id.clone(),
+                step_id: notice.step_id.clone(),
+                host_id: notice.host_id.clone(),
             });
             if !suppressed {
                 for device in s.devices.iter().filter(|d| {
@@ -1475,6 +1489,9 @@ impl Records for MemoryRecords {
                     kind: n.kind.clone(),
                     title: n.title.clone(),
                     body: n.body.clone(),
+                    run_id: n.run_id.clone(),
+                    step_id: n.step_id.clone(),
+                    host_id: n.host_id.clone(),
                 })
         })
     }

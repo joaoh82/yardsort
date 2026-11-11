@@ -21,6 +21,9 @@ pub struct NoticeDraft {
     pub event_key: String,
     pub category: NoticeCategory,
     pub kind: &'static str,
+    /// The run and step a workflow notice opens. Never a one-time code.
+    pub run_id: Option<String>,
+    pub step_id: Option<String>,
 }
 
 impl NoticeDraft {
@@ -29,6 +32,8 @@ impl NoticeDraft {
             event_key: self.event_key.clone(),
             category: self.category,
             kind: self.kind.to_owned(),
+            run_id: self.run_id.clone(),
+            step_id: self.step_id.clone(),
         }
     }
 }
@@ -39,6 +44,8 @@ pub struct QueuedNotice {
     pub event_key: String,
     pub category: String,
     pub kind: String,
+    pub run_id: Option<String>,
+    pub step_id: Option<String>,
 }
 
 /// Keep `draft` until the server has accepted it. A key already waiting, sent, or dropped is
@@ -50,14 +57,16 @@ pub fn enqueue(store: &Store, draft: &NoticeDraft, now: i64) -> StoreResult<bool
 fn enqueue_on(conn: &rusqlite::Connection, draft: &NoticeDraft, now: i64) -> StoreResult<bool> {
     let written = conn.execute(
         "INSERT OR IGNORE INTO mobile_notice_outbox
-         (event_key, category, kind, created_at, expires_at, state)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'queued')",
+         (event_key, category, kind, created_at, expires_at, state, run_id, step_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6, ?7)",
         params![
             draft.event_key,
             category_name(draft.category),
             draft.kind,
             now,
             now.saturating_add(NOTICE_TTL_MS),
+            draft.run_id,
+            draft.step_id,
         ],
     )?;
     Ok(written > 0)
@@ -110,7 +119,7 @@ pub fn pending(store: &Store, now: i64) -> StoreResult<Vec<QueuedNotice>> {
     for key in keep {
         if let Some(row) = conn
             .query_row(
-                "SELECT event_key, category, kind FROM mobile_notice_outbox
+                "SELECT event_key, category, kind, run_id, step_id FROM mobile_notice_outbox
                  WHERE event_key = ?1 AND state = 'queued'",
                 [key],
                 |row| {
@@ -118,6 +127,8 @@ pub fn pending(store: &Store, now: i64) -> StoreResult<Vec<QueuedNotice>> {
                         event_key: row.get(0)?,
                         category: row.get(1)?,
                         kind: row.get(2)?,
+                        run_id: row.get(3)?,
+                        step_id: row.get(4)?,
                     })
                 },
             )
@@ -327,27 +338,59 @@ pub fn desktop_update(version: &str) -> Option<NoticeDraft> {
 }
 
 pub fn workflow_question(run_id: &str, step_id: &str, opened_at: i64) -> Option<NoticeDraft> {
-    draft(
-        NoticeCategory::Workflow,
-        "question",
-        &format!(
-            "question:{}:{}:{opened_at}",
-            piece(run_id, 80),
-            piece(step_id, 80)
+    about(
+        draft(
+            NoticeCategory::Workflow,
+            "question",
+            &format!(
+                "question:{}:{}:{opened_at}",
+                piece(run_id, 80),
+                piece(step_id, 80)
+            ),
         ),
+        run_id,
+        step_id,
     )
 }
 
 pub fn workflow_approval(run_id: &str, step_id: &str, opened_at: i64) -> Option<NoticeDraft> {
-    draft(
-        NoticeCategory::Workflow,
-        "approval",
-        &format!(
-            "approval:{}:{}:{opened_at}",
-            piece(run_id, 80),
-            piece(step_id, 80)
+    about(
+        draft(
+            NoticeCategory::Workflow,
+            "approval",
+            &format!(
+                "approval:{}:{}:{opened_at}",
+                piece(run_id, 80),
+                piece(step_id, 80)
+            ),
         ),
+        run_id,
+        step_id,
     )
+}
+
+/// Attach the run and step when both are ids and neither is a one-time code. Otherwise the
+/// notice still goes out, without a subject the phone could open.
+fn about(draft: Option<NoticeDraft>, run_id: &str, step_id: &str) -> Option<NoticeDraft> {
+    draft.map(|mut draft| {
+        if subject_ok(run_id) && subject_ok(step_id) {
+            draft.run_id = Some(run_id.to_owned());
+            draft.step_id = Some(step_id.to_owned());
+        }
+        draft
+    })
+}
+
+fn subject_ok(text: &str) -> bool {
+    remote_proto::ids::check_id(text).is_ok() && !looks_like_code(text)
+}
+
+fn looks_like_code(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() == 8
+        && bytes
+            .iter()
+            .all(|byte| b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".contains(byte))
 }
 
 /// The category prefix plus the hex SHA-256 of `rest`. The repository, the number and the run
@@ -367,6 +410,8 @@ fn draft(category: NoticeCategory, kind: &'static str, rest: &str) -> Option<Not
         event_key,
         category,
         kind,
+        run_id: None,
+        step_id: None,
     })
 }
 
