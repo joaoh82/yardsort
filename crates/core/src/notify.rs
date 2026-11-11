@@ -78,7 +78,7 @@ fn category_name(category: NoticeCategory) -> &'static str {
 /// does not hand the server the whole backlog.
 pub fn pending(store: &Store, now: i64) -> StoreResult<Vec<QueuedNotice>> {
     let conn = store.conn();
-    prune(&conn, now)?;
+    prune_outbox(&conn, now)?;
     conn.execute(
         "UPDATE mobile_notice_outbox SET state = 'expired'
          WHERE state = 'queued' AND expires_at <= ?1",
@@ -159,16 +159,25 @@ fn remember(conn: &rusqlite::Connection, key: &str, stamp: &str, now: i64) -> St
     Ok(())
 }
 
-fn prune(conn: &rusqlite::Connection, now: i64) -> StoreResult<()> {
+/// Sent, dropped and expired outbox rows older than a week. A desktop update that was sent is
+/// removed here, so the same version can be queued again: that later notice is a reminder.
+fn prune_outbox(conn: &rusqlite::Connection, now: i64) -> StoreResult<()> {
     let before = now.saturating_sub(WEEK_MS);
     conn.execute(
         "DELETE FROM mobile_notice_outbox
          WHERE state IN ('sent', 'dropped', 'expired') AND created_at < ?1",
         [before],
     )?;
+    Ok(())
+}
+
+/// Seen rows for `prefix` that this observation did not refresh. Items still in the list were
+/// just given a new `seen_at`, so only ones no longer listed are removed.
+fn prune_seen(conn: &rusqlite::Connection, prefix: &str, now: i64) -> StoreResult<()> {
+    let before = now.saturating_sub(WEEK_MS);
     conn.execute(
-        "DELETE FROM mobile_notice_seen WHERE seen_at < ?1",
-        [before],
+        "DELETE FROM mobile_notice_seen WHERE item_key LIKE ?1 AND seen_at < ?2",
+        params![format!("{prefix}%"), before],
     )?;
     Ok(())
 }
@@ -178,7 +187,7 @@ fn prune(conn: &rusqlite::Connection, now: i64) -> StoreResult<()> {
 pub fn observe_tasks(store: &Store, tasks: &[Task], now: i64) -> StoreResult<Vec<NoticeDraft>> {
     let mut out = Vec::new();
     let conn = store.conn();
-    prune(&conn, now)?;
+    prune_outbox(&conn, now)?;
     for task in tasks {
         let Some((slug, number)) = github_slug(&task.url) else {
             continue;
@@ -198,23 +207,29 @@ pub fn observe_tasks(store: &Store, tasks: &[Task], now: i64) -> StoreResult<Vec
             }
             continue;
         }
+        // Refresh seen_at even when nothing changed, so a week of quiet does not look like a
+        // first sighting the next time the stamp moves or the task finishes.
         if known.as_deref() != Some(stamp.as_str()) {
             if let Some(draft) = task_progress(&slug, number, &stamp) {
                 if enqueue_on(&conn, &draft, now)? {
                     out.push(draft);
                 }
             }
-            remember(&conn, &item, &stamp, now)?;
         }
-        if completed && seen(&conn, &format!("{item}:complete"))?.is_none() {
-            if let Some(draft) = task_complete(&slug, number) {
-                if enqueue_on(&conn, &draft, now)? {
-                    out.push(draft);
+        remember(&conn, &item, &stamp, now)?;
+        if completed {
+            let marker = format!("{item}:complete");
+            if seen(&conn, &marker)?.is_none() {
+                if let Some(draft) = task_complete(&slug, number) {
+                    if enqueue_on(&conn, &draft, now)? {
+                        out.push(draft);
+                    }
                 }
             }
-            remember(&conn, &format!("{item}:complete"), "1", now)?;
+            remember(&conn, &marker, "1", now)?;
         }
     }
+    prune_seen(&conn, "task:", now)?;
     Ok(out)
 }
 
@@ -227,7 +242,7 @@ pub fn observe_reviews(
 ) -> StoreResult<Vec<NoticeDraft>> {
     let mut out = Vec::new();
     let conn = store.conn();
-    prune(&conn, now)?;
+    prune_outbox(&conn, now)?;
     for pr in requests {
         if pr.state != crate::forge::PullRequestState::Open {
             continue;
@@ -256,6 +271,7 @@ pub fn observe_reviews(
             remember(&conn, &marker, "1", now)?;
         }
     }
+    prune_seen(&conn, "review:", now)?;
     Ok(out)
 }
 
@@ -667,7 +683,28 @@ mod tests {
         pending(&store, 1 + WEEK_MS + 1).unwrap();
         assert!(
             enqueue(&store, &kept, 2).unwrap(),
-            "a sent row older than a week is gone, so the key can be queued again"
+            "a sent desktop update older than a week is queued again, as a reminder"
         );
+    }
+
+    #[test]
+    fn an_idle_week_does_not_hide_the_next_change() {
+        let store = Store::in_memory();
+        let url = "https://github.com/Example/widgets/issues/91";
+        let first = task(url, "2026-10-02T18:00:00Z", None);
+        assert!(observe_tasks(&store, std::slice::from_ref(&first), 1)
+            .unwrap()
+            .is_empty());
+        let week = 1 + 8 * 24 * 60 * 60 * 1000;
+        assert!(
+            observe_tasks(&store, std::slice::from_ref(&first), week)
+                .unwrap()
+                .is_empty(),
+            "an unchanged task is still known after a week"
+        );
+        let done = task(url, "2026-10-02T18:00:00Z", Some(ClosedAs::Completed));
+        let complete = observe_tasks(&store, std::slice::from_ref(&done), week + 1).unwrap();
+        assert_eq!(complete.len(), 1);
+        assert_eq!(complete[0].kind, "complete");
     }
 }

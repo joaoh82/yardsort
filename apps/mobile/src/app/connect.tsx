@@ -11,6 +11,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState, useSyncExternalStore } from "react";
 
 import { type Found, messageOf } from "../lib/accounts";
+import { registerGrantedPush } from "../lib/push-token";
 import { useApp, useSnapshot } from "../lib/context";
 import { issuerHost } from "../lib/format";
 import { Body, Button, Card, Field, Mono, Problem, Screen, Title } from "../ui/parts";
@@ -47,8 +48,11 @@ export default function Connect() {
     setBusy("signingIn");
     setProblem(null);
     try {
-      if (await accounts.signIn(server, deviceName, browser)) onward();
-      else setProblem("The sign-in was closed before it finished.");
+      if (await accounts.signIn(server, deviceName, browser)) {
+        // Permission stays a Settings choice. A grant already given covers this account too.
+        await registerGrantedPush((read) => accounts.registerForNotifications(read));
+        onward();
+      } else setProblem("The sign-in was closed before it finished.");
     } catch (error) {
       setProblem(messageOf(error));
     } finally {

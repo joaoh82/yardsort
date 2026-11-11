@@ -36,7 +36,8 @@ a timer of their own. An item the computer has not seen before is recorded and s
 including a completed task on a later page and a pull request that was not in the last fetch. A
 later change of stamp on an item it has seen, a completion of one it has seen, or a review reason
 that appears on a pull request it has seen, is one notice. The same version of a desktop update
-is one notice on every computer of the account.
+is one notice on every computer of the account. A week after that version was sent, this
+computer may send it again. That second notice is an intentional reminder.
 
 An event key is at most 200 characters, starts with the category's prefix, and uses only lower
 case letters, digits, and `:._-`. Upper case is refused, so a one-time code cannot be hidden in
@@ -76,9 +77,12 @@ first, so a notice for another signed-in account still opens. Answering, approvi
 installing stay on the computer. A link with a query string is left alone, so a code cannot ride
 on it.
 
-Permission is asked once, from Settings → Notifications, not when the app launches. iOS tokens
+Permission is asked once, from Settings → Notifications, not when the app launches and not
+when a person signs in. Once it has been granted, the token is registered for every account
+this phone is signed in to, at app start and after a sign-in. iOS tokens
 are registered as APNs and Android tokens as FCM. A token the system rotates is registered
-again. A tap, including one that launched the app, opens the notice from `deepLink`. The app
+again. A tap, including one that launched the app, opens the notice from `deepLink`. The same
+tap is opened once. A notice that arrives while the app is open is shown. The app
 config carries the `aps-environment` entitlement and a placeholder `google-services.json`. A
 real Firebase file replaces the placeholder through `GOOGLE_SERVICES_JSON`. Neither file is a
 credential that can send.
@@ -128,12 +132,16 @@ Two queues, both with a one-day expiry.
 
 An account may have 100 notices still waiting. Notices already sent do not count. Past 100, a
 new one is stored so it is not sent later, and the drop is logged with the account and the count.
-Sent, dropped and expired rows in the computer's outbox, and items it recorded as seen, are
-deleted after a week.
+Sent, dropped and expired rows in the computer's outbox are deleted after a week. An item
+still in the list just fetched keeps its seen row, so a week of quiet does not hide the next
+change, including a completion. An item no longer listed is deleted after a week. A desktop
+update that was sent more than a week ago is removed on purpose, so the same version can be
+offered again as a reminder.
 
 A token the provider says is gone is forgotten. For FCM that is HTTP 404 with
-`error.details[].errorCode` of `UNREGISTERED`. For APNs that is HTTP 410 with a JSON reason of
-`BadDeviceToken` or `Unregistered`. A `NOT_FOUND` that is not `UNREGISTERED` leaves the token in
+`error.details[].errorCode` of `UNREGISTERED`. For APNs that is HTTP 400 with a JSON reason of
+`BadDeviceToken`, or HTTP 410 with a JSON reason of `Unregistered` or `ExpiredToken`. A
+`NOT_FOUND` that is not `UNREGISTERED` leaves the token in
 place, so a wrong project id does not wipe every phone. An APNs 403 of `ExpiredProviderToken` or
 `InvalidProviderToken` drops the cached provider token and tries again next time. The notice is
 not sent to a token that is gone. Revoking a phone, or the account, deletes its token, and a

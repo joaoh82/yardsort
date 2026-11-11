@@ -189,14 +189,17 @@ With Remote on, this computer can tell your phone when something needs a look.
 - A task moved forward, or finished.
 - A review needs attention: checks failed, it conflicts, changes were requested, or it has no review yet.
 - A workflow run failed.
-- A newer desktop version is available. Installing it stays on this computer.
+- A newer desktop version is available. The same version can be mentioned again after a week.
+  Installing it stays on this computer.
 - A workflow is waiting for a question or an approval. You answer and approve on this computer.
 
 The notification opens that item in the phone app. The phone does not answer, approve, or install.
 A one-time code stays on this computer. It can still appear in a notification here when
 Settings → General includes it. It is never in the one the phone receives.
 
-On the phone, Settings → Notifications asks once for permission to send notifications, then can
+On the phone, Settings → Notifications asks once for permission to send notifications. After
+that, the token is registered for every account this phone is signed in to, when the app starts
+and after a sign-in. The screen can
 mute everything for this account, or turn one of those categories off. A tap opens the item,
 including when the app was not running. A notice that was skipped while a category was off is not
 sent later if you turn it back on. A new event after that is.

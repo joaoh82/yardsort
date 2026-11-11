@@ -493,15 +493,35 @@ export class Accounts {
     });
   }
 
-  /** Register a push token when the phone has one, and ask for anything still queued. */
+  /**
+   * Register a push token when the phone has one, and ask for anything still queued, for every
+   * account this phone is signed in to. The one in use is first. One account that cannot be
+   * reached does not stop the others. When none could, the last error is thrown.
+   */
   async registerForNotifications(
     readToken: () => Promise<{ platform: "apns" | "fcm"; token: string } | null>,
   ): Promise<void> {
     const token = await readToken();
-    await this.#withAccess(async (session, access) => {
-      if (token) await session.client.registerPushToken(access, token);
-      await session.client.markNotificationsReachable(access);
-    });
+    const index = this.#need();
+    const ordered = [
+      ...(index.active ? [index.active] : []),
+      ...index.all.filter((profile) => profile.id !== index.active?.id),
+    ];
+    if (ordered.length === 0) return;
+    let last: unknown;
+    let registered = false;
+    for (const profile of ordered) {
+      try {
+        await this.#withAccessOf(profile, this.#sessionOf(profile), async (session, access) => {
+          if (token) await session.client.registerPushToken(access, token);
+          await session.client.markNotificationsReachable(access);
+        });
+        registered = true;
+      } catch (error) {
+        last = error;
+      }
+    }
+    if (!registered && last !== undefined) throw last;
   }
 
   /**

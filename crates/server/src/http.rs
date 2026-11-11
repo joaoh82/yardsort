@@ -21,7 +21,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::WebSocketUpgrade;
-use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Extension, Path, Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -202,14 +202,18 @@ enum Answer {
 
 async fn limited<R: Records>(
     State(gate): State<Arc<Gate<R>>>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Response {
     // The bearer is copied out before any await. Holding a borrow of the request across one
     // makes this middleware's future unsendable, which axum refuses.
     let bearer = presented_bearer(&request);
     let fallback = client_address(&request, gate.client_ip_header.as_ref());
-    let address = device_or_address(&gate, bearer.as_deref(), fallback).await;
+    let (address, known) = device_or_address(&gate, bearer.as_deref(), fallback).await;
+    if let Some(caller) = known {
+        // The three notice routes read this and skip a second authenticate of the same token.
+        request.extensions_mut().insert(caller);
+    }
     let records = &gate.service.records;
     let shared = match gate.limiter.check(address, Instant::now()) {
         Ok(()) => crate::limit::take_shared(records, gate.name, address, gate.per_minute).await,
@@ -256,20 +260,21 @@ fn presented_bearer(request: &Request) -> Option<String> {
 }
 
 /// The device, when this gate counts devices and the access token names one. Otherwise `fallback`.
+/// A caller that authenticated is returned so the handler does not ask again.
 async fn device_or_address<R: Records>(
     gate: &Gate<R>,
     bearer: Option<&str>,
     fallback: IpAddr,
-) -> IpAddr {
+) -> (IpAddr, Option<Caller>) {
     if !gate.per_device {
-        return fallback;
+        return (fallback, None);
     }
     let Some(access) = bearer else {
-        return fallback;
+        return (fallback, None);
     };
     match gate.service.authenticate(access, now_ms()).await {
-        Ok(caller) => device_address(&caller.device),
-        Err(_) => fallback,
+        Ok(caller) => (device_address(&caller.device), Some(caller)),
+        Err(_) => (fallback, None),
     }
 }
 
@@ -699,12 +704,16 @@ fn answer<T: Serialize>(result: Result<T, RemoteError>) -> Response {
 
 async fn submit_notice<R: Records + Clone + 'static>(
     State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
     headers: HeaderMap,
     body: Result<Json<NoticeSubmission>, JsonRejection>,
 ) -> Response {
-    let caller = match caller(&service, &headers).await {
-        Ok(caller) => caller,
-        Err(error) => return failure(error),
+    let caller = match known {
+        Some(Extension(caller)) => caller,
+        None => match caller(&service, &headers).await {
+            Ok(caller) => caller,
+            Err(error) => return failure(error),
+        },
     };
     let submission = match body_of(body, "That notice is not one Yardsort sends.") {
         Ok(submission) => submission,
@@ -715,12 +724,16 @@ async fn submit_notice<R: Records + Clone + 'static>(
 
 async fn save_push_token<R: Records>(
     State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
     headers: HeaderMap,
     body: Result<Json<PushRegistration>, JsonRejection>,
 ) -> Response {
-    let caller = match caller(&service, &headers).await {
-        Ok(caller) => caller,
-        Err(error) => return failure(error),
+    let caller = match known {
+        Some(Extension(caller)) => caller,
+        None => match caller(&service, &headers).await {
+            Ok(caller) => caller,
+            Err(error) => return failure(error),
+        },
     };
     let registration = match body_of(body, "That push token cannot be used.") {
         Ok(registration) => registration,
@@ -770,11 +783,15 @@ async fn set_notification_preferences<R: Records>(
 
 async fn mark_reachable<R: Records>(
     State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
     headers: HeaderMap,
 ) -> Response {
-    let caller = match caller(&service, &headers).await {
-        Ok(caller) => caller,
-        Err(error) => return failure(error),
+    let caller = match known {
+        Some(Extension(caller)) => caller,
+        None => match caller(&service, &headers).await {
+            Ok(caller) => caller,
+            Err(error) => return failure(error),
+        },
     };
     answer(service.mark_reachable(&caller, now_ms()).await)
 }

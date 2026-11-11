@@ -393,12 +393,14 @@ fn signs(key: &jsonwebtoken::EncodingKey, algorithm: jsonwebtoken::Algorithm) ->
     .is_ok()
 }
 
-/// APNs: the token is gone only on 410 with a JSON reason of `BadDeviceToken` or `Unregistered`.
+/// APNs: the token is gone on 400 `BadDeviceToken`, or on 410 `Unregistered` or `ExpiredToken`.
 fn classify_apns(status: u16, body: &str) -> PushOutcome {
     if (200..300).contains(&status) {
         return PushOutcome::Sent;
     }
-    if status == 410 && apns_reason_is(body, &["BadDeviceToken", "Unregistered"]) {
+    let gone = (status == 400 && apns_reason_is(body, &["BadDeviceToken"]))
+        || (status == 410 && apns_reason_is(body, &["Unregistered", "ExpiredToken"]));
+    if gone {
         tracing::info!(status, "a push token is no longer registered");
         return PushOutcome::Gone;
     }
@@ -554,7 +556,7 @@ mod tests {
     }
 
     #[test]
-    fn only_an_unregistered_token_is_gone() {
+    fn only_a_dead_token_is_gone() {
         let unregistered = r#"{"error":{"code":404,"status":"NOT_FOUND","details":[{"errorCode":"UNREGISTERED"}]}}"#;
         assert_eq!(classify_fcm(404, unregistered), PushOutcome::Gone);
         let wrong_project = r#"{"error":{"code":404,"status":"NOT_FOUND","message":"NOT_FOUND"}}"#;
@@ -569,11 +571,19 @@ mod tests {
         );
         assert_eq!(
             classify_apns(410, r#"{"reason":"BadDeviceToken"}"#),
+            PushOutcome::Unreachable
+        );
+        assert_eq!(
+            classify_apns(410, r#"{"reason":"ExpiredToken"}"#),
             PushOutcome::Gone
         );
         assert_eq!(classify_apns(410, "Unregistered"), PushOutcome::Unreachable);
         assert_eq!(
             classify_apns(400, r#"{"reason":"BadDeviceToken"}"#),
+            PushOutcome::Gone
+        );
+        assert_eq!(
+            classify_apns(400, r#"{"reason":"BadTopic"}"#),
             PushOutcome::Unreachable
         );
         assert_eq!(classify_apns(200, ""), PushOutcome::Sent);

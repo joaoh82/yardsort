@@ -5,9 +5,11 @@ import { describe, expect, test } from "bun:test";
 
 import {
   bindPush,
+  enableForegroundNotices,
   mapDeviceToken,
   routeFromNotificationData,
   type PushRuntime,
+  type PushTap,
 } from "../../src/lib/push-token";
 
 const ID = "11111111-1111-4111-8111-111111111111";
@@ -35,12 +37,17 @@ describe("a notification tap", () => {
     const opened: string[] = [];
     // A property, not a `let`. Assigning the callback into a `let` makes TypeScript
     // narrow that variable to `never` at the call.
-    const taps: { current: ((data: unknown) => void) | null } = { current: null };
-    let last: { data: unknown } | null = {
+    const taps: { current: ((tap: PushTap) => void) | null } = { current: null };
+    let last: PushTap | null = {
+      id: "cold",
       data: { deepLink: `yardsort://notice/workflow/${ID}` },
     };
+    let cleared = 0;
     const runtime: PushRuntime = {
       getLastNotificationResponseAsync: async () => last,
+      clearLastNotificationResponseAsync: () => {
+        cleared += 1;
+      },
       addNotificationResponseReceivedListener: (handler) => {
         taps.current = handler;
         return { remove: () => {} };
@@ -56,10 +63,12 @@ describe("a notification tap", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(opened).toEqual([`/notice/${ID}`]);
+    expect(cleared).toBe(1);
     last = null;
-    taps.current?.({ deepLink: `yardsort://notice/review/${ID}` });
+    taps.current?.({ id: "cold", data: { deepLink: `yardsort://notice/review/${ID}` } });
+    taps.current?.({ id: "later", data: { deepLink: `yardsort://notice/review/${ID}` } });
     expect(opened).toEqual([`/notice/${ID}`, `/notice/${ID}`]);
-    taps.current?.({ deepLink: "yardsort://signed-in?code=Q7K2M9NP" });
+    taps.current?.({ id: "code", data: { deepLink: "yardsort://signed-in?code=Q7K2M9NP" } });
     expect(opened).toHaveLength(2);
   });
 
@@ -83,5 +92,24 @@ describe("a notification tap", () => {
     rotated.current?.("android", "next");
     rotated.current?.("web", "ignored");
     expect(tokens).toEqual(["apns:rotated", "fcm:next"]);
+  });
+
+  test("shows a foreground notice and creates the default channel first", async () => {
+    const channels: string[] = [];
+    let shown = false;
+    await enableForegroundNotices({
+      setNotificationHandler: (handler) => {
+        void handler.handleNotification().then((behavior) => {
+          shown = behavior.shouldShowBanner && behavior.shouldShowList && behavior.shouldPlaySound;
+        });
+      },
+      setNotificationChannelAsync: async (id) => {
+        channels.push(id);
+        return null;
+      },
+    });
+    await Promise.resolve();
+    expect(channels).toEqual(["default"]);
+    expect(shown).toBe(true);
   });
 });

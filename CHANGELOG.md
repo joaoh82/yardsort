@@ -10,8 +10,11 @@ has the downloads and the full commit lists.
   update, and a workflow question or approval each send one notification. It opens that item
   in the phone app. You answer, approve, and install on the computer. The phone notification
   never includes a one-time code. On the phone, Settings → Notifications asks once for
-  permission, then can mute all of them for this account or turn a category off. A tap opens
-  the item, including when the app was not running. Task and review notices are sent when
+  permission. After that the token is registered for every account this phone is signed in to,
+  when the app starts and after a sign-in. The screen can mute all of them for this account or
+  turn a category off. A tap opens
+  the item, including when the app was not running. The same desktop version can be mentioned
+  again after a week. Task and review notices are sent when
   this computer loads those lists. A notice waits up to a day when the phone or the server cannot be
   reached, and is delivered once when it can. See
   [Notifications](docs/guide/remote.md#notifications).

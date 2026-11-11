@@ -15,11 +15,54 @@ export type DevicePushToken = { platform: "apns" | "fcm"; token: string };
 
 export type PushTokenReader = () => Promise<DevicePushToken | null>;
 
+/** One tap: the request's identifier, so a cold start and the listener are the same tap once. */
+export interface PushTap {
+  id: string;
+  data: unknown;
+}
+
 /** What a tap handler needs of the notifications module. Tests pass a stand-in. */
 export interface PushRuntime {
-  getLastNotificationResponseAsync(): Promise<{ data: unknown } | null>;
-  addNotificationResponseReceivedListener(handler: (data: unknown) => void): { remove(): void };
+  getLastNotificationResponseAsync(): Promise<PushTap | null>;
+  /** Present when the module can forget the tap that launched the app. */
+  clearLastNotificationResponseAsync?(): Promise<void> | void;
+  addNotificationResponseReceivedListener(handler: (tap: PushTap) => void): { remove(): void };
   addPushTokenListener(handler: (os: string, data: unknown) => void): { remove(): void };
+}
+
+/** What showing a notice while the app is open needs. Tests pass a stand-in. */
+export interface ForegroundNotices {
+  setNotificationHandler(handler: {
+    handleNotification: () => Promise<{
+      shouldShowBanner: boolean;
+      shouldShowList: boolean;
+      shouldPlaySound: boolean;
+      shouldSetBadge: boolean;
+    }>;
+  }): void;
+  setNotificationChannelAsync(
+    id: string,
+    channel: { name: string; importance: number },
+  ): Promise<unknown>;
+}
+
+/** Shown while the app is open: banner, list and sound. The badge is left alone. */
+const FOREGROUND = {
+  shouldShowBanner: true,
+  shouldShowList: true,
+  shouldPlaySound: true,
+  shouldSetBadge: false,
+};
+
+/**
+ * Android needs a channel before permission is asked, or the prompt has nowhere to deliver.
+ * The same call installs the handler that shows a notice while the app is open.
+ */
+export async function enableForegroundNotices(runtime: ForegroundNotices): Promise<void> {
+  runtime.setNotificationHandler({
+    handleNotification: async () => FOREGROUND,
+  });
+  await runtime.setNotificationChannelAsync("default", { name: "Notices", importance: 5 });
 }
 
 /** iOS is APNs and Android is FCM. Anything else, or an empty token, is not registered. */
@@ -50,14 +93,18 @@ export function bindPush(
   open: (route: string) => void,
   onToken: (token: DevicePushToken) => void,
 ): () => void {
-  const openData = (data: unknown) => {
-    const route = routeFromNotificationData(data);
+  const seen = new Set<string>();
+  const openTap = (tap: PushTap) => {
+    if (tap.id !== "" && seen.has(tap.id)) return;
+    if (tap.id !== "") seen.add(tap.id);
+    const route = routeFromNotificationData(tap.data);
     if (route) open(route);
   };
   void runtime.getLastNotificationResponseAsync().then((last) => {
-    if (last) openData(last.data);
+    if (last) openTap(last);
+    void runtime.clearLastNotificationResponseAsync?.();
   });
-  const taps = runtime.addNotificationResponseReceivedListener(openData);
+  const taps = runtime.addNotificationResponseReceivedListener(openTap);
   const tokens = runtime.addPushTokenListener((os, data) => {
     const token = mapDeviceToken(os, data);
     if (token) onToken(token);
@@ -72,6 +119,7 @@ export function bindPush(
 export async function requestPushPermissionOnce(): Promise<boolean> {
   try {
     const Notifications = await import("expo-notifications");
+    await enableForegroundNotices(Notifications);
     const current = await Notifications.getPermissionsAsync();
     if (current.status !== "undetermined") return current.granted;
     const next = await Notifications.requestPermissionsAsync();
@@ -94,6 +142,23 @@ export const readPushToken: PushTokenReader = async () => {
 };
 
 /**
+ * Register with the accounts already signed in, when permission was granted earlier.
+ * Does not ask. Settings is the only place that asks.
+ */
+export async function registerGrantedPush(
+  register: (readToken: PushTokenReader) => Promise<void>,
+): Promise<void> {
+  try {
+    const Notifications = await import("expo-notifications");
+    const current = await Notifications.getPermissionsAsync();
+    if (!current.granted) return;
+    await register(readPushToken);
+  } catch {
+    // A phone without the native module, or a server that cannot be reached, stays quiet.
+  }
+}
+
+/**
  * Install the tap and token listeners for the life of the app. Does not ask for permission.
  * The unsubscribe is safe to call before the native module has finished loading.
  */
@@ -104,16 +169,27 @@ export function installPushHandlers(
   let stop = () => {};
   let gone = false;
   void import("expo-notifications")
-    .then((Notifications) => {
+    .then(async (Notifications) => {
+      if (gone) return;
+      await enableForegroundNotices(Notifications);
       if (gone) return;
       const runtime: PushRuntime = {
         getLastNotificationResponseAsync: async () => {
           const last = await Notifications.getLastNotificationResponseAsync();
-          return last ? { data: last.notification.request.content.data } : null;
+          return last
+            ? {
+                id: last.notification.request.identifier,
+                data: last.notification.request.content.data,
+              }
+            : null;
         },
+        clearLastNotificationResponseAsync: Notifications.clearLastNotificationResponseAsync,
         addNotificationResponseReceivedListener: (handler) =>
           Notifications.addNotificationResponseReceivedListener((response) => {
-            handler(response.notification.request.content.data);
+            handler({
+              id: response.notification.request.identifier,
+              data: response.notification.request.content.data,
+            });
           }),
         addPushTokenListener: (handler) =>
           Notifications.addPushTokenListener((token) => {
