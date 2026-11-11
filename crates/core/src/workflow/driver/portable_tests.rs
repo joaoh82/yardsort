@@ -3294,3 +3294,80 @@ fn starting_a_session_clears_an_untracked_factory_note_and_not_the_shared_exclud
         "a second tick wrote factory/.gitignore again"
     );
 }
+
+/// A committed note under `factory/` is the project's. Clearing a rewrite must leave it.
+const REWRITE_TRACKED: &str = r#"id: notes
+name: Notes
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: write
+    action: start_session
+    harness: claude
+    prompt: write the plan
+  - id: saved
+    needs: [write]
+    action: wait_session
+    session: "{{ steps.write.session }}"
+    until: settled
+    produces:
+      - name: kept
+        path: factory/kept.md
+"#;
+
+#[test]
+fn a_tracked_file_under_factory_survives_the_rewrite_clear() {
+    let repo = tempfile::tempdir().unwrap();
+    let git = git();
+    git.run(repo.path(), &["init"]).unwrap();
+    std::fs::create_dir_all(repo.path().join("factory")).unwrap();
+    std::fs::write(repo.path().join("factory/kept.md"), "committed note").unwrap();
+    git.run(repo.path(), &["add", "factory/kept.md"]).unwrap();
+    git.run(repo.path(), &["commit", "-m", "keep the note"])
+        .unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("yardsort.db")).unwrap();
+    let project = store.add_project("app", "/code/app").unwrap();
+    let workspace = store
+        .add_worktree(
+            &project.id,
+            "fix-login",
+            repo.path().to_str().unwrap(),
+            Some("main"),
+            None,
+        )
+        .unwrap();
+    let folder = crate::workflow::user_dir(dir.path());
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("notes.yaml"), REWRITE_TRACKED).unwrap();
+    queue(
+        &store,
+        dir.path(),
+        &Request {
+            workflow_id: "notes",
+            workspace_id: &workspace.id,
+            inputs: &BTreeMap::new(),
+            requested_by: "cli",
+            unattended: false,
+            origin_record: None,
+            depth: 0,
+            event: None,
+            tracked: None,
+        },
+        &crate::workflow::runs::Accepting::default(),
+    )
+    .unwrap();
+
+    let host = PtyHost::new(Arc::new(|_| {}));
+    let hands = Starting {
+        notified: Mutex::new(Vec::new()),
+    };
+    Driver::default().tick(&store, &host, &hands, &git).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("factory/kept.md")).unwrap(),
+        "committed note",
+        "a tracked file under factory/ was deleted"
+    );
+}
