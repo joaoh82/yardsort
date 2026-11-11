@@ -1,5 +1,34 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { layoutSteps } from "./layout";
+
+/** The steps of the shipped factory, read from the yaml the app runs, not a copy of it. */
+function softwareFactorySteps(): { id: string; needs: string[]; routes?: { to: string }[] }[] {
+  const file = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../../crates/core/src/workflow/builtin/software-factory.yaml",
+  );
+  const body = (readFileSync(file, "utf8").split("\nsteps:\n")[1] ?? "").replace(/^ {2}- id: /, "");
+  return body
+    .split(/\n {2}- id: /)
+    .filter((chunk) => chunk.trim().length > 0)
+    .map((chunk) => {
+      const id = chunk.split("\n")[0]?.trim() ?? "";
+      const listed = chunk.match(/\n {4}needs: \[([^\]]*)\]/)?.[1] ?? "";
+      const needs = listed
+        .split(",")
+        .map((name) => name.trim())
+        .filter((name) => name.length > 0);
+      const routes = (chunk.match(/\n {4}on:\n((?: {6}.+\n)*)/)?.[1] ?? "")
+        .split("\n")
+        .map((line) => line.split(":")[1]?.trim() ?? "")
+        .filter((to) => to.length > 0)
+        .map((to) => ({ to }));
+      return routes.length > 0 ? { id, needs, routes } : { id, needs };
+    });
+}
 
 const at = (placed: { id: string; x: number; y: number }[], id: string) =>
   placed.find((node) => node.id === id)!;
@@ -56,35 +85,10 @@ describe("layoutSteps", () => {
   });
 
   it("draws the software factory as one column, with the three loops back", () => {
-    const { nodes, links } = layoutSteps([
-      { id: "define", needs: [] },
-      { id: "brief", needs: ["define"] },
-      { id: "gather", needs: ["brief"] },
-      { id: "context", needs: ["gather"] },
-      { id: "plan", needs: ["context"] },
-      { id: "plan-ready", needs: ["plan"] },
-      {
-        id: "approve-plan",
-        needs: ["plan-ready"],
-        routes: [{ to: "implement" }, { to: "plan" }, { to: "stop" }],
-      },
-      { id: "implement", needs: ["approve-plan"] },
-      { id: "implement-ready", needs: ["implement"] },
-      {
-        id: "verify",
-        needs: ["implement-ready"],
-        routes: [{ to: "await-review" }, { to: "implement" }],
-      },
-      { id: "await-review", needs: ["verify"] },
-      {
-        id: "accept-review",
-        needs: ["await-review"],
-        routes: [{ to: "release" }, { to: "implement" }, { to: "stop" }],
-      },
-      { id: "release", needs: ["accept-review"] },
-      { id: "ready", needs: ["release"] },
-    ]);
-    const order = [
+    const steps = softwareFactorySteps();
+    const { nodes, links } = layoutSteps(steps);
+    const order = steps.map((step) => step.id);
+    expect(order).toEqual([
       "define",
       "brief",
       "gather",
@@ -99,7 +103,7 @@ describe("layoutSteps", () => {
       "accept-review",
       "release",
       "ready",
-    ];
+    ]);
     const y = (id: string) => at(nodes, id).y;
     for (let i = 1; i < order.length; i++) {
       const above = order[i - 1];

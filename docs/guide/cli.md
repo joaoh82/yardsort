@@ -614,9 +614,11 @@ while Yardsort is closed, because the app is what carries runs out. It refuses o
 [computer with no screen](headless-host.md#projects-and-agents) too, where `yardsort-host` has the
 profile and carries no runs out yet; so do `ys test run` and `ys schedule run`. Inside a workspace's folder,
 or in an agent's terminal there, `--workspace` can be left out. It prints the run's id and
-returns at once. A workflow that uses the pull request needs the GitHub CLI (`gh`), logged in,
-and an open pull request for the workspace's branch. A run id can be shortened to its first
-characters, as `runs` prints it. `--json` works as everywhere.
+returns at once. A workflow that uses the pull request needs the GitHub CLI (`gh`), logged in.
+It can start before the branch has an open pull request; a later step looks again. `gh` not
+answering refuses the run, and a workflow about a pull request elsewhere still needs that one.
+A run id can be shortened to its first characters, as `runs` prints it. `--json` works as
+everywhere.
 
 `approve`, `reject` and `request-changes` record your decision on a step that is waiting
 for approval. Leave `--code` out and `ys` asks at the terminal without echoing, when both

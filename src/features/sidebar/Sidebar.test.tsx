@@ -688,6 +688,7 @@ describe("Sidebar", () => {
       needsPullRequest: true,
       pullRequest: null,
       pullRequestProblem: "`feature` has no open pull request.",
+      pullRequestNote: null,
       needsOrigin: true,
     });
     await renderWithWorktree();

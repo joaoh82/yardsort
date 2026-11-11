@@ -9,7 +9,7 @@
 //! does, showing a notification, and writing the handoff packet, which needs git and the login
 //! environment. Typing into a session needs only the terminal host, so it is done here.
 
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
@@ -21,7 +21,7 @@ use super::engine::{
     self, ApprovalDecision, Effect, Finish, Inputs, Move, Outputs, Plan, PrSeen, RecordedApproval,
     SessionFacts, StepOutcome, TestRun, World,
 };
-use super::runs::{self, Facts, Place};
+use super::runs::{self, Facts, Place, PrFacts};
 use super::{artifact, ArtifactSource, PrActivity, SessionRef};
 use crate::error::IpcResult;
 use crate::forge::{PrPost, PrPostKind};
@@ -53,6 +53,14 @@ pub trait Hands {
     /// once: the job it returns is what does the asking, on a thread of its own, and must give
     /// up by itself — the app's stops `gh` after [`FORGE_LIMIT`].
     fn pr_posts(&self, workspace_id: &str, pr: &super::runs::PrFacts) -> PrAsk;
+
+    /// A job that asks whether the workspace has an open pull request. Called on the driver's
+    /// thread, so it returns at once: the job it returns does the asking, on a thread of its
+    /// own. `Ok(None)` is an answer: the branch has no open pull request. The default is that
+    /// answer, so a test that queued the run with one already known does not have to ask.
+    fn open_pull_request(&self, _workspace_id: &str) -> OpenPr {
+        Box::new(|| Ok(None))
+    }
 
     /// One session's conversation, for a step that asked for a transcript. `raw` asks for each
     /// turn's own text. Without it, the budgeted digest. [`Conversation::Ready`]`(None)` when
@@ -115,6 +123,9 @@ pub enum Conversation {
 /// Asking the forge, as a job for a thread of its own.
 pub type PrAsk = Box<dyn FnOnce() -> Result<Vec<PrPost>, String> + Send + 'static>;
 
+/// Asking whether the workspace has an open pull request, as a job for a thread of its own.
+pub type OpenPr = Box<dyn FnOnce() -> Result<Option<PrFacts>, String> + Send + 'static>;
+
 /// How long one question to the forge may take before it is given up on.
 pub const FORGE_LIMIT: Duration = Duration::from_secs(60);
 
@@ -138,6 +149,8 @@ pub struct Driver {
     /// What the forge last said about each run's pull request. Shared with the threads that
     /// ask it, which put their answers here.
     forge: std::sync::Arc<Mutex<HashMap<String, Asked>>>,
+    /// A pull request looked up after the run was queued, because the branch had none then.
+    pulls: std::sync::Arc<Mutex<HashMap<String, PullLookup>>>,
     forge_every_ms: i64,
     /// Something about a run changed during the current tick.
     touched: std::sync::atomic::AtomicBool,
@@ -166,6 +179,7 @@ impl Driver {
             settled: Settled::new(settle_busy_ms),
             recovered: Mutex::new(HashSet::new()),
             forge: std::sync::Arc::new(Mutex::new(HashMap::new())),
+            pulls: std::sync::Arc::new(Mutex::new(HashMap::new())),
             forge_every_ms: i64::try_from(forge_every.as_millis()).unwrap_or(i64::MAX),
             touched: std::sync::atomic::AtomicBool::new(false),
             active: Mutex::new(HashSet::new()),
@@ -361,6 +375,10 @@ impl Driver {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .retain(|id, _| runs.iter().any(|run| &run.id == id));
+        self.pulls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|id, _| runs.iter().any(|run| &run.id == id));
         // What is active now, after this tick's own moves, is what the next tick compares to:
         // a run this tick finished is not news then.
         *self.active.lock().unwrap_or_else(PoisonError::into_inner) = store
@@ -416,6 +434,66 @@ impl Driver {
         }
         asked.posts.clone()
     }
+
+    /// The open pull request looked up for a run that was queued without one.
+    ///
+    /// The same throttle as [`Self::pr_posts`]: a slow forge must not hold the tick, and a
+    /// branch with no pull request is not asked again until the interval has passed.
+    fn open_pr(&self, run_id: &str, ask: impl FnOnce() -> OpenPr) -> Open {
+        let now = now_ms();
+        let mut pulls = self.pulls.lock().unwrap_or_else(PoisonError::into_inner);
+        let slot = pulls.entry(run_id.to_owned()).or_default();
+        let due = slot.found.is_none() || now - slot.at >= self.forge_every_ms;
+        if due && !slot.waiting {
+            slot.at = now;
+            slot.waiting = true;
+            let job = ask();
+            let answers = std::sync::Arc::clone(&self.pulls);
+            let run = run_id.to_owned();
+            let spawned = std::thread::Builder::new()
+                .name("workflow-pr".into())
+                .spawn(move || {
+                    let answer = job();
+                    let mut pulls = answers.lock().unwrap_or_else(PoisonError::into_inner);
+                    let Some(slot) = pulls.get_mut(&run) else {
+                        return;
+                    };
+                    slot.waiting = false;
+                    match answer {
+                        Ok(pr) => slot.found = Some(pr),
+                        Err(why) => {
+                            eprintln!("workflows: run {run}: cannot find the pull request: {why}");
+                        }
+                    }
+                });
+            if spawned.is_err() {
+                slot.waiting = false;
+            }
+        }
+        match &slot.found {
+            None => Open::Looking,
+            Some(None) => Open::Missing,
+            Some(Some(pr)) => Open::Found(pr.clone()),
+        }
+    }
+}
+
+/// What a later look found for a run that started with no pull request.
+#[derive(Debug, Default)]
+struct PullLookup {
+    at: i64,
+    waiting: bool,
+    /// `None` until the forge has answered. `Some(None)` means it answered: no open one.
+    found: Option<Option<PrFacts>>,
+}
+
+/// A pull request looked up after the run was queued.
+enum Open {
+    /// The question is out, or has not been answered.
+    Looking,
+    /// Asked, and the branch has no open pull request.
+    Missing,
+    Found(PrFacts),
 }
 
 /// When each session last went quiet after real work, from the host's events. Kept in memory:
@@ -488,18 +566,20 @@ fn move_on(
         note_run_finished(store, &run.id, "failed");
         return Ok(());
     };
-    let mut facts = Facts::parse(&run.context);
+    let facts = RefCell::new(Facts::parse(&run.context));
     let mut started_at = run.started_at;
     if run.status == "queued" {
         // The workspace's own agent is whichever was newest when the run began: found now,
         // before the run has started any of its own for it to be mistaken for.
         if runs::needs_origin(&workflow) {
             let opened_by = facts
+                .borrow()
                 .pr
                 .as_ref()
                 .and_then(|pr| pr.elsewhere.as_ref())
                 .and_then(|elsewhere| elsewhere.opened_by.clone());
-            facts.origin = match (facts.origin_record.as_deref(), opened_by.as_deref()) {
+            let origin_record = facts.borrow().origin_record.clone();
+            facts.borrow_mut().origin = match (origin_record.as_deref(), opened_by.as_deref()) {
                 // Asked for on behalf of one agent: that one, or none when it is not running.
                 (Some(record), _) => live_terminal(host, &place.workspace.id, record),
                 // About a pull request elsewhere: the agent that opened it while it runs, else
@@ -509,7 +589,7 @@ fn move_on(
                 (None, None) => origin_session(store, host, &place.workspace.id),
             };
         }
-        if !store.start_workflow_run(&run.id, Some(&facts.to_json()))? {
+        if !store.start_workflow_run(&run.id, Some(&facts.borrow().to_json()))? {
             return Ok(()); // Cancelled between the read and now.
         }
         driver.touch();
@@ -532,6 +612,9 @@ fn move_on(
         resume_human_waits(driver, store, hands, &workflow, run)?;
     }
     tell_open_questions(driver, store, hands, run)?;
+    if writes_factory(&workflow) {
+        exclude_factory_dir(git, Path::new(&place.workspace.path));
+    }
     let inputs: Inputs = serde_json::from_str(&run.inputs).unwrap_or_default();
 
     // Sessions typed to during this tick. The host marks a session busy only once output comes
@@ -630,13 +713,16 @@ fn move_on(
                 )?;
                 continue;
             }
+            if let Effect::Start { step, .. } = &effect {
+                clear_rewritten_files(&workflow, step, Path::new(&place.workspace.path));
+            }
             let outcome = carry_out(
                 store,
                 host,
                 hands,
                 &place,
                 effect,
-                facts.unattended,
+                facts.borrow().unattended,
                 &mut typed_to,
             );
             let change = match outcome {
@@ -1063,7 +1149,7 @@ struct Finishing<'a> {
     store: &'a Store,
     hands: &'a dyn Hands,
     place: &'a Place,
-    facts: &'a Facts,
+    facts: &'a RefCell<Facts>,
     inputs: &'a Inputs,
     steps: &'a [WorkflowStepRow],
     workflow: &'a super::Workflow,
@@ -1155,7 +1241,7 @@ struct Capture<'a> {
     store: &'a Store,
     hands: &'a dyn Hands,
     place: &'a Place,
-    facts: &'a Facts,
+    facts: &'a RefCell<Facts>,
     inputs: &'a Inputs,
     steps: &'a [WorkflowStepRow],
     run_id: &'a str,
@@ -1266,7 +1352,7 @@ impl Capture<'_> {
 
     fn session_pty(&self, reference: &SessionRef) -> Option<String> {
         match reference {
-            SessionRef::Origin => self.facts.origin.clone(),
+            SessionRef::Origin => self.facts.borrow().origin.clone(),
             SessionRef::Step(id) if id == &self.step.id => self.outputs.get("session").cloned(),
             SessionRef::Step(id) => self
                 .steps
@@ -1313,7 +1399,10 @@ impl Capture<'_> {
             [whole] if whole == "handoff" => handoff
                 .get_or_init(|| self.hands.handoff(&self.place.workspace.id))
                 .clone(),
-            other => self.place.var(other).or_else(|| self.facts.var(other)),
+            other => self
+                .place
+                .var(other)
+                .or_else(|| self.facts.borrow().var(other)),
         }
     }
 }
@@ -1327,7 +1416,7 @@ struct Seen<'a> {
     run_id: &'a str,
     /// When the run started: pull request activity counts from here.
     started_at: i64,
-    facts: &'a Facts,
+    facts: &'a RefCell<Facts>,
     place: &'a Place,
     now: i64,
     memory: OnceCell<Option<String>>,
@@ -1368,7 +1457,12 @@ impl World for Seen<'_> {
                 .handoff
                 .get_or_init(|| self.hands.handoff(&self.place.workspace.id))
                 .clone(),
-            [namespace, _] if namespace == "pr" || namespace == "event" => self.facts.var(path),
+            [namespace, _] if namespace == "pr" || namespace == "event" => {
+                if namespace == "pr" {
+                    self.pull_request();
+                }
+                self.facts.borrow().var(path)
+            }
             [namespace, name] if namespace == "artifacts" => self
                 .store
                 .workflow_artifacts(self.run_id)
@@ -1383,19 +1477,32 @@ impl World for Seen<'_> {
     }
 
     fn origin(&self) -> Option<String> {
-        self.facts.origin.clone()
+        self.facts.borrow().origin.clone()
     }
 
-    fn pr_activity(&self, kind: PrActivity) -> Option<PrSeen> {
-        let pr = self.facts.pr.as_ref()?;
+    fn pr_known(&self) -> Option<bool> {
+        match self.ensure_pr() {
+            Open::Found(_) => Some(true),
+            Open::Missing => Some(false),
+            Open::Looking => None,
+        }
+    }
+
+    fn pr_activity(&self, kind: PrActivity, since: i64) -> Option<PrSeen> {
+        // No pull request yet: keep waiting. A lookup still out is the same answer.
+        let Open::Found(pr) = self.ensure_pr() else {
+            return None;
+        };
         let posts = self.driver.pr_posts(self.run_id, || {
-            self.hands.pr_posts(&self.place.workspace.id, pr)
+            self.hands.pr_posts(&self.place.workspace.id, &pr)
         })?;
-        // The forge keeps whole seconds; a post in the second the run started counts.
-        let since = self.started_at - self.started_at.rem_euclid(1000);
+        // The forge keeps whole seconds. A post in the second this wait began counts, and
+        // not one from before it — a review that finished the previous pass does not finish
+        // the next. The run's own start is the earliest a post can count.
+        let floor = floor_sec(self.started_at.max(since));
         let wanted: Vec<&PrPost> = posts
             .iter()
-            .filter(|post| post.at_ms >= since)
+            .filter(|post| post.at_ms >= floor)
             .filter(|post| match kind {
                 PrActivity::Any => true,
                 PrActivity::Review => post.kind == PrPostKind::Review,
@@ -1447,6 +1554,114 @@ impl World for Seen<'_> {
             decided_at: row.decided_at,
         })
     }
+}
+
+impl Seen<'_> {
+    /// The pull request this run knows. A run queued before the branch had one looks again,
+    /// and stores it once it is there. [`Open::Looking`] while that question is out.
+    fn ensure_pr(&self) -> Open {
+        if let Some(pr) = self.facts.borrow().pr.clone() {
+            return Open::Found(pr);
+        }
+        let found = self.driver.open_pr(self.run_id, || {
+            self.hands.open_pull_request(&self.place.workspace.id)
+        });
+        if let Open::Found(pr) = &found {
+            self.remember(pr.clone());
+        }
+        found
+    }
+
+    fn pull_request(&self) {
+        let _ = self.ensure_pr();
+    }
+
+    fn remember(&self, pr: PrFacts) {
+        if self.facts.borrow().pr.is_some() {
+            return;
+        }
+        self.facts.borrow_mut().pr = Some(pr);
+        let json = self.facts.borrow().to_json();
+        if self
+            .store
+            .set_workflow_run_context(self.run_id, &json)
+            .is_err()
+        {
+            eprintln!(
+                "workflows: run {}: could not store the pull request",
+                self.run_id
+            );
+        }
+    }
+}
+
+/// Whole seconds, as the forge records a post. A post in that second counts.
+fn floor_sec(ms: i64) -> i64 {
+    ms - ms.rem_euclid(1000)
+}
+
+/// Whether a workflow writes its notes under `factory/`. Those stay out of commits.
+fn writes_factory(workflow: &super::Workflow) -> bool {
+    workflow.steps.iter().any(|step| {
+        step.produces.iter().any(|decl| {
+            matches!(&decl.source, super::ArtifactSource::File { path } if path == "factory" || path.starts_with("factory/"))
+        })
+    })
+}
+
+/// Drop files a session is about to write again, so a previous pass cannot be captured as
+/// this one. A wait on `step` that produces a file is that file.
+fn clear_rewritten_files(workflow: &super::Workflow, step: &str, root: &Path) {
+    for later in &workflow.steps {
+        let super::Action::WaitSession {
+            session: super::SessionRef::Step(source),
+            ..
+        } = &later.action
+        else {
+            continue;
+        };
+        if source != step {
+            continue;
+        }
+        for decl in &later.produces {
+            let super::ArtifactSource::File { path } = &decl.source else {
+                continue;
+            };
+            if let Err(why) = super::artifact::remove_file(root, path) {
+                eprintln!("workflows: could not clear `{path}` before `{step}`: {why}");
+            }
+        }
+    }
+}
+
+/// Keep `factory/` out of commits in this worktree. `git` records it in `info/exclude`, which
+/// is this worktree's and is not a file in the project. A failure leaves the prompt's request
+/// not to commit the notes; it does not fail the run.
+fn exclude_factory_dir(git: &Git, root: &Path) {
+    let Ok(printed) = git.run(root, &["rev-parse", "--git-path", "info/exclude"]) else {
+        return;
+    };
+    let printed = Path::new(printed.trim());
+    let path = if printed.is_absolute() {
+        printed.to_path_buf()
+    } else {
+        root.join(printed)
+    };
+    if let Some(parent) = path.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    if existing.lines().any(|line| line.trim() == "factory/") {
+        return;
+    }
+    let mut next = existing;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next.push_str("factory/\n");
+    let _ = std::fs::write(&path, next);
 }
 
 fn is_applied_decision(change: &Move) -> bool {

@@ -196,9 +196,10 @@ checks everything before anything is queued:
 - every required input is given, there are no inputs the workflow does not ask for, a `choice` is
   one of its options, and an agent named by a `harness` input or a step is set up in Yardsort and
   on your `PATH`
-- a workflow that uses the pull request has one to use: the branch the workspace has checked out
-  has an open pull request on GitHub, found with the GitHub CLI (`gh`), which must be installed
-  and logged in. Its number, link and title are kept with the run.
+- a workflow that uses the pull request can ask the GitHub CLI (`gh`), which must be installed
+  and logged in. No open pull request is not a refusal: the run starts, and a later step looks
+  again. `gh` not answering is a refusal. A workflow about a pull request elsewhere still needs
+  that pull request. An open one found now is kept with the run: its number, link and title.
 
 Optional inputs left out take their `default`, or are empty. A workflow runs once at a time in a
 workspace: asking again while it runs is refused, naming the run. With Yardsort closed, `ys` says
@@ -573,12 +574,16 @@ its link:
 It needs the clone: without one in the project's folder, the dialog says so and does not start.
 
 In a parent project the workspace's own pull request is often merged or missing while its work is
-in the clones. Then **Request code review** started from the workspace says it has no open pull
-request, and lists the open ones the workspace tracks elsewhere: pick one and the dialog switches
-to **Request code review elsewhere** on it, keeping what you chose. **Address reviews** does the
-same with **Address reviews elsewhere**, and so does a workflow of your own `<id>` when there is
-an `<id>-elsewhere` about a pull request elsewhere. **Choose another pull request** goes back to
-the list. A run started this way from a workflow's page opens the page of the one it ran.
+in the clones. Then **Request code review** started from the workspace says it will use the pull
+request the run opens, and lists the open ones the workspace tracks elsewhere: pick one and the
+dialog switches to **Request code review elsewhere** on it, keeping what you chose. **Address
+reviews** does the same with **Address reviews elsewhere**, and so does a workflow of your own
+`<id>` when there is an `<id>-elsewhere` about a pull request elsewhere. **Choose another pull
+request** goes back to the list. A run started this way from a workflow's page opens the page of
+the one it ran. A step that names `{{ pr.number }}` or another `pr.*` field fails once the lookup
+finds there is still no open pull request, rather than starting with the name left blank. `gh`
+not answering still stops the dialog, and a workflow about a pull request elsewhere still needs
+that pull request.
 
 On **Request code review elsewhere**'s own page in the Workflows view, **Run** and **Schedule…**
 are turned off: it needs a pull request elsewhere to be about.
@@ -595,10 +600,9 @@ below. Open it in **Workflows** and the chart shows every step, top to bottom, w
 back where a phase repeats. The file beside the chart is the workflow. It is read-only;
 `ys workflow copy software-factory` is how you change a timeout or a limit.
 
-The branch needs an open pull request before the run starts. The review phase waits on that
-pull request, and the file names it, so Yardsort looks it up when you press **Run**. A draft is
-enough. `gh` has to be installed and logged in. The smoke test you name has to be one of the
-workspace's.
+The run starts from the task. It does not need an open pull request first. `gh` has to be
+installed and logged in, because Yardsort asks it when you press **Run** and looks again while
+the run is going. The smoke test you name has to be one of the workspace's.
 
 ```sh
 ys workflow run software-factory --workspace fix-login \
@@ -627,11 +631,14 @@ What happens:
    the agent recorded. Up to 5 rounds. The step waits up to 24 hours, then fails. Going quiet
    does not finish it.
 2. **Gather context** (`gather`, then `context`). A new agent reads the brief, inspects the
-   code and the docs, and writes `factory/context.md`. It is told not to change product code
-   and not to commit. `context` copies that file into the `context` artifact when the agent
-   settles. The step fails if the file is not there. The wait is 2 hours.
+   code and the docs, and writes `factory/context.md`. It deletes that file first when one is
+   already there, so a later pass is not the previous notes. It is told not to change product
+   code and not to commit. `context` copies that file into the `context` artifact when the
+   agent settles. The step fails if the file is not there. The wait is 2 hours.
 3. **Plan** (`plan`, `plan-ready`, then `approve-plan`). An agent reads the brief and the
-   context and writes `factory/plan.md`. It is told not to implement. Then an approval gate
+   context and writes `factory/plan.md`, deleting that file first when one is already there,
+   so a plan sent back is not the previous file. It is told not to implement. Then an approval
+   gate
    shows you the plan. **Approve** starts implementation. **Request changes** needs a note,
    runs planning again, and gives that note to the agent as `changes-approve-plan`. **Reject**
    stops the run. The gate can be entered 3 times, including the first. The third request for
@@ -640,9 +647,11 @@ What happens:
    notification on this computer includes the code unless Settings → General leaves it out.
    The phone notice does not include the code. It opens the decision.
 4. **Implement** (`implement`, then `implement-ready`). An agent works from the approved plan,
-   commits, and pushes to `{{ workspace.branch }}`. It is told to update pull request
-   `#{{ pr.number }}`, and not to open a second one. `factory/` is a note for the run; the
-   agent is told not to commit it. The wait is 4 hours.
+   commits, and pushes to `{{ workspace.branch }}`. If that branch has no open pull request,
+   it opens a draft with `gh pr create --draft`. If one is already open, it updates that one
+   and does not open a second. `factory/` is a note for the run. Yardsort adds it to the
+   worktree's `info/exclude`, so it stays out of commits even when the agent does not, and
+   the agent is told not to commit it. The wait is 4 hours.
 5. **Verify** (`verify`). Runs the smoke test you named, with `gate: true`, and waits up to 30
    minutes. A pass goes on to review. A failure runs implementation again and gives it
    `failure-verify`, the report. A file you have not approved waits for you, and the step
@@ -652,8 +661,10 @@ What happens:
    including the first. The count is not reset when review sends the work back, so a failure
    after a review uses one of the same three. The third failure stops the run.
 6. **Review** (`await-review`, then `accept-review`). `await-review` waits until a review
-   appears on the pull request, posted after the run started. It has no timeout, and it keeps
-   waiting if you quit and open Yardsort again. A comment that is not a review does not count.
+   appears on the pull request, posted after this wait began. A review from an earlier pass
+   does not count. While the branch still has no open pull request, the step keeps waiting;
+   it does not fail. It has no timeout, and it keeps waiting if you quit and open Yardsort
+   again. A comment that is not a review does not count.
    Then an approval gate. **Approve** goes on. **Request changes** needs a note, runs
    implementation again, and gives it `changes-accept-review`. **Reject** stops the run. The
    gate can be entered 3 times, including the first. The third request for changes stops the
@@ -671,9 +682,11 @@ box.
 
 What this workflow does not do:
 
-- It does not open the pull request the review waits on. That pull request is the one on the
-  branch when the run is queued. Implementation updates it. A pull request created during the
-  run is not the one `await-review` watches, and the run will not start without one.
+- It does not open the pull request itself. Implementation is told to open a draft with
+  `gh pr create --draft` when the branch has none, or to update the one already open.
+  `await-review` follows that pull request once Yardsort can see it. Until then the wait
+  continues. A step that fills in `{{ pr.number }}` or another `pr.*` field fails if the
+  lookup then finds there is still none.
 - It does not take the retry limits as inputs. Copy the file to change `max_attempts`.
 - It does not branch on the text of a note, or on GitHub's own review state.
 - It does not merge, deploy, or roll back.
@@ -736,17 +749,17 @@ out of time fails.
 Any text in a step can use `{{ name }}`. Only these names exist. A name is a dotted path and
 nothing else: no filters, no expressions. Anything else is reported where it is written.
 
-| Variable                                                                                                                                                             | What it is                                                                                                                                                                                                                                                                                                                                                        |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project.name`, `project.root`                                                                                                                                       | The project, and the folder of its own checkout.                                                                                                                                                                                                                                                                                                                  |
-| `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task`                                                                    | The workspace the run is about. `task` is the first message it was started with. In the project's own checkout, `branch` is whatever git has checked out, and `base_branch` the repository's default branch, unless that is the branch itself.                                                                                                                    |
-| `pr.number`, `pr.url`, `pr.title`, `pr.repo`, `pr.clone`                                                                                                             | The open pull request for the workspace's branch, found when the run is queued. For a `tracked_pull_request` workflow, the one it is about, read by its link, with `pr.repo` its repository (`owner/name`) and `pr.clone` the project's nested clone of it; both are empty for a workspace's own.                                                                 |
-| `inputs.<id>`                                                                                                                                                        | What was given for that input.                                                                                                                                                                                                                                                                                                                                    |
-| `steps.<id>.<field>`                                                                                                                                                 | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`, `decision` and `feedback` from `approve`. The step must be among this step's `needs`.                                                                       |
-| `memory`                                                                                                                                                             | The project's [memory](memory.md): its approved entries, cited, when the project shares it and has any. Empty otherwise. It never carries the request to propose new entries that an agent you start yourself gets. An agent's first message gets the memory after it anyway; put `{{ memory }}` in a `start_session` prompt to have it there instead, not twice. |
-| `handoff`                                                                                                                                                            | The workspace's [handoff](terminals-and-sessions.md#handing-work-to-another-agent) packet: what happened there so far.                                                                                                                                                                                                                                            |
-| `artifacts.<name>`                                                                                                                                                   | Text of an artifact this step consumes. See [Artifacts](#artifacts).                                                                                                                                                                                                                                                                                              |
-| `event.kind`, `event.count`, `event.note`, `event.head`, `event.summary`, `event.verdict`, `event.url`, `event.number`, `event.title`, `event.authors`, `event.name` | What set off a run a [trigger](triggers.md#what-the-workflow-is-told) started. Empty in a run you started yourself.                                                                                                                                                                                                                                               |
+| Variable                                                                                                                                                             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `project.name`, `project.root`                                                                                                                                       | The project, and the folder of its own checkout.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task`                                                                    | The workspace the run is about. `task` is the first message it was started with. In the project's own checkout, `branch` is whatever git has checked out, and `base_branch` the repository's default branch, unless that is the branch itself.                                                                                                                                                                                                                                                                                             |
+| `pr.number`, `pr.url`, `pr.title`, `pr.repo`, `pr.clone`                                                                                                             | The open pull request for the workspace's branch. Found when the run is queued if one is already open, and looked up again during the run if it was not. A step that names one of these waits while that lookup is out, and fails once the answer is that there is still none. `wait_pr_activity` keeps waiting instead. For a `tracked_pull_request` workflow, the one it is about, read by its link, with `pr.repo` its repository (`owner/name`) and `pr.clone` the project's nested clone of it; both are empty for a workspace's own. |
+| `inputs.<id>`                                                                                                                                                        | What was given for that input.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `steps.<id>.<field>`                                                                                                                                                 | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`, `decision` and `feedback` from `approve`. The step must be among this step's `needs`.                                                                                                                                                                                                                                                |
+| `memory`                                                                                                                                                             | The project's [memory](memory.md): its approved entries, cited, when the project shares it and has any. Empty otherwise. It never carries the request to propose new entries that an agent you start yourself gets. An agent's first message gets the memory after it anyway; put `{{ memory }}` in a `start_session` prompt to have it there instead, not twice.                                                                                                                                                                          |
+| `handoff`                                                                                                                                                            | The workspace's [handoff](terminals-and-sessions.md#handing-work-to-another-agent) packet: what happened there so far.                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `artifacts.<name>`                                                                                                                                                   | Text of an artifact this step consumes. See [Artifacts](#artifacts).                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `event.kind`, `event.count`, `event.note`, `event.head`, `event.summary`, `event.verdict`, `event.url`, `event.number`, `event.title`, `event.authors`, `event.name` | What set off a run a [trigger](triggers.md#what-the-workflow-is-told) started. Empty in a run you started yourself.                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 To write `{{` literally, for example in a prompt about a template language, write `\{{`.
 

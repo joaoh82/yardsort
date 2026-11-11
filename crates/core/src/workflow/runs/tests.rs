@@ -206,26 +206,24 @@ fn a_named_harness_in_a_step_is_checked_too() {
 }
 
 #[test]
-fn a_workflow_that_uses_the_pull_request_needs_one_open_and_keeps_it() {
+fn a_workflow_that_uses_the_pull_request_queues_without_one_and_keeps_an_open_one() {
     let mut fx = Fixture::new();
-    let error = fx
-        .queue("code-review", &[("reviewer", "claude")])
-        .unwrap_err();
-    assert_eq!(error.code, "pull_request_missing");
+    let id = fx.queue("code-review", &[("reviewer", "claude")]).unwrap();
+    let run = fx.store.workflow_run(&id).unwrap().unwrap();
     assert!(
-        error.message.contains("has no open one"),
-        "{}",
-        error.message
+        Facts::parse(&run.context).pr.is_none(),
+        "no open pull request is stored as none, and the run still queues"
     );
+    assert!(fx.store.cancel_workflow_run(&id, "done").unwrap());
 
     fx.look.pr = Some(pull_request(7, PullRequestState::Merged));
-    let error = fx
-        .queue("code-review", &[("reviewer", "claude")])
-        .unwrap_err();
-    assert_eq!(
-        error.code, "pull_request_missing",
-        "a merged one is not open"
+    let id = fx.queue("code-review", &[("reviewer", "claude")]).unwrap();
+    let run = fx.store.workflow_run(&id).unwrap().unwrap();
+    assert!(
+        Facts::parse(&run.context).pr.is_none(),
+        "a merged pull request is not the open one"
     );
+    assert!(fx.store.cancel_workflow_run(&id, "done").unwrap());
 
     fx.look.forge_down = Some("gh is not logged in.".into());
     let error = fx
@@ -235,7 +233,7 @@ fn a_workflow_that_uses_the_pull_request_needs_one_open_and_keeps_it() {
         (error.code.as_str(), error.message.as_str()),
         ("pull_request_unknown", "gh is not logged in.")
     );
-    assert!(fx.store.workflow_runs(None, 10).unwrap().is_empty());
+    assert_eq!(fx.store.workflow_runs(None, 10).unwrap().len(), 2);
 
     fx.look.forge_down = None;
     fx.look.pr = Some(pull_request(7, PullRequestState::Open));
@@ -254,6 +252,24 @@ fn a_workflow_that_uses_the_pull_request_needs_one_open_and_keeps_it() {
     let var = |path: &str| facts.var(&path.split('.').map(str::to_owned).collect::<Vec<_>>());
     assert_eq!(var("pr.number").as_deref(), Some("7"));
     assert_eq!(var("pr.title").as_deref(), Some("Fix the login"));
+}
+
+#[test]
+fn the_software_factory_queues_before_the_branch_has_a_pull_request() {
+    let fx = Fixture::new();
+    let id = fx
+        .queue(
+            "software-factory",
+            &[
+                ("task", "Add a logout button"),
+                ("agent", "claude"),
+                ("suite", "login"),
+            ],
+        )
+        .unwrap();
+    let run = fx.store.workflow_run(&id).unwrap().unwrap();
+    assert_eq!(run.workflow_id, "software-factory");
+    assert!(Facts::parse(&run.context).pr.is_none());
 }
 
 /// A pull request the workspace tracks in another repository: its run is about that one, read

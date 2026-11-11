@@ -144,9 +144,16 @@ pub trait World {
     fn var(&self, path: &[String]) -> Option<String>;
     /// The terminal id of the workspace's own agent, found when the run started.
     fn origin(&self) -> Option<String>;
-    /// Reviews or comments of `kind` on the workspace's pull request since the run started, as
-    /// the forge last said. `None` while nothing is known yet.
-    fn pr_activity(&self, kind: PrActivity) -> Option<PrSeen>;
+    /// Reviews or comments of `kind` on the workspace's pull request at or after `since`
+    /// (when this wait began), as the forge last said. `None` while nothing is known yet,
+    /// or while the pull request itself is not known yet: the wait keeps waiting.
+    fn pr_activity(&self, kind: PrActivity, since: i64) -> Option<PrSeen>;
+    /// Whether `{{ pr.* }}` can be filled. `None` while the open pull request is still being
+    /// looked up. `Some(false)` when there is none. `Some(true)` when one is known. The
+    /// default is known, so a world that fills `pr.*` from [`World::var`] does not have to say so.
+    fn pr_known(&self) -> Option<bool> {
+        Some(true)
+    }
     /// A smoke test run by id: its status and the summary `ys test wait` prints. `None` when the
     /// row is gone.
     fn test_run(&self, run_id: &str) -> Option<TestRun>;
@@ -429,14 +436,14 @@ pub fn advance(
                         if let Some(why) = branch_blocked(step, workflow, &outcomes) {
                             Some(skip(id, StepStatus::Pending, &why))
                         } else {
-                            Some(begin(
+                            begin(
                                 step,
                                 &lookup,
                                 &session_of,
                                 world,
                                 &mut plan.effects,
                                 clarifies(workflow, id),
-                            ))
+                            )
                         }
                     } else {
                         None
@@ -1014,8 +1021,30 @@ fn begin(
     world: &dyn World,
     effects: &mut Vec<Effect>,
     clarify: bool,
-) -> Move {
+) -> Option<Move> {
     let id = step.id.as_str();
+    // A step that names the pull request cannot render until one is known. While the lookup
+    // is still out, the step stays pending. Once the answer is that there is none, it fails
+    // rather than starting with the name left blank.
+    let pr_fields = pull_request_fields(&step.action);
+    if !pr_fields.is_empty() {
+        match world.pr_known() {
+            None => return None,
+            Some(false) => {
+                let listed = pr_fields
+                    .iter()
+                    .map(|field| format!("`{{{{ pr.{field} }}}}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Some(fail(
+                    id,
+                    StepStatus::Pending,
+                    &format!("There is no open pull request, so {listed} cannot be filled."),
+                ));
+            }
+            Some(true) => {}
+        }
+    }
     let render = |text: &str| template::render(text, lookup);
     let mut change = match &step.action {
         Action::StartSession {
@@ -1135,7 +1164,23 @@ fn begin(
     if !change.to.is_final() {
         change.clear_outcome = true;
     }
-    change
+    Some(change)
+}
+
+/// `pr.*` fields this step's text names, in the order they are written.
+fn pull_request_fields(action: &Action) -> Vec<String> {
+    let mut fields = Vec::new();
+    for text in super::runs::action_texts(action) {
+        for var in template::placeholders(text) {
+            let [namespace, field] = var.path.as_slice() else {
+                continue;
+            };
+            if namespace == "pr" && !fields.iter().any(|known| known == field) {
+                fields.push(field.clone());
+            }
+        }
+    }
+    fields
 }
 
 /// A clarifying wait. It finishes on a recorded summary, or when `until` is exited and the
@@ -1334,7 +1379,7 @@ fn wait(
                 None => None,
             }
         }
-        Action::WaitPrActivity { kind, timeout_secs } => match world.pr_activity(*kind) {
+        Action::WaitPrActivity { kind, timeout_secs } => match world.pr_activity(*kind, since) {
             Some(seen) if seen.count > 0 => {
                 let mut left = Outputs::new();
                 left.insert("count".into(), seen.count.to_string());

@@ -174,6 +174,29 @@ fn the_built_in_software_factory_parses_with_its_phases_and_loops() {
             path: "factory/plan.md".into(),
         }
     );
+    let prompt = |id: &str| match &step(id).action {
+        Action::StartSession { prompt, .. } => prompt.clone().unwrap_or_default(),
+        other => panic!("{id} is not a session: {other:?}"),
+    };
+    let gather = prompt("gather");
+    assert!(
+        gather.contains("Delete `factory/context.md`"),
+        "gather does not clear the previous notes: {gather}"
+    );
+    let plan = prompt("plan");
+    assert!(
+        plan.contains("Delete `factory/plan.md`"),
+        "plan does not clear the previous plan: {plan}"
+    );
+    let implement = prompt("implement");
+    assert!(
+        implement.contains("gh pr create --draft"),
+        "implement does not open a draft pull request: {implement}"
+    );
+    assert!(
+        !implement.contains("pr.number"),
+        "implement still names the pull request, which may not exist yet: {implement}"
+    );
 
     let plan_gate = step("approve-plan");
     assert!(plan_gate.gate);

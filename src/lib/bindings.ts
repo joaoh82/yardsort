@@ -2918,8 +2918,13 @@ export type RunPreview_Deserialize = {
 	needsPullRequest: boolean,
 	/**  Found: the workspace's open pull request. */
 	pullRequest: PrFacts_Deserialize | null,
-	/**  Why there is none to use, when one is needed. */
+	/**
+	 *  Why there is none to use, when the run cannot look. Not set when the branch simply has
+	 *  no open pull request: the run may open one.
+	 */
 	pullRequestProblem: string | null,
+	/**  Shown when the branch has no open pull request and the run can still start. */
+	pullRequestNote: string | null,
 	/**  The workflow talks to the workspace's own agent. */
 	needsOrigin: boolean,
 	/**  Variables the run will render as nothing, and why. A run still goes ahead. */
@@ -2932,8 +2937,13 @@ export type RunPreview_Serialize = {
 	needsPullRequest: boolean,
 	/**  Found: the workspace's open pull request. */
 	pullRequest: PrFacts_Serialize | null,
-	/**  Why there is none to use, when one is needed. */
+	/**
+	 *  Why there is none to use, when the run cannot look. Not set when the branch simply has
+	 *  no open pull request: the run may open one.
+	 */
 	pullRequestProblem: string | null,
+	/**  Shown when the branch has no open pull request and the run can still start. */
+	pullRequestNote: string | null,
 	/**  The workflow talks to the workspace's own agent. */
 	needsOrigin: boolean,
 	/**  Variables the run will render as nothing, and why. A run still goes ahead. */

@@ -199,6 +199,35 @@ pub fn read_file(root: &Path, path: &str) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|_| format!("`{trimmed}` is not text, so it is not copied."))
 }
 
+/// Delete a workspace file an agent is about to write again. Missing is fine: the first pass
+/// has nothing to clear. The path must stay inside `root`, the same rule as [`read_file`].
+pub fn remove_file(root: &Path, path: &str) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.contains("{{") {
+        return Err(format!("`{trimmed}` still has a variable in it."));
+    }
+    check_path(trimmed)?;
+    let root_real = match root.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("Could not read the workspace: {error}")),
+    };
+    let full = root.join(trimmed);
+    let full_real = match full.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("Could not remove `{trimmed}`: {error}")),
+    };
+    contained(&root_real, &full_real, trimmed)?;
+    let meta = std::fs::metadata(&full_real)
+        .map_err(|error| format!("Could not remove `{trimmed}`: {error}"))?;
+    if !meta.is_file() {
+        return Err(format!("`{trimmed}` is not a file."));
+    }
+    std::fs::remove_file(&full_real)
+        .map_err(|error| format!("Could not remove `{trimmed}`: {error}"))
+}
+
 /// The resolved path stays inside the workspace, and its real name is not a secret.
 fn contained(root: &Path, full: &Path, written: &str) -> Result<(), String> {
     if !full.starts_with(root) {

@@ -76,9 +76,10 @@ steps:
 
       {{ inputs.task }}
 
-      Write what you found to `factory/context.md`: the parts of the tree that matter, the
-      conventions to follow, constraints already in the project, and the risks. Then stop.
-      This step fails if that file is missing.
+      Delete `factory/context.md` if it is already there, then write what you found to
+      `factory/context.md`: the parts of the tree that matter, the conventions to follow,
+      constraints already in the project, and the risks. Then stop. This step fails if that
+      file is missing.
 
   - id: context
     needs: [gather]
@@ -106,8 +107,9 @@ steps:
       The brief and the context are attached. If a note named `changes-approve-plan` is
       attached, the previous plan was sent back: revise the plan to answer that note.
 
-      Write the plan to `factory/plan.md`: the approach, the files to change, how to test
-      it, and what is out of scope. Then stop. This step fails if that file is missing.
+      Delete `factory/plan.md` if it is already there, then write the plan to
+      `factory/plan.md`: the approach, the files to change, how to test it, and what is out
+      of scope. Then stop. This step fails if that file is missing.
 
   - id: plan-ready
     needs: [plan]
@@ -148,9 +150,9 @@ steps:
       failed: fix that. If a note named `changes-accept-review` is attached, review asked
       for changes: do those. Leave `factory/` uncommitted; those notes are for this run.
 
-      Commit the work and push it to `{{ workspace.branch }}`. The open pull request is
-      #{{ pr.number }} ({{ pr.url }}). Update that pull request so it contains this work.
-      Do not open a second one. Then stop.
+      Commit the work and push it to `{{ workspace.branch }}`. If that branch has no open
+      pull request, open one with `gh pr create --draft`. If it already has one, update
+      that pull request so it contains this work. Do not open a second one. Then stop.
 
   - id: implement-ready
     needs: [implement]
