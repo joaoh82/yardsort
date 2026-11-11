@@ -1,0 +1,209 @@
+# Built into Yardsort. To change it, duplicate it: a file in your workflows folder with the same
+# id is used instead of this one, and removing that file brings this one back.
+id: software-factory
+name: Software factory
+description: >
+  Take one task from a brief you clarify, through context, a plan you approve, implementation,
+  a smoke test, and a review, and stop when you say it is ready to release. It does not merge,
+  deploy, or roll back.
+version: 1
+
+trigger:
+  kind: manual
+  context: workspace
+
+inputs:
+  - id: task
+    kind: text
+    label: What to build
+    required: true
+  - id: agent
+    kind: harness
+    label: Who does the work
+    required: true
+  - id: suite
+    kind: test
+    label: Smoke test to run
+    required: true
+
+steps:
+  - id: define
+    action: start_session
+    harness: "{{ inputs.agent }}"
+    prompt: |
+      Define the outcome of this work in {{ workspace.name }}, on branch
+      `{{ workspace.branch }}`. Do not edit the repository.
+
+      The task:
+
+      {{ inputs.task }}
+
+      The workspace was started with:
+
+      {{ workspace.task }}
+
+      Ask what you still need, with `ys workflow ask`, one `--question` per question.
+      Cover anything not already settled: the problem, the behaviour they want, the
+      constraints, and how they will know it is done.
+
+      When you have enough, record the brief with `ys workflow summary --text`. The
+      text must have these four parts, in this order, each with a heading: Problem,
+      Desired behaviour, Constraints, Acceptance criteria. Then stop.
+
+  - id: brief
+    needs: [define]
+    action: wait_session
+    session: "{{ steps.define.session }}"
+    until: settled
+    clarify: true
+    max_rounds: 5
+    timeout: 24h
+    produces:
+      - name: brief
+        from: brief
+
+  - id: gather
+    needs: [brief]
+    action: start_session
+    harness: "{{ inputs.agent }}"
+    consumes: [brief]
+    prompt: |
+      Gather context for this task. You are in the worktree of `{{ workspace.branch }}`.
+      Read the code and the docs that bear on it. Do not change product code, and do not
+      commit.
+
+      The task:
+
+      {{ inputs.task }}
+
+      Write what you found to `factory/context.md`: the parts of the tree that matter, the
+      conventions to follow, constraints already in the project, and the risks. Then stop.
+      This step fails if that file is missing.
+
+  - id: context
+    needs: [gather]
+    action: wait_session
+    session: "{{ steps.gather.session }}"
+    until: settled
+    timeout: 2h
+    produces:
+      - name: context
+        path: factory/context.md
+
+  - id: plan
+    needs: [context]
+    action: start_session
+    harness: "{{ inputs.agent }}"
+    consumes: [brief, context, changes-approve-plan]
+    prompt: |
+      Write a plan for this task. You are in the worktree of `{{ workspace.branch }}`.
+      Do not implement it, and do not commit.
+
+      The task:
+
+      {{ inputs.task }}
+
+      The brief and the context are attached. If a note named `changes-approve-plan` is
+      attached, the previous plan was sent back: revise the plan to answer that note.
+
+      Write the plan to `factory/plan.md`: the approach, the files to change, how to test
+      it, and what is out of scope. Then stop. This step fails if that file is missing.
+
+  - id: plan-ready
+    needs: [plan]
+    action: wait_session
+    session: "{{ steps.plan.session }}"
+    until: settled
+    timeout: 2h
+    produces:
+      - name: plan
+        path: factory/plan.md
+
+  - id: approve-plan
+    needs: [plan-ready]
+    action: approve
+    consumes: [plan]
+    prompt: |
+      Read the plan. Approve it to start implementation. Request changes to send your
+      note back to planning. Reject to stop the run.
+    on:
+      approved: implement
+      changes_requested: plan
+      rejected: stop
+    max_attempts: 3
+
+  - id: implement
+    needs: [approve-plan]
+    action: start_session
+    harness: "{{ inputs.agent }}"
+    consumes: [plan, failure-verify, changes-accept-review]
+    prompt: |
+      Implement the approved plan in this worktree, on `{{ workspace.branch }}`.
+
+      The task:
+
+      {{ inputs.task }}
+
+      The plan is attached. If a note named `failure-verify` is attached, the smoke test
+      failed: fix that. If a note named `changes-accept-review` is attached, review asked
+      for changes: do those. Leave `factory/` uncommitted; those notes are for this run.
+
+      Commit the work and push it to `{{ workspace.branch }}`. The open pull request is
+      #{{ pr.number }} ({{ pr.url }}). Update that pull request so it contains this work.
+      Do not open a second one. Then stop.
+
+  - id: implement-ready
+    needs: [implement]
+    action: wait_session
+    session: "{{ steps.implement.session }}"
+    until: settled
+    timeout: 4h
+
+  - id: verify
+    needs: [implement-ready]
+    action: run_test
+    test: "{{ inputs.suite }}"
+    gate: true
+    timeout: 30m
+    on:
+      passed: await-review
+      failed: implement
+    max_attempts: 3
+
+  - id: await-review
+    needs: [verify]
+    action: wait_pr_activity
+    kind: review
+    # No timeout: a review can take longer than a week, and this wait survives a restart.
+    # A comment that is not a review does not count.
+
+  - id: accept-review
+    needs: [await-review]
+    action: approve
+    consumes: [plan]
+    prompt: |
+      A review is on pull request #{{ pr.number }} ({{ steps.await-review.latest_url }}).
+      Read it. Approve to go on to the release check. Request changes to send your note
+      back to implementation. Reject to stop the run. This reads that a review appeared;
+      it does not read GitHub's own approve or request-changes state.
+    on:
+      approved: release
+      changes_requested: implement
+      rejected: stop
+    max_attempts: 3
+
+  - id: release
+    needs: [accept-review]
+    action: approve
+    consumes: [plan]
+    prompt: |
+      The work is ready to release. Approve to finish this run. Reject, or request
+      changes, to stop it. This does not merge, deploy, or roll back.
+
+  - id: ready
+    needs: [release]
+    action: notify
+    title: "{{ workspace.name }} is ready to release"
+    body: >
+      Pull request #{{ pr.number }} ({{ pr.url }}) passed the smoke test and the review
+      gate. Merging and deploying are still yours to do.

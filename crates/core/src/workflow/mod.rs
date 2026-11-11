@@ -502,6 +502,10 @@ pub const BUILT_IN: &[(&str, &str)] = &[
     ),
     ("fix-checks", include_str!("builtin/fix-checks.yaml")),
     ("review-branch", include_str!("builtin/review-branch.yaml")),
+    (
+        "software-factory",
+        include_str!("builtin/software-factory.yaml"),
+    ),
 ];
 
 /// Where the user's own workflow files live.

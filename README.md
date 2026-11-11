@@ -413,6 +413,10 @@ wrote it is told to address the review. From a terminal, with Yardsort open:
 ys workflow run code-review --workspace fix-login --input reviewer=codex
 ```
 
+The built-in **Software factory** takes a task from a brief you clarify, through a plan you
+approve, implementation, a smoke test and a review, and stops when you say it is ready to
+release. It does not merge or deploy.
+
 The app carries the run out in the background, with the agents it starts as ordinary tabs, and
 `ys workflow runs` follows it step by step. See [Workflows](docs/guide/workflows.md).
 

@@ -635,8 +635,9 @@ directly is not stopped. The plain list has a WAITING ON column. `runs --run <id
 artifacts it reads, and the decision once it is recorded. `--json` includes `waitingOn`,
 `pendingApprovals` and `decisions`, and not the code. See
 [An approval](workflows.md#an-approval). See
-[Running a workflow](workflows.md#running-a-workflow) and
-[Requesting a code review](workflows.md#requesting-a-code-review).
+[Running a workflow](workflows.md#running-a-workflow),
+[Requesting a code review](workflows.md#requesting-a-code-review), and
+[The software factory](workflows.md#the-software-factory).
 
 ### `ys test`
 

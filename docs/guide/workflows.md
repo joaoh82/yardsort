@@ -74,7 +74,7 @@ own, never in one of your projects; a repository because some agents will not ru
 
 ## Where workflows come from
 
-- **Built in.** Yardsort ships with seven. **Request code review** (`code-review`): a second
+- **Built in.** Yardsort ships with eight. **Request code review** (`code-review`): a second
   agent, one you pick, reviews the workspace's pull request in the same worktree and posts its
   review on GitHub with `gh`. When the review is on the pull request, you get a notification, and
   the agent that wrote the pull request is told once it is not busy. See
@@ -97,7 +97,10 @@ own, never in one of your projects; a repository because some agents will not ru
   that opened it, and is for a [trigger](triggers.md#pull-requests-elsewhere) on those. **Review the branch** (`review-branch`): a second agent, one you pick, reviews the
   branch against its base in the same worktree, without a pull request, and writes its findings
   as its last message; then the workspace's own agent is told to read them with
-  [`ys workspace context`](cli.md#ys-workspace-context-workspace) and address them. Each is
+  [`ys workspace context`](cli.md#ys-workspace-context-workspace) and address them. **Software
+  factory** (`software-factory`) takes a task from a brief you clarify, through a plan you
+  approve, implementation, a smoke test and a review, and stops when you say it is ready to
+  release. See [The software factory](#the-software-factory). Each is
   read-only; `ys workflow show <id>` prints the whole file.
 - **Yours.** Every `.yaml` or `.yml` file in the `workflows` folder of Yardsort's data directory.
   [Where Yardsort keeps things](troubleshooting.md#where-yardsort-keeps-things) says where that
@@ -584,6 +587,97 @@ elsewhere**, or any workflow about one — on the `pr.*` events of each pull req
 tracks: `pr.opened` to review each one an agent opens. A workflow of your own can be about a pull
 request elsewhere too, with `context: tracked_pull_request`; `pr.repo` and `pr.clone` are refused
 in any other.
+
+## The software factory
+
+**Software factory** (`software-factory`) is the built-in that runs one task through the phases
+below. Open it in **Workflows** and the chart shows every step, top to bottom, with an arrow
+back where a phase repeats. The file beside the chart is the workflow. It is read-only;
+`ys workflow copy software-factory` is how you change a timeout or a limit.
+
+The branch needs an open pull request before the run starts. The review phase waits on that
+pull request, and the file names it, so Yardsort looks it up when you press **Run**. A draft is
+enough. `gh` has to be installed and logged in. The smoke test you name has to be one of the
+workspace's.
+
+```sh
+ys workflow run software-factory --workspace fix-login \
+  --input task="Add a logout button" \
+  --input agent=claude \
+  --input suite=login
+```
+
+`task` is what to build. `agent` is who does the work, one of your agents. `suite` is the
+[smoke test](smoke-tests.md) the verify phase runs. There is no input for how many times a
+phase may repeat: that number is `max_attempts` in the file, 3 everywhere it loops, and it is
+not a variable. Copy the workflow to change it. The range is 2 to 10.
+
+What happens:
+
+1. **Define the outcome** (`define`, then `brief`). An agent starts with your task and the
+   workspace's. `brief` waits on that session with `clarify: true`. The agent asks with
+   `ys workflow ask`, one `--question` per question, and you answer in the run view, from a
+   terminal Yardsort did not start, or on a phone signed in to the same account while this
+   computer is online. The window does not ask for a code. The terminal and the phone do, the
+   same one-time code as an approval. A question only printed in the terminal is not asked.
+   When the agent has enough, it records the brief with `ys workflow summary --text`. The
+   prompt tells it to cover the problem, the behaviour you want, the constraints, and the
+   acceptance criteria. The `brief` artifact is that summary together with the questions and
+   the answers. The engine does not check that the four headings are present: it stores what
+   the agent recorded. Up to 5 rounds. The step waits up to 24 hours, then fails. Going quiet
+   does not finish it.
+2. **Gather context** (`gather`, then `context`). A new agent reads the brief, inspects the
+   code and the docs, and writes `factory/context.md`. It is told not to change product code
+   and not to commit. `context` copies that file into the `context` artifact when the agent
+   settles. The step fails if the file is not there. The wait is 2 hours.
+3. **Plan** (`plan`, `plan-ready`, then `approve-plan`). An agent reads the brief and the
+   context and writes `factory/plan.md`. It is told not to implement. Then an approval gate
+   shows you the plan. **Approve** starts implementation. **Request changes** needs a note,
+   runs planning again, and gives that note to the agent as `changes-approve-plan`. **Reject**
+   stops the run. The gate can be entered 3 times, including the first. The third request for
+   changes stops the run and says to start a new one. Each pass waits again, shows a new code,
+   and needs a new decision. You decide in the app, from a terminal, or on the phone. The
+   notification on this computer includes the code unless Settings → General leaves it out.
+   The phone notice does not include the code. It opens the decision.
+4. **Implement** (`implement`, then `implement-ready`). An agent works from the approved plan,
+   commits, and pushes to `{{ workspace.branch }}`. It is told to update pull request
+   `#{{ pr.number }}`, and not to open a second one. `factory/` is a note for the run; the
+   agent is told not to commit it. The wait is 4 hours.
+5. **Verify** (`verify`). Runs the smoke test you named, with `gate: true`, and waits up to 30
+   minutes. A pass goes on to review. A failure runs implementation again and gives it
+   `failure-verify`, the report. A file you have not approved waits for you, and the step
+   waits with it. The enforced verdict is that smoke test. There is no step that runs an
+   arbitrary project command such as `cargo test`; the implement agent can run those itself,
+   and this phase is the one Yardsort records. The step can run 3 times in the whole run,
+   including the first. The count is not reset when review sends the work back, so a failure
+   after a review uses one of the same three. The third failure stops the run.
+6. **Review** (`await-review`, then `accept-review`). `await-review` waits until a review
+   appears on the pull request, posted after the run started. It has no timeout, and it keeps
+   waiting if you quit and open Yardsort again. A comment that is not a review does not count.
+   Then an approval gate. **Approve** goes on. **Request changes** needs a note, runs
+   implementation again, and gives it `changes-accept-review`. **Reject** stops the run. The
+   gate can be entered 3 times, including the first. The third request for changes stops the
+   run. The wait sees that a review appeared. It does not read
+   whether GitHub recorded an approval or a request for changes. That decision is yours, at
+   this gate.
+
+The run ends at **release**. The prompt says the work is ready to release. **Approve** finishes
+the run, and `ready` notifies you. **Reject**, or **Request changes**, stops the run: this gate
+has no loop back. Nothing is merged, deployed, or rolled back.
+
+The chart's arrows back are the three loops: from the plan gate to planning, from the smoke
+test to implementation, and from the review gate to implementation. A route to `stop` is not a
+box.
+
+What this workflow does not do:
+
+- It does not open the pull request the review waits on. That pull request is the one on the
+  branch when the run is queued. Implementation updates it. A pull request created during the
+  run is not the one `await-review` watches, and the run will not start without one.
+- It does not take the retry limits as inputs. Copy the file to change `max_attempts`.
+- It does not branch on the text of a note, or on GitHub's own review state.
+- It does not merge, deploy, or roll back.
+- It does not record what happened and learn from it.
 
 ## The file
 

@@ -54,4 +54,76 @@ describe("layoutSteps", () => {
       "sign-off->plan",
     ]);
   });
+
+  it("draws the software factory as one column, with the three loops back", () => {
+    const { nodes, links } = layoutSteps([
+      { id: "define", needs: [] },
+      { id: "brief", needs: ["define"] },
+      { id: "gather", needs: ["brief"] },
+      { id: "context", needs: ["gather"] },
+      { id: "plan", needs: ["context"] },
+      { id: "plan-ready", needs: ["plan"] },
+      {
+        id: "approve-plan",
+        needs: ["plan-ready"],
+        routes: [{ to: "implement" }, { to: "plan" }, { to: "stop" }],
+      },
+      { id: "implement", needs: ["approve-plan"] },
+      { id: "implement-ready", needs: ["implement"] },
+      {
+        id: "verify",
+        needs: ["implement-ready"],
+        routes: [{ to: "await-review" }, { to: "implement" }],
+      },
+      { id: "await-review", needs: ["verify"] },
+      {
+        id: "accept-review",
+        needs: ["await-review"],
+        routes: [{ to: "release" }, { to: "implement" }, { to: "stop" }],
+      },
+      { id: "release", needs: ["accept-review"] },
+      { id: "ready", needs: ["release"] },
+    ]);
+    const order = [
+      "define",
+      "brief",
+      "gather",
+      "context",
+      "plan",
+      "plan-ready",
+      "approve-plan",
+      "implement",
+      "implement-ready",
+      "verify",
+      "await-review",
+      "accept-review",
+      "release",
+      "ready",
+    ];
+    const y = (id: string) => at(nodes, id).y;
+    for (let i = 1; i < order.length; i++) {
+      const above = order[i - 1];
+      const below = order[i];
+      if (above === undefined || below === undefined) throw new Error("missing step");
+      expect(y(above)).toBeLessThan(y(below));
+    }
+    expect(links.map((link) => link.id)).toEqual([
+      "define->brief",
+      "brief->gather",
+      "gather->context",
+      "context->plan",
+      "plan->plan-ready",
+      "plan-ready->approve-plan",
+      "approve-plan->implement",
+      "approve-plan->plan",
+      "implement->implement-ready",
+      "implement-ready->verify",
+      "verify->await-review",
+      "verify->implement",
+      "await-review->accept-review",
+      "accept-review->release",
+      "accept-review->implement",
+      "release->ready",
+    ]);
+  });
 });

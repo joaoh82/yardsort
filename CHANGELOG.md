@@ -3,6 +3,17 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Software factory.** A built-in workflow, `software-factory`, takes a task from a brief the
+  agent clarifies with you, through context, a plan you approve, implementation on the
+  workspace's open pull request, a smoke test that must pass, and a review, and stops when you
+  say it is ready to release. Requesting changes on the plan runs planning again. A failed
+  smoke test, or changes after review, runs implementation again, up to three times including
+  the first. You answer and decide in Yardsort, from a terminal, or on the phone. It does not
+  merge, deploy, or roll back, and it does not follow a pull request opened during the run.
+  See [The software factory](docs/guide/workflows.md#the-software-factory).
+
 ## 0.27.0
 
 - **The phone can be told about activity on this computer.** When Remote is on, a task that
