@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.26.0
 
 - **A workflow on a workspace's pull requests elsewhere, from the workspace.** When **Request code
   review** or **Address reviews** is started on a workspace with no open pull request of its own,
