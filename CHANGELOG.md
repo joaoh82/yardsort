@@ -5,6 +5,19 @@ has the downloads and the full commit lists.
 
 ## 0.27.0
 
+- **The phone can be told about activity on this computer.** When Remote is on, a task that
+  moved or finished, a review that needs attention, a failed workflow, an available desktop
+  update, and a workflow question or approval each send one notification. It opens that item
+  in the phone app. You answer, approve, and install on the computer. The phone notification
+  never includes a one-time code. On the phone, Settings → Notifications asks once for
+  permission. After that the token is registered for every account this phone is signed in to,
+  when the app starts and after a sign-in. The screen can mute all of them for this account or
+  turn a category off. A tap opens
+  the item, including when the app was not running. The same desktop version can be mentioned
+  again after a week. Task and review notices are sent when
+  this computer loads those lists. A notice waits up to a day when the phone or the server cannot be
+  reached, and is delivered once when it can. See
+  [Notifications](docs/guide/remote.md#notifications).
 - **A workflow can be answered from the phone.** While this computer is online, a phone signed
   in to the same account can see a run, including why it is waiting, and can approve, reject,
   request changes, answer a question, or resume a run that is ready to continue. The one-time
@@ -32,19 +45,6 @@ has the downloads and the full commit lists.
   had none, even with its agent's new pull requests in the clones tracked beside it. See
   [A pull request in another repository](docs/guide/workflows.md#a-pull-request-in-another-repository).
 
-- **The phone can be told about activity on this computer.** When Remote is on, a task that
-  moved or finished, a review that needs attention, a failed workflow, an available desktop
-  update, and a workflow question or approval each send one notification. It opens that item
-  in the phone app. You answer, approve, and install on the computer. The phone notification
-  never includes a one-time code. On the phone, Settings → Notifications asks once for
-  permission. After that the token is registered for every account this phone is signed in to,
-  when the app starts and after a sign-in. The screen can mute all of them for this account or
-  turn a category off. A tap opens
-  the item, including when the app was not running. The same desktop version can be mentioned
-  again after a week. Task and review notices are sent when
-  this computer loads those lists. A notice waits up to a day when the phone or the server cannot be
-  reached, and is delivered once when it can. See
-  [Notifications](docs/guide/remote.md#notifications).
 - **An agent in a workflow can ask you a question and continue in the same session.**
   On a `wait_session` with `clarify: true`, the agent asks with `ys workflow ask`
   (one `--question` each) and the run waits. You answer in the run view, or with
