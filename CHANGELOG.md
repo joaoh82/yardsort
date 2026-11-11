@@ -17,6 +17,10 @@ has the downloads and the full commit lists.
   phone paired before this needs to be unpaired and paired again. An older desktop is not shown
   workflow scopes, and they are not granted for it, until that desktop states that it speaks
   them. See [Notifications](docs/guide/remote.md#notifications).
+- **A keyboard with the phone.** A Bluetooth or plugged-in keyboard now sends Esc, Ctrl and Alt
+  combinations, Shift-Tab and the arrows to the terminal while the phone has control; letters still
+  go into the field. The arrows, Tab and Backspace on their own reach the terminal while the field is
+  empty. See [A keyboard with the phone](docs/guide/remote.md#a-keyboard-with-the-phone).
 
 ## 0.26.0
 

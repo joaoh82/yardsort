@@ -5,13 +5,17 @@
  * Typing into a terminal, natively (31 §5): a field for what the system keyboard, dictation or a
  * paste makes, and a row of the keys a phone lacks. Return in the field sends it with Enter, and a
  * paste keeps its lines, which is why the field is a multiline one that returns nothing itself.
- * Where the computer takes them, a picture can be given too, ahead of the keys.
+ * Where the computer takes them, a picture can be given too, ahead of the keys. A keyboard paired
+ * with the phone types into the field too, and its Esc, Ctrl, Alt and arrows reach the terminal
+ * (`lib/hardware.ts`).
  */
 
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
+import { HardwareKeys } from "../../modules/hardware-keys";
 import type { TerminalControl } from "../lib/control";
+import { type HardwareKey, hardwareBytes } from "../lib/hardware";
 import { addedCharacter, bytesOf, controlByte, type Key, KEY_NAMES } from "../lib/keys";
 import { Button, FONTS, useColors } from "./parts";
 
@@ -61,6 +65,13 @@ export function Composer({
     control.press(KEY_NAMES[key], bytesOf(key, { ctrl, applicationCursor }));
   };
 
+  const fromKeyboard = (key: HardwareKey) => {
+    const sent = hardwareBytes(key, applicationCursor);
+    if (!sent) return;
+    setCtrl(false);
+    control.press(sent.said, sent.bytes);
+  };
+
   const changed = (text: string) => {
     if (ctrl) {
       setCtrl(false);
@@ -76,7 +87,12 @@ export function Composer({
   };
 
   return (
-    <View style={styles.composer}>
+    <HardwareKeys
+      enabled={holding}
+      plain={draft.length === 0}
+      onKey={({ nativeEvent }) => fromKeyboard(nativeEvent)}
+      style={styles.composer}
+    >
       <View style={styles.line}>
         <TextInput
           accessibilityLabel="What to type"
@@ -167,7 +183,7 @@ export function Composer({
           })}
         </ScrollView>
       )}
-    </View>
+    </HardwareKeys>
   );
 }
 

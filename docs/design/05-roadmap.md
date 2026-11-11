@@ -1047,6 +1047,11 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       tries one it was waiting on at once; a development build's readout of the two budgets; and
       `echo-time.ts` with a delay proxy to measure them. Its local smoke test passed: through 100 ms
       of round trip, a keystroke's echo at p95 105 ms against a budget of 300.
+      Slice 9 was built on 2026-11-11 ([35 §18](35-remote-r4-r5.md#18--what-the-ninth-slice-adds)):
+      a keyboard paired with the phone, through a native module of the app's own. Letters still go
+      into the field; Esc, Ctrl and Alt combinations, Shift-Tab and the arrows go to the terminal,
+      the arrows, Tab and Backspace on their own only while the field is empty. Its run on the
+      Android emulator passed, and found a hardware Return sending the field twice, fixed.
       Slice 12 was added on 2026-11-08 at the owner's request: the slim image and a full one, with
       toolchains, `gh` and the harnesses whose licence allows it, published to the GitHub Container
       Registry on each release beside the tarballs; the other harnesses installed by the operator

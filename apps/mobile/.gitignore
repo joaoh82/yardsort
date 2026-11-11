@@ -1,6 +1,8 @@
 # Made by `expo prebuild` and `expo run`: the native projects are generated, never committed.
 /ios/
 /android/
+# What Gradle builds of a local module's own.
+/modules/*/android/build/
 .expo/
 expo-env.d.ts
 *.jks
