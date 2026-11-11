@@ -24,7 +24,7 @@ getrandom = "0.3"
 # token cannot choose how it is checked. Pure-Rust crypto: no C toolchain on any platform.
 jsonwebtoken = { version = "11.1", default-features = false, features = ["rust_crypto"] }
 # To the identity provider only: discovery, its keys, and the code exchange.
-reqwest = { version = "0.13", default-features = false, features = ["form", "json", "rustls-no-provider"] }
+reqwest = { version = "0.13", default-features = false, features = ["form", "http2", "json", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # The records, in PostgreSQL. Queries are checked by the tests against a real server, not at
 # compile time, so building needs no database. (sqlx would check them at compile time, but its

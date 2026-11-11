@@ -5,6 +5,14 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **The phone can be told about activity on this computer.** When Remote is on, a task that
+  moved or finished, a review that needs attention, a failed workflow, an available desktop
+  update, and a workflow question or approval each send one notification. It opens that item
+  in the phone app. You answer, approve, and install on the computer. The phone notification
+  never includes a one-time code. On the phone, Settings → Notifications can mute all of them
+  or turn a category off. A notice waits up to a day when the phone or the server cannot be
+  reached, and is delivered once when it can. See
+  [Notifications](docs/guide/remote.md#notifications).
 - **An agent in a workflow can ask you a question and continue in the same session.**
   On a `wait_session` with `clarify: true`, the agent asks with `ys workflow ask`
   (one `--question` each) and the run waits. You answer in the run view, or with

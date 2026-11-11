@@ -10,6 +10,9 @@ day old, which is how a machine that spent the night asleep finds out. If a newe
 an **update** pill appears beside **Settings** at the foot of the projects panel; press it to see
 what the update is. Nothing is downloaded until you ask for it.
 
+A phone signed in through [Remote](remote.md#notifications) can also be told that an update is
+available. The notification only says so. Installing it stays on this computer.
+
 You can also look right now: **Settings → General → Check now**, which shows the version you are
 running too. To stop the automatic check, untick **Check for updates automatically** there.
 

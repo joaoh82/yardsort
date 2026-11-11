@@ -26,6 +26,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use remote_proto::account::{LoginParams, TokenRequest};
+use remote_proto::notify::{NoticeSubmission, NotificationPreferences, PushRegistration};
 use remote_proto::pairing::{GrantDecision, HostRegistration, PairingRequest};
 use remote_proto::relay::{TicketRequest, MAX_MESSAGE};
 use remote_proto::{DeviceId, ErrorCode, GrantId, HostId, RemoteError};
@@ -139,6 +140,14 @@ pub fn router<R: Records + 'static>(service: ControlService<R>, options: Options
             post(ticket::<R>).route_layer(middleware::from_fn_with_state(tickets, limited::<R>)),
         )
         .route("/v1/relay", get(relay::<R>))
+        .route("/v1/notices", post(submit_notice::<R>))
+        .route("/v1/notifications/token", post(save_push_token::<R>))
+        .route(
+            "/v1/notifications/preferences",
+            get(notification_preferences::<R>).post(set_notification_preferences::<R>),
+        )
+        .route("/v1/notifications/reachable", post(mark_reachable::<R>))
+        .route("/v1/notifications/{id}", get(read_notice::<R>))
         .fallback(|| async { failure(RemoteError::not_found()) })
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .layer(middleware::from_fn(guard))
@@ -601,6 +610,100 @@ fn answer<T: Serialize>(result: Result<T, RemoteError>) -> Response {
         Ok(value) => Json(value).into_response(),
         Err(error) => failure(error),
     }
+}
+
+async fn submit_notice<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    body: Result<Json<NoticeSubmission>, JsonRejection>,
+) -> Response {
+    let caller = match caller(&service, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    let submission = match body_of(body, "That notice is not one Yardsort sends.") {
+        Ok(submission) => submission,
+        Err(error) => return error.into_response(),
+    };
+    answer(service.submit_notice(&caller, submission, now_ms()).await)
+}
+
+async fn save_push_token<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    body: Result<Json<PushRegistration>, JsonRejection>,
+) -> Response {
+    let caller = match caller(&service, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    let registration = match body_of(body, "That push token cannot be used.") {
+        Ok(registration) => registration,
+        Err(error) => return error.into_response(),
+    };
+    match service
+        .save_push_token(&caller, registration, now_ms())
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => failure(error),
+    }
+}
+
+async fn notification_preferences<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+) -> Response {
+    let caller = match caller(&service, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    answer(service.notification_preferences(&caller).await)
+}
+
+async fn set_notification_preferences<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    body: Result<Json<NotificationPreferences>, JsonRejection>,
+) -> Response {
+    let caller = match caller(&service, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    let preferences = match body_of(body, "Those notification settings are not usable.") {
+        Ok(preferences) => preferences,
+        Err(error) => return error.into_response(),
+    };
+    match service
+        .set_notification_preferences(&caller, preferences)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => failure(error),
+    }
+}
+
+async fn mark_reachable<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+) -> Response {
+    let caller = match caller(&service, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    answer(service.mark_reachable(&caller, now_ms()).await)
+}
+
+async fn read_notice<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let caller = match caller(&service, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    answer(service.read_notice(&caller, &id).await)
 }
 
 /// The device behind `Authorization: Bearer …`.

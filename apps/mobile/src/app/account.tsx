@@ -9,6 +9,7 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Alert } from "react-native";
 
 import { messageOf } from "../lib/accounts";
+import { readPushToken } from "../lib/push-token";
 import { useApp, useSnapshot } from "../lib/context";
 import { moment } from "../lib/format";
 import type { Profile } from "../lib/profiles";
@@ -133,6 +134,10 @@ function SignedIn({
       live = false;
     };
   }, [fetchDevices, profile.id]);
+
+  useEffect(() => {
+    void accounts.registerForNotifications(readPushToken).catch(() => {});
+  }, [accounts, profile.id]);
 
   const refresh = async () => {
     setRefreshing(true);

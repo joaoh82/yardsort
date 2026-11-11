@@ -45,6 +45,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0033_workflow_attempts.sql"),
     include_str!("../migrations/0034_workflow_approval_history.sql"),
     include_str!("../migrations/0035_workflow_clarifications.sql"),
+    include_str!("../migrations/0036_mobile_notices.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -4737,7 +4738,7 @@ impl Store {
             > 0)
     }
 
-    fn conn(&self) -> MutexGuard<'_, Connection> {
+    pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -4916,7 +4917,7 @@ fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-pub(crate) fn now_ms() -> i64 {
+pub fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
@@ -5662,7 +5663,7 @@ steps:
         {
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[30].contains("CREATE TABLE workflow_approval_decisions"));
-            assert_eq!(MIGRATIONS.len(), 35);
+            assert_eq!(MIGRATIONS.len(), 36);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -5729,7 +5730,7 @@ steps:
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[31].contains("CREATE TABLE workflow_waits"));
             assert!(MIGRATIONS[31].contains("code_rounds"));
-            assert_eq!(MIGRATIONS.len(), 35);
+            assert_eq!(MIGRATIONS.len(), 36);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs

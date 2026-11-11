@@ -138,7 +138,7 @@ export const DOCS_NAV: DocSection[] = [
         slug: "guide/remote",
         title: "Remote",
         description:
-          "Reach this computer from your phone through a Yardsort server. Still under development, and off until you turn it on.",
+          "Reach this computer from your phone through a Yardsort server. The phone can be told about tasks, reviews, failures, desktop updates, and workflow questions. Still under development, and off until you turn it on.",
       },
       {
         slug: "guide/headless-host",

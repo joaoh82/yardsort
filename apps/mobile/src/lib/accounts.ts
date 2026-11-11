@@ -472,6 +472,36 @@ export class Accounts {
     return this.#withAccess((session, access) => session.client.devices(access));
   }
 
+  /** What this phone is set to receive. */
+  notificationPreferences(): Promise<import("@yardsort/remote-client").NotificationPreferences> {
+    return this.#withAccess((session, access) => session.client.notificationPreferences(access));
+  }
+
+  /** Replace what this phone is set to receive. */
+  setNotificationPreferences(
+    preferences: import("@yardsort/remote-client").NotificationPreferences,
+  ): Promise<void> {
+    return this.#withAccess((session, access) =>
+      session.client.setNotificationPreferences(access, preferences),
+    );
+  }
+
+  /** Register a push token when the phone has one, and ask for anything still queued. */
+  async registerForNotifications(
+    readToken: () => Promise<{ platform: "apns" | "fcm"; token: string } | null>,
+  ): Promise<void> {
+    const token = await readToken();
+    await this.#withAccess(async (session, access) => {
+      if (token) await session.client.registerPushToken(access, token);
+      await session.client.markNotificationsReachable(access);
+    });
+  }
+
+  /** One notification, for the screen a tap opens. */
+  notice(id: string): Promise<import("@yardsort/remote-client").NoticeView> {
+    return this.#withAccess((session, access) => session.client.notice(access, id));
+  }
+
   /**
    * The computers that let this phone in. A grant's computer no longer on the account is not one:
    * the server has taken it off, and nothing can reach it.

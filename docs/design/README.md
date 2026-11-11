@@ -43,6 +43,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 36  | [Triggers](36-triggers.md)                                              | Proposal: start a workflow or a smoke test when something happens — the agent is done, a PR opens, a review arrives, checks fail                                                            |
 | 37  | [Floor Manager](37-floor-manager.md)                                    | First slice built, and its permission is a setting `ys` enforces: read only, ask first, trusted. `ys pr list` and `ys pr checkout`                                                          |
 | 38  | [Pull requests in other repositories](38-pull-requests-elsewhere.md)    | Built: a workspace tracks pull requests opened in nested clones — seen by every built-in agent, `ys pr track` or by hand — merges, closes, replies to and reads them, and has them reviewed |
+| 39  | [Mobile notifications](39-mobile-notifications.md)                      | Built: the phone is told about tasks, reviews, failures, desktop updates, and workflow questions. The notice opens the item. Answering and installing stay on the computer                  |
 
 ## Vocabulary
 

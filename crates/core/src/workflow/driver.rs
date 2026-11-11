@@ -431,6 +431,7 @@ fn move_on(
             "failed",
             Some("The workflow file no longer checks out."),
         )?;
+        note_run_finished(store, &run.id, "failed");
         return Ok(());
     };
     let place = match run.workspace_id.as_deref() {
@@ -440,6 +441,7 @@ fn move_on(
     let Some(place) = place else {
         driver.touch();
         store.finish_workflow_run(&run.id, "failed", Some("The workspace is gone."))?;
+        note_run_finished(store, &run.id, "failed");
         return Ok(());
     };
     let mut facts = Facts::parse(&run.context);
@@ -619,6 +621,7 @@ fn move_on(
             };
             driver.touch();
             store.finish_workflow_run(&run.id, status, error.as_deref())?;
+            note_run_finished(store, &run.id, status);
             return Ok(());
         }
         // Only an effect that happened can let another step start. One put back to wait would
@@ -1461,6 +1464,11 @@ fn tell_open_questions(
                 replaced,
             )),
         );
+        // The phone is told that a question is open. The one-time code stays on the computer.
+        note_mobile(
+            store,
+            crate::notify::workflow_question(&run.id, &wait.step_id, wait.created_at),
+        );
         if wait.notified_at.is_none() {
             store.mark_workflow_wait_notified(&run.id, &wait.step_id)?;
         }
@@ -1510,6 +1518,12 @@ fn follow_approval(
                 false,
             )),
         );
+        if let Some(wait) = store.workflow_wait(&run.id, &step.id)? {
+            note_mobile(
+                store,
+                crate::notify::workflow_approval(&run.id, &step.id, wait.created_at),
+            );
+        }
         store.mark_workflow_wait_notified(&run.id, &step.id)?;
     }
     Ok(())
@@ -1565,6 +1579,12 @@ fn resume_human_waits(
                     true,
                 )),
             );
+            if let Some(wait) = store.workflow_wait(&run.id, &step.id)? {
+                note_mobile(
+                    store,
+                    crate::notify::workflow_approval(&run.id, &step.id, wait.created_at),
+                );
+            }
         } else if !told {
             let _ = hands.notify(
                 super::waits::TITLE_WAITING,
@@ -1576,6 +1596,12 @@ fn resume_human_waits(
                     false,
                 )),
             );
+            if let Some(wait) = store.workflow_wait(&run.id, &step.id)? {
+                note_mobile(
+                    store,
+                    crate::notify::workflow_approval(&run.id, &step.id, wait.created_at),
+                );
+            }
             store.mark_workflow_wait_notified(&run.id, &step.id)?;
         }
     }
@@ -1607,6 +1633,18 @@ fn open_approval_wait(
         &phase.to_json(),
     )?;
     Ok(())
+}
+
+/// A failed run, for the phone. The error text stays on the computer.
+fn note_run_finished(store: &Store, run_id: &str, status: &str) {
+    note_mobile(store, crate::notify::workflow_failure(run_id, status));
+}
+
+/// Queue a phone notice. The desktop notification is separate and may still carry a code.
+fn note_mobile(store: &Store, draft: Option<crate::notify::NoticeDraft>) {
+    if let Some(draft) = draft {
+        let _ = crate::notify::enqueue(store, &draft, now_ms());
+    }
 }
 
 /// The code to put in a notification, or none when the setting leaves it out.

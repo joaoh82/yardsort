@@ -19,6 +19,14 @@
 //! - `YARDSORT_INSTANCE`: this instance's name, as that proxy knows it. On Fly.io it is the
 //!   Machine's id, which Fly.io sets as `FLY_MACHINE_ID` and is used when this is unset; anywhere
 //!   else, a name made up at each start.
+//!
+//! Push is optional. With none of these set, notices wait until a provider is configured.
+//! - `YARDSORT_APNS_KEY_ID`, `YARDSORT_APNS_TEAM_ID`, `YARDSORT_APNS_BUNDLE_ID`
+//!   (`dev.yardsort.mobile` for a release build, `dev.yardsort.mobile.development` for a
+//!   development build), and `YARDSORT_APNS_KEY` or `YARDSORT_APNS_KEY_FILE` (the `.p8` PEM).
+//!   `YARDSORT_APNS_SANDBOX=1` sends to the sandbox.
+//! - `YARDSORT_FCM_CREDENTIALS` or `YARDSORT_FCM_CREDENTIALS_FILE` (a service account JSON).
+//!   `YARDSORT_FCM_PROJECT_ID` overrides the project id in that file.
 
 use std::net::SocketAddr;
 
@@ -47,6 +55,13 @@ pub struct Settings {
     pub client_ip_header: Option<HeaderName>,
     pub routing: Routing,
     pub instance: Instance,
+    pub push: PushSettings,
+}
+
+/// APNs and FCM, when the operator configured them. A missing piece leaves that provider off.
+pub struct PushSettings {
+    pub apns: Option<crate::push::Apns>,
+    pub fcm: Option<crate::push::Fcm>,
 }
 
 impl std::fmt::Debug for Settings {
@@ -62,6 +77,8 @@ impl std::fmt::Debug for Settings {
             .field("client_ip_header", &self.client_ip_header)
             .field("routing", &self.routing)
             .field("instance", &self.instance.as_str())
+            .field("apns", &self.push.apns.is_some())
+            .field("fcm", &self.push.fcm.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -136,8 +153,65 @@ impl Settings {
             },
             device_redirects,
             database_url: database_url(&get)?,
+            push: push_settings(&get),
         })
     }
+}
+
+fn push_settings(get: &impl Fn(&str) -> Option<String>) -> PushSettings {
+    let apns = apns_settings(get);
+    let fcm = fcm_settings(get);
+    PushSettings { apns, fcm }
+}
+
+fn apns_settings(get: &impl Fn(&str) -> Option<String>) -> Option<crate::push::Apns> {
+    let key_id = filled(get, "YARDSORT_APNS_KEY_ID");
+    let team_id = filled(get, "YARDSORT_APNS_TEAM_ID");
+    let bundle_id = filled(get, "YARDSORT_APNS_BUNDLE_ID");
+    let key = push_secret(get, "YARDSORT_APNS_KEY");
+    if key_id.is_none() && team_id.is_none() && bundle_id.is_none() && key.is_none() {
+        return None;
+    }
+    let (Some(key_id), Some(team_id), Some(bundle_id), Some(key)) =
+        (key_id, team_id, bundle_id, key)
+    else {
+        tracing::warn!(
+            "push: APNs needs YARDSORT_APNS_KEY_ID, YARDSORT_APNS_TEAM_ID, \
+             YARDSORT_APNS_BUNDLE_ID and YARDSORT_APNS_KEY"
+        );
+        return None;
+    };
+    let sandbox = matches!(
+        get("YARDSORT_APNS_SANDBOX").as_deref(),
+        Some("1" | "true" | "yes")
+    );
+    match crate::push::Apns::parse(key_id, team_id, bundle_id, sandbox, key.expose()) {
+        Some(apns) => Some(apns),
+        None => {
+            tracing::warn!("push: the APNs key could not be read");
+            None
+        }
+    }
+}
+
+fn fcm_settings(get: &impl Fn(&str) -> Option<String>) -> Option<crate::push::Fcm> {
+    let credentials = push_secret(get, "YARDSORT_FCM_CREDENTIALS");
+    let project = filled(get, "YARDSORT_FCM_PROJECT_ID");
+    if credentials.is_none() && project.is_none() {
+        return None;
+    }
+    let Some(credentials) = credentials else {
+        tracing::warn!("push: FCM needs YARDSORT_FCM_CREDENTIALS");
+        return None;
+    };
+    let Some(mut fcm) = crate::push::Fcm::parse(credentials.expose()) else {
+        tracing::warn!("push: the FCM credentials could not be read");
+        return None;
+    };
+    if let Some(project) = project {
+        fcm.project_id = project;
+    }
+    Some(fcm)
 }
 
 /// What `yardsort-server revoke-account` needs: the database, and the provider the server signs
@@ -159,6 +233,32 @@ impl AdminSettings {
             issuer: get("YARDSORT_OIDC_ISSUER"),
         })
     }
+}
+
+/// A push secret from the environment. A blank value is unset, so a compose file can pass
+/// `${VAR:-}` and leave the provider off until the operator fills it in.
+fn push_secret(get: &impl Fn(&str) -> Option<String>, name: &str) -> Option<Secret> {
+    let value = filled(get, name);
+    let file = filled(get, &format!("{name}_FILE"));
+    match (value, file) {
+        (None, None) => None,
+        (Some(_), Some(_)) => {
+            tracing::warn!("push: set {name} or {name}_FILE, not both");
+            None
+        }
+        (Some(value), None) => Some(Secret::new(value)),
+        (None, Some(path)) => match std::fs::read_to_string(path.trim()) {
+            Ok(text) => Some(Secret::new(text.trim_end().to_owned())),
+            Err(error) => {
+                tracing::warn!("push: {name}_FILE: {error}");
+                None
+            }
+        },
+    }
+}
+
+fn filled(get: &impl Fn(&str) -> Option<String>, name: &str) -> Option<String> {
+    get(name).filter(|text| !text.trim().is_empty())
 }
 
 /// `name`, or the contents of the file `{name}_FILE` names.
