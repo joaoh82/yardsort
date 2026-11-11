@@ -9,6 +9,7 @@ import { Secret, webCrypto, type Scope } from "@yardsort/remote-client";
 
 import type { StandIn } from "../../../../packages/remote-client/test/stand-in.ts";
 import { Accounts, type Browser, type Env } from "../../src/lib/accounts";
+import type { Diagnostics } from "../../src/lib/diagnostics";
 import { MemoryVault } from "./memory-vault";
 
 export const browser: Browser = async (url, redirect) => {
@@ -29,6 +30,7 @@ export async function paired(
   name: string,
   scopes?: Scope[],
   fetch?: typeof globalThis.fetch,
+  diagnostics?: Diagnostics,
 ) {
   const shelf = new MemoryVault();
   const vault = new MemoryVault();
@@ -38,6 +40,7 @@ export async function paired(
     userAgent: "yardsort-mobile/test (ios)",
     shelf,
     ...(fetch ? { fetch } : {}),
+    ...(diagnostics ? { diagnostics } : {}),
   };
   const accounts = new Accounts(env, vault);
   await accounts.load();

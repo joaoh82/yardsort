@@ -19,6 +19,7 @@ import * as WebBrowser from "expo-web-browser";
 import { Platform as ReactPlatform } from "react-native";
 
 import type { Browser, Env } from "./accounts";
+import { diagnostics } from "./diagnostics";
 import type { ChoiceFile } from "./appearance";
 import { LONGEST_SIDE, type PickImage } from "./attach";
 import type { Shelf } from "./observed";
@@ -97,11 +98,15 @@ const platform: Platform =
 
 export const appVersion: string = Constants.expoConfig?.version ?? "0.0.0";
 
+/** `ios 18.1`, for diagnostics. */
+export const systemVersion = `${ReactPlatform.OS} ${String(ReactPlatform.Version)}`;
+
 export const nativeEnv: Env = {
   crypto: nativeCrypto,
   platform,
   userAgent: `yardsort-mobile/${appVersion} (${platform})`,
   shelf: cacheShelf,
+  diagnostics,
 };
 
 /**

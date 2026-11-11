@@ -29,28 +29,48 @@ export interface Offered {
   link: string;
 }
 
+export interface StartOptions {
+  /** Keep what the server and the host log, every level of Yardsort's own crates, for {@link StandIn.logs}. */
+  logs?: boolean;
+}
+
 export class StandIn {
   server!: string;
   host!: HostId;
   hostName!: string;
-  #process: ReturnType<typeof Bun.spawn<"pipe", "pipe", "inherit">>;
+  #process: Bun.Subprocess<"pipe", "pipe", "pipe" | "inherit">;
   #lines: AsyncGenerator<string>;
+  #logs: string[] = [];
 
-  private constructor() {
+  private constructor(options: StartOptions) {
     this.#process = Bun.spawn(
       ["cargo", "run", "-q", "-p", "yardsort-server", "--example", "stand-in"],
       {
         cwd: ROOT,
+        env: options.logs
+          ? { ...process.env, YARDSORT_STAND_IN_LOGS: process.env.YARDSORT_STAND_IN_LOGS ?? "1" }
+          : process.env,
         stdin: "pipe",
         stdout: "pipe",
-        stderr: "inherit",
+        stderr: options.logs ? "pipe" : "inherit",
       },
     );
     this.#lines = lines(this.#process.stdout);
+    const stderr = this.#process.stderr;
+    if (stderr instanceof ReadableStream) void this.#keep(stderr);
   }
 
-  static async start(): Promise<StandIn> {
-    const standIn = new StandIn();
+  async #keep(stderr: ReadableStream<Uint8Array>): Promise<void> {
+    for await (const line of lines(stderr)) this.#logs.push(line);
+  }
+
+  /** What the server and the host logged so far, when started with {@link StartOptions.logs}. */
+  logs(): string {
+    return this.#logs.join("\n");
+  }
+
+  static async start(options: StartOptions = {}): Promise<StandIn> {
+    const standIn = new StandIn(options);
     const first = await standIn.#next();
     const ready = (
       JSON.parse(first) as { ready?: { server: string; host: HostId; hostName: string } }
@@ -86,6 +106,7 @@ export class StandIn {
   signInAs = (subject: string) => this.#ask<null>({ op: "signInAs", subject });
   removeHost = () => this.#ask<null>({ op: "removeHost" });
   note = (text: string) => this.#ask<null>({ op: "note", text });
+  conversation = (title: string) => this.#ask<null>({ op: "conversation", title });
   hostOffline = () => this.#ask<null>({ op: "hostOffline" });
   hostOnline = () => this.#ask<null>({ op: "hostOnline" });
 

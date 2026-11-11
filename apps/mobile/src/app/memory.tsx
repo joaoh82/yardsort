@@ -26,7 +26,7 @@ export default function MemoryScreen() {
 }
 
 function Memory({ host, project }: { host: HostId; project: ProjectId }) {
-  const { reach, channel } = useChannelTo(host);
+  const { reach, channel, lastSeenAt } = useChannelTo(host);
   const [asked, setAsked] = useState(0);
   const [more, setMore] = useState<MemoryPage | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -64,12 +64,13 @@ function Memory({ host, project }: { host: HostId; project: ProjectId }) {
 
   return (
     <Screen refreshing={false} onRefresh={() => setAsked((n) => n + 1)}>
-      <ReachLine reach={reach} lastSeenAt={null} />
+      <ReachLine reach={reach} lastSeenAt={lastSeenAt} />
       <Body muted>Approved notes only. Proposals are reviewed at the computer.</Body>
       {first.problem && <Problem>{first.problem}</Problem>}
       {problem && <Problem>{problem}</Problem>}
       {channel && !page && !first.problem && <Waiting label="Asking the computer" />}
       {!channel && !page && <Body muted>Memory shows when the computer can be reached.</Body>}
+      {page && !channel && first.at !== null && <Body muted>As of {moment(first.at)}.</Body>}
       {page?.notes.length === 0 && <Body muted>No approved notes in this project.</Body>}
       {page?.notes.map((note) => (
         <Card key={note.id} label="A note">

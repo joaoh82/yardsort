@@ -11,6 +11,7 @@ import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 
 import { messageOf } from "../lib/accounts";
+import { moment } from "../lib/format";
 import { OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
 import { Body, Button, Group, Problem, Row, Screen, Section, Waiting } from "../ui/parts";
 
@@ -26,7 +27,7 @@ export default function WorkflowsScreen() {
 
 function Runs({ host }: { host: HostId }) {
   const router = useRouter();
-  const { reach, channel } = useChannelTo(host);
+  const { reach, channel, lastSeenAt } = useChannelTo(host);
   const [asked, setAsked] = useState(0);
   const [more, setMore] = useState<WorkflowRunPage | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -56,9 +57,10 @@ function Runs({ host }: { host: HostId }) {
   return (
     <Screen refreshing={false} onRefresh={() => setAsked((n) => n + 1)}>
       <Stack.Screen options={{ title: "Workflows" }} />
-      <ReachLine reach={reach} lastSeenAt={null} />
+      <ReachLine reach={reach} lastSeenAt={lastSeenAt} />
       {first.problem ? <Problem>{first.problem}</Problem> : null}
       {problem ? <Problem>{problem}</Problem> : null}
+      {page && !channel && first.at !== null ? <Body muted>As of {moment(first.at)}.</Body> : null}
       {!page && !first.problem ? (
         <Waiting label={channel ? "Asking the computer" : "Waiting for the computer"} />
       ) : null}

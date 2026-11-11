@@ -29,6 +29,7 @@ import { messageOf } from "../lib/accounts";
 import { pastedPath } from "../lib/attach";
 import { useApp } from "../lib/context";
 import { deviceName, fitted, TerminalControl } from "../lib/control";
+import type { Reach } from "../lib/presence";
 import { Timings, timingWords } from "../lib/timing";
 import { type Sight, PageFeed, TerminalWatch } from "../lib/watch";
 import { Composer } from "../ui/composer";
@@ -89,7 +90,7 @@ function Watching({
   }, [live, control]);
   useEffect(() => () => control.release(), [control]);
 
-  const { reach, channel } = useChannelTo(host);
+  const { reach, channel, lastSeenAt } = useChannelTo(host);
   const [pageStarts, setPageStarts] = useState(0);
   const [trouble, setTrouble] = useState(false);
   const [draft, setDraft] = useState("");
@@ -242,7 +243,7 @@ function Watching({
           <View style={styles.status}>
             <Dot kind={stopped(sight) ? "bad" : reachDot(reach)} />
             <Text style={[styles.statusWords, { color: colors.muted }]}>
-              {statusLine(sight, describeReach(reach, null), hold.holding)}
+              {statusLine(sight, reach, lastSeenAt, hold.holding)}
             </Text>
           </View>
           {__DEV__ && (
@@ -289,14 +290,26 @@ function stopped(sight: Sight): boolean {
   return sight.problem !== null && !sight.following;
 }
 
-function statusLine(sight: Sight, reach: string, holding: boolean): string {
+function statusLine(
+  sight: Sight,
+  reach: Reach | undefined,
+  lastSeenAt: number | null,
+  holding: boolean,
+): string {
   if (sight.exit) {
     return sight.exit.success
       ? "The program ended."
       : `The program ended with exit code ${sight.exit.code}.`;
   }
   if (sight.gone) return "This terminal is no longer on the computer.";
-  if (reach !== "Online") return `${reach}. What is on the computer keeps running.`;
+  // A computer the relay says is offline may be asleep or off: what ran there may have stopped.
+  // Any other way of not reaching it is this phone's connection, which stops nothing there.
+  if (reach?.kind === "offline") {
+    return `${describeReach(reach, lastSeenAt)}. That does not mean the program stopped.`;
+  }
+  if (reach?.kind !== "online") {
+    return `${describeReach(reach, lastSeenAt)}. What is on the computer keeps running.`;
+  }
   if (stopped(sight)) return "Not watching this terminal.";
   if (!sight.following) return "Connecting to the terminal.";
   if (holding) return "You have control. The person at the computer can take it back by typing.";

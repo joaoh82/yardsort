@@ -22,6 +22,10 @@ Neither end listens for connections: this computer and your phone each reach out
 included. The connection is encrypted on the way, but not end to end. Use a server you run yourself, or
 one run by someone you trust with that.
 
+Neither the server nor this computer writes any of it in a log: not what a terminal shows or is sent,
+not a conversation's title, and not a memory note. Their logs say which device and which computer, and
+when, and the errors.
+
 ## Turning it on
 
 Open **Settings**, then **Remote**. Give the server's address and a name for this computer, then press
@@ -103,6 +107,29 @@ word. When the phone's network changes, it asks each computer it has open whethe
 and opens the connection again within a few seconds if not, rather than waiting until it notices by
 itself. One it was already waiting to reach again is tried at once. Nothing typed is sent again, and
 control is not taken back: press **Take control** again once it is back.
+
+## When a computer cannot be reached
+
+On the phone, a computer is **Online** while the phone holds a connection to it, and **Reconnecting**
+while it tries again. It shows **Offline, last seen** and when, once the server says the computer is
+not connected to it: a computer that is asleep, shut down or off the network. Offline does not say
+whether what runs there stopped: losing the connection stops nothing, and a computer that sleeps or
+shuts down stops its agents with it. What the phone last read from the computer, such as a
+workspace's conversations, approved memory or a workflow run, stays on its screen marked **As of**
+when it was read. Nothing typed or chosen while it cannot be reached is kept to be sent later.
+
+## Diagnostics on the phone
+
+**Settings → Diagnostics** shows what happened to the phone's connections since the app started:
+
+- the app's version, the phone's system and the protocol it speaks;
+- the server's id, and this phone's id there;
+- each change to the sign-in, to each computer, named by its id, and to the network, with its time
+  in UTC and the error code that came with it.
+
+It holds no names, titles, paths or addresses, nothing a terminal showed and nothing typed. Read it
+there, then **Share** sends that same text through the phone's share sheet, to whoever you choose.
+Nothing is sent otherwise. Only the last 200 changes are kept, and only while the app runs.
 
 ## Scrolling on the phone
 

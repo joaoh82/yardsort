@@ -1770,3 +1770,39 @@ async fn instances_starting_together_migrate_once() {
     assert_eq!(ids.len(), 1, "one server, one id: {ids:?}");
     empty.drop().await;
 }
+
+/// A database error names what it broke, never the values it was about: PostgreSQL's own
+/// message and DETAIL can quote them, and the error is logged.
+#[tokio::test]
+async fn a_database_error_never_quotes_the_values() {
+    let Some(db) = common::pg::database().await else {
+        return;
+    };
+    let records = db.records.clone();
+    raw(&db)
+        .await
+        .batch_execute("CREATE UNIQUE INDEX devices_by_name ON devices (name)")
+        .await
+        .unwrap();
+    let account = records.account("https://id.one", "alice", T).await.unwrap();
+    enroll(&*records, &account, "zz-marker-zz", T).await;
+    let twice = Device {
+        id: device_id(),
+        account: account.clone(),
+        name: "zz-marker-zz".into(),
+        kind: DeviceKind::Phone,
+        platform: Platform::Ios,
+        created_at: T,
+        last_seen_at: None,
+        revoked: None,
+    };
+    let error = records
+        .add_device(twice, issued("again", T))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(!error.contains("zz-marker-zz"), "{error}");
+    assert!(error.contains("23505"), "{error}");
+    assert!(error.contains("devices_by_name"), "{error}");
+    db.drop().await;
+}

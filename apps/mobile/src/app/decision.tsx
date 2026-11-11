@@ -33,7 +33,7 @@ export default function DecisionScreen() {
 }
 
 function Decision({ host, run, step }: { host: HostId; run: RunId; step: RunId }) {
-  const { reach, channel } = useChannelTo(host);
+  const { reach, channel, lastSeenAt } = useChannelTo(host);
   const [asked, setAsked] = useState(0);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -108,7 +108,7 @@ function Decision({ host, run, step }: { host: HostId; run: RunId; step: RunId }
   return (
     <Screen refreshing={false} onRefresh={() => setAsked((n) => n + 1)}>
       <Stack.Screen options={{ title: "Decision" }} />
-      <ReachLine reach={reach} lastSeenAt={null} />
+      <ReachLine reach={reach} lastSeenAt={lastSeenAt} />
       {first.problem ? <Problem>{first.problem}</Problem> : null}
       {problem ? <Problem>{problem}</Problem> : null}
       {message ? <Body>{message}</Body> : null}
