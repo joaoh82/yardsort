@@ -6,11 +6,13 @@ import {
   type RunPreview,
   type TestItem,
   type TrackedPullRequest,
+  type WorkflowItem,
   type Workspace,
 } from "@/lib/ipc";
 import { useModalFocus } from "@/lib/useModalFocus";
 import { useHarnessStore } from "@/stores/harnesses";
 import { useProjectsStore } from "@/stores/projects";
+import { usePublishStore } from "@/stores/publish";
 import { useWorkflowStore } from "@/stores/workflows";
 import { InputField } from "./InputField";
 
@@ -38,17 +40,27 @@ interface Props {
  * is checked again by the core when it is queued, exactly as `ys workflow run` does; what shows
  * here first is so the person can see what the run will find before asking for it.
  */
-export function RunWorkflowDialog({ workflowId, workspace, tracked, onClose, onStarted }: Props) {
+export function RunWorkflowDialog({
+  workflowId,
+  workspace,
+  tracked: trackedGiven,
+  onClose,
+  onStarted,
+}: Props) {
   const titleId = useId();
   const dialogRef = useRef<HTMLFormElement>(null);
   useModalFocus(dialogRef);
   const items = useWorkflowStore((s) => s.items);
   const projects = useProjectsStore((s) => s.projects);
   const allHarnesses = useHarnessStore((s) => s.harnesses);
+  const pullRequestsByProject = usePublishStore((s) => s.byProject);
   const harnesses = allHarnesses.filter((h) => h.enabled);
 
   const [chosenWorkflow, setChosenWorkflow] = useState(workflowId ?? "");
   const [chosenWorkspace, setChosenWorkspace] = useState(workspace?.id ?? "");
+  // The pull request elsewhere the run is about: the one it was opened from, or one the person
+  // picked when the workspace had no open pull request of its own.
+  const [tracked, setTracked] = useState(trackedGiven);
   // What the person chose, per workflow; an input they have not touched shows its default.
   const [chosen, setChosen] = useState<Record<string, Record<string, string>>>({});
   // What the core said a run would find, and for which workflow and workspace it said it.
@@ -150,6 +162,24 @@ export function RunWorkflowDialog({ workflowId, workspace, tracked, onClose, onS
   );
   const missing = inputs.filter((input) => input.required && !answers[input.id]?.trim());
   const blockedByPullRequest = preview?.needsPullRequest && !preview.pullRequest;
+
+  // No open pull request of its own, but open ones the workspace tracks elsewhere — often the
+  // whole of its work, in a parent project. The workflow's `-elsewhere` twin can run on one.
+  const projectId = projects.find((p) => p.workspaces.some((w) => w.id === chosenWorkspace))?.id;
+  const openElsewhere =
+    !tracked && blockedByPullRequest && projectId
+      ? (pullRequestsByProject[projectId]?.tracked ?? []).filter(
+          (t) => t.workspaceId === chosenWorkspace && t.pullRequest?.state === "open",
+        )
+      : [];
+  const twin = runnableElsewhere(items, chosenWorkflow);
+  const runOn = (pick: TrackedPullRequest) => {
+    if (!twin) return;
+    // What was answered carries over: the twin asks the same things.
+    setChosen((all) => ({ ...all, [twin.id]: { ...answers, ...all[twin.id] } }));
+    setTracked(pick);
+    setChosenWorkflow(twin.id);
+  };
   const ready =
     !!workflow &&
     !!chosenWorkspace &&
@@ -255,9 +285,42 @@ export function RunWorkflowDialog({ workflowId, workspace, tracked, onClose, onS
                 </span>
               </p>
             ) : (
-              <p role="alert" className="text-red-400 select-text">
-                {preview.pullRequestProblem}
-              </p>
+              <div className="flex flex-col gap-2">
+                <p role="alert" className="text-red-400 select-text">
+                  {preview.pullRequestProblem}
+                </p>
+                {openElsewhere.length > 0 &&
+                  (twin ? (
+                    <div className="flex flex-col gap-1.5">
+                      <p className="text-ink-muted">
+                        This workspace tracks open pull requests elsewhere:
+                      </p>
+                      <ul aria-label="Open elsewhere" className="flex flex-col gap-1">
+                        {openElsewhere.map((t) => (
+                          <li key={t.id}>
+                            <button
+                              type="button"
+                              className="w-full truncate rounded border border-line bg-canvas/40 px-2.5 py-1.5 text-left text-ink hover:border-accent"
+                              onClick={() => runOn(t)}
+                            >
+                              {t.repo.owner}/{t.repo.name}#{t.number} {t.pullRequest?.title}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-ink-faint">Pick one to run “{twin.name}” on it instead.</p>
+                    </div>
+                  ) : (
+                    <p className="text-ink-muted">
+                      This workspace tracks open pull requests elsewhere (
+                      {openElsewhere
+                        .map((t) => `${t.repo.owner}/${t.repo.name}#${t.number}`)
+                        .join(", ")}
+                      ), but this workflow runs only on the workspace&apos;s own. Run one about a
+                      pull request elsewhere from it, in the Pull requests view.
+                    </p>
+                  ))}
+              </div>
             ))}
           {preview && preview.empty.length > 0 && (
             <ul aria-label="Will be empty" className="flex flex-col gap-1 text-amber-300">
@@ -299,5 +362,20 @@ export function RunWorkflowDialog({ workflowId, workspace, tracked, onClose, onS
         </footer>
       </form>
     </div>
+  );
+}
+
+/**
+ * The workflow to run instead on a pull request elsewhere: `<id>-elsewhere`, when there is one
+ * about such a pull request that can run — the built-ins come in such pairs, and a copy keeps
+ * its built-in's id.
+ */
+function runnableElsewhere(items: WorkflowItem[], id: string): WorkflowItem | undefined {
+  if (!id) return undefined;
+  return items.find(
+    (item) =>
+      item.id === `${id}-elsewhere` &&
+      item.problems.length === 0 &&
+      item.workflow?.trigger.context === "tracked_pull_request",
   );
 }

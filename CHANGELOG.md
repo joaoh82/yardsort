@@ -3,6 +3,16 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **A workflow on a workspace's pull requests elsewhere, from the workspace.** When **Request code
+  review** or **Address reviews** is started on a workspace with no open pull request of its own,
+  the dialog now lists the open pull requests the workspace tracks in other repositories, and
+  picking one runs **Request code review elsewhere** or **Address reviews elsewhere** on it.
+  Before, a parent project's workspace whose own pull request was merged could only be told it
+  had none, even with its agent's new pull requests in the clones tracked beside it. See
+  [A pull request in another repository](docs/guide/workflows.md#a-pull-request-in-another-repository).
+
 ## 0.25.0
 
 - **Triggers on pull requests in other repositories.** A trigger whose workflow is about a pull

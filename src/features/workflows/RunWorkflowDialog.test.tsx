@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunPreview, WorkflowItem } from "@/lib/ipc";
@@ -18,8 +18,16 @@ vi.mock("@/lib/ipc", async (original) => ({
 
 import { useHarnessStore } from "@/stores/harnesses";
 import { useProjectsStore } from "@/stores/projects";
+import { usePublishStore } from "@/stores/publish";
 import { useWorkflowStore } from "@/stores/workflows";
-import { harness, project, worktree } from "@/test/fixtures";
+import {
+  harness,
+  project,
+  pullRequest,
+  pullRequestsOf,
+  trackedOf,
+  worktree,
+} from "@/test/fixtures";
 import { RunWorkflowDialog } from "./RunWorkflowDialog";
 
 const review: WorkflowItem = {
@@ -395,10 +403,98 @@ describe("RunWorkflowDialog on a pull request elsewhere", () => {
     vi.clearAllMocks();
     core.testList.mockResolvedValue([]);
     useWorkflowStore.setState({ items: [review, elsewhere], loaded: true });
-    useHarnessStore.setState({ loaded: true, harnesses: [harness("claude")] });
+    useHarnessStore.setState({ loaded: true, harnesses: [harness("claude"), harness("codex")] });
     useProjectsStore.setState({
       projects: [{ ...project("app"), workspaces: [...project("app").workspaces, fixLogin] }],
     });
+    usePublishStore.setState({ byProject: {} });
+  });
+
+  const noneOfItsOwn: RunPreview = {
+    ...withPr,
+    pullRequest: null,
+    pullRequestProblem: "`fix-login` has no open pull request.",
+  };
+  const merged = trackedOf(fixLogin.id, pullRequest(61, { state: "merged", title: "Old one" }));
+  const trackedHere = (
+    tracked = [
+      trackedOf(fixLogin.id, pullRequest(226, { title: "Usage totals" })),
+      merged,
+      trackedOf("w-other", pullRequest(9, { title: "Someone else's" })),
+    ],
+  ) =>
+    usePublishStore.setState({
+      byProject: { [fixLogin.projectId]: pullRequestsOf([], { tracked }) },
+    });
+
+  it("offers the open pull requests the workspace tracks when it has none of its own", async () => {
+    core.workflowPreview.mockImplementation((_id: string, _ws: string, trackedId: string | null) =>
+      Promise.resolve(
+        trackedId
+          ? {
+              ...withPr,
+              pullRequest: {
+                number: 226,
+                url: "https://github.com/demo/lib/pull/226",
+                title: "Usage totals",
+                elsewhere: { repo: "demo/lib", clone: "/code/app/lib" },
+              },
+            }
+          : noneOfItsOwn,
+      ),
+    );
+    core.workflowStart.mockResolvedValue("run-3");
+    trackedHere();
+    const user = userEvent.setup();
+    render(<RunWorkflowDialog workflowId="code-review" workspace={fixLogin} onClose={() => {}} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("has no open pull request");
+    const offered = screen.getByRole("list", { name: "Open elsewhere" });
+    // Only the open one, and only this workspace's.
+    expect(
+      within(offered)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["demo/lib#226 Usage totals"]);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Who reviews" }), "codex");
+    await user.click(within(offered).getByRole("button", { name: "demo/lib#226 Usage totals" }));
+
+    expect(
+      screen.getByRole("heading", { name: "Run “Request code review elsewhere”" }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText(/demo\/lib#\s*226 Usage totals/)).toBeInTheDocument();
+    expect(core.workflowPreview).toHaveBeenLastCalledWith(
+      "code-review-elsewhere",
+      fixLogin.id,
+      "t-226",
+    );
+    expect(screen.getByRole("combobox", { name: "Who reviews" })).toHaveValue("codex");
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    await waitFor(() =>
+      expect(core.workflowStart).toHaveBeenCalledWith(
+        "code-review-elsewhere",
+        fixLogin.id,
+        { reviewer: "codex" },
+        "t-226",
+      ),
+    );
+  });
+
+  it("names them, without offering a run, when the workflow has no twin about one", async () => {
+    core.workflowPreview.mockResolvedValue(noneOfItsOwn);
+    useWorkflowStore.setState({ items: [review], loaded: true });
+    trackedHere();
+    render(<RunWorkflowDialog workflowId="code-review" workspace={fixLogin} onClose={() => {}} />);
+    expect(await screen.findByText(/tracks open pull requests elsewhere \(demo\/lib#226\)/));
+    expect(screen.queryByRole("list", { name: "Open elsewhere" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
+  it("offers nothing when the workspace tracks no open pull request", async () => {
+    core.workflowPreview.mockResolvedValue(noneOfItsOwn);
+    trackedHere([merged]);
+    render(<RunWorkflowDialog workflowId="code-review" workspace={fixLogin} onClose={() => {}} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("has no open pull request");
+    expect(screen.queryByText(/tracks open pull requests elsewhere/)).toBeNull();
   });
 
   it("runs on that pull request, read by its link, and offers only workflows about one", async () => {

@@ -296,6 +296,13 @@ its link:
    clone, push, and answer each comment.
 
 It needs the clone: without one in the project's folder, the dialog says so and does not start.
+
+In a parent project the workspace's own pull request is often merged or missing while its work is
+in the clones. Then **Request code review** started from the workspace says it has no open pull
+request, and lists the open ones the workspace tracks elsewhere: pick one and the dialog switches
+to **Request code review elsewhere** on it, keeping what you chose. **Address reviews** does the
+same with **Address reviews elsewhere**, and so does a workflow of your own `<id>` when there is
+an `<id>-elsewhere` about a pull request elsewhere.
 It is offered only on a pull request elsewhere: the Workflows view does not run or schedule it.
 A [trigger](triggers.md#pull-requests-elsewhere) can start it — or **Address reviews
 elsewhere**, or any workflow about one — on the `pr.*` events of each pull request the workspace
