@@ -44,9 +44,9 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        # A hung mirror once held a pull request's check for three hours; this takes two minutes.
-        # The script retries against archive.ubuntu.com when the runner's mirror stalls.
-        timeout-minutes: 15
+        # A hung mirror once held a pull request's check for three hours; a healthy run takes
+        # about two minutes. The script's worst case is 1050s, inside this limit.
+        timeout-minutes: 20
         run: bash .github/apt-install.sh
 
       - uses: oven-sh/setup-bun@v2
@@ -254,9 +254,9 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        # A hung mirror once held a pull request's check for three hours; this takes two minutes.
-        # The script retries against archive.ubuntu.com when the runner's mirror stalls.
-        timeout-minutes: 15
+        # A hung mirror once held a pull request's check for three hours; a healthy run takes
+        # about two minutes. The script's worst case is 1050s, inside this limit.
+        timeout-minutes: 20
         run: bash .github/apt-install.sh
 
       - uses: oven-sh/setup-bun@v2
