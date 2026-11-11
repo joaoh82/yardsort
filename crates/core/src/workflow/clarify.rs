@@ -117,11 +117,17 @@ pub enum AskWrite {
 pub enum SummaryWrite {
     Recorded,
     Empty,
+    /// A question on this step has no answer yet. The summary waits until that answer.
+    AlreadyWaiting,
     MissingRun,
     MissingStep,
     NotClarifying,
-    NotWaiting { status: String },
-    RunEnded { status: String },
+    NotWaiting {
+        status: String,
+    },
+    RunEnded {
+        status: String,
+    },
 }
 
 /// The step a question belongs to.
@@ -221,7 +227,8 @@ pub fn ask(
 }
 
 /// Store the agent's outcome for a clarifying step. A later call replaces it. The step
-/// does not move, and the text is not taken from the terminal.
+/// does not move, and the text is not taken from the terminal. A question that is still
+/// open is refused: the summary would otherwise finish a dead session as if none existed.
 pub fn summary(
     store: &Store,
     run_id: &str,
@@ -242,6 +249,13 @@ pub fn summary(
             _ => SummaryWrite::NotClarifying,
         });
     };
+    let open = store
+        .clarification_rounds(run_id, step_id)?
+        .iter()
+        .any(|round| round.answer.is_none() && round.applied_at.is_none());
+    if open {
+        return Ok(SummaryWrite::AlreadyWaiting);
+    }
     store.record_clarification_summary(run_id, step_id, body.trim())?;
     Ok(SummaryWrite::Recorded)
 }
@@ -282,6 +296,9 @@ pub fn summary_refusal(result: &SummaryWrite, run: &str, step: &str) -> Option<S
     let message = match result {
         SummaryWrite::Recorded => return None,
         SummaryWrite::Empty => "Say the outcome in --text.".to_owned(),
+        SummaryWrite::AlreadyWaiting => format!(
+            "Step `{step}` is still waiting for an answer. Record the summary after that answer."
+        ),
         SummaryWrite::MissingRun => format!("No run {run:?}. `ys workflow runs` lists them."),
         SummaryWrite::MissingStep => format!("Run {run} has no step `{step}`."),
         SummaryWrite::NotClarifying => {

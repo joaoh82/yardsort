@@ -12,8 +12,9 @@ has the downloads and the full commit lists.
   one-time code shown in the window and, unless the run is set not to notify, in the
   notification. The code is issued either way. The window does not ask for it.
   The answer is typed back into that same session. A question only printed in the
-  terminal is not asked. The step finishes when the agent records `ys workflow summary`,
-  or when `until: exited` and the session has ended with no question still open.
+  terminal is not asked. The step finishes when the agent records `ys workflow summary`.
+  A summary is refused while a question is still waiting for an answer. The step also
+  finishes when `until: exited` and the session has ended with no question still open.
   Going quiet does not finish it. Without a summary, a session that is still running
   waits until the step's timeout and then fails. If the session ends first, the step
   fails and says the session ended without a summary. Rounds are

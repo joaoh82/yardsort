@@ -2539,6 +2539,39 @@ fn a_dead_session_with_no_summary_fails_without_a_timeout() {
 }
 
 #[test]
+fn a_recorded_summary_finishes_a_dead_session_that_still_has_a_question() {
+    let mut run = Run::from(CLARIFY);
+    session_up(&mut run);
+    run.world.clarifications.insert(
+        "discover".into(),
+        ClarificationState {
+            rounds: 1,
+            waiting: true,
+            summary: true,
+            ..ClarificationState::default()
+        },
+    );
+    run.world.sessions.insert(
+        "pty-9".into(),
+        SessionFacts {
+            alive: false,
+            busy: false,
+            settled_at: None,
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "succeeded");
+    assert_eq!(
+        run.rows
+            .iter()
+            .find(|row| row.step_id == "discover")
+            .and_then(|row| parse_outputs(&row.outputs).get("outcome").cloned())
+            .as_deref(),
+        Some("summary")
+    );
+}
+
+#[test]
 fn an_open_question_fails_when_the_session_ends() {
     let mut run = Run::from(CLARIFY);
     session_up(&mut run);

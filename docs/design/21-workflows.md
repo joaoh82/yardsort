@@ -760,7 +760,8 @@ The claim also requires the run to be `running` and the step to be `waiting`, so
 a cancel or a halt cannot type into a dead run. An answer to a step that has
 already failed or timed out is refused, even when the run is still going.
 
-A clarifying step finishes only when `ys workflow summary` has been recorded, or
+A summary is refused while a question is still unanswered. A clarifying step finishes
+only when `ys workflow summary` has been recorded, or
 when `until` is `exited` and the session has ended with no question still open. A
 settled session that is still running, with no summary, keeps waiting until the
 step's timeout, then the step fails. A session that has ended, with no summary,

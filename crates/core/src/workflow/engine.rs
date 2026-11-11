@@ -1212,25 +1212,29 @@ fn clarify_wait(
             .as_deref()
             .map(|pty| world.session(pty))
             .unwrap_or_default();
-        if !facts.alive {
+        // A summary already recorded finishes the step. Checking it after this failure
+        // would report that the session ended without a summary when one was stored.
+        if !facts.alive && !state.summary {
             return Some(fail(
                 id,
                 StepStatus::Waiting,
                 "The session ended without a summary.",
             ));
         }
-        return if timed_out {
-            Some(fail(
-                id,
-                StepStatus::Waiting,
-                &format!(
-                    "Timed out waiting for an answer after {}.",
-                    duration(timeout_secs.unwrap_or(0))
-                ),
-            ))
-        } else {
-            None
-        };
+        if facts.alive {
+            return if timed_out {
+                Some(fail(
+                    id,
+                    StepStatus::Waiting,
+                    &format!(
+                        "Timed out waiting for an answer after {}.",
+                        duration(timeout_secs.unwrap_or(0))
+                    ),
+                ))
+            } else {
+                None
+            };
+        }
     }
     if state.summary {
         return Some(Move {

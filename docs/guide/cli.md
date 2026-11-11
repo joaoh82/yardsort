@@ -599,7 +599,7 @@ only printed in the terminal is not asked. `answer` is yours: a session Yardsort
 cannot use it, and neither can the Floor Manager. It asks for the one-time code shown in
 the window and in the notification, the same way `approve` does. Leave `--code` out to
 type it with echo off, or pass `--code -` and the code on standard input. The window does
-not ask for the code. The same session receives the answer. A clarifying step finishes
+not ask for the code. The same session receives the answer. `summary` is refused while a question is still waiting for an answer. A clarifying step finishes
 when the agent records `summary`, or when `until: exited` and the session has ended
 with no question still open. Going quiet does not finish it. A session that ends
 with no summary fails the step.

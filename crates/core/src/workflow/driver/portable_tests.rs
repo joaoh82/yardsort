@@ -2644,6 +2644,43 @@ fn a_question_under_notify_never_still_gets_a_code() {
 }
 
 #[test]
+fn a_summary_is_refused_while_a_question_is_open() {
+    let (_dir, store, run) = clarify_run(CLARIFY_YAML);
+    let host = QuietHost::new();
+    let hands = Asking::new();
+    let driver = Driver::new(1, Duration::from_secs(3600));
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(
+        crate::workflow::clarify::ask(
+            &store,
+            &run,
+            "discover",
+            &["What should the timeout be?".to_owned()]
+        )
+        .unwrap(),
+        crate::workflow::clarify::AskWrite::Recorded { round: 1 }
+    );
+    let written = crate::workflow::clarify::summary(
+        &store,
+        &run,
+        "discover",
+        "The timeout should be 30 seconds.",
+    )
+    .unwrap();
+    assert_eq!(
+        written,
+        crate::workflow::clarify::SummaryWrite::AlreadyWaiting
+    );
+    let message = crate::workflow::clarify::summary_refusal(&written, &run, "discover")
+        .expect("the refusal is told");
+    assert!(message.contains("still waiting for an answer"), "{message}");
+    assert!(store
+        .clarification_summary(&run, "discover")
+        .unwrap()
+        .is_none());
+}
+
+#[test]
 fn a_question_only_printed_in_the_session_does_not_pause_the_step() {
     let (_dir, store, run) = clarify_run(CLARIFY_YAML);
     let host = QuietHost::new();
