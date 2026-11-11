@@ -93,6 +93,8 @@ enum StopAfter {
     AfterDecisionApplied,
     /// The next step has been claimed (`running`) and its effect has not been carried out.
     AfterNextClaim,
+    /// The engine has planned a rewind and the store has not applied it.
+    BeforeRewindApplied,
 }
 
 /// How far a transcript read got. A slow read must not fail the step, and must not be started
@@ -181,8 +183,8 @@ impl Driver {
     /// Nothing when the step is already decided, or when `force` is false and this process
     /// already holds the code. The bool is whether a code row existed before this issue.
     ///
-    /// The slow hash runs on a helper thread, and neither the code lock nor the database is
-    /// held while it runs. `force` is Show a new code, which resets the wrong-try count. A
+    /// The slow hash runs before the code lock is taken again, so the lock is not held
+    /// while the hash runs. `force` is Show a new code, which resets the wrong-try count. A
     /// restart reissue (`force` false) keeps that count, so a lockout survives the restart.
     pub fn issue_approval_code(
         &self,
@@ -198,10 +200,7 @@ impl Driver {
                 return Ok(None);
             }
         }
-        let prepared = std::thread::spawn(crate::workflow::code::issue);
-        let (code, salt, hash) = prepared
-            .join()
-            .unwrap_or_else(|error| std::panic::resume_unwind(error));
+        let (code, salt, hash) = crate::workflow::code::issue();
         let mut codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
         if !force && codes.contains_key(&key) {
             return Ok(None);
@@ -483,6 +482,9 @@ fn move_on(
                     store.clear_workflow_wait(&run.id, &change.step)?;
                     driver.forget_code(&run.id, &change.step);
                 }
+                if change.rewind.is_some() && driver.arm_halt(StopAfter::BeforeRewindApplied) {
+                    return Ok(());
+                }
                 if apply(driver, store, &run.id, change)? {
                     if driver.halt_now() {
                         return Ok(());
@@ -673,6 +675,36 @@ enum Outcome {
 }
 
 fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResult<bool> {
+    // A loop is one change: the steps go back to pending, the old decision is removed, and
+    // the feedback is kept. It is not the path that records a decision. Checked first, so a
+    // request for changes that routes back is not also applied as a finished decision.
+    if let Some(rewind) = &change.rewind {
+        let feedback = rewind.feedback.as_ref().map(|copy| NewWorkflowArtifact {
+            name: copy.name.clone(),
+            source: copy.source.clone(),
+            detail: None,
+            body: copy.body.clone(),
+            truncated: false,
+        });
+        // The rewind cancels a smoke test it sends back, in the same transaction, so a
+        // crash after the commit still leaves that test cancelled.
+        let moved = store.rewind_workflow(
+            run_id,
+            &change.step,
+            &change.from,
+            rewind.seen,
+            &rewind.steps,
+            feedback.as_ref(),
+        )?;
+        if !moved {
+            return Ok(false);
+        }
+        for step in &rewind.steps {
+            driver.forget_code(run_id, step);
+        }
+        driver.touch();
+        return Ok(true);
+    }
     // A person's decision, the wait's applied mark, and the decision's artifacts are one
     // change. The step is no longer waiting, so the decision is not applied a second time,
     // and the artifact is not written again on the next start.
@@ -708,6 +740,25 @@ fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResu
             change.note.as_deref(),
             change.outcome.as_deref(),
             change.clear_outcome,
+        )?
+    } else if let Some(copy) = &change.feedback {
+        let artifact = NewWorkflowArtifact {
+            name: copy.name.clone(),
+            source: copy.source.clone(),
+            detail: None,
+            body: copy.body.clone(),
+            truncated: false,
+        };
+        store.move_workflow_step_leaving(
+            run_id,
+            &change.step,
+            &change.from,
+            change.to,
+            change.outputs.as_deref(),
+            change.note.as_deref(),
+            change.outcome.as_deref(),
+            change.clear_outcome,
+            &[artifact],
         )?
     } else {
         store.move_workflow_step(

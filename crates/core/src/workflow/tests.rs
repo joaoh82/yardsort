@@ -296,6 +296,13 @@ fn step_ids_are_names_and_unique() {
         found.starts_with("12:9: `Start` cannot be a step's id."),
         "{found}"
     );
+    let reserved = problem(&with_steps(
+        "  - id: stop\n    action: notify\n    title: Hi\n",
+    ));
+    assert!(
+        reserved.contains("`stop` cannot be a step's id"),
+        "{reserved}"
+    );
     let found = problem(&with_steps(
         "  - id: start\n    action: notify\n    title: Hi\n",
     ));
@@ -1187,5 +1194,200 @@ fn an_artifact_source_is_checked_before_the_run() {
             session: super::SessionRef::Origin,
             raw: false,
         }
+    );
+}
+
+const BRANCHED: &str = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: plan
+    action: notify
+    title: Plan
+    consumes: [changes-sign-off]
+  - id: sign-off
+    needs: [plan]
+    action: approve
+    prompt: Look at the plan.
+    on:
+      approved: implement
+      rejected: stop
+      changes_requested: plan
+    max_attempts: 3
+  - id: implement
+    needs: [sign-off]
+    action: notify
+    title: Build
+  - id: verify
+    needs: [implement]
+    action: run_test
+    test: login
+    gate: true
+    on:
+      passed: ship
+      failed: implement
+    max_attempts: 3
+  - id: ship
+    needs: [verify]
+    action: notify
+    title: Ship
+"#;
+
+#[test]
+fn routes_name_every_outcome_and_a_loop_names_its_limit() {
+    let workflow = parse(BRANCHED).unwrap();
+    let sign = workflow
+        .steps
+        .iter()
+        .find(|step| step.id == "sign-off")
+        .unwrap();
+    assert_eq!(sign.max_attempts, Some(3));
+    assert_eq!(sign.routes.len(), 3);
+    assert!(sign
+        .routes
+        .iter()
+        .any(|route| route.when == OutcomeName::Approved && route.to == "implement"));
+    assert!(sign
+        .routes
+        .iter()
+        .any(|route| route.stops() && route.when == OutcomeName::Rejected));
+    let verify = workflow
+        .steps
+        .iter()
+        .find(|step| step.id == "verify")
+        .unwrap();
+    assert_eq!(
+        verify
+            .routes
+            .iter()
+            .map(|route| route.when)
+            .collect::<Vec<_>>(),
+        vec![OutcomeName::Failed, OutcomeName::Passed]
+    );
+}
+
+#[test]
+fn a_branch_to_a_missing_step_is_refused() {
+    let found = problem(&BRANCHED.replace("approved: implement", "approved: missing"));
+    assert!(found.contains("There is no step `missing`"), "{found}");
+}
+
+#[test]
+fn a_step_no_branch_can_reach_is_refused() {
+    let found = problem(
+        "id: demo\nname: Demo\nversion: 1\ntrigger:\n  kind: manual\nsteps:\n  - id: sign-off\n    \
+         action: approve\n    prompt: Look\n    on:\n      approved: implement\n      \
+         rejected: stop\n      changes_requested: stop\n  - id: implement\n    needs: [sign-off]\n    \
+         action: notify\n    title: Build\n  - id: leftover\n    needs: [sign-off]\n    \
+         action: notify\n    title: No\n",
+    );
+    assert!(found.contains("Step `leftover` cannot run"), "{found}");
+}
+
+#[test]
+fn a_loop_without_a_limit_is_refused() {
+    let found = problem(&BRANCHED.replacen(
+        "      changes_requested: plan\n    max_attempts: 3\n",
+        "      changes_requested: plan\n",
+        1,
+    ));
+    assert!(
+        found.contains("Routing back needs `max_attempts`"),
+        "{found}"
+    );
+}
+
+#[test]
+fn a_limit_above_the_cap_or_without_a_loop_is_refused() {
+    let high = problem(&BRANCHED.replacen("max_attempts: 3", "max_attempts: 11", 1));
+    assert!(
+        high.contains("`max_attempts` must be from 2 to 10"),
+        "{high}"
+    );
+    let idle = problem(
+        "id: demo\nname: Demo\nversion: 1\ntrigger:\n  kind: manual\nsteps:\n  - id: sign-off\n    \
+         action: approve\n    prompt: Look\n    max_attempts: 3\n",
+    );
+    assert!(
+        idle.contains("`max_attempts` is set, and no route comes back"),
+        "{idle}"
+    );
+}
+
+#[test]
+fn a_branch_must_name_every_outcome_and_only_those() {
+    let missing = problem(&BRANCHED.replace("      rejected: stop\n", ""));
+    assert!(missing.contains("Say where `rejected` goes"), "{missing}");
+    let odd = problems(&BRANCHED.replace("rejected: stop", "nope: stop"));
+    assert!(
+        odd.iter()
+            .any(|line| line.contains("`nope` is not an outcome")),
+        "{odd:?}"
+    );
+    let notify = problem(
+        "id: demo\nname: Demo\nversion: 1\ntrigger:\n  kind: manual\nsteps:\n  - id: ping\n    \
+         action: notify\n    title: Hi\n    on:\n      passed: stop\n",
+    );
+    assert!(
+        notify.contains("`on` is not something a `notify` step takes"),
+        "{notify}"
+    );
+}
+
+#[test]
+fn a_forward_failure_may_be_consumed() {
+    let source = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: verify
+    action: run_test
+    test: login
+    on:
+      passed: stop
+      failed: report
+  - id: report
+    needs: [verify]
+    action: notify
+    title: Report
+    consumes: [failure-verify]
+"#;
+    let workflow = parse(source).unwrap();
+    assert_eq!(
+        workflow.steps[1].consumes,
+        vec!["failure-verify".to_owned()]
+    );
+    let refused = problems(&source.replace("failed: report", "failed: stop"));
+    assert!(
+        refused.iter().any(|line| line.contains(
+            "Step `verify` does not route `failed` back to `report`, so `failure-verify` is never written"
+        )),
+        "{refused:?}"
+    );
+}
+
+#[test]
+fn feedback_is_only_consumed_when_that_outcome_comes_back() {
+    let found = problems(&BRANCHED.replacen(
+        "      changes_requested: plan\n    max_attempts: 3\n",
+        "      changes_requested: stop\n",
+        1,
+    ));
+    assert!(
+        found
+            .iter()
+            .any(|line| line.contains("does not route `changes_requested` back to `plan`")),
+        "{found:?}"
+    );
+    let reserved = problem(&with_steps(
+        "  - id: sign-off\n    action: approve\n    produces:\n      - name: failure-sign-off\n        text: notes\n",
+    ));
+    assert!(
+        reserved.contains("`failure-sign-off` is reserved"),
+        "{reserved}"
     );
 }

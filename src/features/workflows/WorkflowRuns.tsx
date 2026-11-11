@@ -82,6 +82,14 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                       Blocked: waiting for {run.blockedOn}.
                     </span>
                   )}
+                  {!open && run.status === "failed" && run.error && (
+                    <span
+                      title={run.error}
+                      className="max-w-[40%] shrink truncate text-[11px] text-red-400"
+                    >
+                      {run.error}
+                    </span>
+                  )}
                   {scheduled && (
                     <span
                       title={`Started by the schedule “${scheduled.scheduleName}”`}

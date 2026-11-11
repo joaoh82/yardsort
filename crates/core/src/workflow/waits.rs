@@ -8,17 +8,19 @@
 //!
 //! [`list_open`] and [`decide_with_code`] are what a phone or a remote crate calls. They
 //! read and write this database. A remote caller must use [`decide_with_code`]. The
-//! window path takes a `DesktopWindow`, and only the app crate can construct one,
-//! because only the app enables `desktop-window`. This build adds no remote route, no
-//! protocol message and no phone screen. Those stay with the later notification and
+//! window path takes a `DesktopWindow`. The `desktop-window` feature is a review guard,
+//! not a hard boundary: Cargo unifies features across a build, so a crate compiled with
+//! the app can see `DesktopWindow` too. This build adds no remote route, no protocol
+//! message and no phone screen. Those stay with the later notification and
 //! mobile-control work.
 
 use std::collections::HashMap;
 
 use crate::store::{ApprovalWrite, Store, StoreResult};
 
-/// The desktop window. Only the app enables the `desktop-window` feature, so a remote
-/// crate cannot construct this. Remote callers use [`decide_with_code`].
+/// The desktop window. `desktop-window` is a review guard, not a hard boundary: Cargo
+/// unifies features across a build, so this type is visible to every crate in a build
+/// that enables it. Remote callers use [`decide_with_code`], which always takes the code.
 #[cfg(feature = "desktop-window")]
 #[derive(Debug, Clone, Copy)]
 pub struct DesktopWindow {

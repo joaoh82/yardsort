@@ -42,6 +42,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0030_workflow_artifacts.sql"),
     include_str!("../migrations/0031_workflow_approval_decisions.sql"),
     include_str!("../migrations/0032_workflow_human_waits.sql"),
+    include_str!("../migrations/0033_workflow_attempts.sql"),
+    include_str!("../migrations/0034_workflow_approval_history.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -459,6 +461,9 @@ pub struct WorkflowStepRow {
     /// A step outcome as JSON, when the step judged something. Null on older rows and on
     /// steps that produced none. See `workflow::engine::StepOutcome`.
     pub outcome: Option<String>,
+    /// How many times this step has been entered. A loop does not reset it, and a restart
+    /// does not add one.
+    pub attempts: u32,
 }
 
 /// A named document stored on a run, as a later step and the run view read it.
@@ -467,7 +472,7 @@ pub struct WorkflowArtifactRow {
     pub run_id: String,
     pub name: String,
     pub step_id: String,
-    /// `file`, `text`, `output` or `transcript`.
+    /// `file`, `text`, `output`, `transcript`, `decision` or `verdict`.
     pub source: String,
     /// The path, the field, or `digest` / `raw`. Empty for text written in the file.
     pub detail: Option<String>,
@@ -475,6 +480,9 @@ pub struct WorkflowArtifactRow {
     /// The body was cut at the size cap.
     pub truncated: bool,
     pub updated_at: i64,
+    /// Which entry of the producing step wrote this body. Older ones stay in
+    /// `workflow_artifact_versions`.
+    pub attempt: u32,
 }
 
 /// What recording an approval did, or why it did not.
@@ -744,6 +752,197 @@ struct ApprovalChallenge {
     hash: Vec<u8>,
     attempts: i64,
     rounds: i64,
+}
+
+/// The code a terminal presented, as the check saw it. The write accepts the decision
+/// only when both the attempt count and this hash are still on the row.
+struct CheckedCode {
+    attempts: i64,
+    hash: Vec<u8>,
+}
+
+/// Runs between a successful code check and the decision write, in tests only. A test
+/// uses it to replace the code in that window. Production builds do not have the hook.
+#[cfg(test)]
+fn run_code_check_hook() {
+    CODE_CHECK_HOOK.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().as_mut() {
+            hook();
+        }
+    });
+}
+
+#[cfg(test)]
+thread_local! {
+    static CODE_CHECK_HOOK: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Copy the current bodies into the version table. A row already stored for that
+/// attempt is replaced, so the version matches the body that was used.
+fn archive_step_artifacts(tx: &Connection, run_id: &str, step_id: &str) -> rusqlite::Result<usize> {
+    tx.execute(
+        "INSERT INTO workflow_artifact_versions
+         (run_id, name, attempt, step_id, source, detail, body, truncated, created_at)
+         SELECT run_id, name, attempt, step_id, source, detail, body, truncated, updated_at
+         FROM workflow_artifacts WHERE run_id = ?1 AND step_id = ?2
+         ON CONFLICT(run_id, name, attempt) DO UPDATE SET
+           step_id = excluded.step_id,
+           source = excluded.source,
+           detail = excluded.detail,
+           body = excluded.body,
+           truncated = excluded.truncated,
+           created_at = excluded.created_at",
+        params![run_id, step_id],
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn keep_artifact_version(
+    tx: &Connection,
+    run_id: &str,
+    name: &str,
+    attempt: i64,
+    step_id: &str,
+    source: &str,
+    detail: Option<&str>,
+    body: &str,
+    truncated: bool,
+    now: i64,
+) -> rusqlite::Result<usize> {
+    tx.execute(
+        "INSERT INTO workflow_artifact_versions
+         (run_id, name, attempt, step_id, source, detail, body, truncated, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(run_id, name, attempt) DO UPDATE SET
+           step_id = excluded.step_id,
+           source = excluded.source,
+           detail = excluded.detail,
+           body = excluded.body,
+           truncated = excluded.truncated,
+           created_at = excluded.created_at",
+        params![
+            run_id,
+            name,
+            attempt,
+            step_id,
+            source,
+            detail,
+            body,
+            i64::from(truncated),
+            now,
+        ],
+    )
+}
+
+fn archive_named_artifact(tx: &Connection, run_id: &str, name: &str) -> rusqlite::Result<usize> {
+    tx.execute(
+        "INSERT INTO workflow_artifact_versions
+         (run_id, name, attempt, step_id, source, detail, body, truncated, created_at)
+         SELECT run_id, name, attempt, step_id, source, detail, body, truncated, updated_at
+         FROM workflow_artifacts WHERE run_id = ?1 AND name = ?2
+         ON CONFLICT(run_id, name, attempt) DO UPDATE SET
+           step_id = excluded.step_id,
+           source = excluded.source,
+           detail = excluded.detail,
+           body = excluded.body,
+           truncated = excluded.truncated,
+           created_at = excluded.created_at",
+        params![run_id, name],
+    )
+}
+
+/// Keep the current `changes-*` and `failure-*` bodies, then drop them from the table a
+/// consumer reads. A step that runs again must not be handed a note from an earlier pass.
+fn retire_step_feedback(tx: &Connection, run_id: &str, step_id: &str) -> rusqlite::Result<()> {
+    tx.execute(
+        "INSERT INTO workflow_artifact_versions
+         (run_id, name, attempt, step_id, source, detail, body, truncated, created_at)
+         SELECT run_id, name, attempt, step_id, source, detail, body, truncated, updated_at
+         FROM workflow_artifacts
+         WHERE run_id = ?1 AND step_id = ?2
+           AND (name LIKE 'changes-%' OR name LIKE 'failure-%')
+         ON CONFLICT(run_id, name, attempt) DO UPDATE SET
+           step_id = excluded.step_id,
+           source = excluded.source,
+           detail = excluded.detail,
+           body = excluded.body,
+           truncated = excluded.truncated,
+           created_at = excluded.created_at",
+        params![run_id, step_id],
+    )?;
+    tx.execute(
+        "DELETE FROM workflow_artifacts
+         WHERE run_id = ?1 AND step_id = ?2
+           AND (name LIKE 'changes-%' OR name LIKE 'failure-%')",
+        params![run_id, step_id],
+    )?;
+    Ok(())
+}
+
+/// Smoke-test run ids a rewind is about to clear off `run_test` steps.
+fn test_runs_a_rewind_clears(
+    tx: &Connection,
+    run_id: &str,
+    steps: &[String],
+) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = tx.prepare(
+        "SELECT step_id, outputs FROM workflow_step_runs
+         WHERE run_id = ?1 AND action = 'run_test'",
+    )?;
+    let rows = stmt.query_map(params![run_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut ids = Vec::new();
+    for row in rows {
+        let (step_id, outputs) = row?;
+        if !steps.iter().any(|id| id == &step_id) {
+            continue;
+        }
+        if let Some(test_run) = crate::workflow::engine::parse_outputs(&outputs)
+            .get("run")
+            .cloned()
+        {
+            ids.push(test_run);
+        }
+    }
+    Ok(ids)
+}
+
+/// Remember who decided, before a rewind deletes the row. The next pass needs a new decision.
+fn archive_approval(
+    tx: &Connection,
+    run_id: &str,
+    step_id: &str,
+    now: i64,
+) -> rusqlite::Result<()> {
+    tx.execute(
+        "INSERT INTO workflow_approval_history
+         (run_id, step_id, attempt, decision, feedback, actor, decided_at, archived_at)
+         SELECT d.run_id, d.step_id, s.attempts, d.decision, d.feedback, d.actor, d.decided_at, ?3
+         FROM workflow_approval_decisions d
+         JOIN workflow_step_runs s ON s.run_id = d.run_id AND s.step_id = d.step_id
+         WHERE d.run_id = ?1 AND d.step_id = ?2 AND d.decision IS NOT NULL
+         ON CONFLICT(run_id, step_id, attempt) DO UPDATE SET
+           decision = excluded.decision,
+           feedback = excluded.feedback,
+           actor = excluded.actor,
+           decided_at = excluded.decided_at,
+           archived_at = excluded.archived_at",
+        params![run_id, step_id, now],
+    )?;
+    Ok(())
+}
+
+/// The attempt number to store on an artifact this step is writing now.
+fn attempt_of(tx: &Connection, run_id: &str, step_id: &str) -> rusqlite::Result<i64> {
+    let found: Option<i64> = tx
+        .query_row(
+            "SELECT attempts FROM workflow_step_runs WHERE run_id = ?1 AND step_id = ?2",
+            params![run_id, step_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(found.unwrap_or(1).max(1))
 }
 
 fn approval_challenge(
@@ -2372,7 +2571,7 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT run_id, step_id, position, action, status, started_at, ended_at, outputs,
-                    note, outcome
+                    note, outcome, attempts
              FROM workflow_step_runs WHERE run_id = ? ORDER BY position",
         )?;
         let rows = stmt.query_map([run_id], |row| {
@@ -2387,6 +2586,7 @@ impl Store {
                 outputs: row.get(7)?,
                 note: row.get(8)?,
                 outcome: row.get(9)?,
+                attempts: u32::try_from(row.get::<_, i64>(10)?).unwrap_or(0),
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -2396,7 +2596,7 @@ impl Store {
     pub fn workflow_artifacts(&self, run_id: &str) -> StoreResult<Vec<WorkflowArtifactRow>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT run_id, name, step_id, source, detail, body, truncated, updated_at
+            "SELECT run_id, name, step_id, source, detail, body, truncated, updated_at, attempt
              FROM workflow_artifacts WHERE run_id = ? ORDER BY name",
         )?;
         let rows = stmt.query_map([run_id], |row| {
@@ -2409,6 +2609,7 @@ impl Store {
                 body: row.get(5)?,
                 truncated: row.get::<_, i64>(6)? != 0,
                 updated_at: row.get(7)?,
+                attempt: u32::try_from(row.get::<_, i64>(8)?).unwrap_or(1),
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -2426,6 +2627,8 @@ impl Store {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let now = now_ms();
+        let attempt = attempt_of(&tx, run_id, step_id)?;
+        archive_step_artifacts(&tx, run_id, step_id)?;
         tx.execute(
             "DELETE FROM workflow_artifacts WHERE run_id = ? AND step_id = ?",
             params![run_id, step_id],
@@ -2433,8 +2636,8 @@ impl Store {
         for artifact in artifacts {
             tx.execute(
                 "INSERT INTO workflow_artifacts
-                 (run_id, name, step_id, source, detail, body, truncated, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                 (run_id, name, step_id, source, detail, body, truncated, updated_at, attempt)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     run_id,
                     artifact.name,
@@ -2444,7 +2647,20 @@ impl Store {
                     artifact.body,
                     i64::from(artifact.truncated),
                     now,
+                    attempt,
                 ],
+            )?;
+            keep_artifact_version(
+                &tx,
+                run_id,
+                &artifact.name,
+                attempt,
+                step_id,
+                &artifact.source,
+                artifact.detail.as_deref(),
+                &artifact.body,
+                artifact.truncated,
+                now,
             )?;
         }
         tx.commit()?;
@@ -2459,17 +2675,23 @@ impl Store {
         step_id: &str,
         artifact: &NewWorkflowArtifact,
     ) -> StoreResult<()> {
-        self.conn().execute(
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let now = now_ms();
+        let attempt = attempt_of(&tx, run_id, step_id)?;
+        archive_named_artifact(&tx, run_id, &artifact.name)?;
+        tx.execute(
             "INSERT INTO workflow_artifacts
-             (run_id, name, step_id, source, detail, body, truncated, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             (run_id, name, step_id, source, detail, body, truncated, updated_at, attempt)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(run_id, name) DO UPDATE SET
                step_id = excluded.step_id,
                source = excluded.source,
                detail = excluded.detail,
                body = excluded.body,
                truncated = excluded.truncated,
-               updated_at = excluded.updated_at",
+               updated_at = excluded.updated_at,
+               attempt = excluded.attempt",
             params![
                 run_id,
                 artifact.name,
@@ -2478,13 +2700,53 @@ impl Store {
                 artifact.detail,
                 artifact.body,
                 i64::from(artifact.truncated),
-                now_ms(),
+                now,
+                attempt,
             ],
         )?;
+        keep_artifact_version(
+            &tx,
+            run_id,
+            &artifact.name,
+            attempt,
+            step_id,
+            &artifact.source,
+            artifact.detail.as_deref(),
+            &artifact.body,
+            artifact.truncated,
+            now,
+        )?;
+        tx.commit()?;
         Ok(())
     }
 
     /// The decision stored for one step, if a person has recorded one.
+    /// Decisions a rewind removed, oldest attempt first. The live decision is
+    /// [`Self::workflow_approval`].
+    #[cfg(test)]
+    pub(crate) fn archived_approvals(
+        &self,
+        run_id: &str,
+        step_id: &str,
+    ) -> StoreResult<Vec<WorkflowApproval>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT decision, feedback, actor, decided_at
+             FROM workflow_approval_history
+             WHERE run_id = ?1 AND step_id = ?2
+             ORDER BY attempt",
+        )?;
+        let rows = stmt.query_map(params![run_id, step_id], |row| {
+            Ok(WorkflowApproval {
+                decision: row.get(0)?,
+                feedback: row.get(1)?,
+                actor: row.get(2)?,
+                decided_at: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     pub fn workflow_approval(
         &self,
         run_id: &str,
@@ -2528,7 +2790,8 @@ impl Store {
     /// `workflow::waits::decide_in_window` passes that. A terminal with no issued
     /// code, a wrong code, a round count this build will not run, or five wrong codes
     /// already, is refused. The slow check runs before the write transaction. The write
-    /// then checks that the attempt count and the decision are still what the check saw.
+    /// then checks that the attempt count, the code hash, and the decision are still
+    /// what the check saw. A code replaced while the hash runs is not accepted.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn record_workflow_approval(
         &self,
@@ -2556,14 +2819,18 @@ impl Store {
         }
         let actor = crate::workflow::artifact::actor_name(actor);
         // Hash outside the write. A wrong code is counted in its own short transaction.
-        let expected_attempts = if let Some(code) = code {
+        let expected = if let Some(code) = code {
             match self.check_presented_code(run_id, step_id, code)? {
-                Ok(attempts) => Some(attempts),
+                Ok(checked) => Some(checked),
                 Err(refusal) => return Ok(refusal),
             }
         } else {
             None
         };
+        // A restart can replace the code while the slow check above is hashing.
+        // The write below matches the hash that check saw, so the new code is not accepted.
+        #[cfg(test)]
+        run_code_check_hook();
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let run: Option<(String,)> = tx
@@ -2599,11 +2866,11 @@ impl Store {
         if existing.as_ref().is_some_and(|row| row.decision.is_some()) {
             return Ok(ApprovalWrite::AlreadyDecided);
         }
-        if let Some(expected) = expected_attempts {
+        if let Some(expected) = expected.as_ref() {
             let Some(row) = existing.as_ref() else {
                 return Ok(ApprovalWrite::NoCode);
             };
-            if row.attempts != expected {
+            if row.attempts != expected.attempts {
                 return Ok(if row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
                     ApprovalWrite::CodeLocked
                 } else {
@@ -2612,12 +2879,22 @@ impl Store {
             }
         }
         let now = now_ms();
-        let written = if let Some(expected) = expected_attempts {
+        let written = if let Some(expected) = expected.as_ref() {
             tx.execute(
                 "UPDATE workflow_approval_decisions
                  SET decision = ?3, feedback = ?4, actor = ?5, decided_at = ?6
-                 WHERE run_id = ?1 AND step_id = ?2 AND decision IS NULL AND attempts = ?7",
-                params![run_id, step_id, decision, feedback, actor, now, expected],
+                 WHERE run_id = ?1 AND step_id = ?2 AND decision IS NULL
+                   AND attempts = ?7 AND code_hash = ?8",
+                params![
+                    run_id,
+                    step_id,
+                    decision,
+                    feedback,
+                    actor,
+                    now,
+                    expected.attempts,
+                    expected.hash
+                ],
             )?
         } else if existing.is_some() {
             tx.execute(
@@ -2636,11 +2913,18 @@ impl Store {
         };
         if written == 0 {
             let again = approval_challenge(&tx, run_id, step_id)?;
+            if again.as_ref().is_some_and(|row| row.decision.is_some()) {
+                return Ok(ApprovalWrite::AlreadyDecided);
+            }
             if again
                 .as_ref()
                 .is_some_and(|row| row.attempts >= crate::workflow::code::ATTEMPT_LIMIT)
             {
                 return Ok(ApprovalWrite::CodeLocked);
+            }
+            // The code was replaced, or the attempt count moved, after the check.
+            if expected.is_some() {
+                return Ok(ApprovalWrite::WrongCode);
             }
             return Ok(ApprovalWrite::AlreadyDecided);
         }
@@ -2664,12 +2948,14 @@ impl Store {
 
     /// Check a presented code before any decision is written. A wrong code increments the
     /// attempt count in its own transaction, and only while that count is still what was read.
+    /// The hash returned is the one that matched, so the later write can refuse a code a
+    /// restart replaced while this check was hashing.
     fn check_presented_code(
         &self,
         run_id: &str,
         step_id: &str,
         code: &str,
-    ) -> StoreResult<Result<i64, ApprovalWrite>> {
+    ) -> StoreResult<Result<CheckedCode, ApprovalWrite>> {
         let Some(row) = approval_challenge(&self.conn(), run_id, step_id)? else {
             return Ok(Err(ApprovalWrite::NoCode));
         };
@@ -2688,7 +2974,10 @@ impl Store {
         if !crate::workflow::code::matches(code, &row.salt, &row.hash, rounds) {
             return Ok(Err(self.note_wrong_code(run_id, step_id, row.attempts)?));
         }
-        Ok(Ok(row.attempts))
+        Ok(Ok(CheckedCode {
+            attempts: row.attempts,
+            hash: row.hash,
+        }))
     }
 
     /// Count one wrong code, unless the row changed since it was read.
@@ -2992,18 +3281,21 @@ impl Store {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let now = now_ms();
+        let attempt = attempt_of(&tx, run_id, step_id)?;
         for artifact in artifacts {
+            archive_named_artifact(&tx, run_id, &artifact.name)?;
             tx.execute(
                 "INSERT INTO workflow_artifacts
-                 (run_id, name, step_id, source, detail, body, truncated, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 (run_id, name, step_id, source, detail, body, truncated, updated_at, attempt)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(run_id, name) DO UPDATE SET
                    step_id = excluded.step_id,
                    source = excluded.source,
                    detail = excluded.detail,
                    body = excluded.body,
                    truncated = excluded.truncated,
-                   updated_at = excluded.updated_at",
+                   updated_at = excluded.updated_at,
+                   attempt = excluded.attempt",
                 params![
                     run_id,
                     artifact.name,
@@ -3013,7 +3305,20 @@ impl Store {
                     artifact.body,
                     i64::from(artifact.truncated),
                     now,
+                    attempt,
                 ],
+            )?;
+            keep_artifact_version(
+                &tx,
+                run_id,
+                &artifact.name,
+                attempt,
+                step_id,
+                &artifact.source,
+                artifact.detail.as_deref(),
+                &artifact.body,
+                artifact.truncated,
+                now,
             )?;
         }
         tx.commit()?;
@@ -3039,6 +3344,8 @@ impl Store {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let now = now_ms();
+        let attempt = attempt_of(&tx, run_id, step_id)?;
+        archive_step_artifacts(&tx, run_id, step_id)?;
         tx.execute(
             "DELETE FROM workflow_artifacts WHERE run_id = ? AND step_id = ?",
             params![run_id, step_id],
@@ -3046,8 +3353,8 @@ impl Store {
         for artifact in artifacts {
             tx.execute(
                 "INSERT INTO workflow_artifacts
-                 (run_id, name, step_id, source, detail, body, truncated, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                 (run_id, name, step_id, source, detail, body, truncated, updated_at, attempt)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     run_id,
                     artifact.name,
@@ -3057,13 +3364,30 @@ impl Store {
                     artifact.body,
                     i64::from(artifact.truncated),
                     now,
+                    attempt,
                 ],
+            )?;
+            keep_artifact_version(
+                &tx,
+                run_id,
+                &artifact.name,
+                attempt,
+                step_id,
+                &artifact.source,
+                artifact.detail.as_deref(),
+                &artifact.body,
+                artifact.truncated,
+                now,
             )?;
         }
         let marks = from.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let sql = format!(
             "UPDATE workflow_step_runs
              SET status = ?1,
+                 attempts = attempts + CASE
+                     WHEN status = 'pending' AND ?1 IN ('running', 'waiting', 'succeeded') THEN 1
+                     ELSE 0
+                 END,
                  started_at = CASE WHEN ?2 THEN started_at ELSE COALESCE(started_at, ?3) END,
                  ended_at = CASE WHEN ?2 THEN ?3 ELSE ended_at END,
                  outputs = COALESCE(?4, outputs),
@@ -3125,6 +3449,10 @@ impl Store {
         let sql = format!(
             "UPDATE workflow_step_runs
              SET status = ?1,
+                 attempts = attempts + CASE
+                     WHEN status = 'pending' AND ?1 IN ('running', 'waiting', 'succeeded') THEN 1
+                     ELSE 0
+                 END,
                  started_at = CASE WHEN ?2 THEN started_at ELSE COALESCE(started_at, ?3) END,
                  ended_at = CASE WHEN ?2 THEN ?3 ELSE ended_at END,
                  outputs = COALESCE(?4, outputs),
@@ -3147,10 +3475,115 @@ impl Store {
             step_id.to_owned().into(),
         ];
         values.extend(from.iter().map(|s| s.as_str().to_owned().into()));
-        Ok(self
-            .conn()
-            .execute(&sql, rusqlite::params_from_iter(values))?
-            > 0)
+        self.move_in_transaction(&sql, values, run_id, step_id, &[])
+    }
+
+    /// [`Self::move_workflow_step`], and store `artifacts` in the same change. A forward
+    /// failure writes `failure-<step>` here, so a crash cannot succeed the step and drop the note.
+    #[allow(clippy::too_many_arguments)]
+    pub fn move_workflow_step_leaving(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        from: &[StepStatus],
+        to: StepStatus,
+        outputs: Option<&str>,
+        note: Option<&str>,
+        outcome: Option<&str>,
+        clear_outcome: bool,
+        artifacts: &[NewWorkflowArtifact],
+    ) -> StoreResult<bool> {
+        let now = now_ms();
+        let marks = from.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "UPDATE workflow_step_runs
+             SET status = ?1,
+                 attempts = attempts + CASE
+                     WHEN status = 'pending' AND ?1 IN ('running', 'waiting', 'succeeded') THEN 1
+                     ELSE 0
+                 END,
+                 started_at = CASE WHEN ?2 THEN started_at ELSE COALESCE(started_at, ?3) END,
+                 ended_at = CASE WHEN ?2 THEN ?3 ELSE ended_at END,
+                 outputs = COALESCE(?4, outputs),
+                 note = COALESCE(?5, note),
+                 outcome = CASE WHEN ?6 THEN NULL ELSE COALESCE(?7, outcome) END
+             WHERE run_id = ?8 AND step_id = ?9 AND status IN ({marks})
+               AND EXISTS (SELECT 1 FROM workflow_runs WHERE id = ?8 AND status = 'running')"
+        );
+        let mut values: Vec<rusqlite::types::Value> = vec![
+            to.as_str().to_owned().into(),
+            i64::from(to.is_final()).into(),
+            now.into(),
+            outputs.map(str::to_owned).into(),
+            note.map(str::to_owned).into(),
+            i64::from(clear_outcome).into(),
+            outcome.map(str::to_owned).into(),
+            run_id.to_owned().into(),
+            step_id.to_owned().into(),
+        ];
+        values.extend(from.iter().map(|s| s.as_str().to_owned().into()));
+        self.move_in_transaction(&sql, values, run_id, step_id, artifacts)
+    }
+
+    fn move_in_transaction(
+        &self,
+        sql: &str,
+        values: Vec<rusqlite::types::Value>,
+        run_id: &str,
+        step_id: &str,
+        artifacts: &[NewWorkflowArtifact],
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let now = now_ms();
+        let moved = tx.execute(sql, rusqlite::params_from_iter(values))? > 0;
+        if !moved {
+            return Ok(false);
+        }
+        if !artifacts.is_empty() {
+            let attempt = attempt_of(&tx, run_id, step_id)?;
+            for artifact in artifacts {
+                archive_named_artifact(&tx, run_id, &artifact.name)?;
+                tx.execute(
+                    "INSERT INTO workflow_artifacts
+                     (run_id, name, step_id, source, detail, body, truncated, updated_at, attempt)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                     ON CONFLICT(run_id, name) DO UPDATE SET
+                       step_id = excluded.step_id,
+                       source = excluded.source,
+                       detail = excluded.detail,
+                       body = excluded.body,
+                       truncated = excluded.truncated,
+                       updated_at = excluded.updated_at,
+                       attempt = excluded.attempt",
+                    params![
+                        run_id,
+                        artifact.name,
+                        step_id,
+                        artifact.source,
+                        artifact.detail,
+                        artifact.body,
+                        i64::from(artifact.truncated),
+                        now,
+                        attempt,
+                    ],
+                )?;
+                keep_artifact_version(
+                    &tx,
+                    run_id,
+                    &artifact.name,
+                    attempt,
+                    step_id,
+                    &artifact.source,
+                    artifact.detail.as_deref(),
+                    &artifact.body,
+                    artifact.truncated,
+                    now,
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(true)
     }
 
     /// The same move as [`Self::move_workflow_step`], except it does not apply once a decision
@@ -3173,6 +3606,10 @@ impl Store {
         let sql = format!(
             "UPDATE workflow_step_runs
              SET status = ?1,
+                 attempts = attempts + CASE
+                     WHEN status = 'pending' AND ?1 IN ('running', 'waiting', 'succeeded') THEN 1
+                     ELSE 0
+                 END,
                  started_at = CASE WHEN ?2 THEN started_at ELSE COALESCE(started_at, ?3) END,
                  ended_at = CASE WHEN ?2 THEN ?3 ELSE ended_at END,
                  outputs = COALESCE(?4, outputs),
@@ -3227,6 +3664,10 @@ impl Store {
         let sql = format!(
             "UPDATE workflow_step_runs
              SET status = ?1,
+                 attempts = attempts + CASE
+                     WHEN status = 'pending' AND ?1 IN ('running', 'waiting', 'succeeded') THEN 1
+                     ELSE 0
+                 END,
                  started_at = CASE WHEN ?2 THEN started_at ELSE COALESCE(started_at, ?3) END,
                  ended_at = CASE WHEN ?2 THEN ?3 ELSE ended_at END,
                  outputs = COALESCE(?4, outputs),
@@ -3256,18 +3697,21 @@ impl Store {
              WHERE run_id = ?1 AND step_id = ?2 AND applied_at IS NULL",
             params![run_id, step_id, now],
         )?;
+        let attempt = attempt_of(&tx, run_id, step_id)?;
         for artifact in artifacts {
+            archive_named_artifact(&tx, run_id, &artifact.name)?;
             tx.execute(
                 "INSERT INTO workflow_artifacts
-                 (run_id, name, step_id, source, detail, body, truncated, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 (run_id, name, step_id, source, detail, body, truncated, updated_at, attempt)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(run_id, name) DO UPDATE SET
                    step_id = excluded.step_id,
                    source = excluded.source,
                    detail = excluded.detail,
                    body = excluded.body,
                    truncated = excluded.truncated,
-                   updated_at = excluded.updated_at",
+                   updated_at = excluded.updated_at,
+                   attempt = excluded.attempt",
                 params![
                     run_id,
                     artifact.name,
@@ -3277,7 +3721,136 @@ impl Store {
                     artifact.body,
                     i64::from(artifact.truncated),
                     now,
+                    attempt,
                 ],
+            )?;
+            keep_artifact_version(
+                &tx,
+                run_id,
+                &artifact.name,
+                attempt,
+                step_id,
+                &artifact.source,
+                artifact.detail.as_deref(),
+                &artifact.body,
+                artifact.truncated,
+                now,
+            )?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Send a run back to earlier steps, once. False when this step is no longer in `from` at
+    /// attempt `seen`: a restart already applied it, or the step moved. Attempt counts stay as
+    /// they are. Approval decisions and waits on the steps that run again are removed, so the
+    /// next pass needs a new decision. `feedback`, when set, is stored at attempt `seen`.
+    /// A smoke test those steps were still running is cancelled in this same change, so a
+    /// crash after the commit still leaves it cancelled.
+    pub fn rewind_workflow(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        from: &[StepStatus],
+        seen: u32,
+        steps: &[String],
+        feedback: Option<&NewWorkflowArtifact>,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let now = now_ms();
+        // Read before the updates below clear the outputs that name the test.
+        let tests = test_runs_a_rewind_clears(&tx, run_id, steps)?;
+        let marks = from.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "UPDATE workflow_step_runs
+             SET status = 'pending',
+                 started_at = NULL,
+                 ended_at = NULL,
+                 outputs = '{{}}',
+                 note = NULL,
+                 outcome = NULL
+             WHERE run_id = ?1 AND step_id = ?2 AND attempts = ?3 AND status IN ({marks})
+               AND EXISTS (SELECT 1 FROM workflow_runs WHERE id = ?1 AND status = 'running')"
+        );
+        let mut values: Vec<rusqlite::types::Value> = vec![
+            run_id.to_owned().into(),
+            step_id.to_owned().into(),
+            i64::from(seen).into(),
+        ];
+        values.extend(from.iter().map(|status| status.as_str().to_owned().into()));
+        if tx.execute(&sql, rusqlite::params_from_iter(values))? == 0 {
+            return Ok(false);
+        }
+        for id in steps {
+            tx.execute(
+                "UPDATE workflow_step_runs
+                 SET status = 'pending',
+                     started_at = NULL,
+                     ended_at = NULL,
+                     outputs = '{}',
+                     note = NULL,
+                     outcome = NULL
+                 WHERE run_id = ?1 AND step_id = ?2",
+                params![run_id, id],
+            )?;
+            retire_step_feedback(&tx, run_id, id)?;
+            archive_approval(&tx, run_id, id, now)?;
+            tx.execute(
+                "DELETE FROM workflow_approval_decisions WHERE run_id = ?1 AND step_id = ?2",
+                params![run_id, id],
+            )?;
+            tx.execute(
+                "DELETE FROM workflow_waits WHERE run_id = ?1 AND step_id = ?2",
+                params![run_id, id],
+            )?;
+        }
+        if let Some(artifact) = feedback {
+            let attempt = i64::from(seen).max(1);
+            archive_named_artifact(&tx, run_id, &artifact.name)?;
+            tx.execute(
+                "INSERT INTO workflow_artifacts
+                 (run_id, name, step_id, source, detail, body, truncated, updated_at, attempt)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT(run_id, name) DO UPDATE SET
+                   step_id = excluded.step_id,
+                   source = excluded.source,
+                   detail = excluded.detail,
+                   body = excluded.body,
+                   truncated = excluded.truncated,
+                   updated_at = excluded.updated_at,
+                   attempt = excluded.attempt",
+                params![
+                    run_id,
+                    artifact.name,
+                    step_id,
+                    artifact.source,
+                    artifact.detail,
+                    artifact.body,
+                    i64::from(artifact.truncated),
+                    now,
+                    attempt,
+                ],
+            )?;
+            keep_artifact_version(
+                &tx,
+                run_id,
+                &artifact.name,
+                attempt,
+                step_id,
+                &artifact.source,
+                artifact.detail.as_deref(),
+                &artifact.body,
+                artifact.truncated,
+                now,
+            )?;
+        }
+        for test_run in &tests {
+            smoke::cancel_test_in(
+                &tx,
+                test_run,
+                "The workflow is running this step again.",
+                now,
             )?;
         }
         tx.commit()?;
@@ -4456,7 +5029,7 @@ steps:
         {
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[30].contains("CREATE TABLE workflow_approval_decisions"));
-            assert_eq!(MIGRATIONS.len(), 32);
+            assert_eq!(MIGRATIONS.len(), 34);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -4523,7 +5096,7 @@ steps:
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[31].contains("CREATE TABLE workflow_waits"));
             assert!(MIGRATIONS[31].contains("code_rounds"));
-            assert_eq!(MIGRATIONS.len(), 32);
+            assert_eq!(MIGRATIONS.len(), 34);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -4761,6 +5334,376 @@ steps:
     }
 
     #[test]
+    fn a_rewind_applies_once_and_a_restart_does_not_recount_it() {
+        let store = Store::in_memory();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_runs
+                 (id, workflow_id, workflow_name, definition, workspace_name, inputs, status,
+                  requested_by, created_at)
+                 VALUES ('run-1', 'demo', 'Demo', 'id: demo\n', 'fix', '{}', 'running', 'cli', 1)",
+                [],
+            )
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_step_runs
+                 (run_id, step_id, position, action, status, attempts)
+                 VALUES ('run-1', 'plan', 0, 'notify', 'succeeded', 1),
+                        ('run-1', 'sign-off', 1, 'approve', 'waiting', 1),
+                        ('run-1', 'implement', 2, 'notify', 'pending', 0)",
+                [],
+            )
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_approval_decisions
+                 (run_id, step_id, decision, feedback, actor, decided_at, code_salt, code_hash)
+                 VALUES ('run-1', 'sign-off', 'changes_requested', 'shorter', 'ada', 5, x'00', x'11')",
+                [],
+            )
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_waits
+                 (run_id, step_id, kind, blocked_on, action_needed, created_at)
+                 VALUES ('run-1', 'sign-off', 'approval', 'your approval', 'Decide.', 5)",
+                [],
+            )
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_artifacts
+                 (run_id, name, step_id, source, body, truncated, updated_at, attempt)
+                 VALUES ('run-1', 'failure-verify', 'verify', 'verdict', 'old report', 0, 1, 1)",
+                [],
+            )
+            .unwrap();
+        let feedback = NewWorkflowArtifact {
+            name: "changes-sign-off".into(),
+            source: "decision".into(),
+            detail: None,
+            body: "shorter".into(),
+            truncated: false,
+        };
+        // `verify` wrote the old report. It is one of the steps this rewind runs
+        // again, so that report leaves the table a later pass reads.
+        let steps = vec![
+            "plan".into(),
+            "sign-off".into(),
+            "implement".into(),
+            "verify".into(),
+        ];
+        assert!(store
+            .rewind_workflow(
+                "run-1",
+                "sign-off",
+                &[StepStatus::Waiting],
+                1,
+                &steps,
+                Some(&feedback),
+            )
+            .unwrap());
+        // A restart applies the same plan again and must not add another attempt or version.
+        assert!(!store
+            .rewind_workflow(
+                "run-1",
+                "sign-off",
+                &[StepStatus::Waiting],
+                1,
+                &steps,
+                Some(&feedback),
+            )
+            .unwrap());
+        let rows = store.workflow_steps("run-1").unwrap();
+        for id in ["plan", "sign-off", "implement"] {
+            let row = rows.iter().find(|row| row.step_id == id).unwrap();
+            assert_eq!(row.status, "pending", "{id}");
+            assert!(row.outcome.is_none(), "{id}");
+        }
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.step_id == "plan")
+                .unwrap()
+                .attempts,
+            1
+        );
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.step_id == "sign-off")
+                .unwrap()
+                .attempts,
+            1
+        );
+        assert!(store
+            .workflow_approval("run-1", "sign-off")
+            .unwrap()
+            .is_none());
+        assert!(store.workflow_wait("run-1", "sign-off").unwrap().is_none());
+        let current = store.workflow_artifacts("run-1").unwrap();
+        assert_eq!(current.len(), 1);
+        assert_eq!(current[0].name, "changes-sign-off");
+        assert_eq!(current[0].body, "shorter");
+        assert_eq!(current[0].attempt, 1);
+        assert!(
+            current.iter().all(|row| row.name != "failure-verify"),
+            "an earlier failure must not be handed out again"
+        );
+        let retired: String = store
+            .conn()
+            .query_row(
+                "SELECT body FROM workflow_artifact_versions
+                 WHERE run_id = 'run-1' AND name = 'failure-verify'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retired, "old report");
+        let history: (String, String, String) = store
+            .conn()
+            .query_row(
+                "SELECT decision, actor, feedback FROM workflow_approval_history
+                 WHERE run_id = 'run-1' AND step_id = 'sign-off'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            history,
+            ("changes_requested".into(), "ada".into(), "shorter".into())
+        );
+        let versions: i64 = store
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM workflow_artifact_versions
+                 WHERE run_id = 'run-1' AND name = 'changes-sign-off'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(versions, 1);
+
+        // The next entry counts once. A crash while it is running does not count again.
+        assert!(store
+            .move_workflow_step(
+                "run-1",
+                "sign-off",
+                &[StepStatus::Pending],
+                StepStatus::Waiting,
+                None,
+                None,
+                None,
+                false,
+            )
+            .unwrap());
+        assert!(!store
+            .move_workflow_step(
+                "run-1",
+                "sign-off",
+                &[StepStatus::Pending],
+                StepStatus::Waiting,
+                None,
+                None,
+                None,
+                false,
+            )
+            .unwrap());
+        assert!(store
+            .move_workflow_step(
+                "run-1",
+                "sign-off",
+                &[StepStatus::Waiting],
+                StepStatus::Running,
+                None,
+                None,
+                None,
+                false,
+            )
+            .unwrap());
+        assert!(store
+            .move_workflow_step(
+                "run-1",
+                "sign-off",
+                &[StepStatus::Running],
+                StepStatus::Failed,
+                None,
+                Some("Yardsort stopped while this step was running."),
+                None,
+                false,
+            )
+            .unwrap());
+        let again = store.workflow_steps("run-1").unwrap();
+        let sign = again.iter().find(|row| row.step_id == "sign-off").unwrap();
+        assert_eq!(sign.attempts, 2);
+        assert_eq!(sign.status, "failed");
+
+        // A later attempt keeps the earlier body.
+        store
+            .conn()
+            .execute(
+                "UPDATE workflow_step_runs SET status = 'waiting', attempts = 2
+                 WHERE run_id = 'run-1' AND step_id = 'sign-off'",
+                [],
+            )
+            .unwrap();
+        let later = NewWorkflowArtifact {
+            body: "name the cases".into(),
+            ..feedback
+        };
+        assert!(store
+            .rewind_workflow(
+                "run-1",
+                "sign-off",
+                &[StepStatus::Waiting],
+                2,
+                &steps,
+                Some(&later),
+            )
+            .unwrap());
+        let kept: Vec<(i64, String)> = {
+            let conn = store.conn();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT attempt, body FROM workflow_artifact_versions
+                     WHERE run_id = 'run-1' AND name = 'changes-sign-off' ORDER BY attempt",
+                )
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            kept,
+            vec![(1, "shorter".into()), (2, "name the cases".into())]
+        );
+        assert_eq!(
+            store.workflow_artifacts("run-1").unwrap()[0].body,
+            "name the cases"
+        );
+    }
+
+    #[test]
+    fn a_repeated_attempt_updates_the_kept_version() {
+        let store = Store::in_memory();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_runs
+                 (id, workflow_id, workflow_name, definition, workspace_name, inputs, status,
+                  requested_by, created_at)
+                 VALUES ('run-1', 'demo', 'Demo', 'id: demo\n', 'fix', '{}', 'running', 'cli', 1)",
+                [],
+            )
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_step_runs
+                 (run_id, step_id, position, action, status, attempts)
+                 VALUES ('run-1', 'draft', 0, 'notify', 'running', 1)",
+                [],
+            )
+            .unwrap();
+        let artifact = |body: &str| NewWorkflowArtifact {
+            name: "spec".into(),
+            source: "text".into(),
+            detail: None,
+            body: body.into(),
+            truncated: false,
+        };
+        store
+            .replace_step_artifacts("run-1", "draft", &[artifact("one")])
+            .unwrap();
+        store
+            .replace_step_artifacts("run-1", "draft", &[artifact("two")])
+            .unwrap();
+        let kept: String = store
+            .conn()
+            .query_row(
+                "SELECT body FROM workflow_artifact_versions
+                 WHERE run_id = 'run-1' AND name = 'spec' AND attempt = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, "two");
+        assert_eq!(store.workflow_artifacts("run-1").unwrap()[0].body, "two");
+    }
+
+    #[test]
+    fn a_forward_failure_moves_the_step_and_writes_the_note_together() {
+        let store = Store::in_memory();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_runs
+                 (id, workflow_id, workflow_name, definition, workspace_name, inputs, status,
+                  requested_by, created_at)
+                 VALUES ('run-1', 'demo', 'Demo', 'id: demo\n', 'fix', '{}', 'running', 'cli', 1)",
+                [],
+            )
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_step_runs
+                 (run_id, step_id, position, action, status, attempts)
+                 VALUES ('run-1', 'verify', 0, 'run_test', 'waiting', 1)",
+                [],
+            )
+            .unwrap();
+        let note = NewWorkflowArtifact {
+            name: "failure-verify".into(),
+            source: "verdict".into(),
+            detail: None,
+            body: "login broke".into(),
+            truncated: false,
+        };
+        assert!(!store
+            .move_workflow_step_leaving(
+                "run-1",
+                "verify",
+                &[StepStatus::Pending],
+                StepStatus::Succeeded,
+                Some(r#"{"verdict":"failed"}"#),
+                Some("The test failed."),
+                None,
+                false,
+                std::slice::from_ref(&note),
+            )
+            .unwrap());
+        let still = store.workflow_steps("run-1").unwrap();
+        assert_eq!(still[0].status, "waiting");
+        assert!(store.workflow_artifacts("run-1").unwrap().is_empty());
+
+        assert!(store
+            .move_workflow_step_leaving(
+                "run-1",
+                "verify",
+                &[StepStatus::Waiting],
+                StepStatus::Succeeded,
+                Some(r#"{"verdict":"failed"}"#),
+                Some("The test failed."),
+                None,
+                false,
+                &[note],
+            )
+            .unwrap());
+        let moved = store.workflow_steps("run-1").unwrap();
+        assert_eq!(moved[0].status, "succeeded");
+        let saved = store.workflow_artifacts("run-1").unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].name, "failure-verify");
+        assert_eq!(saved[0].body, "login broke");
+    }
+
+    #[test]
     fn a_terminal_needs_the_code_and_five_wrong_ones_lock_it() {
         let store = Store::in_memory();
         waiting_approval(&store, "run-1");
@@ -4857,6 +5800,79 @@ steps:
                 .decision,
             "approved"
         );
+    }
+
+    #[test]
+    fn a_code_replaced_while_it_is_checked_is_not_accepted() {
+        let store = Store::in_memory();
+        waiting_approval(&store, "run-1");
+        let code = store
+            .begin_approval_code("run-1", "sign-off")
+            .unwrap()
+            .unwrap();
+        let original: Vec<u8> = store
+            .conn()
+            .query_row(
+                "SELECT code_hash FROM workflow_approval_decisions
+                 WHERE run_id = 'run-1' AND step_id = 'sign-off'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        // The hook runs after the presented code has matched and before the write,
+        // which is the window a restart reissue has while the hash runs. The pointer
+        // stays valid: the hook runs before this function returns, and is then cleared.
+        let store_ptr: *const Store = &store;
+        CODE_CHECK_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                let store = unsafe { &*store_ptr };
+                // A different hash, attempts left as they are. This is what a restart
+                // reissue stores. No need to hash a real code to prove the write refuses it.
+                store
+                    .save_approval_code(
+                        "run-1",
+                        "sign-off",
+                        "REPLACED",
+                        b"other-salt",
+                        &[9u8; 32],
+                        false,
+                    )
+                    .unwrap();
+            }));
+        });
+        let result = store.record_workflow_approval(
+            "run-1",
+            "sign-off",
+            "approved",
+            None,
+            "ada",
+            Some(&code),
+        );
+        CODE_CHECK_HOOK.with(|hook| *hook.borrow_mut() = None);
+        assert_eq!(result.unwrap(), ApprovalWrite::WrongCode);
+        assert!(store
+            .workflow_approval("run-1", "sign-off")
+            .unwrap()
+            .is_none());
+        let now: Vec<u8> = store
+            .conn()
+            .query_row(
+                "SELECT code_hash FROM workflow_approval_decisions
+                 WHERE run_id = 'run-1' AND step_id = 'sign-off'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_ne!(now, original);
+        let attempts: i64 = store
+            .conn()
+            .query_row(
+                "SELECT attempts FROM workflow_approval_decisions WHERE run_id = 'run-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(attempts, 0);
     }
 
     #[test]

@@ -9,15 +9,19 @@
 
 use std::collections::BTreeMap;
 
+use super::artifact;
 use super::template;
-use super::{Action, PrActivity, SessionRef, Until, Workflow};
+use super::{
+    ancestors, steps_from, Action, OutcomeName, PrActivity, SessionRef, Until, Workflow,
+    MAX_ATTEMPTS,
+};
 use crate::store::{StepStatus, WorkflowStepRow};
 
 /// What a step concluded, apart from whether its row succeeded or failed.
 ///
-/// A step that judges something produces one: a smoke test's verdict today, and later an
-/// approval or anything a branch will switch on. [`react`] is the one place the run takes
-/// that verdict. It is stored on the step row, not in `outputs`. `outputs` stay the strings
+/// A step that judges something produces one: a smoke test's verdict, or an approval.
+/// A branch reads this, not free text. With no routes, [`react`] is the one place the
+/// run takes that verdict. It is stored on the step row, not in `outputs`. `outputs` stay the strings
 /// a later step reads as `{{ steps.<id>.<field> }}`, and this is not `wait_session`'s
 /// `outcome` field.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
@@ -61,8 +65,8 @@ impl StepOutcome {
 
 /// What a person decided on an approval step.
 ///
-/// `changes_requested` is its own decision, not a rejection. Until a later ticket can send
-/// the work back around, both a rejection and a request for changes stop the run.
+/// `changes_requested` is its own decision, not a rejection. With no `on` routes, both a
+/// rejection and a request for changes stop the run. A route can send either somewhere else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ApprovalDecision {
@@ -200,6 +204,37 @@ pub struct Move {
     pub halt: bool,
     /// An approval timeout. The move applies only when nobody has recorded a decision.
     pub keep_decision: bool,
+    /// A passed outcome routed to `stop`. Skip steps that have not finished and end the
+    /// run succeeded. A failed outcome routed to `stop` uses `halt` instead.
+    pub stop: bool,
+    /// Set these steps back to pending. Applied once, and only while this step's attempt
+    /// count is still `seen`.
+    pub rewind: Option<Rewind>,
+    /// A note this step leaves for a later step, on a route that does not loop. A loop
+    /// carries its note on [`Rewind::feedback`] instead, in the same change as the rewind.
+    pub feedback: Option<FeedbackCopy>,
+}
+
+/// A loop back to an earlier step. The driver applies it in one change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rewind {
+    /// The target and every step that needs it, including the step that branched.
+    pub steps: Vec<String>,
+    /// The branching step's attempt count when this was planned. A second apply, or one
+    /// after a restart already counted a new entry, does not match and does nothing.
+    pub seen: u32,
+    /// A named artifact for the step being run again. Absent when the outcome carried
+    /// nothing to hand back.
+    pub feedback: Option<FeedbackCopy>,
+}
+
+/// One attempt's feedback, stored under a reserved artifact name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeedbackCopy {
+    pub name: String,
+    pub body: String,
+    /// `decision` for an approval, `verdict` for a smoke test.
+    pub source: String,
 }
 
 /// Something only the driver can do. Each belongs to a step the plan has just moved to
@@ -296,9 +331,22 @@ pub fn advance(
         .iter()
         .filter_map(|row| row.started_at.map(|at| (row.step_id.as_str(), at)))
         .collect();
+    let mut outcomes: BTreeMap<String, StepOutcome> = rows
+        .iter()
+        .filter_map(|row| {
+            let parsed = serde_json::from_str(row.outcome.as_deref()?).ok()?;
+            Some((row.step_id.clone(), parsed))
+        })
+        .collect();
+    // Notes a forward route leaves during this plan. A later step in the same plan reads
+    // them. The driver stores the same note when it applies the move.
+    let mut handed: BTreeMap<String, String> = BTreeMap::new();
 
     // Steps are visited in file order until a pass changes nothing, which is at most one pass
-    // per step: a step can only be unblocked by one before it in the graph.
+    // per step: a step can only be unblocked by one before it in the graph. A rewind does not
+    // start later steps in this pass. Judged steps later in the file still conclude, so a halt
+    // or a stop in the same tick wins over the rewind whichever step comes first.
+    let mut rewound = false;
     loop {
         let before = plan.moves.len();
         for step in &workflow.steps {
@@ -306,7 +354,19 @@ pub fn advance(
             let Some(&current) = status.get(id) else {
                 continue;
             };
-            let lookup = |path: &[String]| value(path, inputs, &outputs, world);
+            if rewound && current == StepStatus::Pending {
+                continue;
+            }
+            let lookup = |path: &[String]| {
+                if let [namespace, name] = path {
+                    if namespace == "artifacts" {
+                        if let Some(body) = handed.get(name) {
+                            return Some(body.clone());
+                        }
+                    }
+                }
+                value(path, inputs, &outputs, world)
+            };
             let session_of = |reference: &SessionRef| match reference {
                 SessionRef::Step(from) => outputs
                     .get(from.as_str())
@@ -338,7 +398,11 @@ pub fn advance(
                             &format!("`{}` did not succeed", blocked.0),
                         ))
                     } else if needs.iter().all(|s| *s == StepStatus::Succeeded) {
-                        Some(begin(step, &lookup, &session_of, world, &mut plan.effects))
+                        if let Some(why) = branch_blocked(step, workflow, &outcomes) {
+                            Some(skip(id, StepStatus::Pending, &why))
+                        } else {
+                            Some(begin(step, &lookup, &session_of, world, &mut plan.effects))
+                        }
                     } else {
                         None
                     }
@@ -357,6 +421,8 @@ pub fn advance(
                         let since = started.get(id).copied().unwrap_or(now);
                         wait(
                             step,
+                            workflow,
+                            rows,
                             since,
                             now,
                             &lookup,
@@ -370,6 +436,23 @@ pub fn advance(
             };
             if let Some(change) = moved {
                 let change = hold_for_artifacts(step, change, &mut plan.effects);
+                if change.rewind.is_none() {
+                    if let Some(copy) = &change.feedback {
+                        handed.insert(copy.name.clone(), copy.body.clone());
+                    }
+                }
+                if change.rewind.is_some() {
+                    plan.moves.push(change);
+                    rewound = true;
+                    continue;
+                }
+                if let Some(text) = change.outcome.as_deref() {
+                    if let Ok(parsed) = serde_json::from_str::<StepOutcome>(text) {
+                        outcomes.insert(step.id.clone(), parsed);
+                    }
+                } else if change.clear_outcome {
+                    outcomes.remove(&step.id);
+                }
                 status.insert(id, change.to);
                 if let Some(left) = &change.outputs {
                     outputs.insert(id, parse_outputs(left));
@@ -377,14 +460,16 @@ pub fn advance(
                 plan.moves.push(change);
             }
         }
-        if plan.moves.len() == before {
+        if rewound || plan.moves.len() == before {
             break;
         }
     }
 
     // A failed gate stops the whole run, not only the steps that name it in `needs`.
     // Done before the finish check, so the steps it skips count as finished this tick.
-    halt_the_run(&mut plan, workflow, &mut status);
+    // A step that already succeeded onto `stop` (after its artifacts were stored, including
+    // on a later tick) stops the run the same way.
+    halt_the_run(&mut plan, workflow, &mut status, &outcomes);
 
     if status.values().all(|s| s.is_final()) {
         // Name the gate that halted the run. Another step may already be failed, earlier
@@ -423,6 +508,29 @@ pub fn advance(
     plan
 }
 
+/// A step that has already succeeded, whose stored outcome routes to `stop`.
+///
+/// Saving artifacts finishes the step on a later tick, after the move that chose `stop`
+/// was turned into "still running". The stored outcome is what says the branch ends.
+fn finished_route_stop(
+    workflow: &Workflow,
+    status: &BTreeMap<&str, StepStatus>,
+    outcomes: &BTreeMap<String, StepOutcome>,
+) -> Option<String> {
+    workflow.steps.iter().find_map(|step| {
+        if status.get(step.id.as_str()) != Some(&StepStatus::Succeeded) {
+            return None;
+        }
+        let outcome = outcomes.get(&step.id)?;
+        if outcome.verdict == StepVerdict::Failed {
+            return None;
+        }
+        let when = judged_name(step, outcome)?;
+        let route = step.routes.iter().find(|route| route.when == when)?;
+        route.stops().then(|| step.id.clone())
+    })
+}
+
 /// Skip every step that has not finished, because a gate failed.
 ///
 /// An effect this plan was about to carry out is dropped, so it never starts. A step that
@@ -430,20 +538,38 @@ pub fn advance(
 /// The driver then cancels a smoke test a skipped `run_test` step was waiting on. Anything
 /// else that effect already started is left running: stopping it here could throw away
 /// work, and the run ending is what the gate asked for.
-fn halt_the_run(plan: &mut Plan, workflow: &Workflow, status: &mut BTreeMap<&str, StepStatus>) {
-    let Some(gate) = plan
+fn halt_the_run(
+    plan: &mut Plan,
+    workflow: &Workflow,
+    status: &mut BTreeMap<&str, StepStatus>,
+    outcomes: &BTreeMap<String, StepOutcome>,
+) {
+    let gate = plan
         .moves
         .iter()
         .find(|change| change.halt)
+        .map(|change| change.step.clone());
+    let ended = plan
+        .moves
+        .iter()
+        .find(|change| change.stop)
         .map(|change| change.step.clone())
-    else {
+        .or_else(|| finished_route_stop(workflow, status, outcomes));
+    let Some(cause) = gate.clone().or(ended) else {
         return;
     };
-    plan.effects.clear();
-    let why = format!("the gate `{gate}` failed");
+    let failed_gate = gate.is_some();
+    if failed_gate {
+        plan.effects.clear();
+    }
+    let why = if failed_gate {
+        format!("the gate `{cause}` failed")
+    } else {
+        format!("`{cause}` ended the branch")
+    };
     for step in &workflow.steps {
         let id = step.id.as_str();
-        if id == gate {
+        if id == cause {
             continue;
         }
         let Some(&current) = status.get(id) else {
@@ -463,12 +589,33 @@ fn halt_the_run(plan: &mut Plan, workflow: &Workflow, status: &mut BTreeMap<&str
             existing.outcome = None;
             existing.clear_outcome = true;
             existing.halt = false;
+            // A rewind or a `stop` on this same move must not still be applied. The run is
+            // ending, and sending steps back to pending would leave them unfinished.
+            existing.rewind = None;
+            existing.stop = false;
+            existing.feedback = None;
         } else {
             plan.moves.push(skip(id, current, &why));
         }
         if let Some(slot) = status.get_mut(id) {
             *slot = StepStatus::Skipped;
         }
+    }
+    if !failed_gate {
+        // A passed `stop` keeps the effect of the step that ended the branch. Effects for
+        // steps this pass is skipping are dropped, so they never start.
+        plan.effects
+            .retain(|effect| status.get(effect_step(effect)) != Some(&StepStatus::Skipped));
+    }
+}
+
+fn effect_step(effect: &Effect) -> &str {
+    match effect {
+        Effect::Start { step, .. }
+        | Effect::Paste { step, .. }
+        | Effect::RunTest { step, .. }
+        | Effect::Notify { step, .. }
+        | Effect::Capture { step, .. } => step,
     }
 }
 
@@ -540,6 +687,9 @@ pub fn recover(rows: &[WorkflowStepRow]) -> Vec<Move> {
                     clear_outcome: false,
                     halt: false,
                     keep_decision: false,
+                    stop: false,
+                    rewind: None,
+                    feedback: None,
                 };
             }
             Move {
@@ -552,6 +702,9 @@ pub fn recover(rows: &[WorkflowStepRow]) -> Vec<Move> {
                 clear_outcome: false,
                 halt: false,
                 keep_decision: false,
+                stop: false,
+                rewind: None,
+                feedback: None,
             }
         })
         .collect()
@@ -597,6 +750,9 @@ pub fn react(
         clear_outcome: false,
         halt: stop,
         keep_decision: false,
+        stop: false,
+        rewind: None,
+        feedback: None,
     }
 }
 
@@ -628,6 +784,9 @@ pub fn recorded(
         clear_outcome: false,
         halt: false,
         keep_decision: false,
+        stop: false,
+        rewind: None,
+        feedback: None,
     }
 }
 
@@ -643,6 +802,9 @@ pub fn done(step: &str, outputs: &Outputs) -> Move {
         clear_outcome: false,
         halt: false,
         keep_decision: false,
+        stop: false,
+        rewind: None,
+        feedback: None,
     }
 }
 
@@ -659,6 +821,9 @@ pub fn queued(step: &str, outputs: &Outputs) -> Move {
         clear_outcome: false,
         halt: false,
         keep_decision: false,
+        stop: false,
+        rewind: None,
+        feedback: None,
     }
 }
 
@@ -674,6 +839,9 @@ pub fn skipped(step: &str, why: &str) -> Move {
         clear_outcome: false,
         halt: false,
         keep_decision: false,
+        stop: false,
+        rewind: None,
+        feedback: None,
     }
 }
 
@@ -697,6 +865,9 @@ pub fn still_reading(
         clear_outcome: false,
         halt: false,
         keep_decision: false,
+        stop: false,
+        rewind: None,
+        feedback: None,
     }
 }
 
@@ -713,6 +884,9 @@ pub fn not_yet(step: &str) -> Move {
         clear_outcome: false,
         halt: false,
         keep_decision: false,
+        stop: false,
+        rewind: None,
+        feedback: None,
     }
 }
 
@@ -728,6 +902,9 @@ pub fn failed(step: &str, why: &str) -> Move {
         clear_outcome: false,
         halt: false,
         keep_decision: false,
+        stop: false,
+        rewind: None,
+        feedback: None,
     }
 }
 
@@ -876,8 +1053,11 @@ fn begin(
 }
 
 /// A waiting step: has what it waits for happened, or has it waited too long?
+#[allow(clippy::too_many_arguments)]
 fn wait(
     step: &super::Step,
+    workflow: &Workflow,
+    rows: &[WorkflowStepRow],
     since: i64,
     now: i64,
     lookup: &dyn Fn(&[String]) -> Option<String>,
@@ -984,10 +1164,11 @@ fn wait(
                                     Some(test_failure_reason(&test.summary)),
                                 ),
                             };
-                            Some(react(
-                                id,
+                            Some(route_judged(
+                                step,
+                                workflow,
+                                rows,
                                 StepStatus::Waiting,
-                                step.is_gate(),
                                 &outcome,
                                 &left,
                                 format!("The test {}.", test.status),
@@ -1039,7 +1220,7 @@ fn wait(
         }
         Action::Approve { timeout_secs, .. } => {
             if let Some(recorded) = world.approval(id) {
-                Some(approval_move(step, recorded))
+                Some(approval_move(step, workflow, rows, recorded))
             } else if timed_out(timeout_secs) {
                 // A decision recorded after this plan was built, but before the move is
                 // applied, must win. The store refuses this move when a decision exists.
@@ -1058,9 +1239,15 @@ fn wait(
     }
 }
 
-/// Apply a recorded approval. Approve succeeds the step. Reject and request changes fail it
-/// and halt the run. A timeout is not a decision and does not come through here.
-fn approval_move(step: &super::Step, recorded: RecordedApproval) -> Move {
+/// Apply a recorded approval. With no routes, approve succeeds the step and the other
+/// decisions fail it and halt the run. Routes send the outcome on. A timeout is not a
+/// decision and does not come through here.
+fn approval_move(
+    step: &super::Step,
+    workflow: &Workflow,
+    rows: &[WorkflowStepRow],
+    recorded: RecordedApproval,
+) -> Move {
     let feedback = recorded.feedback.filter(|text| !text.trim().is_empty());
     let note = match &feedback {
         Some(text) => format!("{}: {text}", recorded.decision.word()),
@@ -1082,10 +1269,11 @@ fn approval_move(step: &super::Step, recorded: RecordedApproval) -> Move {
         actor: Some(recorded.actor),
         decided_at: Some(recorded.decided_at),
     };
-    react(
-        &step.id,
+    route_judged(
+        step,
+        workflow,
+        rows,
         StepStatus::Waiting,
-        step.is_gate(),
         &outcome,
         &left,
         note,
@@ -1112,6 +1300,9 @@ fn resume_capture(
         clear_outcome: false,
         halt: false,
         keep_decision: false,
+        stop: false,
+        rewind: None,
+        feedback: None,
     }
 }
 
@@ -1144,6 +1335,8 @@ fn hold_for_artifacts(step: &super::Step, change: Move, effects: &mut Vec<Effect
         clear_outcome,
         halt: false,
         keep_decision: false,
+        stop: false,
+        rewind: None,
         ..change
     }
 }
@@ -1185,6 +1378,175 @@ fn handoff_prompt(
     out
 }
 
+/// Where a judged outcome goes. No routes keeps today's rule: a failed gate halts the run.
+fn route_judged(
+    step: &super::Step,
+    workflow: &Workflow,
+    rows: &[WorkflowStepRow],
+    from: StepStatus,
+    outcome: &StepOutcome,
+    outputs: &Outputs,
+    note: String,
+) -> Move {
+    if step.routes.is_empty() {
+        return react(&step.id, from, step.is_gate(), outcome, outputs, note);
+    }
+    let Some(when) = judged_name(step, outcome) else {
+        return react(&step.id, from, true, outcome, outputs, note);
+    };
+    let Some(route) = step.routes.iter().find(|route| route.when == when) else {
+        return react(
+            &step.id,
+            from,
+            true,
+            outcome,
+            outputs,
+            format!("`{}` has no route.", when.as_str()),
+        );
+    };
+    if route.stops() {
+        if outcome.verdict == StepVerdict::Failed {
+            return react(&step.id, from, true, outcome, outputs, note);
+        }
+        let mut change = react(&step.id, from, false, outcome, outputs, note);
+        change.stop = true;
+        return change;
+    }
+    let back = route.to == step.id
+        || ancestors(&workflow.steps)
+            .get(&step.id)
+            .is_some_and(|set| set.contains(&route.to));
+    if !back {
+        // A later step was chosen. Succeed this one even when the verdict failed, so the
+        // chosen step's needs are met. The outcome stays, and that is what the branch reads.
+        // A failed verdict or a request for changes leaves its note for that step.
+        let mut change = react(&step.id, from, false, outcome, outputs, note);
+        change.feedback = feedback_copy(&step.id, when, outcome);
+        return change;
+    }
+    let seen = rows
+        .iter()
+        .find(|row| row.step_id == step.id)
+        .map(|row| row.attempts)
+        .unwrap_or(0);
+    let limit = step.max_attempts.unwrap_or(MAX_ATTEMPTS).min(MAX_ATTEMPTS);
+    if seen >= limit {
+        let reason = format!(
+            "{} {seen} times, which is the limit ({limit}). Start a new run to try again.",
+            capitalize(when.limit_phrase())
+        );
+        let mut failed = outcome.clone();
+        failed.verdict = StepVerdict::Failed;
+        failed.reason = Some(reason.clone());
+        return react(&step.id, from, true, &failed, outputs, reason);
+    }
+    Move {
+        step: step.id.clone(),
+        from: vec![from],
+        to: StepStatus::Pending,
+        outputs: None,
+        note: Some(note),
+        outcome: None,
+        clear_outcome: true,
+        halt: false,
+        keep_decision: false,
+        stop: false,
+        rewind: Some(Rewind {
+            steps: steps_from(&workflow.steps, &route.to),
+            seen,
+            feedback: feedback_copy(&step.id, when, outcome),
+        }),
+        feedback: None,
+    }
+}
+
+fn judged_name(step: &super::Step, outcome: &StepOutcome) -> Option<OutcomeName> {
+    match &step.action {
+        Action::Approve { .. } => match outcome.decision? {
+            ApprovalDecision::Approved => Some(OutcomeName::Approved),
+            ApprovalDecision::Rejected => Some(OutcomeName::Rejected),
+            ApprovalDecision::ChangesRequested => Some(OutcomeName::ChangesRequested),
+        },
+        Action::RunTest { .. } => match outcome.verdict {
+            StepVerdict::Passed => Some(OutcomeName::Passed),
+            StepVerdict::Failed => Some(OutcomeName::Failed),
+        },
+        _ => None,
+    }
+}
+
+fn feedback_copy(step_id: &str, when: OutcomeName, outcome: &StepOutcome) -> Option<FeedbackCopy> {
+    match when {
+        OutcomeName::ChangesRequested => Some(FeedbackCopy {
+            name: artifact::changes_artifact_name(step_id),
+            body: outcome
+                .feedback
+                .clone()
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or_else(|| "Changes were requested.".to_owned()),
+            source: "decision".to_owned(),
+        }),
+        OutcomeName::Failed => Some(FeedbackCopy {
+            name: artifact::failure_artifact_name(step_id),
+            body: outcome
+                .reason
+                .clone()
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or_else(|| "The test failed.".to_owned()),
+            source: "verdict".to_owned(),
+        }),
+        _ => None,
+    }
+}
+
+/// A pending step whose need took a branch that does not include this step.
+fn branch_blocked(
+    step: &super::Step,
+    workflow: &Workflow,
+    outcomes: &BTreeMap<String, StepOutcome>,
+) -> Option<String> {
+    let before = ancestors(&workflow.steps);
+    for need_id in &step.needs {
+        let Some(need) = workflow
+            .steps
+            .iter()
+            .find(|candidate| candidate.id == *need_id)
+        else {
+            continue;
+        };
+        if need.routes.is_empty() {
+            continue;
+        }
+        let Some(outcome) = outcomes.get(&need.id) else {
+            continue;
+        };
+        let Some(when) = judged_name(need, outcome) else {
+            continue;
+        };
+        let Some(route) = need.routes.iter().find(|route| route.when == when) else {
+            continue;
+        };
+        if route.stops() {
+            return Some(format!("`{}` ended the branch", need.id));
+        }
+        let chosen = &route.to;
+        let allowed =
+            chosen == &step.id || before.get(&step.id).is_some_and(|set| set.contains(chosen));
+        if !allowed {
+            return Some(format!("`{}` went to `{chosen}`", need.id));
+        }
+    }
+    None
+}
+
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+    }
+}
+
 fn to(step: &str, from: StepStatus, to: StepStatus) -> Move {
     Move {
         step: step.to_owned(),
@@ -1196,6 +1558,9 @@ fn to(step: &str, from: StepStatus, to: StepStatus) -> Move {
         clear_outcome: false,
         halt: false,
         keep_decision: false,
+        stop: false,
+        rewind: None,
+        feedback: None,
     }
 }
 

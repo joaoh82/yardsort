@@ -13,8 +13,9 @@ use serde_saphyr::{Location, Spanned};
 
 use super::template::{self, Placeholder};
 use super::{
-    artifact, Action, ArtifactDecl, ArtifactSource, Input, InputKind, Invalid, PrActivity, Problem,
-    RunContext, SessionRef, Step, Trigger, TriggerKind, Until, Workflow, SCHEMA_VERSION,
+    ancestors, artifact, steps_from, Action, ArtifactDecl, ArtifactSource, Input, InputKind,
+    Invalid, OutcomeName, PrActivity, Problem, Route, RunContext, SessionRef, Step, Trigger,
+    TriggerKind, Until, Workflow, MAX_ATTEMPTS, SCHEMA_VERSION,
 };
 use crate::yaml::{self, at, is_id, is_name, list, suggestion};
 
@@ -56,9 +57,9 @@ fn allowed(action: &str) -> &'static [&'static str] {
         "wait_session" => &["session", "until", "timeout"],
         "send_to_session" => &["session", "prompt", "timeout"],
         "wait_pr_activity" => &["kind", "timeout"],
-        "run_test" => &["test", "inputs", "timeout", "gate"],
+        "run_test" => &["test", "inputs", "timeout", "gate", "on", "max_attempts"],
         "notify" => &["title", "body"],
-        "approve" => &["prompt", "timeout", "gate"],
+        "approve" => &["prompt", "timeout", "gate", "on", "max_attempts"],
         _ => &[],
     }
 }
@@ -143,6 +144,12 @@ struct RawStep {
     /// Named documents from earlier steps. Not an action key either.
     #[serde(default)]
     consumes: Option<Spanned<Vec<Spanned<String>>>>,
+    /// Where each structured outcome goes. The value is a step id, or `stop`.
+    #[serde(default)]
+    on: Option<Spanned<BTreeMap<String, Spanned<String>>>>,
+    /// How many times this step may run when a route comes back to it.
+    #[serde(default)]
+    max_attempts: Option<Spanned<u64>>,
 }
 
 /// One named document, as the file writes it. `from` may be left out when only one source key
@@ -186,6 +193,8 @@ impl RawStep {
             ("title", at(&self.title)),
             ("body", at(&self.body)),
             ("gate", at(&self.gate)),
+            ("on", at(&self.on)),
+            ("max_attempts", at(&self.max_attempts)),
         ]
         .into_iter()
         .filter_map(|(key, at)| at.map(|at| (key, at)))
@@ -272,6 +281,9 @@ struct Scope<'a> {
     artifacts: &'a HashMap<String, String>,
     /// Names this step lists under `consumes`, in file order.
     consumes: &'a [String],
+    /// Step ids, so a `changes-<step>` or `failure-<step>` name can be recognised
+    /// before the route check says whether that step actually writes it.
+    step_ids: &'a BTreeSet<String>,
 }
 
 struct Checker<'a> {
@@ -461,7 +473,12 @@ impl Checker<'_> {
         let mut first_line: HashMap<&str, u64> = HashMap::new();
         for step in &raw.value {
             let id = &step.id.value;
-            if !is_name(id) {
+            if id == "stop" {
+                self.problem(
+                    &step.id.referenced,
+                    "`stop` cannot be a step's id. It means the branch ends.",
+                );
+            } else if !is_name(id) {
                 self.problem(
                     &step.id.referenced,
                     format!(
@@ -488,12 +505,14 @@ impl Checker<'_> {
             input_kinds.entry(input.id.clone()).or_insert(input.kind);
         }
         let producers = self.producers(&raw.value);
+        let step_ids: BTreeSet<String> = actions.keys().cloned().collect();
         let empty = BTreeSet::new();
-        raw.value
+        let built: Vec<Step> = raw
+            .value
             .iter()
             .map(|step| {
                 let before = graph.get(&step.id.value).unwrap_or(&empty);
-                let consumes = self.consumes(step, &producers, before);
+                let consumes = self.consumes(step, &producers, before, &step_ids);
                 let scope = Scope {
                     inputs: &input_kinds,
                     actions: &actions,
@@ -501,10 +520,13 @@ impl Checker<'_> {
                     context,
                     artifacts: &producers,
                     consumes: &consumes,
+                    step_ids: &step_ids,
                 };
                 self.step(step, &scope)
             })
-            .collect()
+            .collect();
+        self.check_routes(&built, &raw.value);
+        built
     }
 
     /// Every artifact name in the file, and which step produces it. A name used twice is reported
@@ -539,12 +561,13 @@ impl Checker<'_> {
                     );
                     continue;
                 }
-                if name.starts_with("changes-") {
+                if name.starts_with("changes-") || name.starts_with("failure-") {
                     self.problem(
                         &item.value.name.referenced,
                         format!(
                             "`{name}` is reserved. A request for changes stores \
-                             `changes-<step>` itself."
+                             `changes-<step>`, and a failed verdict that runs a step again \
+                             stores `failure-<step>`."
                         ),
                     );
                     continue;
@@ -568,6 +591,7 @@ impl Checker<'_> {
         step: &RawStep,
         producers: &HashMap<String, String>,
         before: &BTreeSet<String>,
+        step_ids: &BTreeSet<String>,
     ) -> Vec<String> {
         let Some(list) = &step.consumes else {
             return Vec::new();
@@ -582,6 +606,12 @@ impl Checker<'_> {
             if names.iter().any(|listed: &String| listed == name) {
                 self.problem(&item.referenced, format!("`{name}` is listed twice."));
                 continue;
+            }
+            if let Some(producer) = artifact::feedback_step(name) {
+                if step_ids.contains(producer) {
+                    names.push(name.to_owned());
+                    continue;
+                }
             }
             match producers.get(name) {
                 None => self.problem(
@@ -696,6 +726,8 @@ impl Checker<'_> {
                 gate: false,
                 produces: Vec::new(),
                 consumes: scope.consumes.to_vec(),
+                routes: Vec::new(),
+                max_attempts: None,
                 action: Action::Notify { title, body: None },
             };
         }
@@ -794,13 +826,252 @@ impl Checker<'_> {
         let gate = action_name == "approve"
             || (action_name == "run_test" && raw.gate.as_ref().is_some_and(|gate| gate.value));
         let produces = self.artifact_decls(raw, action_name, &action, scope);
+        // `on` and `max_attempts` on any other action are already reported as misplaced keys.
+        let branches = !OutcomeName::for_action(action_name).is_empty();
+        let routes = if branches {
+            self.routes_of(raw, action_name)
+        } else {
+            Vec::new()
+        };
+        let max_attempts = if branches {
+            self.attempt_limit(raw)
+        } else {
+            None
+        };
         Step {
             id,
             needs,
             gate,
             produces,
             consumes: scope.consumes.to_vec(),
+            routes,
+            max_attempts,
             action,
+        }
+    }
+
+    /// The `on` map, as routes. Unknown keys and missing ones are reported here.
+    fn routes_of(&mut self, raw: &RawStep, action_name: &str) -> Vec<Route> {
+        let Some(map) = &raw.on else {
+            return Vec::new();
+        };
+        if map.value.is_empty() {
+            self.problem(
+                &map.referenced,
+                "`on` is empty. Say where each outcome goes, or leave `on` out.",
+            );
+            return Vec::new();
+        }
+        let known = OutcomeName::for_action(action_name);
+        let mut routes = Vec::new();
+        let mut seen = BTreeSet::new();
+        for (key, target) in &map.value {
+            let Some(when) = OutcomeName::parse(action_name, key) else {
+                let list = known
+                    .iter()
+                    .map(|name| format!("`{}`", name.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let why = if known.is_empty() {
+                    format!("A `{action_name}` step has no structured outcome to branch on.")
+                } else {
+                    format!(
+                        "`{key}` is not an outcome a `{action_name}` step branches on. Use {list}."
+                    )
+                };
+                self.problem(&target.referenced, why);
+                continue;
+            };
+            if !seen.insert(when) {
+                self.problem(
+                    &target.referenced,
+                    format!("`{}` is listed twice.", when.as_str()),
+                );
+                continue;
+            }
+            let to = target.value.trim().to_owned();
+            if to.is_empty() {
+                self.problem(
+                    &target.referenced,
+                    "Say which step this outcome goes to, or `stop`.",
+                );
+                continue;
+            }
+            routes.push(Route { when, to });
+        }
+        for required in known {
+            if !seen.contains(required) {
+                self.problem(
+                    &map.referenced,
+                    format!(
+                        "Say where `{}` goes. `on` needs every outcome this step can produce.",
+                        required.as_str()
+                    ),
+                );
+            }
+        }
+        routes
+    }
+
+    /// `max_attempts`, when the file sets it. The range is checked once the routes are known.
+    fn attempt_limit(&mut self, raw: &RawStep) -> Option<u32> {
+        let Some(given) = &raw.max_attempts else {
+            return None;
+        };
+        let value = u32::try_from(given.value).ok();
+        let Some(value) = value else {
+            self.problem(
+                &given.referenced,
+                format!("`max_attempts` is {MAX_ATTEMPTS} at most."),
+            );
+            return None;
+        };
+        if !(2..=MAX_ATTEMPTS).contains(&value) {
+            self.problem(
+                &given.referenced,
+                format!("`max_attempts` must be from 2 to {MAX_ATTEMPTS}. It is {value}."),
+            );
+            return None;
+        }
+        Some(value)
+    }
+
+    /// Unknown targets, loops without a limit, and steps nothing can reach.
+    fn check_routes(&mut self, steps: &[Step], raw: &[RawStep]) {
+        let before = ancestors(steps);
+        let ids: BTreeSet<&str> = steps.iter().map(|step| step.id.as_str()).collect();
+        for (step, source) in steps.iter().zip(raw.iter()) {
+            let at_on = source
+                .on
+                .as_ref()
+                .map(|map| &map.referenced)
+                .unwrap_or(&source.id.referenced);
+            let mut loops = false;
+            for route in &step.routes {
+                if route.stops() {
+                    continue;
+                }
+                if !ids.contains(route.to.as_str()) {
+                    let located = source
+                        .on
+                        .as_ref()
+                        .and_then(|map| map.value.get(route.when.as_str()))
+                        .map(|target| &target.referenced)
+                        .unwrap_or(at_on);
+                    self.problem(
+                        located,
+                        format!(
+                            "There is no step `{}`{}",
+                            route.to,
+                            suggestion(&route.to, steps.iter().map(|step| &step.id))
+                        ),
+                    );
+                    continue;
+                }
+                let back = route.to == step.id
+                    || before
+                        .get(&step.id)
+                        .is_some_and(|set| set.contains(&route.to));
+                let forward = before
+                    .get(&route.to)
+                    .is_some_and(|set| set.contains(&step.id));
+                if !back && !forward {
+                    self.problem(
+                        at_on,
+                        format!(
+                            "`{}` is not on a path from `{}`. A branch goes to a later step that \
+                             needs this one, or back to a step this one needs.",
+                            route.to, step.id
+                        ),
+                    );
+                }
+                if back {
+                    loops = true;
+                }
+            }
+            if loops && step.max_attempts.is_none() && source.max_attempts.is_none() {
+                self.problem(
+                    at_on,
+                    format!(
+                        "Routing back needs `max_attempts`, from 2 to {MAX_ATTEMPTS}, so the \
+                         loop cannot run forever."
+                    ),
+                );
+            }
+            if !loops && step.max_attempts.is_some() && source.max_attempts.is_some() {
+                let at = source
+                    .max_attempts
+                    .as_ref()
+                    .map(|given| &given.referenced)
+                    .unwrap_or(&source.id.referenced);
+                self.problem(
+                    at,
+                    "`max_attempts` is set, and no route comes back to this step.",
+                );
+            }
+            for name in &step.consumes {
+                let Some(producer) = artifact::feedback_step(name) else {
+                    continue;
+                };
+                let wanted = if name.starts_with("changes-") {
+                    OutcomeName::ChangesRequested
+                } else {
+                    OutcomeName::Failed
+                };
+                let writes = steps.iter().find(|candidate| candidate.id == producer);
+                let reaches = writes.is_some_and(|candidate| {
+                    candidate.routes.iter().any(|route| {
+                        route.when == wanted
+                            && !route.stops()
+                            && steps_from(steps, &route.to).iter().any(|id| id == &step.id)
+                    })
+                });
+                if !reaches {
+                    let at = source
+                        .consumes
+                        .as_ref()
+                        .map(|list| &list.referenced)
+                        .unwrap_or(&source.id.referenced);
+                    self.problem(
+                        at,
+                        format!(
+                            "Step `{producer}` does not route `{}` back to `{}`, so `{name}` is \
+                             never written for it.",
+                            wanted.as_str(),
+                            step.id
+                        ),
+                    );
+                }
+            }
+        }
+        let reachable = reachable_steps(steps);
+        for (step, source) in steps.iter().zip(raw.iter()) {
+            if reachable.contains(&step.id) {
+                continue;
+            }
+            // A missing need, a step that needs itself, or a circle is already an error.
+            // Those steps are unreachable for that reason, and saying so again hides it.
+            if !step
+                .needs
+                .iter()
+                .all(|need| ids.contains(need.as_str()) && need != &step.id)
+            {
+                continue;
+            }
+            if before
+                .get(&step.id)
+                .is_some_and(|set| set.contains(&step.id))
+            {
+                continue;
+            }
+            self.problem(
+                &source.id.referenced,
+                format!(
+                    "Step `{}` cannot run. No path from the start reaches it. A step that needs \
+                     a branch runs only when a route names it, or names a step it needs.",
+                    step.id
+                ),
+            );
         }
     }
 
@@ -1395,6 +1666,15 @@ fn resolve(var: &Placeholder, scope: &Scope) -> Result<(), String> {
             "`{raw}`: write a step's result as `{{{{ steps.<id>.<field> }}}}`."
         )),
         ["artifacts", name] => {
+            if artifact::feedback_step(name).is_some_and(|id| scope.step_ids.contains(id)) {
+                if !scope.consumes.iter().any(|listed| listed == *name) {
+                    return Err(format!(
+                        "`{raw}` is used here, but this step does not list `{name}` under \
+                         `consumes`."
+                    ));
+                }
+                return Ok(());
+            }
             let Some(producer) = scope.artifacts.get(*name) else {
                 return Err(format!(
                     "`{raw}`: there is no artifact `{name}`{}",
@@ -1429,6 +1709,50 @@ fn resolve(var: &Placeholder, scope: &Scope) -> Result<(), String> {
         )),
         [] => Err(format!("`{raw}` is empty.")),
     }
+}
+
+/// Steps that can run on some path from a step with no needs.
+fn reachable_steps(steps: &[Step]) -> BTreeSet<String> {
+    let before = ancestors(steps);
+    let mut reach: BTreeSet<String> = steps
+        .iter()
+        .filter(|step| step.needs.is_empty())
+        .map(|step| step.id.clone())
+        .collect();
+    loop {
+        let mut grew = false;
+        for step in steps {
+            if reach.contains(&step.id) {
+                continue;
+            }
+            if !step.needs.iter().all(|need| reach.contains(need)) {
+                continue;
+            }
+            let allowed = step.needs.iter().all(|need| {
+                let Some(pred) = steps.iter().find(|candidate| candidate.id == *need) else {
+                    return false;
+                };
+                if pred.routes.is_empty() {
+                    return true;
+                }
+                pred.routes.iter().any(|route| {
+                    !route.stops()
+                        && (route.to == step.id
+                            || before
+                                .get(&step.id)
+                                .is_some_and(|set| set.contains(&route.to)))
+                })
+            });
+            if allowed {
+                reach.insert(step.id.clone());
+                grew = true;
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    reach
 }
 
 /// One circle in the graph, as step ids in order with the first repeated at the end.

@@ -506,6 +506,12 @@ fn runs(ys: &Yardsort, workspace: Option<&str>, limit: usize, out: &Output) -> R
             ]
         }));
         table(&lines);
+        for run in listed.iter().filter(|run| run.status == "failed") {
+            let Some(error) = run.error.as_deref().filter(|text| !text.is_empty()) else {
+                continue;
+            };
+            sayln!("{}: {error}", memory::short_id(&run.id));
+        }
     })
 }
 
@@ -537,6 +543,8 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
         detail: Option<&'a str>,
         body: &'a str,
         truncated: bool,
+        /// Which entry of the producing step wrote this body. Older entries stay stored.
+        attempt: u32,
     }
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -655,6 +663,7 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                 detail: artifact.detail.as_deref(),
                 body: &artifact.body,
                 truncated: artifact.truncated,
+                attempt: artifact.attempt,
             })
             .collect(),
     };
@@ -710,17 +719,19 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                 match &artifact.detail {
                     Some(detail) => {
                         sayln!(
-                            "{} from {} ({} {detail}{cut})",
+                            "{} from {} ({}, attempt {}, {detail}{cut})",
                             artifact.name,
                             artifact.step_id,
-                            artifact.source
+                            artifact.source,
+                            artifact.attempt
                         );
                     }
                     None => sayln!(
-                        "{} from {} ({}{cut})",
+                        "{} from {} ({}, attempt {}{cut})",
                         artifact.name,
                         artifact.step_id,
-                        artifact.source
+                        artifact.source,
+                        artifact.attempt
                     ),
                 }
                 sayln!("{}", artifact.body);

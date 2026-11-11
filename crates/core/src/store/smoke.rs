@@ -5,7 +5,7 @@
 //! processes must agree on: a step moves, and a run starts, only through a conditional update,
 //! so a cancel from `ys` and the runner in the app never both win.
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{now_ms, Store, StoreResult};
 
@@ -411,30 +411,43 @@ impl Store {
     pub fn cancel_test_run(&self, id: &str, reason: &str) -> StoreResult<bool> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let now = now_ms();
-        let ended = tx.execute(
-            "UPDATE test_runs SET status = 'cancelled', error = ?, ended_at = ?
-             WHERE id = ? AND status IN ('awaiting_approval', 'queued')",
-            params![reason, now, id],
-        )? > 0;
-        if ended {
-            tx.execute(
-                "UPDATE test_step_runs SET status = 'cancelled', ended_at = ?
-                 WHERE run_id = ? AND status IN ('pending', 'running', 'waiting')",
-                params![now, id],
-            )?;
-            tx.commit()?;
-            return Ok(true);
-        }
-        let asked = tx.execute(
-            "UPDATE test_runs SET cancel_requested_at = ?, error = ?
-             WHERE id = ? AND status = 'running' AND cancel_requested_at IS NULL",
-            params![now, reason, id],
-        )? > 0;
+        let changed = cancel_test_in(&tx, id, reason, now_ms())?;
         tx.commit()?;
-        Ok(asked)
+        Ok(changed)
     }
+}
 
+/// Cancel one run on an open transaction. A workflow rewind uses this so the cancel
+/// commits with the rewind. One waiting for approval or queued ends at once. One running
+/// is asked to stop. False when the run had already ended, or was already asked.
+pub(super) fn cancel_test_in(
+    conn: &Connection,
+    id: &str,
+    reason: &str,
+    now: i64,
+) -> rusqlite::Result<bool> {
+    let ended = conn.execute(
+        "UPDATE test_runs SET status = 'cancelled', error = ?, ended_at = ?
+         WHERE id = ? AND status IN ('awaiting_approval', 'queued')",
+        params![reason, now, id],
+    )? > 0;
+    if ended {
+        conn.execute(
+            "UPDATE test_step_runs SET status = 'cancelled', ended_at = ?
+             WHERE run_id = ? AND status IN ('pending', 'running', 'waiting')",
+            params![now, id],
+        )?;
+        return Ok(true);
+    }
+    let asked = conn.execute(
+        "UPDATE test_runs SET cancel_requested_at = ?, error = ?
+         WHERE id = ? AND status = 'running' AND cancel_requested_at IS NULL",
+        params![now, reason, id],
+    )? > 0;
+    Ok(asked)
+}
+
+impl Store {
     /// Whether a cancel was asked for on a running run.
     pub fn test_run_cancel_requested(&self, id: &str) -> StoreResult<bool> {
         Ok(self

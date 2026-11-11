@@ -35,4 +35,23 @@ describe("layoutSteps", () => {
     expect(nodes).toHaveLength(2);
     expect(links).toEqual([]);
   });
+
+  it("draws a route forward in the layout, and a route back without a cycle", () => {
+    const { nodes, links } = layoutSteps([
+      { id: "plan", needs: [] },
+      {
+        id: "sign-off",
+        needs: ["plan"],
+        routes: [{ to: "implement" }, { to: "plan" }, { to: "stop" }],
+      },
+      { id: "implement", needs: ["sign-off"] },
+    ]);
+    expect(at(nodes, "plan").y).toBeLessThan(at(nodes, "sign-off").y);
+    expect(at(nodes, "sign-off").y).toBeLessThan(at(nodes, "implement").y);
+    expect(links.map((link) => link.id)).toEqual([
+      "plan->sign-off",
+      "sign-off->implement",
+      "sign-off->plan",
+    ]);
+  });
 });

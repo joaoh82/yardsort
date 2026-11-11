@@ -5,6 +5,23 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **A workflow can branch on a step's outcome, and send work back a limited number of times.**
+  An `approve` or `run_test` step may set `on`. `approved` can go on to implementation,
+  `changes_requested` can return the note to planning, a failed test can return to
+  implementation, and `rejected` can stop the run or follow a path you name. The branch
+  reads the outcome, not the text of a note. A route back needs `max_attempts`, from 2 to
+  10, including the first try. At the limit the run stops, says why, and says to start a
+  new run. You see that in `ys workflow runs` and on the run in the app. Each pass through
+  an approval waits again and needs a new code and a new decision. The note or the failed
+  report is an artifact the step being run again can read, and each attempt is kept. A
+  failed route that goes forward leaves that report for the step it goes to as well. An
+  earlier loop's note is not handed out again when a later loop runs those steps. A step
+  cannot be named `stop`. A pass that goes to `stop` still ends the run after the step
+  saves what it `produces`. A rewind is not applied when the run is already stopping, even
+  when the looping step comes first in the file, and a smoke test still running on a step
+  that is sent back is cancelled with that rewind. The count survives a
+  restart and is not increased twice. A file with no `on` still loads.
+  See [Conditional paths](docs/guide/workflows.md#conditional-paths).
 - **A workflow that is waiting on you stays waiting across a restart.** The run view
   says `Blocked: waiting for your approval.` and what to do. The sidebar lists every
   run waiting on you. `ys workflow runs` has a WAITING ON column, and `--run` and
