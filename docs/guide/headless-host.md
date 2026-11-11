@@ -220,9 +220,10 @@ yardsort-host pair
 
 Run in a terminal of your own on that computer, an SSH login say, it shows a QR code and a code to
 type, good once for five minutes. Enter it on the phone. When the phone asks, `pair` shows its name
-and what it asks for, and asks you: **Allow viewing**, **allow viewing and typing**, or **deny**. With
-more than one project, it then asks which ones it may reach, all of them if you just press Enter.
-Nothing is let in without your answer.
+and what it asks for. Watching includes reading workflow runs. It asks you: **Allow viewing**,
+**allow viewing and typing**, or **deny**. If you allow it, it then asks whether it may also
+approve or answer workflows. With more than one project, it then asks which ones it may reach,
+all of them if you just press Enter. Nothing is let in without your answer.
 
 The device can be a phone, or the desktop app on another computer, signed in under **Settings → Remote →
 Other computers** ([Reaching another computer](remote.md#reaching-another-computer)). The app asks to

@@ -14,17 +14,20 @@ ALTER TABLE workflow_waits ADD COLUMN remote_key TEXT;
 ALTER TABLE workflow_clarification_rounds ADD COLUMN device_id TEXT;
 ALTER TABLE workflow_clarification_history ADD COLUMN device_id TEXT;
 
--- One remote decision, including a refusal. `fingerprint` hashes the action, the
--- step and the note. It does not include the one-time code. A retry of `decision_id`
--- returns `outcome` and does not write again, including after a rewind.
+-- One remote decision, including a refusal. The key is the phone and its decision id,
+-- so two phones do not share a retry. `fingerprint` hashes the run, the device, the
+-- action, the step and the note. It does not include the one-time code. A retry of
+-- the same key returns `outcome` and does not write again, including after a rewind.
+-- Rows older than seven days are removed when a new one is stored.
 CREATE TABLE workflow_remote_actions (
-    decision_id TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL,
+    decision_id TEXT NOT NULL,
     run_id TEXT NOT NULL,
     step_id TEXT NOT NULL,
-    device_id TEXT NOT NULL,
     outcome TEXT NOT NULL,
     fingerprint TEXT NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (device_id, decision_id)
 );
 
 -- The run and step a workflow notice is about, so the phone can open that decision.

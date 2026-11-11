@@ -96,7 +96,7 @@ const HOST: &str = "h.id, h.account, h.device, h.name, h.created_at, hd.last_see
 /// A grant row and its names, as [`GrantView`] holds them.
 const GRANT: &str = "g.id, g.account, g.host, g.device, g.requested, g.scopes, g.projects, \
                      g.status, g.created_at, g.expires_at, g.decided_at, \
-                     h.name, d.name, d.revoked_at IS NOT NULL";
+                     h.name, d.name, d.revoked_at IS NOT NULL, d.kind";
 
 /// The notification channel signals travel on.
 pub const SIGNAL_CHANNEL: &str = "yardsort_relay";
@@ -1635,7 +1635,11 @@ fn grant_view(row: &Row) -> Result<GrantView> {
         row.get::<_, Vec<String>>(at)
             .into_iter()
             .map(unspelled::<Scope>)
-            .collect()
+            .filter_map(|scope| match scope {
+                Ok(Scope::Unknown) => None,
+                other => Some(other),
+            })
+            .collect::<std::result::Result<_, _>>()
     };
     let projects: Option<String> = row.get(6);
     let status: String = row.get(7);
@@ -1664,6 +1668,7 @@ fn grant_view(row: &Row) -> Result<GrantView> {
         host_name: row.get(11),
         device_name: row.get(12),
         device_revoked: row.get(13),
+        device_kind: unspelled(row.get(14))?,
     })
 }
 

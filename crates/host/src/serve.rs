@@ -372,10 +372,15 @@ async fn pair(home: &Arc<HostHome>, line: &mut Line) {
                 grant,
                 allow,
                 control,
+                workflows,
                 projects,
             })) if grant == request.grant_id => {
                 let answer = if allow {
-                    Answer::Allow { control, projects }
+                    Answer::Allow {
+                        control,
+                        workflows,
+                        projects,
+                    }
                 } else {
                     Answer::Deny
                 };

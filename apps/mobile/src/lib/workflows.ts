@@ -34,16 +34,31 @@ export function workflowTarget(notice: {
   return `/decision?host=${host}&run=${run}&step=${step}`;
 }
 
-/** One id per tap. A lost reply reuses it. A reply, including a refusal, starts a new one. */
+/** One id per action and note. A lost reply reuses it. A different action or note is a new id. */
 export class DecisionIds {
-  #pending: string | null = null;
+  #pending: { id: string; action: string; note: string } | null = null;
 
-  next(fresh: () => string): string {
-    this.#pending ??= fresh();
-    return this.#pending;
+  next(action: string, note: string, fresh: () => string): string {
+    if (this.#pending?.action === action && this.#pending.note === note) return this.#pending.id;
+    const id = fresh();
+    this.#pending = { id, action, note };
+    return id;
   }
 
   settled(): void {
     this.#pending = null;
   }
+}
+
+/** What a conflicting decision id turned out to be, after the run is read again. */
+export function conflictSummary(detail: {
+  status: string;
+  waitingKind?: string | undefined;
+  resumeEligible: boolean;
+}): string {
+  if (detail.waitingKind === "approval") return "That step is still waiting for approval.";
+  if (detail.waitingKind === "question") return "That step is still waiting for an answer.";
+  if (detail.resumeEligible)
+    return "That decision was already sent. The computer has not applied it yet.";
+  return `That decision was already sent. The run is ${detail.status}.`;
 }

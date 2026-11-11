@@ -4,8 +4,10 @@
 import { describe, expect, test } from "bun:test";
 
 import { noticeRoute } from "../../src/lib/notice-link";
+import { askedScopes } from "../../src/lib/accounts";
 import {
   DecisionIds,
+  conflictSummary,
   decisionAvailability,
   OFFLINE,
   workflowTarget,
@@ -40,9 +42,26 @@ describe("a workflow notice", () => {
     const ids = new DecisionIds();
     let n = 0;
     const fresh = () => `id-${++n}`;
-    expect(ids.next(fresh)).toBe("id-1");
-    expect(ids.next(fresh)).toBe("id-1");
+    expect(ids.next("approve", "", fresh)).toBe("id-1");
+    expect(ids.next("approve", "", fresh)).toBe("id-1");
+    expect(ids.next("reject", "", fresh)).toBe("id-2");
+    expect(ids.next("approve", "shorter", fresh)).toBe("id-3");
     ids.settled();
-    expect(ids.next(fresh)).toBe("id-2");
+    expect(ids.next("approve", "", fresh)).toBe("id-4");
+  });
+
+  test("asks for workflow scopes only when the server speaks minor 7", () => {
+    expect(askedScopes({ major: 1, minor: 6 })).not.toContain("workflow:read");
+    expect(askedScopes({ major: 1, minor: 6 })).not.toContain("workflow:decide");
+    expect(askedScopes({ major: 1, minor: 7 })).toContain("workflow:decide");
+    expect(askedScopes({ major: 2, minor: 7 })).not.toContain("workflow:decide");
+  });
+
+  test("a conflict says what the run is doing now", () => {
+    expect(
+      conflictSummary({ status: "running", waitingKind: "approval", resumeEligible: false }),
+    ).toBe("That step is still waiting for approval.");
+    expect(conflictSummary({ status: "running", resumeEligible: true })).toContain("not applied");
+    expect(conflictSummary({ status: "succeeded", resumeEligible: false })).toContain("succeeded");
   });
 });

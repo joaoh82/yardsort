@@ -431,7 +431,7 @@ fn visit(
                 }),
             )
             .map(|mut visitor| {
-                visitor.set_kind(open.kind);
+                visitor.set_kind(context.store, open.kind);
                 visitor
             }),
         );

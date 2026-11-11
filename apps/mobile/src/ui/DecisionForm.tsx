@@ -15,6 +15,7 @@ export function DecisionForm({
   online,
   kind,
   locked,
+  resumeEligible,
   busy,
   note,
   onNote,
@@ -23,6 +24,7 @@ export function DecisionForm({
   online: boolean;
   kind: "approval" | "question" | null;
   locked: boolean;
+  resumeEligible: boolean;
   busy: boolean;
   note: string;
   onNote: (note: string) => void;
@@ -65,11 +67,13 @@ export function DecisionForm({
           />
         </>
       )}
-      <Button
-        title="Resume"
-        disabled={!availability.enabled || busy}
-        onPress={() => send("resume", !availability.enabled || busy)}
-      />
+      {resumeEligible ? (
+        <Button
+          title="Resume"
+          disabled={!availability.enabled || busy}
+          onPress={() => send("resume", !availability.enabled || busy)}
+        />
+      ) : null}
     </>
   );
 }

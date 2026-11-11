@@ -3,7 +3,8 @@
 //! The desktop owns the engine. This answers the relay while that engine is running.
 //! A decision uses the same code-checked write as a terminal. The desktop window and a
 //! phone cannot both apply, because the row is updated only while it is still undecided.
-//! A host token, a computer, and any session Yardsort started are refused before that write.
+//! A host token and a computer are refused before that write. The desktop process's own
+//! environment is not the caller, so it is not consulted here.
 //!
 //! The one-time code is returned only by `workflow.challenge`, and only to a phone. It is
 //! not in a run, an artifact, or a notification. The phone holds it and sends it back with
@@ -17,13 +18,13 @@ use std::path::Path;
 
 use remote_proto::account::DeviceKind;
 use remote_proto::workflow::{
-    redact_preview, safe_error, WorkflowAction, WorkflowArtifactView, WorkflowChallenge,
+    redact_preview, safe_error, safe_note, WorkflowAction, WorkflowArtifactView, WorkflowChallenge,
     WorkflowDecision, WorkflowRunDetail, WorkflowRunPage, WorkflowRunSummary, WorkflowStepView,
-    MAX_ARTIFACT_PREVIEW,
+    MAX_ARTIFACT_PREVIEW, STALE_MESSAGE,
 };
 use remote_proto::{
     clip, ErrorCode, Grant, Operation, ProjectGrant, ProjectId, RemoteError, Reply, Request,
-    MAX_NOTE, MAX_TEXT,
+    MAX_TEXT,
 };
 use sha2::{Digest, Sha256};
 
@@ -41,12 +42,12 @@ pub trait WorkflowGate: Send + Sync {
     fn wake(&self);
 }
 
-/// Who is asking. `launched_session` is true when this process was started by Yardsort.
+/// Who is asking. The kind is the one the host recorded for this device, or the relay's
+/// when that record has none. See the trust model in docs/design/41-mobile-workflow-controls.md.
 #[derive(Debug, Clone)]
 pub struct WorkflowCaller {
     pub kind: DeviceKind,
     pub device: String,
-    pub launched_session: bool,
 }
 
 pub fn is_workflow(operation: &Operation) -> bool {
@@ -57,24 +58,6 @@ pub fn is_workflow(operation: &Operation) -> bool {
             | Operation::WorkflowChallenge(_)
             | Operation::WorkflowDecide(_)
     )
-}
-
-/// Whether any of the markers Yardsort puts on a session it started is set and non-empty.
-pub fn launched_markers(present: impl Fn(&str) -> bool) -> bool {
-    [
-        crate::coordinator::ENV,
-        crate::activity::RUN_ENV,
-        crate::activity::WORKSPACE_ENV,
-        crate::activity::RECORD_ENV,
-    ]
-    .into_iter()
-    .any(present)
-}
-
-/// This process was started by Yardsort. Tested through [`launched_markers`], not by
-/// changing the process environment, which other tests share.
-pub fn launched_here() -> bool {
-    launched_markers(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()))
 }
 
 /// Answer one workflow request. `gate` is what the desktop drives with. Without it the
@@ -100,8 +83,13 @@ pub fn answer(
         }
         Operation::WorkflowChallenge(params) => {
             refuses_decision(caller)?;
-            let run = reachable_run(store, grant, &params.run_id)?;
-            let _ = run;
+            let _ = reachable_run(store, grant, &params.run_id)?;
+            let (attempt, round) = store
+                .workflow_generation(&params.run_id, &params.step_id)
+                .map_err(|_| unreadable())?;
+            if attempt != params.attempt || round != params.round {
+                return Err(RemoteError::new(ErrorCode::InvalidRequest, STALE_MESSAGE));
+            }
             let code = gate
                 .challenge(store, &params.run_id, &params.step_id)
                 .map_err(|_| unreadable())?
@@ -112,7 +100,11 @@ pub fn answer(
                     "There is no code for this step. Open Yardsort on the computer to be shown one.",
                 ));
             };
-            Ok(Reply::WorkflowChallenge(WorkflowChallenge { code }))
+            Ok(Reply::WorkflowChallenge(WorkflowChallenge {
+                code,
+                attempt,
+                round,
+            }))
         }
         Operation::WorkflowDecide(params) => {
             refuses_decision(caller)?;
@@ -130,14 +122,8 @@ fn unsupported() -> RemoteError {
     )
 }
 
-/// A host token and a session Yardsort started cannot even list runs.
+/// A host token cannot even list runs. The desktop process environment is not the caller.
 fn refuses_host(caller: &WorkflowCaller) -> Result<(), RemoteError> {
-    if caller.launched_session {
-        return Err(RemoteError::new(
-            ErrorCode::Forbidden,
-            "A session Yardsort started cannot decide or answer a workflow.",
-        ));
-    }
     if caller.kind == DeviceKind::Host {
         return Err(RemoteError::new(
             ErrorCode::Forbidden,
@@ -147,7 +133,7 @@ fn refuses_host(caller: &WorkflowCaller) -> Result<(), RemoteError> {
     Ok(())
 }
 
-/// Only a signed-in phone decides. A host token, a computer, and a launched session are refused
+/// Only a signed-in phone decides. A host token, a computer, and an unknown kind are refused
 /// before any row is written.
 fn refuses_decision(caller: &WorkflowCaller) -> Result<(), RemoteError> {
     refuses_host(caller)?;
@@ -253,6 +239,16 @@ fn detail(store: &Store, grant: &Grant, run_id: &str) -> Result<WorkflowRunDetai
             .map(|wait| wait.kind.clone()),
         attempts,
         locked,
+        attempt: waiting.as_ref().map(|step| step.attempts).unwrap_or(0),
+        round: waiting
+            .as_ref()
+            .and_then(|step| {
+                store
+                    .workflow_generation(run_id, &step.step_id)
+                    .ok()
+                    .map(|(_, round)| round)
+            })
+            .unwrap_or(0),
         resume_eligible,
         steps: steps
             .into_iter()
@@ -261,7 +257,7 @@ fn detail(store: &Store, grant: &Grant, run_id: &str) -> Result<WorkflowRunDetai
                 action: clip(&step.action, MAX_TEXT),
                 status: step.status,
                 attempts: step.attempts,
-                note: step.note.as_deref().map(|note| clip(note, MAX_NOTE)),
+                note: step.note.as_deref().map(safe_note),
             })
             .collect(),
         artifacts,
@@ -327,7 +323,9 @@ fn decide(
     let stamp = PhoneStamp {
         key: params.decision_id.clone(),
         device_id: caller.device.clone(),
-        fingerprint: fingerprint(action, &step, &note),
+        fingerprint: fingerprint(&params.run_id, &caller.device, action, &step, &note),
+        attempt: params.attempt,
+        round: params.round,
     };
     if params.action == WorkflowAction::Resume {
         return resume(store, gate, &params.run_id, &step, &stamp);
@@ -466,8 +464,12 @@ fn empty_note(note: &str) -> Option<&str> {
     (!trimmed.is_empty()).then_some(trimmed)
 }
 
-fn fingerprint(action: &str, step: &str, note: &str) -> String {
+fn fingerprint(run_id: &str, device_id: &str, action: &str, step: &str, note: &str) -> String {
     let mut hasher = Sha256::new();
+    hasher.update(run_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(device_id.as_bytes());
+    hasher.update([0]);
     hasher.update(action.as_bytes());
     hasher.update([0]);
     hasher.update(step.as_bytes());
@@ -544,7 +546,6 @@ mod tests {
         WorkflowCaller {
             kind,
             device: "phone-1".into(),
-            launched_session: false,
         }
     }
 
@@ -564,6 +565,8 @@ mod tests {
             note: note.map(str::to_owned),
             code: Some(code.to_owned()),
             decision_id: id.into(),
+            attempt: 0,
+            round: 0,
         }))
     }
 
@@ -601,18 +604,7 @@ mod tests {
     }
 
     #[test]
-    fn launched_markers_see_any_of_the_four() {
-        assert!(!launched_markers(|_| false));
-        assert!(launched_markers(|name| name == crate::coordinator::ENV));
-        assert!(launched_markers(|name| name == crate::activity::RUN_ENV));
-        assert!(launched_markers(
-            |name| name == crate::activity::WORKSPACE_ENV
-        ));
-        assert!(launched_markers(|name| name == crate::activity::RECORD_ENV));
-    }
-
-    #[test]
-    fn a_host_a_computer_and_a_launched_session_cannot_decide() {
+    fn a_host_a_computer_and_an_unknown_kind_cannot_decide() {
         let store = Store::in_memory();
         let code = waiting(&store);
         let boom = Boom;
@@ -620,11 +612,7 @@ mod tests {
         for caller in [
             caller(DeviceKind::Host),
             caller(DeviceKind::Computer),
-            WorkflowCaller {
-                kind: DeviceKind::Phone,
-                device: "phone-1".into(),
-                launched_session: true,
-            },
+            caller(DeviceKind::Other),
         ] {
             let error = answer(&store, Some(&boom), &caller, &grant(), &asked).unwrap_err();
             assert_eq!(error.code, ErrorCode::Forbidden, "{caller:?}");
@@ -756,6 +744,8 @@ mod tests {
             note: None,
             code: None,
             decision_id: "d-resume".into(),
+            attempt: 0,
+            round: 0,
         }));
         let phone = caller(DeviceKind::Phone);
         assert_eq!(
@@ -774,5 +764,389 @@ mod tests {
             "accepted"
         );
         assert_eq!(gate.wakes.load(Ordering::SeqCst), 2);
+    }
+
+    fn tries(store: &Store) -> i64 {
+        store
+            .conn()
+            .query_row(
+                "SELECT attempts FROM workflow_approval_decisions
+                 WHERE run_id = 'run-1' AND step_id = 'sign-off'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn a_decision_for_an_earlier_attempt_or_round_is_stale_and_burns_no_try() {
+        let store = Store::in_memory();
+        let code = waiting(&store);
+        let gate = Gate {
+            code: Mutex::new(Some(code.clone())),
+            wakes: AtomicU32::new(0),
+        };
+        let phone = caller(DeviceKind::Phone);
+        let shown = request(Operation::WorkflowRunGet(
+            remote_proto::workflow::WorkflowRunRef {
+                run_id: "run-1".into(),
+            },
+        ));
+        let Reply::WorkflowRun(detail) =
+            answer(&store, Some(&gate), &phone, &grant(), &shown).unwrap()
+        else {
+            panic!("not a run");
+        };
+        assert_eq!((detail.attempt, detail.round), (0, 0));
+        store
+            .conn()
+            .execute(
+                "UPDATE workflow_step_runs SET attempts = 2 WHERE step_id = 'sign-off'",
+                [],
+            )
+            .unwrap();
+        let asked = decide(WorkflowAction::Approve, None, &code, "d-stale");
+        assert_eq!(
+            outcome(answer(&store, Some(&gate), &phone, &grant(), &asked).unwrap()),
+            "stale"
+        );
+        assert!(store
+            .workflow_approval("run-1", "sign-off")
+            .unwrap()
+            .is_none());
+        assert_eq!(tries(&store), 0);
+        assert_eq!(gate.wakes.load(Ordering::SeqCst), 0);
+
+        store
+            .conn()
+            .execute(
+                "UPDATE workflow_step_runs SET attempts = 0 WHERE step_id = 'sign-off'",
+                [],
+            )
+            .unwrap();
+        store
+            .record_clarification("run-1", "sign-off", "[]", "Which name?", 3, "[]", "{}")
+            .unwrap();
+        let asked = decide(WorkflowAction::Approve, None, &code, "d-round");
+        assert_eq!(
+            outcome(answer(&store, Some(&gate), &phone, &grant(), &asked).unwrap()),
+            "stale"
+        );
+        assert!(store
+            .workflow_approval("run-1", "sign-off")
+            .unwrap()
+            .is_none());
+        assert_eq!(tries(&store), 0);
+    }
+
+    #[test]
+    fn a_challenge_for_an_earlier_attempt_does_not_return_the_new_code() {
+        let store = Store::in_memory();
+        let _code = waiting(&store);
+        store
+            .conn()
+            .execute(
+                "UPDATE workflow_step_runs SET attempts = 1 WHERE step_id = 'sign-off'",
+                [],
+            )
+            .unwrap();
+        let boom = Boom;
+        let asked = request(Operation::WorkflowChallenge(
+            remote_proto::workflow::WorkflowStepRef {
+                run_id: "run-1".into(),
+                step_id: "sign-off".into(),
+                attempt: 0,
+                round: 0,
+            },
+        ));
+        let error = answer(
+            &store,
+            Some(&boom),
+            &caller(DeviceKind::Phone),
+            &grant(),
+            &asked,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidRequest);
+        assert_eq!(error.message, STALE_MESSAGE);
+    }
+
+    #[test]
+    fn resume_is_refused_while_a_person_still_has_to_act() {
+        let store = Store::in_memory();
+        let _code = waiting(&store);
+        let gate = Gate {
+            code: Mutex::new(None),
+            wakes: AtomicU32::new(0),
+        };
+        let asked = request(Operation::WorkflowDecide(WorkflowDecideParams {
+            run_id: "run-1".into(),
+            step_id: Some("sign-off".into()),
+            action: WorkflowAction::Resume,
+            note: None,
+            code: None,
+            decision_id: "d-resume-early".into(),
+            attempt: 0,
+            round: 0,
+        }));
+        assert_eq!(
+            outcome(
+                answer(
+                    &store,
+                    Some(&gate),
+                    &caller(DeviceKind::Phone),
+                    &grant(),
+                    &asked
+                )
+                .unwrap()
+            ),
+            "not_eligible"
+        );
+        assert_eq!(gate.wakes.load(Ordering::SeqCst), 0);
+        assert!(store
+            .workflow_approval("run-1", "sign-off")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn a_halted_run_is_run_ended_and_nothing_is_applied() {
+        let store = Store::in_memory();
+        let code = waiting(&store);
+        store
+            .conn()
+            .execute(
+                "UPDATE workflow_runs SET status = 'failed' WHERE id = 'run-1'",
+                [],
+            )
+            .unwrap();
+        let gate = Gate {
+            code: Mutex::new(Some(code.clone())),
+            wakes: AtomicU32::new(0),
+        };
+        assert_eq!(
+            outcome(
+                answer(
+                    &store,
+                    Some(&gate),
+                    &caller(DeviceKind::Phone),
+                    &grant(),
+                    &decide(WorkflowAction::Approve, None, &code, "d-halted"),
+                )
+                .unwrap()
+            ),
+            "run_ended:failed"
+        );
+        assert!(store
+            .workflow_approval("run-1", "sign-off")
+            .unwrap()
+            .is_none());
+        assert_eq!(gate.wakes.load(Ordering::SeqCst), 0);
+    }
+
+    fn ask(store: &Store) -> String {
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_runs
+                 (id, workflow_id, workflow_name, definition, workspace_name, inputs, status,
+                  requested_by, created_at)
+                 VALUES ('run-1', 'demo', 'Demo', 'id: demo\n', 'fix', '{}', 'running', 'cli', 1)",
+                [],
+            )
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_step_runs
+                 (run_id, step_id, position, action, status)
+                 VALUES ('run-1', 'ask', 0, 'wait_session', 'waiting')",
+                [],
+            )
+            .unwrap();
+        store
+            .open_workflow_wait(
+                "run-1",
+                "ask",
+                "question",
+                "your answer",
+                "Answer the question.",
+                Some("Which name?"),
+                "[]",
+                "{}",
+            )
+            .unwrap();
+        store.begin_answer_code("run-1", "ask").unwrap().unwrap()
+    }
+
+    fn answer_request(note: &str, code: &str, id: &str) -> Request {
+        request(Operation::WorkflowDecide(WorkflowDecideParams {
+            run_id: "run-1".into(),
+            step_id: Some("ask".into()),
+            action: WorkflowAction::Answer,
+            note: Some(note.to_owned()),
+            code: Some(code.to_owned()),
+            decision_id: id.into(),
+            attempt: 0,
+            round: 0,
+        }))
+    }
+
+    #[test]
+    fn a_phone_answer_retries_once_and_a_different_note_conflicts() {
+        let store = Store::in_memory();
+        let code = ask(&store);
+        let gate = Gate {
+            code: Mutex::new(Some(code.clone())),
+            wakes: AtomicU32::new(0),
+        };
+        let phone = caller(DeviceKind::Phone);
+        let first = answer_request("Ship", &code, "d-ask");
+        assert_eq!(
+            outcome(answer(&store, Some(&gate), &phone, &grant(), &first).unwrap()),
+            "recorded"
+        );
+        assert_eq!(
+            outcome(answer(&store, Some(&gate), &phone, &grant(), &first).unwrap()),
+            "recorded"
+        );
+        assert!(gate.wakes.load(Ordering::SeqCst) >= 1);
+        let other = answer_request("Wait", &code, "d-ask");
+        assert_eq!(
+            outcome(answer(&store, Some(&gate), &phone, &grant(), &other).unwrap()),
+            "conflict"
+        );
+        let answer: String = store
+            .conn()
+            .query_row(
+                "SELECT answer FROM workflow_waits WHERE step_id = 'ask'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(answer, "Ship");
+    }
+
+    #[test]
+    fn a_recorded_decision_is_not_listed_as_waiting() {
+        let store = Store::in_memory();
+        let code = waiting(&store);
+        store
+            .open_workflow_wait(
+                "run-1",
+                "sign-off",
+                "approval",
+                "your approval",
+                "Approve the step.",
+                None,
+                "[]",
+                "{}",
+            )
+            .unwrap();
+        let phone = caller(DeviceKind::Phone);
+        let gate = Gate {
+            code: Mutex::new(Some(code.clone())),
+            wakes: AtomicU32::new(0),
+        };
+        let listed = request(Operation::WorkflowRunList(
+            remote_proto::workflow::WorkflowRunListParams {
+                cursor: None,
+                limit: None,
+            },
+        ));
+        let Reply::WorkflowRuns(before) =
+            answer(&store, Some(&gate), &phone, &grant(), &listed).unwrap()
+        else {
+            panic!("not a list");
+        };
+        assert_eq!(before.runs[0].waiting_on.as_deref(), Some("sign-off"));
+        answer(
+            &store,
+            Some(&gate),
+            &phone,
+            &grant(),
+            &decide(WorkflowAction::Approve, None, &code, "d-list"),
+        )
+        .unwrap();
+        let Reply::WorkflowRuns(after) =
+            answer(&store, Some(&gate), &phone, &grant(), &listed).unwrap()
+        else {
+            panic!("not a list");
+        };
+        assert!(after.runs[0].waiting_on.is_none());
+    }
+
+    #[test]
+    fn a_step_note_with_a_path_is_left_out() {
+        let store = Store::in_memory();
+        let _code = waiting(&store);
+        store
+            .conn()
+            .execute(
+                "UPDATE workflow_step_runs SET note = 'see /home/ada/secret.txt' WHERE step_id = 'sign-off'",
+                [],
+            )
+            .unwrap();
+        let asked = request(Operation::WorkflowRunGet(
+            remote_proto::workflow::WorkflowRunRef {
+                run_id: "run-1".into(),
+            },
+        ));
+        let gate = Gate {
+            code: Mutex::new(None),
+            wakes: AtomicU32::new(0),
+        };
+        let Reply::WorkflowRun(detail) = answer(
+            &store,
+            Some(&gate),
+            &caller(DeviceKind::Phone),
+            &grant(),
+            &asked,
+        )
+        .unwrap() else {
+            panic!("not a run");
+        };
+        assert_eq!(
+            detail.steps[0].note.as_deref(),
+            Some("This note was left out.")
+        );
+    }
+
+    #[test]
+    fn code_for_phone_matches_the_held_code_reissues_after_restart_and_locks() {
+        use crate::workflow::code::ATTEMPT_LIMIT;
+        use crate::workflow::driver::Driver;
+        let store = Store::in_memory();
+        waiting(&store);
+        let driver = Driver::default();
+        let (code, _) = driver
+            .issue_approval_code(&store, "run-1", "sign-off", true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            driver
+                .code_for_phone(&store, "run-1", "sign-off")
+                .unwrap()
+                .as_deref(),
+            Some(code.as_str())
+        );
+        let restarted = Driver::default();
+        let again = restarted
+            .code_for_phone(&store, "run-1", "sign-off")
+            .unwrap()
+            .unwrap();
+        assert_ne!(again, code);
+        store
+            .conn()
+            .execute(
+                "UPDATE workflow_approval_decisions SET attempts = ?1
+                 WHERE run_id = 'run-1' AND step_id = 'sign-off'",
+                [ATTEMPT_LIMIT],
+            )
+            .unwrap();
+        assert!(restarted
+            .code_for_phone(&store, "run-1", "sign-off")
+            .unwrap()
+            .is_none());
     }
 }

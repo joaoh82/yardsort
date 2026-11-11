@@ -41,6 +41,62 @@ pub enum Scope {
     /// A host token is still refused, even with this scope.
     #[serde(rename = "workflow:decide")]
     WorkflowDecide,
+    /// A scope this build does not know. Accepted on parse and then dropped, so a newer
+    /// peer does not make pairing fail. Never stored and never granted.
+    #[serde(other)]
+    Unknown,
+}
+
+/// Read and write a set of scopes. A name this build does not know is dropped.
+pub mod scope_set {
+    use std::collections::BTreeSet;
+    use std::fmt;
+
+    use serde::de::{SeqAccess, Visitor};
+    use serde::ser::SerializeSeq;
+    use serde::{Deserializer, Serializer};
+
+    use super::Scope;
+
+    pub fn serialize<S>(scopes: &BTreeSet<Scope>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let known: Vec<&Scope> = scopes
+            .iter()
+            .filter(|scope| **scope != Scope::Unknown)
+            .collect();
+        let mut seq = serializer.serialize_seq(Some(known.len()))?;
+        for scope in known {
+            seq.serialize_element(scope)?;
+        }
+        seq.end()
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<BTreeSet<Scope>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Visit;
+        impl<'de> Visitor<'de> for Visit {
+            type Value = BTreeSet<Scope>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a list of scopes")
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut set = BTreeSet::new();
+                while let Some(scope) = seq.next_element::<Scope>()? {
+                    if scope != Scope::Unknown {
+                        set.insert(scope);
+                    }
+                }
+                Ok(set)
+            }
+        }
+        deserializer.deserialize_seq(Visit)
+    }
 }
 
 /// Which projects a grant reaches.
@@ -58,6 +114,7 @@ pub enum ProjectGrant {
 #[serde(rename_all = "camelCase")]
 pub struct Grant {
     pub device: DeviceId,
+    #[serde(with = "scope_set")]
     pub scopes: BTreeSet<Scope>,
     pub projects: ProjectGrant,
 }
@@ -98,5 +155,25 @@ mod tests {
         assert!(!grant.reaches(&theirs));
         assert!(grant.allows(Scope::WorkspaceRead));
         assert!(!grant.allows(Scope::MemoryRead));
+    }
+
+    #[test]
+    fn an_unknown_scope_is_accepted_and_dropped() {
+        #[derive(Deserialize)]
+        struct Asked {
+            #[serde(with = "super::scope_set")]
+            scopes: BTreeSet<Scope>,
+        }
+        let asked: Asked = serde_json::from_str(
+            r#"{"scopes":["workspace:read","workflow:later","workflow:read"]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            asked.scopes,
+            [Scope::WorkspaceRead, Scope::WorkflowRead].into()
+        );
+        let back = serde_json::to_string(&asked.scopes).unwrap();
+        assert!(!back.contains("later"));
+        assert!(back.contains("workflow:read"));
     }
 }

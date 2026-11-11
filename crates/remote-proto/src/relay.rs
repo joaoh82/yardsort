@@ -363,6 +363,12 @@ mod tests {
     }
 
     #[test]
+    fn a_channel_open_without_a_kind_cannot_decide() {
+        let open: ChannelOpen = serde_json::from_str(r#"{"device":"phone","grant":"g1"}"#).unwrap();
+        assert_eq!(open.kind, DeviceKind::Other);
+    }
+
+    #[test]
     fn link_frames_round_trip() {
         let open = ChannelOpen {
             device: DeviceId::new("phone").unwrap(),

@@ -30,6 +30,9 @@ pub enum Ask {
         grant: String,
         allow: bool,
         control: bool,
+        /// Approving or answering workflows. Absent on an older control client, which does not grant it.
+        #[serde(default)]
+        workflows: bool,
         /// Only these projects, by id; all of them when absent.
         projects: Option<Vec<String>>,
     },

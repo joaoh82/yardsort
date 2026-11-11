@@ -316,6 +316,8 @@ fn every_operation_has_the_name_it_is_sent_under() {
         Operation::WorkflowChallenge(workflow::WorkflowStepRef {
             run_id: "run-1".into(),
             step_id: "sign-off".into(),
+            attempt: 1,
+            round: 0,
         }),
         Operation::WorkflowDecide(workflow::WorkflowDecideParams {
             run_id: "run-1".into(),
@@ -324,6 +326,8 @@ fn every_operation_has_the_name_it_is_sent_under() {
             note: None,
             code: Some("ABCD2345".into()),
             decision_id: "d-1".into(),
+            attempt: 1,
+            round: 0,
         }),
     ];
     assert_eq!(all.len(), OPERATIONS.len());

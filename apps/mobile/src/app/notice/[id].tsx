@@ -29,7 +29,9 @@ export default function Notice() {
     if (!signedIn || !id) return;
     let live = true;
     void accounts.notice(id).then(
-      (next) => {
+      async ({ notice: next, profile }) => {
+        if (!live) return;
+        if (accounts.activeId() !== profile) await accounts.activate(profile);
         if (live) setNotice(next);
       },
       (error: unknown) => {

@@ -15,6 +15,7 @@ describe("a workflow decision", () => {
         online={false}
         kind="approval"
         locked={false}
+        resumeEligible={false}
         busy={false}
         note=""
         onNote={() => {}}
@@ -33,6 +34,7 @@ describe("a workflow decision", () => {
         online
         kind="approval"
         locked={false}
+        resumeEligible={false}
         busy={false}
         note=""
         onNote={() => {}}

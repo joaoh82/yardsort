@@ -358,6 +358,7 @@ function Request(props: {
   const { request, busy, onAnswer } = props;
   const projects = useProjectsStore((s) => s.projects);
   const [chosen, setChosen] = useState<string[] | null>(null);
+  const [workflows, setWorkflows] = useState(false);
   return (
     <div
       role="group"
@@ -367,7 +368,7 @@ function Request(props: {
       <p>
         <span className="text-ink">{request.deviceName}</span> asks to{" "}
         {request.wantsControl ? "watch and type into" : "watch"} this computer&rsquo;s terminals,
-        and to see its workspaces and activity.
+        and to see its workspaces, activity, and workflow runs.
       </p>
       {request.wantsControl && (
         <p className="text-ink-faint">
@@ -416,11 +417,20 @@ function Request(props: {
           </div>
         )}
       </fieldset>
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={workflows}
+          onChange={(event) => setWorkflows(event.target.checked)}
+          className="accent-(--color-accent)"
+        />
+        and approve or answer workflows
+      </label>
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
           disabled={busy || (chosen !== null && chosen.length === 0)}
-          onClick={() => onAnswer({ kind: "allow", control: false, projects: chosen })}
+          onClick={() => onAnswer({ kind: "allow", control: false, workflows, projects: chosen })}
           className={buttonClass}
         >
           Let it watch
@@ -429,7 +439,7 @@ function Request(props: {
           <button
             type="button"
             disabled={busy || (chosen !== null && chosen.length === 0)}
-            onClick={() => onAnswer({ kind: "allow", control: true, projects: chosen })}
+            onClick={() => onAnswer({ kind: "allow", control: true, workflows, projects: chosen })}
             className={buttonClass}
           >
             Let it watch and type

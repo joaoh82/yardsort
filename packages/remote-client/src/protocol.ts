@@ -840,6 +840,10 @@ export interface WorkflowDecideParams {
   note: string | null;
   code: string | null;
   decisionId: RunId;
+  /** The waiting step's attempt, as the run detail showed it. */
+  attempt: number;
+  /** The open clarification round, or 0. */
+  round: number;
 }
 
 export interface WorkflowRunSummary {
@@ -883,6 +887,10 @@ export interface WorkflowRunDetail {
   waitingKind?: string;
   attempts: number;
   locked: boolean;
+  /** The waiting step's attempt. 0 when none is waiting. */
+  attempt: number;
+  /** The open clarification round, or 0. */
+  round: number;
   resumeEligible: boolean;
   steps: WorkflowStepView[];
   artifacts: WorkflowArtifactView[];
@@ -890,6 +898,8 @@ export interface WorkflowRunDetail {
 
 export interface WorkflowChallenge {
   code: string;
+  attempt: number;
+  round: number;
 }
 
 export interface WorkflowDecision {
@@ -938,6 +948,8 @@ const workflowRunDetailFields = {
   waitingKind: optional(text(32)),
   attempts: u32,
   locked: bool,
+  attempt: u32,
+  round: u32,
   resumeEligible: bool,
   steps: array(object(workflowStepFields)),
   artifacts: array(object(workflowArtifactFields)),
@@ -974,7 +986,10 @@ export type Operation =
   | { op: "session.resume"; params: SessionResumeParams }
   | { op: "workflow.run.list"; params: WorkflowRunListParams }
   | { op: "workflow.run.get"; params: { runId: RunId } }
-  | { op: "workflow.challenge"; params: { runId: RunId; stepId: RunId } }
+  | {
+      op: "workflow.challenge";
+      params: { runId: RunId; stepId: RunId; attempt: number; round: number };
+    }
   | { op: "workflow.decide"; params: WorkflowDecideParams };
 
 export type OperationName = Operation["op"];
@@ -1067,7 +1082,12 @@ const params: Record<string, Decoder<unknown>> = {
   "session.resume": object({ session: id<SessionRecordId>(), prompt: optional(text()) }),
   "workflow.run.list": object({ cursor: nullable(cursor), limit }),
   "workflow.run.get": object({ runId: id<RunId>() }),
-  "workflow.challenge": object({ runId: id<RunId>(), stepId: id<RunId>() }),
+  "workflow.challenge": object({
+    runId: id<RunId>(),
+    stepId: id<RunId>(),
+    attempt: u32,
+    round: u32,
+  }),
   "workflow.decide": object({
     runId: id<RunId>(),
     stepId: nullable(id<RunId>()),
@@ -1075,6 +1095,8 @@ const params: Record<string, Decoder<unknown>> = {
     note: nullable(text(MAX_NOTE)),
     code: nullable(text(MAX_CODE_LEN)),
     decisionId: id<RunId>(),
+    attempt: u32,
+    round: u32,
   }),
 };
 
@@ -1276,7 +1298,11 @@ export const reply: Decoder<Reply> = tagged<Reply>("kind", {
   uploaded: variant("kind", "uploaded", { upload: u32, path: text() }),
   workflowRuns: variant("kind", "workflowRuns", workflowRunPageFields),
   workflowRun: variant("kind", "workflowRun", workflowRunDetailFields),
-  workflowChallenge: variant("kind", "workflowChallenge", { code: text(MAX_CODE_LEN) }),
+  workflowChallenge: variant("kind", "workflowChallenge", {
+    code: text(MAX_CODE_LEN),
+    attempt: u32,
+    round: u32,
+  }),
   workflowDecision: variant("kind", "workflowDecision", {
     outcome: text(64),
     message: text(MAX_TEXT),
@@ -1312,11 +1338,16 @@ export const SCOPES = [
 ] as const;
 export type Scope = (typeof SCOPES)[number];
 
-/** Scopes as a set, in the order Rust writes one. */
-export const scopes: Decoder<Scope[]> = set(
-  oneOf(SCOPES),
-  (a, b) => SCOPES.indexOf(a) - SCOPES.indexOf(b),
-);
+/** Scopes as a set, in the order Rust writes one. A name this build does not know is dropped. */
+export const scopes: Decoder<Scope[]> = (value, path) => {
+  if (!Array.isArray(value)) throw new DecodeError(path, "is not a list");
+  const known = new Set<Scope>();
+  for (const item of value) {
+    if (typeof item !== "string") throw new DecodeError(path, "is not a string");
+    if ((SCOPES as readonly string[]).includes(item)) known.add(item as Scope);
+  }
+  return SCOPES.filter((scope) => known.has(scope));
+};
 
 /** Which projects a grant reaches. */
 export type ProjectGrant = { kind: "all" } | { kind: "only"; projects: ProjectId[] };

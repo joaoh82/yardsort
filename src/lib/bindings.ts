@@ -2673,6 +2673,8 @@ export type Relevance =
 export type RemoteAnswer = { kind: "deny" } | { kind: "allow"; 
 /**  Typing into terminals too, if the device asked for it. */
 control: boolean; 
+/**  Approving or answering workflows, if the device asked for it. */
+workflows?: boolean; 
 /**  Only these projects; all of them when absent. */
 projects: string[] | null };
 

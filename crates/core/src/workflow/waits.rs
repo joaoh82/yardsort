@@ -330,6 +330,9 @@ pub enum AnswerWrite {
     CodeUnusable,
     /// This decision id was already used for a different action, step or note.
     Conflict,
+    /// The attempt or the clarification round is no longer the one the phone was showing.
+    /// A wrong-code try is not counted.
+    Stale,
 }
 
 /// Store a clarification's answer from a terminal or a remote caller. The code is required.

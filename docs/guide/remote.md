@@ -107,8 +107,9 @@ take control of it, and starts work there.
 2. On the other computer, show a code: **Pair a device** in its **Settings → Remote**, or
    `yardsort-host pair` on one with no screen.
 3. Type the code under **Pairing code** here and press **Pair**. This computer asks to watch and to
-   type, as a phone does. The other computer's person is asked there, and lets it watch, watch and
-   type, or refuses. Until then the pairing says _waiting for its answer_.
+   type, as a phone does. Watching includes reading workflow runs. The other computer's person is
+   asked there, and lets it watch, watch and type, or refuses, and can separately allow it to
+   approve or answer workflows. Until then the pairing says _waiting for its answer_.
 
 Once let in, the other computer is listed under **Other computers** in the sidebar, below your projects,
 by its name: _online_, _connecting_, or _offline_ since when. Click it to open its page in the middle of
@@ -201,8 +202,11 @@ in a notification here when Settings → General includes it. It is never in the
 receives. The phone asks this computer for the code when you decide, over the connection you
 signed in on, and it does not show the code.
 
-A phone paired before this needs to be unpaired and paired again. Saying yes at this computer
-offers the workflow permission. Being allowed to type in a terminal does not include it.
+A phone paired before this needs to be unpaired and paired again. Letting it watch includes
+reading workflow runs. Approving or answering is the checkbox **and approve or answer workflows**,
+or a separate yes on a computer with no screen. Being allowed to type in a terminal does not
+include it. If the step changed after the phone showed it, the phone says to refresh. That tap
+does not use up a wrong code.
 
 On the phone, Settings → Notifications asks once for permission to send notifications. After
 that, the token is registered for every account this phone is signed in to, when the app starts

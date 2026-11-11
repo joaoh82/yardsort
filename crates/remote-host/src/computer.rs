@@ -693,6 +693,7 @@ mod tests {
             host_name: host.to_uppercase(),
             device: remote_proto::DeviceId::new("d").unwrap(),
             device_name: "This computer".into(),
+            device_kind: None,
             state,
             requested: ASKED.into_iter().collect(),
             scopes: Default::default(),

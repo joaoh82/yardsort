@@ -129,9 +129,24 @@ pub enum Answer {
     Allow {
         /// Typing into terminals too, if the device asked for it.
         control: bool,
+        /// Approving or answering workflows, if the device asked for it.
+        workflows: bool,
         /// Only these projects; all of them when absent.
         projects: Option<Vec<String>>,
     },
+}
+
+/// What an allow gives: viewing, typing when chosen, and workflow decisions when chosen.
+/// Never more than the device asked for. Viewing includes reading workflow runs.
+pub fn scopes_for(asked: &BTreeSet<Scope>, control: bool, workflows: bool) -> BTreeSet<Scope> {
+    let mut offered: BTreeSet<Scope> = VIEW.into();
+    if control {
+        offered.insert(Scope::TerminalControl);
+    }
+    if workflows {
+        offered.insert(Scope::WorkflowDecide);
+    }
+    asked.intersection(&offered).copied().collect()
 }
 
 /// A pairing offer: the code to type, and the link a QR code holds, good once until it lapses.
@@ -642,15 +657,12 @@ pub async fn answer(home: &impl Home, grant_id: String, answer: Answer) -> Resul
         })?;
     let decision = match answer {
         Answer::Deny => None,
-        Answer::Allow { control, projects } => {
-            let mut offered: BTreeSet<Scope> = VIEW.into();
-            if control {
-                offered.insert(Scope::TerminalControl);
-            }
-            // A phone that asks may decide a workflow. A view-only pairing still offers it,
-            // and one that does not ask does not receive it. Terminal control does not grant it.
-            offered.insert(Scope::WorkflowDecide);
-            let scopes: BTreeSet<Scope> = asked.requested.intersection(&offered).copied().collect();
+        Answer::Allow {
+            control,
+            workflows,
+            projects,
+        } => {
+            let scopes = scopes_for(&asked.requested, control, workflows);
             if scopes.is_empty() {
                 return Err(Failure::new(
                     "remote_refused",
@@ -682,7 +694,7 @@ pub async fn answer(home: &impl Home, grant_id: String, answer: Answer) -> Resul
     if let (Some(decision), GrantState::Approved) = (&decision, decided.state) {
         // What this host's person chose, as they chose it: the server's copy is not trusted for
         // what it says was given.
-        host::keep_approved(
+        host::keep_approved_with_kind(
             home.store(),
             &decided.id,
             &decided.device,
@@ -690,6 +702,7 @@ pub async fn answer(home: &impl Home, grant_id: String, answer: Answer) -> Resul
             &decision.scopes,
             &decision.projects,
             now_ms(),
+            asked.device_kind,
         )
         .map_err(store_failed)?;
     }
@@ -880,5 +893,24 @@ mod tests {
         let theirs = failed(refused(ErrorCode::Unauthenticated));
         assert!(theirs.is_signed_out());
         assert!(!theirs.needs_where_to_sign_in());
+    }
+
+    #[test]
+    fn watching_does_not_grant_a_decision_unless_the_person_says_so() {
+        let asked: BTreeSet<Scope> = [
+            Scope::WorkspaceRead,
+            Scope::WorkflowRead,
+            Scope::WorkflowDecide,
+            Scope::TerminalControl,
+        ]
+        .into();
+        let watch = scopes_for(&asked, false, false);
+        assert!(watch.contains(&Scope::WorkflowRead));
+        assert!(!watch.contains(&Scope::WorkflowDecide));
+        assert!(!watch.contains(&Scope::TerminalControl));
+        let deciding = scopes_for(&asked, false, true);
+        assert!(deciding.contains(&Scope::WorkflowDecide));
+        let silent: BTreeSet<Scope> = [Scope::WorkspaceRead].into();
+        assert!(!scopes_for(&silent, true, true).contains(&Scope::WorkflowDecide));
     }
 }

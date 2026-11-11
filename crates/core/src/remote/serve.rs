@@ -214,9 +214,27 @@ impl Visitor {
         }
     }
 
-    /// The kind of device the relay says opened this channel. An unknown kind cannot decide.
-    pub fn set_kind(&mut self, kind: remote_proto::account::DeviceKind) {
-        self.kind = kind;
+    /// The kind of device on this channel.
+    ///
+    /// The host's own device is always a host. A kind stored when the person approved this
+    /// device wins: a relay kind that differs cannot decide. A pairing with no stored kind
+    /// trusts the relay. A missing relay kind arrives as [`DeviceKind::Other`] and cannot decide.
+    pub fn set_kind(&mut self, store: &Store, reported: remote_proto::account::DeviceKind) {
+        use remote_proto::account::DeviceKind;
+        if store
+            .remote_host()
+            .ok()
+            .flatten()
+            .is_some_and(|host| host.device_id == self.device.as_str())
+        {
+            self.kind = DeviceKind::Host;
+            return;
+        }
+        self.kind = match super::host::recorded_kind(store, &self.device) {
+            Ok(Some(recorded)) if recorded != reported => DeviceKind::Other,
+            Ok(Some(recorded)) => recorded,
+            _ => reported,
+        };
     }
 
     pub fn device(&self) -> &DeviceId {
@@ -301,7 +319,6 @@ impl Visitor {
                         &super::workflow::WorkflowCaller {
                             kind: self.kind,
                             device: self.device.as_str().to_owned(),
-                            launched_session: super::workflow::launched_here(),
                         },
                         &grant,
                         &request,

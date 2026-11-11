@@ -12,6 +12,8 @@
     "waitingKind": "approval",
     "attempts": 0,
     "locked": false,
+    "attempt": 1,
+    "round": 0,
     "resumeEligible": false,
     "steps": [
       {

@@ -372,11 +372,13 @@ export class Channel {
   async workflowChallenge(
     runId: WorkflowRunDetail["runId"],
     stepId: string,
+    attempt: number,
+    round: number,
   ): Promise<WorkflowChallenge> {
     const { kind: _, ...challenge } = expect(
       await this.ask({
         op: "workflow.challenge",
-        params: { runId, stepId: stepId as WorkflowRunDetail["runId"] },
+        params: { runId, stepId: stepId as WorkflowRunDetail["runId"], attempt, round },
       }),
       "workflowChallenge",
     );

@@ -381,6 +381,7 @@ fn grant_summary(view: GrantView, now: i64) -> GrantSummary {
         host_name: view.host_name,
         device: grant.device,
         device_name: view.device_name,
+        device_kind: view.device_kind,
         state,
         requested: grant.requested,
         scopes: grant.scopes,

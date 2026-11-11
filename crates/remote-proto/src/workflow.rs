@@ -41,16 +41,24 @@ pub struct WorkflowRunRef {
     pub run_id: String,
 }
 
-/// One step of a run. The challenge asks for the code of this step.
+/// One step of a run. The challenge asks for the code of the attempt and round the phone is showing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowStepRef {
     pub run_id: String,
     pub step_id: String,
+    /// The waiting step's attempt, as the run detail showed it.
+    pub attempt: u32,
+    /// The open clarification round, or 0 when the step is not asking a question.
+    pub round: u32,
 }
 
+/// What the phone shows when the attempt or the round moved on before the tap.
+pub const STALE_MESSAGE: &str = "This changed. Refresh and read it again.";
+
 /// One decision. `decision_id` makes a retry apply once.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// `attempt` and `round` are the ones the phone was showing. A later one is refused as `stale`.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowDecideParams {
     pub run_id: String,
@@ -62,6 +70,25 @@ pub struct WorkflowDecideParams {
     #[serde(default)]
     pub code: Option<String>,
     pub decision_id: String,
+    /// The waiting step's attempt, as the run detail showed it.
+    pub attempt: u32,
+    /// The open clarification round, or 0 when the step is not asking a question.
+    pub round: u32,
+}
+
+impl std::fmt::Debug for WorkflowDecideParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkflowDecideParams")
+            .field("run_id", &self.run_id)
+            .field("step_id", &self.step_id)
+            .field("action", &self.action)
+            .field("note", &self.note)
+            .field("code", &self.code.as_ref().map(|_| "[redacted]"))
+            .field("decision_id", &self.decision_id)
+            .field("attempt", &self.attempt)
+            .field("round", &self.round)
+            .finish()
+    }
 }
 
 impl WorkflowDecideParams {
@@ -176,6 +203,10 @@ pub struct WorkflowRunDetail {
     pub waiting_kind: Option<String>,
     pub attempts: u32,
     pub locked: bool,
+    /// The waiting step's attempt. A decision for an earlier one is stale. 0 when none is waiting.
+    pub attempt: u32,
+    /// The open clarification round, or 0 when this step is not asking a question.
+    pub round: u32,
     /// The person has decided or answered, and the computer has not applied it yet,
     /// or the run is queued.
     pub resume_eligible: bool,
@@ -183,12 +214,26 @@ pub struct WorkflowRunDetail {
     pub artifacts: Vec<WorkflowArtifactView>,
 }
 
-/// The one-time code, and only that. Sent on the relay to the phone that asked. Never
-/// pushed, and never included in a run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The one-time code for the attempt and round the phone asked about. Sent on the relay to
+/// the phone that asked. Never pushed, and never included in a run.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowChallenge {
     pub code: String,
+    /// The attempt the code belongs to. The same number the request named.
+    pub attempt: u32,
+    /// The clarification round the code belongs to, or 0.
+    pub round: u32,
+}
+
+impl std::fmt::Debug for WorkflowChallenge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkflowChallenge")
+            .field("code", &"[redacted]")
+            .field("attempt", &self.attempt)
+            .field("round", &self.round)
+            .finish()
+    }
 }
 
 /// What the decision did. A retry of the same id returns the same outcome.
@@ -199,12 +244,25 @@ pub struct WorkflowDecision {
     pub message: String,
 }
 
+fn hides_local(text: &str) -> bool {
+    text.contains('/') || text.contains('\\') || text.contains("://")
+}
+
 /// A run error the phone may see. A path or a URL is replaced, so a local folder is not sent.
 pub fn safe_error(error: &str) -> String {
-    if error.contains('/') || error.contains('\\') || error.contains("://") {
+    if hides_local(error) {
         "The run ended with an error.".to_owned()
     } else {
         clip(error, MAX_TEXT)
+    }
+}
+
+/// A step note the phone may see. The same path and URL rule as [`safe_error`].
+pub fn safe_note(note: &str) -> String {
+    if hides_local(note) {
+        "This note was left out.".to_owned()
+    } else {
+        clip(note, MAX_NOTE)
     }
 }
 
@@ -246,4 +304,32 @@ fn secret_line(line: &str) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_hides_the_one_time_code() {
+        let decide = WorkflowDecideParams {
+            run_id: "run-1".into(),
+            step_id: Some("sign-off".into()),
+            action: WorkflowAction::Approve,
+            note: None,
+            code: Some("ABCD2345".into()),
+            decision_id: "d-1".into(),
+            attempt: 1,
+            round: 0,
+        };
+        let shown = format!("{decide:?}");
+        assert!(!shown.contains("ABCD2345"));
+        assert!(shown.contains("[redacted]"));
+        let challenge = WorkflowChallenge {
+            code: "ABCD2345".into(),
+            attempt: 1,
+            round: 2,
+        };
+        assert!(!format!("{challenge:?}").contains("ABCD2345"));
+    }
 }

@@ -13,7 +13,7 @@ import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 
 import { messageOf } from "../lib/accounts";
-import { DecisionIds } from "../lib/workflows";
+import { DecisionIds, conflictSummary } from "../lib/workflows";
 import { DecisionForm } from "../ui/DecisionForm";
 import { OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
 import { Body, Problem, Screen, Waiting } from "../ui/parts";
@@ -39,7 +39,6 @@ function Decision({ host, run, step }: { host: HostId; run: RunId; step: RunId }
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const code = useRef<string | null>(null);
   const ids = useRef(new DecisionIds());
   const read = useCallback(async (through: Channel) => through.workflowRun(run), [run]);
   const first = useRead(channel, read, asked);
@@ -50,31 +49,55 @@ function Decision({ host, run, step }: { host: HostId; run: RunId; step: RunId }
       : null;
 
   const onDecide = async (action: WorkflowAction) => {
-    if (!channel) return;
-    const id = ids.current.next(() => Crypto.randomUUID()) as RunId;
+    if (!channel || !detail) return;
+    const attempt = detail.attempt;
+    const round = detail.round;
+    const sentNote = note.trim() === "" ? "" : note;
+    const id = ids.current.next(action, sentNote, () => Crypto.randomUUID()) as RunId;
     setBusy(true);
     setProblem(null);
     try {
-      let presented = code.current;
-      if (action !== "resume" && presented === null) {
-        const challenged = await channel.workflowChallenge(run, step);
+      let presented: string | null = null;
+      if (action !== "resume") {
+        const challenged = await channel.workflowChallenge(run, step, attempt, round);
+        if (challenged.attempt !== attempt || challenged.round !== round) {
+          setProblem("This changed. Refresh and read it again.");
+          ids.current.settled();
+          return;
+        }
         presented = challenged.code;
-        code.current = presented;
       }
       const decision = await channel.workflowDecide({
         runId: run,
         stepId: action === "resume" ? null : step,
         action,
-        note: note.trim() === "" ? null : note,
-        code: presented,
+        note: sentNote === "" ? null : sentNote,
+        code: action === "resume" ? null : presented,
         decisionId: id,
+        attempt,
+        round,
       });
       ids.current.settled();
-      code.current = null;
+      if (decision.outcome === "stale") {
+        setProblem("This changed. Refresh and read it again.");
+        setAsked((n) => n + 1);
+        return;
+      }
+      if (decision.outcome === "conflict") {
+        const again = await channel.workflowRun(run);
+        setProblem(conflictSummary(again));
+        setAsked((n) => n + 1);
+        return;
+      }
       setMessage(decision.message);
       setAsked((n) => n + 1);
     } catch (error) {
-      setProblem(messageOf(error));
+      const text = messageOf(error);
+      setProblem(
+        text.includes("Refresh and read it again")
+          ? "This changed. Refresh and read it again."
+          : text,
+      );
     } finally {
       setBusy(false);
     }
@@ -96,6 +119,7 @@ function Decision({ host, run, step }: { host: HostId; run: RunId; step: RunId }
           online={channel !== null}
           kind={kind}
           locked={detail.locked}
+          resumeEligible={detail.resumeEligible}
           busy={busy}
           note={note}
           onNote={setNote}

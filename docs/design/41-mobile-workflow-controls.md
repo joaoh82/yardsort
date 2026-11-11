@@ -9,14 +9,24 @@ A decision is refused before any row is written unless every one of these is tru
 
 - The channel was opened by a phone. A host token, a computer, and any other kind are refused.
   A relay that does not say the kind is treated as other, so it cannot decide.
-- The process answering the channel was not started by Yardsort. The markers are
-  `YARDSORT_COORDINATOR`, `YARDSORT_RUN_ID`, `YARDSORT_WORKSPACE_ID`, and
-  `YARDSORT_SESSION_RECORD_ID`.
-- The grant includes `workflow:decide`. `workflow:read` is enough to list and to open a run.
-  Terminal control does not include either. A view-only pairing still offers `workflow:decide`
-  when the phone asked for it. A phone that does not ask does not receive it.
+- The grant includes `workflow:decide`. `workflow:read` is enough to list and to open a run, and
+  watching includes it. Terminal control does not include either. `workflow:decide` is granted
+  only when the person at the computer checks **and approve or answer workflows** (or answers
+  yes to that question on `yardsort-host pair`). A phone that does not ask does not receive it.
 - The run is inside the grant. A run with no project is visible only to a grant of every
   project. Anything outside the grant is `not_found`, and nothing is written.
+
+The desktop process's own environment is not the caller. A session Yardsort started is still
+refused by `ys` on that session. It is not inferred from the process that is answering the phone.
+
+### What the host trusts about the kind
+
+The kind on the relay ticket is what the server says. The host records the kind the server
+reported when the person approved the pairing. A later channel whose kind differs from that
+record cannot decide. A pairing from before this column has no recorded kind, and the host
+trusts the relay's kind. The host's own device id is never treated as a phone. A ticket that
+omits the kind is other, and cannot decide. A server that lies both at approval and on the
+ticket is not distinguished from an honest one.
 
 A host with no screen does not drive workflows. It does not advertise these operations, and it
 answers them as unsupported.
@@ -46,9 +56,16 @@ Protocol minor 7 adds four operations.
 
 - `workflow.run.list` and `workflow.run.get` need `workflow:read`. A run lists its steps, status,
   what it is waiting on, the blocking sentence, the wrong-code count, whether that step is
-  locked, and whether resume is eligible. It does not list a code, a hash, or a salt.
-- `workflow.challenge` and `workflow.decide` need `workflow:decide`. Decide is approve, reject,
-  request changes (with a note), answer a question, or resume.
+  locked, the waiting step's attempt, the open clarification round (0 when it is not asking),
+  and whether resume is eligible. A list's waiting line uses the same "still needs a person"
+  check as the detail, so a recorded decision is not listed as waiting. It does not list a
+  code, a hash, or a salt. A step note that contains a path or a URL is replaced with
+  "This note was left out."
+- `workflow.challenge` and `workflow.decide` need `workflow:decide`. Both carry the attempt and
+  the round the phone was showing. Decide is approve, reject, request changes (with a note),
+  answer a question, or resume. Resume sends no code. A challenge or a decision whose attempt
+  or round is no longer the open one is refused with `stale` ("This changed. Refresh and read
+  it again.") and does not count as a wrong code. The challenge does not return the new code.
 - An artifact body is included only for a document the waiting step named, or one stored as the
   decision or the verdict. It is cut at 2,000 characters. A line that looks like a secret is
   replaced. A file whose name is a secret is left out. A run error that contains a path or a URL
@@ -56,12 +73,14 @@ Protocol minor 7 adds four operations.
 
 ## One decision, once
 
-Every decision carries a `decisionId`. The outcome is stored in `workflow_remote_actions` in the
-same transaction as the guarded update. A retry of that id, with the same action, step, and note,
-returns the stored outcome and does not apply again. The fingerprint is a hash of those three.
-It does not include the code, so a retry can send the code again without changing the record.
-The same id with a different body is `conflict`. A different id after a decision is
-`already_decided`.
+Every decision carries a `decisionId`. The outcome is stored in `workflow_remote_actions`, keyed
+by the phone and that id, in the same transaction as the guarded update. A retry of that pair,
+with the same run, device, action, step, and note, returns the stored outcome and does not apply
+again. The fingerprint is a hash of those five. It does not include the code, so a retry can send
+the code again without changing the record. The same id with a different body is `conflict`.
+A different id after a decision is `already_decided`. Rows older than seven days are removed
+when a new one is stored. The phone starts a new id when the action or the note changes. On
+`conflict` it reads the run again and shows what it is doing now.
 
 A refusal is a response. The next tap uses a new id. A wrong code and the stored outcome commit
 together, so a retry of that id does not burn another attempt.
@@ -92,4 +111,10 @@ eight-character code, is dropped and the notice is still accepted. The push payl
 A computer posting to an older server, which refuses the new fields, sends the notice once more
 without them.
 
-The phone opens a workflow notice on the decision screen.
+The phone opens a workflow notice on the decision screen. When the notice belongs to another
+account this phone is signed in to, that account is made the one on screen first.
+
+A phone asks for `workflow:read` and `workflow:decide` only when the server it is pairing with
+advertises protocol minor 7 or newer. An older server never sees those names. A scope name this
+build does not know is accepted and then dropped, on a pairing request and on a grant, so a
+newer peer does not make pairing fail. The unknown name is not stored and not granted.

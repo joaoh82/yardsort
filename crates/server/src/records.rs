@@ -187,6 +187,8 @@ pub struct GrantView {
     pub host_name: String,
     pub device_name: String,
     pub device_revoked: bool,
+    /// The signed-in device's kind, when this record still has that device.
+    pub device_kind: Option<DeviceKind>,
 }
 
 /// Which grants to list. Always within one account.
@@ -851,6 +853,7 @@ impl State {
                 .unwrap_or_default(),
             device_name: device.map(|d| d.name.clone()).unwrap_or_default(),
             device_revoked: device.is_none_or(|d| d.revoked.is_some()),
+            device_kind: device.map(|d| d.kind),
             grant: grant.clone(),
         }
     }

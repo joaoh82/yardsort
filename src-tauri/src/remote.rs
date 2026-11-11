@@ -375,6 +375,9 @@ pub enum RemoteAnswer {
     Allow {
         /// Typing into terminals too, if the device asked for it.
         control: bool,
+        /// Approving or answering workflows, if the device asked for it.
+        #[serde(default)]
+        workflows: bool,
         /// Only these projects; all of them when absent.
         projects: Option<Vec<String>>,
     },
@@ -662,7 +665,15 @@ pub async fn remote_answer(
 ) -> IpcResult<RemoteStatus> {
     let answer = match answer {
         RemoteAnswer::Deny => Answer::Deny,
-        RemoteAnswer::Allow { control, projects } => Answer::Allow { control, projects },
+        RemoteAnswer::Allow {
+            control,
+            workflows,
+            projects,
+        } => Answer::Allow {
+            control,
+            workflows,
+            projects,
+        },
     };
     account::answer(&AppHome::new(&app), grant_id, answer)
         .await

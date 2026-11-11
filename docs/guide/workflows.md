@@ -323,7 +323,9 @@ includes it unless Settings → General leaves it out, which is the default on L
 The notice then says to open Yardsort for the code. That is the notification on this computer.
 A phone signed in through [Remote](remote.md#notifications) gets a separate notice that an
 approval is waiting. It opens the decision and does not include the code. You can approve on
-this computer, or on that phone while this computer is online.
+this computer, or on that phone while this computer is online. The phone sends the attempt it
+was showing. A later pass is refused, and that tap does not use up a wrong code. Refresh the
+run and decide again.
 `ys workflow runs` does not print
 the code, and neither does `--json`. A wrong code is refused. After five wrong codes,
 `ys` stops until you press **Show a new code** in the window. Opening Yardsort again
@@ -433,7 +435,8 @@ stays with you. This is not an approval. The one-time code works the same way as
 the window shows it, the notification on this computer includes it unless Settings → General
 leaves it out, and `ys workflow runs` does not print it. A phone notice opens the question and
 does not include the code. You can answer on this computer, or on the phone, as
-[Remote](remote.md#notifications) describes. After five wrong codes the terminal
+[Remote](remote.md#notifications) describes. The phone sends the round it was showing. A later
+round is refused, and that tap does not use up a wrong code. After five wrong codes the terminal
 stops until you press **Show a new code**. The phone cannot be given a code until you do.
 
 `timeout` still fails the step when you have not answered in time, or when a summary

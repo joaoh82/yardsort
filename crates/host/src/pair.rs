@@ -51,7 +51,21 @@ pub async fn run(profile: &Profile) -> Result<(), String> {
                         "watch this computer's terminals"
                     }
                 );
+                println!("Watching includes reading workflow runs.");
                 let (allow, control) = choose(&mut typed, wants_control).await?;
+                let workflows = if allow {
+                    matches!(
+                        ask(
+                            &mut typed,
+                            "Also let it approve or answer workflows? [y/N] "
+                        )
+                        .await?
+                        .as_str(),
+                        "y" | "yes"
+                    )
+                } else {
+                    false
+                };
                 let projects = if allow {
                     which_projects(&mut typed, &projects).await?
                 } else {
@@ -61,6 +75,7 @@ pub async fn run(profile: &Profile) -> Result<(), String> {
                     grant,
                     allow,
                     control,
+                    workflows,
                     projects,
                 })
                 .await?;
