@@ -351,9 +351,15 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
         <RunWorkflowDialog
           workflowId={workflowId}
           onClose={() => setRunning(false)}
-          onStarted={(run) => {
-            setSelectedRun(run);
-            void useWorkflowStore.getState().loadRuns(workflowId);
+          onStarted={(run, started) => {
+            void useWorkflowStore.getState().loadRuns(started);
+            if (started === workflowId) {
+              setSelectedRun(run);
+            } else {
+              // Run as its twin on a pull request elsewhere: its runs are on that one's page.
+              useWorkflowStore.getState().showRun(started, run);
+              useProjectsStore.getState().openWorkflow(started);
+            }
           }}
         />
       )}

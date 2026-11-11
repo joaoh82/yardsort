@@ -81,7 +81,8 @@ own, never in one of your projects; a repository because some agents will not ru
   [Requesting a code review](#requesting-a-code-review). **Request code review elsewhere**
   (`code-review-elsewhere`) does the same for a pull request the workspace
   [tracks in another repository](commits-and-pull-requests.md#pull-requests-in-other-repositories),
-  and is started from that pull request or a trigger: see
+  and is started from that pull request, from **Request code review** on a workspace with no open
+  pull request of its own, or by a trigger: see
   [A pull request in another repository](#a-pull-request-in-another-repository).
   **Smoke test, then tell the agent**
   (`smoke-then-tell`): it runs one of the workspace's [smoke tests](smoke-tests.md) and tells the
@@ -558,7 +559,17 @@ its link:
    clone, push, and answer each comment.
 
 It needs the clone: without one in the project's folder, the dialog says so and does not start.
-It is offered only on a pull request elsewhere: the Workflows view does not run or schedule it.
+
+In a parent project the workspace's own pull request is often merged or missing while its work is
+in the clones. Then **Request code review** started from the workspace says it has no open pull
+request, and lists the open ones the workspace tracks elsewhere: pick one and the dialog switches
+to **Request code review elsewhere** on it, keeping what you chose. **Address reviews** does the
+same with **Address reviews elsewhere**, and so does a workflow of your own `<id>` when there is
+an `<id>-elsewhere` about a pull request elsewhere. **Choose another pull request** goes back to
+the list. A run started this way from a workflow's page opens the page of the one it ran.
+
+On **Request code review elsewhere**'s own page in the Workflows view, **Run** and **Schedule…**
+are turned off: it needs a pull request elsewhere to be about.
 A [trigger](triggers.md#pull-requests-elsewhere) can start it — or **Address reviews
 elsewhere**, or any workflow about one — on the `pr.*` events of each pull request the workspace
 tracks: `pr.opened` to review each one an agent opens. A workflow of your own can be about a pull

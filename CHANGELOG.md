@@ -5,6 +5,14 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **A workflow on a workspace's pull requests elsewhere, from the workspace.** When **Request code
+  review** or **Address reviews** is started on a workspace with no open pull request of its own,
+  the dialog now lists the open pull requests the workspace tracks in other repositories, and
+  picking one runs **Request code review elsewhere** or **Address reviews elsewhere** on it.
+  Before, a parent project's workspace whose own pull request was merged could only be told it
+  had none, even with its agent's new pull requests in the clones tracked beside it. See
+  [A pull request in another repository](docs/guide/workflows.md#a-pull-request-in-another-repository).
+
 - **An agent in a workflow can ask you a question and continue in the same session.**
   On a `wait_session` with `clarify: true`, the agent asks with `ys workflow ask`
   (one `--question` each) and the run waits. You answer in the run view, or with

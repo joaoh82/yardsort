@@ -57,6 +57,22 @@ vi.mock("./WorkflowChart", () => ({
   ),
 }));
 
+// The Run dialog has tests of its own; here it only reports which workflow it started.
+vi.mock("./RunWorkflowDialog", () => ({
+  RunWorkflowDialog: ({
+    onStarted,
+  }: {
+    onStarted?: (runId: string, workflowId: string) => void;
+  }) => (
+    <>
+      <button onClick={() => onStarted?.("run-8", "code-review")}>Started it</button>
+      <button onClick={() => onStarted?.("run-9", "code-review-elsewhere")}>
+        Started its twin
+      </button>
+    </>
+  ),
+}));
+
 import { useProjectsStore } from "@/stores/projects";
 import { useSchedulesStore } from "@/stores/schedules";
 import { useTriggersStore } from "@/stores/triggers";
@@ -341,6 +357,27 @@ describe("WorkflowView", () => {
     expect(within(runs).getByText("Scheduled · Nightly")).toBeInTheDocument();
     expect(within(runs).getByText("Triggered · Address reviews")).toBeInTheDocument();
     expect(core.workflowRunSteps).toHaveBeenCalledWith("run-1");
+  });
+
+  it("opens the page of the workflow a run started as, when that is its twin elsewhere", async () => {
+    useWorkflowStore.setState({ items: [item("code-review", { kind: "builtIn" })] });
+    const user = userEvent.setup();
+    render(<WorkflowView workflowId="code-review" />);
+    await user.click(await screen.findByRole("button", { name: "Run…" }));
+    await user.click(screen.getByRole("button", { name: "Started its twin" }));
+    expect(useProjectsStore.getState().workflowId).toBe("code-review-elsewhere");
+    expect(useWorkflowStore.getState().shownRun["code-review-elsewhere"]).toBe("run-9");
+    expect(core.workflowRuns).toHaveBeenCalledWith("code-review-elsewhere", expect.anything());
+  });
+
+  it("stays on its own page for a run of itself", async () => {
+    useWorkflowStore.setState({ items: [item("code-review", { kind: "builtIn" })] });
+    const user = userEvent.setup();
+    render(<WorkflowView workflowId="code-review" />);
+    await user.click(await screen.findByRole("button", { name: "Run…" }));
+    await user.click(screen.getByRole("button", { name: "Started it" }));
+    expect(useProjectsStore.getState().workflowId).toBeNull();
+    expect(core.workflowRuns).toHaveBeenCalledWith("code-review", expect.anything());
   });
 
   it("opens on the run asked for from elsewhere, once", async () => {
