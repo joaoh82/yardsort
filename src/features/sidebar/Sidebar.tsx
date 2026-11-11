@@ -11,7 +11,7 @@ import { reviewVanishedWorkspaces } from "./actions";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { ProjectTree } from "./ProjectTree";
 import { OtherComputersList } from "./OtherComputersList";
-import { WorkflowsSection } from "@/features/workflows/WorkflowsSection";
+import { WorkflowsRow } from "@/features/workflows/WorkflowsRow";
 import { PullRequestsRow } from "@/features/pull-requests/PullRequestsRow";
 import { usePullRequestPolling } from "@/features/pull-requests/usePullRequestPolling";
 import { TasksRow } from "@/features/tasks/TasksRow";
@@ -67,7 +67,7 @@ export function Sidebar() {
     <aside aria-label="Projects" className="flex h-full flex-col bg-surface">
       <PullRequestsRow />
       <TasksRow />
-      <WorkflowsSection />
+      <WorkflowsRow />
       <TestsRow />
       <SchedulesRow />
       <TriggersRow />

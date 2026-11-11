@@ -212,6 +212,14 @@ In the trigger dialog, the workflows about one elsewhere are under **On a pull r
 elsewhere**, offered unless an event that is not the pull request's is ticked; once one is
 chosen, the other events are greyed out.
 
+The preset **Review the pull request when it opens** uses **Request code review**, which is about
+the workspace's own pull request. In a workspace that tracks pull requests elsewhere, the dialog
+says so when a workflow about its own pull request is chosen for a pull request's events: it
+tracks so many in other repositories, and the trigger never hears them. When the workflow has a
+twin about those, such as **Request code review elsewhere**, **Use “…”** switches to it and keeps
+the answers you gave. A saved trigger says the same when it is opened in the Triggers view; press
+**Edit…** to change its workflow.
+
 - **Being tracked is `pr.opened`.** An agent tracks the pull request it has just opened, so
   `pr.opened` is the workspace tracking one — by `ys pr track`, **Track pull request…**, or the
   agent's own reporting — when Yardsort looks at it within ten minutes of the tracking. One

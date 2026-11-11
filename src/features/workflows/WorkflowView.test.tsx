@@ -76,7 +76,7 @@ vi.mock("./RunWorkflowDialog", () => ({
 import { useProjectsStore } from "@/stores/projects";
 import { useSchedulesStore } from "@/stores/schedules";
 import { useTriggersStore } from "@/stores/triggers";
-import { NEW_WORKFLOW, useWorkflowStore } from "@/stores/workflows";
+import { NEW_WORKFLOW, useWorkflowStore, WORKFLOW_LIST } from "@/stores/workflows";
 import { WorkflowView } from "./WorkflowView";
 
 const TEXT = "id: demo\nname: Demo\n";
@@ -163,7 +163,7 @@ describe("WorkflowView", () => {
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Customize" }));
     expect(core.workflowCopy).toHaveBeenCalledWith("code-review");
-    expect(await screen.findByText(/Your copy, used instead of the built-in/)).toBeInTheDocument();
+    expect(await screen.findByText(/your copy, used instead of the built-in/)).toBeInTheDocument();
   });
 
   it("selects a chart node and passes its current YAML location to the editor", async () => {
@@ -260,7 +260,7 @@ describe("WorkflowView", () => {
     core.workflowRemove.mockResolvedValue(undefined);
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(core.workflowRemove).toHaveBeenCalledWith(path));
-    expect(useProjectsStore.getState().workflowId).toBeNull();
+    await waitFor(() => expect(useProjectsStore.getState().workflowId).toBe(WORKFLOW_LIST));
   });
 
   it("offers Reset to built-in for a copy that replaces one, and stays on it after", async () => {

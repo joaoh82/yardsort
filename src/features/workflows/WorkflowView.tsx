@@ -1,8 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { errorMessage, ipc, type Step, type WorkflowCheck } from "@/lib/ipc";
-import { native } from "@/lib/native";
 import { useProjectsStore } from "@/stores/projects";
-import { NEW_WORKFLOW, TEMPLATE, useWorkflowStore } from "@/stores/workflows";
+import {
+  NEW_WORKFLOW,
+  removeWorkflow,
+  TEMPLATE,
+  useWorkflowStore,
+  WORKFLOW_LIST,
+} from "@/stores/workflows";
 import { ScheduleDialog } from "@/features/schedules/ScheduleDialog";
 import { DescribeWorkflow } from "./DescribeWorkflow";
 import { RunWorkflowDialog } from "./RunWorkflowDialog";
@@ -87,8 +92,17 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
 
   if (!isNew && !item) {
     return (
-      <div className="flex h-full items-center justify-center p-6 text-ink-faint">
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-ink-faint">
         {loaded ? "That workflow is not there any more." : "Loading…"}
+        {loaded && (
+          <button
+            type="button"
+            className={quiet}
+            onClick={() => useProjectsStore.getState().openWorkflow(WORKFLOW_LIST)}
+          >
+            Every workflow
+          </button>
+        )}
       </div>
     );
   }
@@ -148,27 +162,15 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
 
   const remove = () =>
     act(async () => {
-      if (!path) return;
-      const sure = await native.confirm(
-        replacesBuiltIn
-          ? `Delete your copy of “${name}”? The built-in is used again. Your file is gone for good: ${path}`
-          : `Delete “${name}”? The file is gone for good: ${path}`,
-        {
-          title: replacesBuiltIn ? "Reset to the built-in" : "Delete workflow",
-          okLabel: replacesBuiltIn ? "Reset" : "Delete",
-        },
-      );
-      if (!sure) return;
-      await ipc.workflowRemove(path);
-      const store = useWorkflowStore.getState();
-      store.setDraft(workflowId, null);
-      await store.load();
-      if (!replacesBuiltIn) useProjectsStore.getState().openWorkflow(null);
+      if (!item) return;
+      const removed = await removeWorkflow(item);
+      // A reset copy leaves the built-in under the same id, which stays open.
+      if (removed && !replacesBuiltIn) useProjectsStore.getState().openWorkflow(WORKFLOW_LIST);
     });
 
   const discard = () => {
     useWorkflowStore.getState().setDraft(workflowId, null);
-    useProjectsStore.getState().openWorkflow(null);
+    useProjectsStore.getState().openWorkflow(WORKFLOW_LIST);
   };
 
   // One about a pull request elsewhere is started from that pull request, never from here.
@@ -180,6 +182,7 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
   return (
     <section aria-label={`Workflow ${name}`} className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 items-start gap-3 border-b border-line px-4 py-3">
+        <BackToList />
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-base font-semibold">{name}</h2>
           <p className="truncate text-small text-ink-faint">
@@ -188,8 +191,8 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
               : builtIn
                 ? "Built in — customize it to change it"
                 : replacesBuiltIn
-                  ? `Your copy, used instead of the built-in — ${path}`
-                  : path}
+                  ? `Custom: your copy, used instead of the built-in — ${path}`
+                  : `Custom — ${path}`}
             {problems.length > 0 &&
               ` · ${problems.length} ${problems.length === 1 ? "problem" : "problems"}`}
           </p>
@@ -364,5 +367,20 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
         />
       )}
     </section>
+  );
+}
+
+/** Back to the list of every workflow, which the sidebar's **Workflows** row opens. */
+function BackToList() {
+  return (
+    <button
+      type="button"
+      aria-label="Back to every workflow"
+      title="Every workflow"
+      onClick={() => useProjectsStore.getState().openWorkflow(WORKFLOW_LIST)}
+      className="-ml-1 size-7 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink"
+    >
+      ←
+    </button>
   );
 }

@@ -15,6 +15,7 @@ import {
 import { useModalFocus } from "@/lib/useModalFocus";
 import { useHarnessStore } from "@/stores/harnesses";
 import { useProjectsStore } from "@/stores/projects";
+import { usePublishStore } from "@/stores/publish";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTriggersStore } from "@/stores/triggers";
 import { useWorkflowStore } from "@/stores/workflows";
@@ -82,6 +83,7 @@ export function TriggerDialog(props: Props) {
   const allHarnesses = useHarnessStore((s) => s.harnesses);
   const sessionsByWorkspace = useSessionsStore((s) => s.byWorkspace);
   const triggers = useTriggersStore((s) => s.items);
+  const pullRequestsByProject = usePublishStore((s) => s.byProject);
 
   const [preset, setPreset] = useState<string | null>(trigger?.preset ?? null);
   const [workspaceId, setWorkspaceId] = useState(trigger?.workspaceId ?? props.workspaceId ?? "");
@@ -164,6 +166,20 @@ export function TriggerDialog(props: Props) {
           item.problems.length === 0 && item.workflow?.trigger.context === "tracked_pull_request",
       )
     : [];
+
+  // A workflow about the workspace's own pull request hears only the one from its branch. A
+  // workspace whose agents open theirs in other repositories, and track them, never has one, and
+  // such a trigger would wait for ever: say so, and offer the workflow's twin about those.
+  const trackedHere = projectId
+    ? (pullRequestsByProject[projectId]?.tracked ?? []).filter((t) => t.workspaceId === workspaceId)
+        .length
+    : 0;
+  const ownPullRequestOnly =
+    target === "workflow" &&
+    !!workflow &&
+    !elsewhere &&
+    events.some((event) => subjectOf(event) === "pull request");
+  const twin = elsewhereWorkflows.find((item) => item.id === `${targetId}-elsewhere`) ?? null;
 
   // The workspace's tests are wanted for a test trigger, for a workflow's `test` input, and for
   // the `test.finished` filter.
@@ -775,6 +791,33 @@ export function TriggerDialog(props: Props) {
                 </select>
               )}
             </div>
+            {ownPullRequestOnly && trackedHere > 0 && (
+              <div
+                role="note"
+                className="mt-1 flex flex-col items-start gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-detail text-amber-200"
+              >
+                <p>
+                  {workspaceName || "This workspace"} tracks {trackedHere}{" "}
+                  {trackedHere === 1 ? "pull request" : "pull requests"} in other repositories. This
+                  workflow is about the pull request from the workspace&apos;s own branch, so it
+                  never hears {trackedHere === 1 ? "that one" : "those"}.
+                  {!twin && " Choose one listed under “On a pull request it tracks elsewhere”."}
+                </p>
+                {twin && (
+                  <button
+                    type="button"
+                    className="rounded border border-amber-500/50 px-2 py-1 text-amber-100 hover:bg-amber-500/20"
+                    onClick={() => {
+                      // The twin asks the same questions; what was answered carries over.
+                      setPreset(null);
+                      setTargetId(twin.id);
+                    }}
+                  >
+                    Use “{twin.name}”
+                  </button>
+                )}
+              </div>
+            )}
           </fieldset>
 
           {inputs.map((input) => (

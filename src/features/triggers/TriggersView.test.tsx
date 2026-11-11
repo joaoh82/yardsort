@@ -24,10 +24,20 @@ vi.mock("@/lib/ipc", async (original) => ({
 }));
 
 import { useProjectsStore } from "@/stores/projects";
+import { usePublishStore } from "@/stores/publish";
 import { useSmokeTestsStore } from "@/stores/smokeTests";
 import { useTriggersStore } from "@/stores/triggers";
 import { useWorkflowStore } from "@/stores/workflows";
-import { project, trigger, triggerFire, triggerPresets, worktree } from "@/test/fixtures";
+import {
+  project,
+  pullRequest,
+  pullRequestsOf,
+  trackedOf,
+  trigger,
+  triggerFire,
+  triggerPresets,
+  worktree,
+} from "@/test/fixtures";
 import { TriggersView } from "./TriggersView";
 
 const reviews = trigger("t1", {
@@ -60,6 +70,7 @@ beforeEach(() => {
     error: null,
   });
   useSmokeTestsStore.setState({ open: {}, shown: {} });
+  usePublishStore.setState({ byProject: {} });
   useWorkflowStore.setState({ items: [], loaded: true, shownRun: {} });
   useProjectsStore.setState({
     triggersOpen: true,
@@ -179,6 +190,31 @@ describe("TriggersView", () => {
     expect(await screen.findByText("Watching acme/lib#212")).toBeInTheDocument();
     expect(screen.getByText("acme/cloud#57 is closed")).toBeInTheDocument();
     expect(screen.queryByText(/Watching #/)).toBeNull();
+  });
+
+  it("says when a trigger about the workspace's own pull request misses those it tracks elsewhere", async () => {
+    core.triggerList.mockResolvedValue([
+      trigger("t4", {
+        name: "Review the pull request when it opens",
+        events: ["pr.opened"],
+        targetId: "code-review",
+        watch: { number: null, closed: false, problem: null, lookedAt: Date.now() },
+      }),
+    ]);
+    await opened("Review the pull request when it opens");
+    expect(await screen.findByText("None yet. One opening is news.")).toBeInTheDocument();
+    expect(screen.queryByText(/in other repositories/)).toBeNull();
+
+    usePublishStore.setState({
+      byProject: {
+        "p-app": pullRequestsOf([], {
+          tracked: [trackedOf("w-app-fix-login", pullRequest(241))],
+        }),
+      },
+    });
+    expect(await screen.findByText(/in other repositories/)).toHaveTextContent(
+      "fix-login tracks 1 pull request in other repositories, and this trigger hears only the pull request from the workspace's own branch. To have that one start it, press Edit… and choose a workflow on a pull request it tracks elsewhere.",
+    );
   });
 
   it("offers Reset on a capped trigger, and says why it stopped", async () => {

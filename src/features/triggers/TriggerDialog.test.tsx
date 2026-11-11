@@ -22,10 +22,21 @@ vi.mock("@/lib/ipc", async (original) => ({
 
 import { useHarnessStore } from "@/stores/harnesses";
 import { useProjectsStore } from "@/stores/projects";
+import { usePublishStore } from "@/stores/publish";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTriggersStore } from "@/stores/triggers";
 import { useWorkflowStore } from "@/stores/workflows";
-import { harness, project, record, trigger, triggerPresets, worktree } from "@/test/fixtures";
+import {
+  harness,
+  project,
+  pullRequest,
+  pullRequestsOf,
+  record,
+  trackedOf,
+  trigger,
+  triggerPresets,
+  worktree,
+} from "@/test/fixtures";
 import { TriggerDialog } from "./TriggerDialog";
 
 /** A built-in workflow with these inputs. */
@@ -85,6 +96,7 @@ beforeEach(() => {
   });
   useHarnessStore.setState({ loaded: true, harnesses: [harness("claude"), harness("codex")] });
   useSessionsStore.setState({ byWorkspace: {} });
+  usePublishStore.setState({ byProject: {} });
   useProjectsStore.setState({
     projects: [{ ...project("app"), workspaces: [...project("app").workspaces, fixLogin] }],
   });
@@ -315,6 +327,63 @@ describe("TriggerDialog", () => {
         events: ["pr.opened"],
         targetId: "code-review-elsewhere",
         inputs: { reviewer: "claude" },
+      }),
+    );
+  });
+
+  it("says when the workspace's pull requests are elsewhere, and offers the workflow's twin", async () => {
+    const reviewer = {
+      id: "reviewer",
+      kind: "harness" as const,
+      label: "Who reviews",
+      required: true,
+      default: null,
+      options: [],
+    };
+    const elsewhere = builtIn("code-review-elsewhere", [reviewer]);
+    elsewhere.workflow!.trigger = { kind: "manual", context: "tracked_pull_request" };
+    useWorkflowStore.setState({
+      items: [builtIn("code-review", [reviewer]), elsewhere],
+      loaded: true,
+    });
+    core.triggerSave.mockResolvedValue({ trigger: trigger("t-new"), untold: [] });
+    const user = userEvent.setup();
+    render(<TriggerDialog workspaceId={fixLogin.id} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("checkbox", { name: "Opens" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Workflow" }), "code-review");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Who reviews" }), "codex");
+    // Nothing tracked elsewhere: the workspace's own pull request is the one to hear.
+    expect(screen.queryByRole("note")).toBeNull();
+
+    // Another workspace's tracked pull request is not this one's.
+    usePublishStore.setState({
+      byProject: {
+        [fixLogin.projectId]: pullRequestsOf([], {
+          tracked: [
+            trackedOf(fixLogin.id, pullRequest(41)),
+            trackedOf(fixLogin.id, pullRequest(42)),
+            trackedOf("w-app", pullRequest(43)),
+          ],
+        }),
+      },
+    });
+    const note = await screen.findByRole("note");
+    expect(note).toHaveTextContent(
+      "fix-login tracks 2 pull requests in other repositories. This workflow is about the pull request from the workspace's own branch, so it never hears those.",
+    );
+
+    await user.click(within(note).getByRole("button", { name: "Use “code-review-elsewhere”" }));
+    expect(screen.getByRole("combobox", { name: "Workflow" })).toHaveValue("code-review-elsewhere");
+    expect(screen.queryByRole("note")).toBeNull();
+    // The answer carries over: the twin asks the same question.
+    expect(screen.getByRole("combobox", { name: "Who reviews" })).toHaveValue("codex");
+
+    await user.click(screen.getByRole("button", { name: "Add trigger" }));
+    expect(core.triggerSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: ["pr.opened"],
+        targetId: "code-review-elsewhere",
+        inputs: { reviewer: "codex" },
       }),
     );
   });

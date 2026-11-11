@@ -22,6 +22,11 @@ Eight questions were put to the user on 2026-09-28. The answers, and what follow
    panel. [02-ux](02-ux.md) said the bottom of the panel is where future top-level features go;
    this is the first one to go at the top instead, because a workflow is something you _start_,
    like a workspace, not something you configure, like Settings.
+   _Since 0.28: the section is one **Workflows** row, like Tests and Triggers, that opens the
+   list in the main panel — each row marked built in or custom, a custom one deletable from
+   there. A list of every workflow outgrew a third of the sidebar. The open list is
+   `workflowId = ":list"` in the projects store, so "one thing takes the center panel" still
+   holds without another flag._
 3. **The app runs workflows. `ys` needs the app open.** The engine is in `yardsort-core`, driven
    from the app's Rust side. `ys workflow run` writes a queued run and tells the app through the
    activity inbox the app already watches. With no app running, `ys` says so and creates nothing.
