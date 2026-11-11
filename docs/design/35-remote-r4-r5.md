@@ -1010,7 +1010,7 @@ composed input stay the system's. What the field has no use for goes to the term
   and **Backspace** with Alt or Ctrl.
 - **The arrows, Tab and Backspace on their own** only while the field is empty. Then they move
   through Claude's menu or a shell's history; with a draft, they edit it.
-- **Cmd** is never taken, nor Ctrl-Tab or Alt-Tab: they are the system's.
+- **Cmd** is never taken, nor Ctrl-Tab or Alt-Tab, with Shift or without: they are the system's.
 
 **Where.** `modules/hardware-keys`, a local Expo module: a view around the composer, `enabled`
 while this phone holds control and `plain` while the field is empty, telling `onKey` which key
@@ -1029,8 +1029,10 @@ again, and one that may not have arrived is named as it was pressed, such as **C
 
 **What the emulator found.** A hardware Return sent the field twice, before this slice too: Android's
 text view tells its listener of a keyboard's Return as it goes down and again as it comes up, and
-React Native's submits each time. The wrapper lets the field hear only the press. It needs a
-keyboard to happen, so no screen test can show it; the run below did, before and after.
+React Native's submits each time. The wrapper lets the field hear only the press, and only when that
+press went down in the field: a button reached with Tab is pressed by the release, so anything else
+gets both (found in review). It needs a keyboard to happen, so no screen test can show it; the run
+below did, before and after.
 
 **Tests that fail without it.** Which keys are taken, with the field empty and not, and what each
 sends, by the program's cursor keys; that only a key the view takes sends anything. On the phone's

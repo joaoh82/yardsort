@@ -61,7 +61,7 @@ go straight to the terminal instead, wherever the field is:
 
 **The arrows, Tab and Backspace on their own** go to the terminal while the field is empty, so they
 move through an agent's menu or a shell's history. While something is in the field, they edit it.
-Shortcuts with **Cmd** are left to the phone.
+Shortcuts with **Cmd** are left to the phone, and so are Ctrl-Tab and Alt-Tab.
 
 ## Starting work from the phone
 

@@ -6,6 +6,7 @@ package dev.yardsort.hardwarekeys
 import android.content.Context
 import android.view.KeyEvent
 import android.view.Window
+import android.widget.EditText
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.records.Field
 import expo.modules.kotlin.records.Record
@@ -39,6 +40,9 @@ class HardwareKeysView(context: Context, appContext: AppContext) : ExpoView(cont
   /** Keys taken as they went down, so that they are taken as they come up too. */
   private val down = mutableSetOf<Int>()
 
+  /** Whether the Return now held went down in the composer's field. */
+  private var enterInField = false
+
   fun setTaking(enabled: Boolean) {
     this.enabled = enabled
     listen()
@@ -66,8 +70,15 @@ class HardwareKeysView(context: Context, appContext: AppContext) : ExpoView(cont
     val soft = event.flags and KeyEvent.FLAG_SOFT_KEYBOARD != 0
     // Return goes to the field, which sends what is in it. A text view tells its listener of a
     // keyboard's Return as it goes down and again as it comes up, and React Native's submits each
-    // time, so the field would send it twice: it hears only the press.
-    if (event.keyCode == KeyEvent.KEYCODE_ENTER && !soft) return event.action == KeyEvent.ACTION_UP
+    // time, so the field would send it twice: it hears only the press. Anything else focused, such
+    // as a button reached with Tab, needs the release, which is what presses it.
+    if (event.keyCode == KeyEvent.KEYCODE_ENTER && !soft) {
+      when (event.action) {
+        KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) enterInField = findFocus() is EditText
+        KeyEvent.ACTION_UP -> return enterInField.also { enterInField = false }
+      }
+      return false
+    }
     if (event.action == KeyEvent.ACTION_UP) return down.remove(event.keyCode)
     if (event.action != KeyEvent.ACTION_DOWN) return false
     if (soft || event.isMetaPressed) return false
@@ -82,7 +93,7 @@ class HardwareKeysView(context: Context, appContext: AppContext) : ExpoView(cont
     when (key) {
       "escape" -> true
       "up", "down", "left", "right" -> plain || ctrl || alt || shift
-      "tab" -> shift || (plain && !ctrl && !alt)
+      "tab" -> !ctrl && !alt && (shift || plain)
       "backspace" -> ctrl || alt || plain
       else ->
         key.length == 1 &&

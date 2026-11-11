@@ -57,9 +57,11 @@ describe("what is taken from the field", () => {
     expect(takes(press("1", { alt: true, shift: true }), false)).toBe(false);
   });
 
-  test("Ctrl-Tab and Alt-Tab are left to the system, and Return and named keys it does not know", () => {
+  test("Ctrl-Tab and Alt-Tab, shifted or not, are left to the system, and Return and named keys it does not know", () => {
     expect(takes(press("tab", { ctrl: true }), true)).toBe(false);
     expect(takes(press("tab", { alt: true }), true)).toBe(false);
+    expect(takes(press("tab", { ctrl: true, shift: true }), false)).toBe(false);
+    expect(takes(press("tab", { alt: true, shift: true }), false)).toBe(false);
     expect(takes(press("enter"), true)).toBe(false);
     expect(takes(press("home"), true)).toBe(false);
   });

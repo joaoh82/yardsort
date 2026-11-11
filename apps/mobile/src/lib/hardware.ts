@@ -52,7 +52,7 @@ export function takes(press: HardwareKey, plain: boolean): boolean {
   const { key, ctrl, alt, shift } = press;
   if (key === "escape") return true;
   if (isArrow(key)) return plain || ctrl || alt || shift;
-  if (key === "tab") return shift || (plain && !ctrl && !alt);
+  if (key === "tab") return !ctrl && !alt && (shift || plain);
   if (key === "backspace") return ctrl || alt || plain;
   if (key.length !== 1) return false;
   if (ctrl) return CTRL_CHARS.includes(key);
