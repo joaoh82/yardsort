@@ -121,6 +121,31 @@ describe("what records it", () => {
     ]);
   });
 
+  test("a retry that changes nothing records nothing, so the last changes stay", async () => {
+    let tries = 0;
+    const diagnostics = new Diagnostics(() => AT);
+    const presence = new Presence({
+      open: async () => {
+        tries += 1;
+        throw new ClientError("remote", "It is offline.", {
+          code: "host_offline",
+          message: "It is offline.",
+          retryable: true,
+        });
+      },
+      explain: async () => "undetermined",
+      offlineRetryMs: 1,
+      diagnostics,
+    });
+    presence.watch([HOST]);
+    await until("tried many times", () => tries > KEPT + 10);
+    presence.stop();
+    expect(diagnostics.getSnapshot().map((entry) => entry.happening)).toEqual([
+      { what: "reach", host: HOST, reach: "connecting" },
+      { what: "reach", host: HOST, reach: "offline", code: "remote:host_offline" },
+    ]);
+  });
+
   test("a change of network, as its kind and whether it is connected", () => {
     let heard!: (state: NetworkState) => void;
     const diagnostics = new Diagnostics(() => AT);

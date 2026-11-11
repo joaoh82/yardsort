@@ -67,6 +67,8 @@ export class Presence {
   /** Computers found gone: not asked again until the next start, or they would be asked forever. */
   #gone = new Set<HostId>();
   #listeners = new Set<() => void>();
+  /** What was last recorded of each computer: a retry that changes nothing records nothing. */
+  #recorded = new Map<HostId, string>();
 
   constructor(readonly options: PresenceOptions) {}
 
@@ -126,6 +128,7 @@ export class Presence {
     watch.channel?.close();
     watch.wake?.();
     this.#watches.delete(host);
+    this.#recorded.delete(host);
     if (!this.#reach.has(host)) return;
     const reach = new Map(this.#reach);
     reach.delete(host);
@@ -162,7 +165,7 @@ export class Presence {
       }
       if (outcome === "signedOut") {
         // The profile is deleted by now, and the screen holding this goes with it.
-        this.options.diagnostics?.record({ what: "reach", host, reach: "gone", code: cause });
+        this.#record(host, "gone", cause);
         return;
       }
       if (outcome === "refused") {
@@ -206,9 +209,16 @@ export class Presence {
   }
 
   #set(host: HostId, reach: Reach, cause?: string): void {
-    this.options.diagnostics?.record({ what: "reach", host, reach: reach.kind, code: cause });
+    this.#record(host, reach.kind, cause);
     this.#reach = new Map(this.#reach).set(host, reach);
     this.#changed();
+  }
+
+  #record(host: HostId, reach: Reach["kind"], cause: string | undefined): void {
+    const said = `${reach} ${cause ?? ""}`;
+    if (this.#recorded.get(host) === said) return;
+    this.#recorded.set(host, said);
+    this.options.diagnostics?.record({ what: "reach", host, reach, code: cause });
   }
 
   #changed(): void {

@@ -86,10 +86,17 @@ steps:
       stdout_contains: typed ten times
   - id: neither_log_holds_it
     action: shell
+    # Each precondition fails the step on its own, and grep finding nothing (1) is told from grep
+    # failing to read (2), so success is printed only once both logs were read through.
     line: >-
-      test -s "$YS_RUN_DIR/server.log" && test -s "$YS_RUN_DIR/serve.log" && grep -q "/v1/"
-      "$YS_RUN_DIR/server.log" && if grep -n -e zz-typed-leak -e 42-zz-printed "$YS_RUN_DIR/server.log"
-      "$YS_RUN_DIR/serve.log"; then echo "a log holds it"; exit 1; fi; echo neither log holds it
+      server="$YS_RUN_DIR/server.log"; host="$YS_RUN_DIR/serve.log";
+      test -s "$server" || { echo "the server's log is empty"; exit 1; };
+      test -s "$host" || { echo "the host's log is empty"; exit 1; };
+      grep -q "/v1/" "$server" || { echo "the server's log has no request in it"; exit 1; };
+      found=0; grep -n -e zz-typed-leak -e 42-zz-printed "$server" "$host" || found=$?;
+      if [ "$found" -eq 0 ]; then echo "a log holds it"; exit 1; fi;
+      if [ "$found" -ne 1 ]; then echo "a log could not be read"; exit 1; fi;
+      echo neither log holds it
     expect:
       stdout_contains: neither log holds it
 

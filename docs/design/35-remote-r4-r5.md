@@ -1111,7 +1111,7 @@ system, the protocol it speaks, the active server's id and this phone's device i
 change to the sign-in, to each computer by its id, and to the network, with its time in UTC to the
 millisecond and its code: how a channel ended (`silent:1006`, `hostOffline:4004`) or what an error
 was (`remote:host_offline`). Each change is one of three shapes of ids, states and codes; a code that
-does not look like one is written `other`, so no server's words, name or title can get in. The last 200
+does not look like one is written `other`, so no server's words, name or title can get in. A retry that leaves a computer as it was, such as one still offline every 15 seconds, records nothing (found in review), so a few computers offline for a while cannot push out what happened. The last 200
 are kept in memory and go with the app; nothing is written to the phone. The screen shows the whole
 text, and **Share** hands that same text to the share sheet. Computers are named by id rather than name,
 so a person sharing it shares no name of theirs; the screen says so above it.
