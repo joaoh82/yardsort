@@ -42,6 +42,7 @@ import {
   type SocketFactory,
 } from "@yardsort/remote-client";
 
+import type { Diagnostics } from "./diagnostics";
 import { Observed, type Shelf } from "./observed";
 import { type Profile, Profiles, type Vault } from "./profiles";
 
@@ -67,6 +68,8 @@ export interface Env {
   shelf?: Shelf;
   /** Milliseconds since the epoch. */
   clock?: () => number;
+  /** Where each change of where the sign-in stands is recorded. */
+  diagnostics?: Diagnostics;
 }
 
 /** Where the active profile stands. */
@@ -302,6 +305,7 @@ export class Accounts {
       profile.id,
       new Session(client, issued, profiles.keeper(profile.id), this.#options(profile, client)),
     );
+    this.env.diagnostics?.record({ what: "signIn", standing: "signedIn" });
     this.#standing = { kind: "signedIn", session: this.#sessions.get(profile.id) as Session };
     this.#notice = null;
     this.#changed();
@@ -363,6 +367,7 @@ export class Accounts {
     this.#set(profile, { kind: "opening" });
     const client = this.clientFor(profile.address);
     let standing: Standing;
+    let code: string | undefined;
     try {
       const refresh = await profiles.refresh(profile.id);
       if (!refresh) return await this.#signedOut(profile);
@@ -387,20 +392,23 @@ export class Accounts {
         return await this.#signedOut(profile);
       } else {
         standing = { kind: "unreachable", message: messageOf(error) };
+        code = error instanceof ClientError ? (error.code ?? error.kind) : "error";
       }
     }
-    this.#set(profile, standing);
+    this.#set(profile, standing, code);
   }
 
   /** Set where `profile` stands, unless another profile became the active one meanwhile. */
-  #set(profile: Profile, standing: Standing): void {
+  #set(profile: Profile, standing: Standing, code?: string): void {
     if (this.#profiles?.active?.id !== profile.id) return;
+    this.env.diagnostics?.record({ what: "signIn", standing: standing.kind, code });
     this.#standing = standing;
     this.#changed();
   }
 
   /** The server refused this phone's credential: forget the profile, and say so. */
   async #signedOut(profile: Profile): Promise<void> {
+    this.env.diagnostics?.record({ what: "signIn", standing: "signedOut" });
     await this.#forget(profile.id);
     this.#notice = `This phone was signed out of ${profile.serverName}. Nothing from it is kept here.`;
     this.#changed();

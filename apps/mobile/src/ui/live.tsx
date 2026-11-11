@@ -21,6 +21,7 @@ import { AppState, StyleSheet, View } from "react-native";
 
 import { messageOf, type Parted } from "../lib/accounts";
 import { useApp, useSnapshot } from "../lib/context";
+import { diagnostics as phoneDiagnostics } from "../lib/diagnostics";
 import { moment } from "../lib/format";
 import type { ObservedComputer } from "../lib/observed";
 import { NetworkChanges } from "../lib/network";
@@ -91,7 +92,7 @@ export function useLive(): boolean {
 const network = new NetworkChanges((heard) => {
   const subscription = addNetworkStateListener(heard);
   return () => subscription.remove();
-});
+}, phoneDiagnostics);
 
 /** Tell `presence` each time the phone's network changes, while this screen is there. */
 export function useNetworkChanges(presence: Presence): void {
@@ -102,18 +103,21 @@ export interface Link {
   reach: Reach | undefined;
   /** Open, or `null`: a new one each time it is reached again, to read everything through anew. */
   channel: Channel | null;
+  /** When the server last saw the computer, as this phone last heard: for while it is offline. */
+  lastSeenAt: number | null;
 }
 
 /** A channel to `host`, held while this screen is live. */
 export function useChannelTo(host: HostId): Link {
-  const { accounts } = useApp();
+  const { accounts, diagnostics } = useApp();
   const presence = useMemo(
     () =>
       new Presence({
         open: (to) => accounts.openChannel(to),
         explain: (to) => accounts.explain(to),
+        diagnostics,
       }),
-    [accounts],
+    [accounts, diagnostics],
   );
   const reaches = useSyncExternalStore(presence.subscribe, presence.getSnapshot);
   const live = useLive();
@@ -126,7 +130,32 @@ export function useChannelTo(host: HostId): Link {
   useEffect(() => () => presence.stop(), [presence]);
 
   const reach = reaches.get(host);
-  return { reach, channel: reach?.kind === "online" ? presence.channelOf(host) : null };
+  const lastSeenAt = useLastSeen(host, reach?.kind === "offline");
+  return {
+    reach,
+    channel: reach?.kind === "online" ? presence.channelOf(host) : null,
+    lastSeenAt,
+  };
+}
+
+/** When `host` was last seen, from what this phone keeps, read once it is found offline. */
+function useLastSeen(host: HostId, offline: boolean): number | null {
+  const { accounts } = useApp();
+  const [lastSeenAt, setLastSeenAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (!offline) return;
+    let stale = false;
+    void accounts
+      .observed()
+      ?.computers()
+      .then((computers) => {
+        if (!stale) setLastSeenAt(computers.find((c) => c.host === host)?.lastSeenAt ?? null);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [accounts, host, offline]);
+  return lastSeenAt;
 }
 
 /** An answer read through a channel: asked again on a new channel, and whenever `asked` changes. */

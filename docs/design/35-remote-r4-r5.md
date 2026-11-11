@@ -2,7 +2,7 @@
 
 **Status:** planned on 2026-11-06. The first slice, the host's account moved out of the app, was
 built the same day (§10); its local smoke tests and the owner's phone check against staging passed.
-The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. The sixth, resume and fork in the core and the host after its restarts, was built the same day (§15); its local smoke test, and the owner's run on the box, R5's gate check 3, passed. The seventh, starting and resuming from a client, was built the same day (§16), under `terminal:control` rather than a scope of its own, as the owner chose; its local smoke test and the owner's run on the box passed. The eighth, R4's first, the phone reconnecting on a network change and the time budgets measured, was built on 2026-11-10 (§17); its local smoke test passed, at p95 105 ms through 100 ms of round trip. The ninth, a keyboard paired with the phone, was built on 2026-11-11 (§18); its tests and its run on the Android emulator passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
+The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. The sixth, resume and fork in the core and the host after its restarts, was built the same day (§15); its local smoke test, and the owner's run on the box, R5's gate check 3, passed. The seventh, starting and resuming from a client, was built the same day (§16), under `terminal:control` rather than a scope of its own, as the owner chose; its local smoke test and the owner's run on the box passed. The eighth, R4's first, the phone reconnecting on a network change and the time budgets measured, was built on 2026-11-10 (§17); its local smoke test passed, at p95 105 ms through 100 ms of round trip. The ninth, a keyboard paired with the phone, was built on 2026-11-11 (§18); its tests and its run on the Android emulator passed. The tenth, honest offline, no leaks and diagnostics, was built the same day (§19); its tests, the server's end-to-end run, and its smoke test's steps run by hand passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
 2026-11-08 against where Remote is going, several machines an account owns and the desktop choosing
 where a task runs (§3, "Where agents run"); what comes after R5 is in §9. This is the plan for the last two
 phases before sync: what each has to show, what it starts from, the decisions taken before any
@@ -1054,5 +1054,87 @@ which modifiers are down, as a keyboard's do, but they come from no keyboard dev
 **Still to try, by the owner**, on the iPhone with a Bluetooth keyboard and a TestFlight build of this
 slice: in `vim`, Esc leaves insert mode and the arrows move; `sleep 100` and Ctrl-C stops it; the
 arrows and Return move through and choose in Claude's menu; Alt-B in a shell moves back a word; and
-Return sends the field once. None of the iOS code has been built here: the TestFlight workflow,
-on macOS, is the first to compile it.
+Return sends the field once. None of the iOS code was built here: the TestFlight workflow, on macOS,
+first compiled it, as `mobile-v0.1.5` from the merge, on 2026-11-11, at the first try.
+
+## 19 · What the tenth slice adds
+
+Built on 2026-11-11, on Linux. No protocol change. The server changes only in what one kind of error
+logs, so staging has it after its next deploy, which needs the owner's go-ahead. The phone reaches the
+iPhone with a new TestFlight build.
+
+**The leak audit.** R4's gate says no terminal output, input, title, path or memory in logs, push
+payloads, caches or diagnostics. Every place that writes a log, a cache or a payload was read first:
+
+- **The server** logs one line per request (method, the path without its query, status and time),
+  ids and close reasons on the relay, and errors. No frame is ever logged; the relay forwards text it
+  never decodes. Push payloads were already fixed sentences, with a test (YARD-4).
+- **The host**, the app's and `yardsort-host`, prints errors and its own status, and no frame. The core's
+  remote serving logs nothing.
+- **The phone** keeps names, branches and ids in its cache, and credentials in the Keychain (31 §5),
+  and writes no log.
+- **Found:** a database error was logged with PostgreSQL's message and DETAIL, which quote the row, as
+  `Key (name)=(…) already exists` with a device's name. It is now its SQLSTATE and the table, column or
+  constraint (`postgres.rs`, `failed`). Nothing else held anything.
+
+**How it is checked**, each failing if a marker gets through:
+
+- `test/lib/leaks.test.ts`, in `just check`, against the stand-in with every level of Yardsort's own
+  crates logged and the server's default for the rest. Three phones on one terminal; one takes control
+  and types a hundred lines; the person at the computer types a line only the output then holds; a
+  conversation is titled with a marker and a memory note carries one; the computer drops off the relay
+  and comes back. Then no marker is in the stand-in's log, in any phone's cache or vault, or in the
+  diagnostics. Made to log what a device sends at trace, it fails at once. With every crate at trace,
+  dependencies too (`YARDSORT_STAND_IN_LOGS=trace`), it still passes.
+- **The server's end-to-end run** (`just server-e2e`, CI's "Server end to end"), the real image with
+  PostgreSQL and ZITADEL, already refused a log with the client secret or a credential; it now also
+  refuses one with what its pretend phone typed through the relay.
+- **The smoke test**, `.yardsort/tests/remote-no-leaks.yaml`: the real `yardsort-host` on the stand-in,
+  a pretend phone typing ten times and reading back what the shell printed, then both logs grepped.
+
+**Offline, reviewed against 31 §5.** Online is what the socket says, offline is the relay's
+`host_offline` with when the computer was last seen, and offline never says the agents stopped: the
+computers list and the computer's own screen did that. Three places did not:
+
+- Every screen inside a computer (a workspace, memory, workflows, a decision, starting and resuming, a
+  terminal) said **Offline** without when. `useChannelTo` now reads when it was last seen from what the
+  phone keeps, once the computer is found offline.
+- A terminal said "What is on the computer keeps running" whatever stopped the phone reaching it. That
+  is true of a lost connection, and not of a computer asleep or shut down, which offline is. Offline now
+  says that does not mean the program stopped.
+- Memory, the workflow runs and a workflow run kept what they had read when the channel closed, with
+  nothing to say it was from before, where a workspace's conversations said **As of**. They do too now.
+  The workflow screens have no screen test: the stand-in server of the screen tests has no workflows.
+
+**Diagnostics** (`src/lib/diagnostics.ts`, **Settings → Diagnostics**). The app's version, the phone's
+system, the protocol it speaks, the active server's id and this phone's device id there; then each
+change to the sign-in, to each computer by its id, and to the network, with its time in UTC to the
+millisecond and its code: how a channel ended (`silent:1006`, `hostOffline:4004`) or what an error
+was (`remote:host_offline`). Each change is one of three shapes of ids, states and codes; a code that
+does not look like one is written `other`, so no server's words, name or title can get in. A retry that leaves a computer as it was, such as one still offline every 15 seconds, records nothing (found in review), so a few computers offline for a while cannot push out what happened. The last 200
+are kept in memory and go with the app; nothing is written to the phone. The screen shows the whole
+text, and **Share** hands that same text to the share sheet. Computers are named by id rather than name,
+so a person sharing it shares no name of theirs; the screen says so above it.
+
+**Tests that fail without it.** The database error naming its constraint and not the value
+(`records.rs`, against PostgreSQL); the leak test above; codes kept and words dropped, the last 200
+kept, the report's text, a computer's reach with how its channel ended and never its words, a network
+change by its kind (`diagnostics.test.ts`). On the phone's screens: an offline workspace, memory and
+terminal say when the computer was last seen, memory says when it was read, and the terminal does not
+say its program runs on; diagnostics show the versions, the server, the device and each computer's
+states with their codes, hold no name, title or branch, and share exactly what is shown.
+
+**Its smoke test** was run on 2026-11-11, step by step by hand, as `ys test run` waits for the file to be
+approved in Yardsort: it passed, with 84 lines in the server's log, and neither log holding what was
+typed or printed.
+
+**Still to do, by the owner:**
+
+1. Approve `remote-no-leaks` in Yardsort, and run it (`ys test run remote-no-leaks`).
+2. Staging, after a deploy with this slice: from the phone, take control of a shell on the box and send
+   `echo zz-staging-$((6*7))-zz`. Then grep the server's logs on Fly and `yardsort-host`'s on the box
+   for `zz-staging` and `42-zz`: neither may be there.
+3. The iPhone, on a TestFlight build of this slice: open a computer, then put it to sleep; each screen
+   says **Offline, last seen**, and a terminal does not say its program keeps running. Then **Settings →
+   Diagnostics**: read it, **Share** it to Notes, and check that it names no computer, workspace or
+   person.

@@ -96,7 +96,7 @@ function Start({
   project: ProjectId | null;
 }) {
   const router = useRouter();
-  const { reach, channel } = useChannelTo(host);
+  const { reach, channel, lastSeenAt } = useChannelTo(host);
   const [asked, setAsked] = useState(0);
   const [project, setProject] = useState<ProjectId | null>(wantedProject);
   const [harness, setHarness] = useState<string | null>(null);
@@ -185,7 +185,7 @@ function Start({
   return (
     <Screen refreshing={false} onRefresh={() => setAsked((n) => n + 1)}>
       {screenTitle}
-      <ReachLine reach={reach} lastSeenAt={null} />
+      <ReachLine reach={reach} lastSeenAt={lastSeenAt} />
       {choices.problem && <Problem>{choices.problem}</Problem>}
       {channel && !answer && !choices.problem && <Waiting label="Asking the computer" />}
       {!channel && <Body muted>Starting needs the computer to be reachable.</Body>}
@@ -287,7 +287,7 @@ function Resume({
   session: SessionRecordId;
 }) {
   const router = useRouter();
-  const { reach, channel } = useChannelTo(host);
+  const { reach, channel, lastSeenAt } = useChannelTo(host);
   const [asked, setAsked] = useState(0);
   const [message, setMessage] = useState("");
   const [resuming, setResuming] = useState(false);
@@ -346,7 +346,7 @@ function Resume({
   return (
     <Screen refreshing={false} onRefresh={() => setAsked((n) => n + 1)}>
       {screenTitle}
-      <ReachLine reach={reach} lastSeenAt={null} />
+      <ReachLine reach={reach} lastSeenAt={lastSeenAt} />
       {choices.problem && <Problem>{choices.problem}</Problem>}
       {channel && !answer && !choices.problem && <Waiting label="Asking the computer" />}
       {!channel && <Body muted>Resuming needs the computer to be reachable.</Body>}

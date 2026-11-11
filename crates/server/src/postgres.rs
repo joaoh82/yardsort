@@ -1801,10 +1801,26 @@ fn hash(row: &Row, at: usize) -> Result<TokenHash> {
 }
 
 /// The error and its causes: a database error's own `Display` is only "db error".
+///
+/// What PostgreSQL said is kept to its code and what it was about, never its message or DETAIL,
+/// which can quote the values in the row: a device's name, an account's subject. This is logged.
 fn failed(error: impl std::error::Error) -> RecordsError {
     let mut text = error.to_string();
     let mut cause = error.source();
     while let Some(next) = cause {
+        if let Some(db) = next.downcast_ref::<tokio_postgres::error::DbError>() {
+            text.push_str(&format!(": {} {}", db.severity(), db.code().code()));
+            for (what, name) in [
+                ("table", db.table()),
+                ("column", db.column()),
+                ("constraint", db.constraint()),
+            ] {
+                if let Some(name) = name {
+                    text.push_str(&format!(" {what} {name}"));
+                }
+            }
+            break;
+        }
         text.push_str(&format!(": {next}"));
         cause = next.source();
     }

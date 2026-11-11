@@ -5,6 +5,7 @@ import { createContext, type ReactNode, useContext, useSyncExternalStore } from 
 
 import type { Accounts, Browser, Snapshot } from "./accounts";
 import type { PickImage } from "./attach";
+import type { Diagnostics } from "./diagnostics";
 import type { Incoming } from "./pairing";
 
 interface App {
@@ -16,6 +17,10 @@ interface App {
   incoming: Incoming;
   /** Ask the person for a picture to give an agent. */
   pickImage: PickImage;
+  /** What happened to the connections since the app started, for Settings → Diagnostics. */
+  diagnostics: Diagnostics;
+  /** This app's version and the phone's system, `0.1.5` and `ios 18.1`. */
+  about: { app: string; system: string };
 }
 
 const AppContext = createContext<App | null>(null);

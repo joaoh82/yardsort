@@ -9,13 +9,16 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Accounts, messageOf } from "../lib/accounts";
 import { appearance } from "../lib/appearance";
 import { AppProvider } from "../lib/context";
+import { diagnostics } from "../lib/diagnostics";
 import {
   appearanceFile,
+  appVersion,
   nativeEnv,
   pickImage,
   secureVault,
   suggestedDeviceName,
   systemBrowser,
+  systemVersion,
 } from "../lib/native";
 import { incoming } from "../lib/pairing";
 import { installPushHandlers, registerGrantedPush } from "../lib/push-token";
@@ -29,6 +32,8 @@ const app = {
   deviceName: suggestedDeviceName(),
   incoming,
   pickImage,
+  diagnostics,
+  about: { app: appVersion, system: systemVersion },
 };
 
 export default function Layout() {
@@ -116,6 +121,7 @@ export default function Layout() {
               <Stack.Screen name="account" options={{ title: "Account" }} />
               <Stack.Screen name="servers" options={{ title: "Servers" }} />
               <Stack.Screen name="settings" options={{ title: "Settings" }} />
+              <Stack.Screen name="diagnostics" options={{ title: "Diagnostics" }} />
               <Stack.Screen name="computer" options={{ title: "Computer" }} />
               <Stack.Screen name="workflows" options={{ title: "Workflows" }} />
               <Stack.Screen name="workflow" options={{ title: "Workflow" }} />
