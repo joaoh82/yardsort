@@ -45,8 +45,8 @@ const components: Components = {
       <span className="text-ink-faint">[image: {label}]</span>
     );
   },
-  h1: ({ children }) => <h4 className="mt-4 mb-2 text-[15px] font-semibold">{children}</h4>,
-  h2: ({ children }) => <h5 className="mt-4 mb-2 text-[14px] font-semibold">{children}</h5>,
+  h1: ({ children }) => <h4 className="mt-4 mb-2 text-base font-semibold">{children}</h4>,
+  h2: ({ children }) => <h5 className="mt-4 mb-2 text-[15px] font-semibold">{children}</h5>,
   h3: ({ children }) => <h6 className="mt-3 mb-1.5 font-semibold">{children}</h6>,
   h4: ({ children }) => <h6 className="mt-3 mb-1.5 font-semibold">{children}</h6>,
   h5: ({ children }) => <h6 className="mt-3 mb-1.5 font-medium">{children}</h6>,
@@ -77,10 +77,10 @@ const components: Components = {
     <blockquote className="my-2 border-l-2 border-line pl-3 text-ink-muted">{children}</blockquote>
   ),
   code: ({ children }) => (
-    <code className="rounded bg-raised px-1 py-0.5 font-mono text-[12px]">{children}</code>
+    <code className="rounded bg-raised px-1 py-0.5 font-mono text-detail">{children}</code>
   ),
   pre: ({ children }) => (
-    <pre className="my-2 overflow-x-auto rounded bg-raised p-3 font-mono text-[12px] leading-relaxed [&>code]:bg-transparent [&>code]:p-0">
+    <pre className="my-2 overflow-x-auto rounded bg-raised p-3 font-mono text-detail leading-relaxed [&>code]:bg-transparent [&>code]:p-0">
       {children}
     </pre>
   ),

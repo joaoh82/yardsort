@@ -7,8 +7,8 @@ import { Changed, EnvUses, Steps } from "./ApprovalCard";
 import { statusColour, statusWords } from "./words";
 
 const control =
-  "h-8 w-full rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
-const label = "text-[11px] font-semibold tracking-wider text-ink-faint uppercase";
+  "h-9 w-full rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
+const label = "text-small font-semibold tracking-wider text-ink-faint uppercase";
 
 interface Props {
   workspaceId: string;
@@ -253,12 +253,12 @@ export function RunSmokeTestDialog({ workspaceId, testId, inputs: given, onClose
                       className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-raised"
                     >
                       <span
-                        className={`shrink-0 rounded-full px-1.5 text-[10px] ${statusColour(run.status)}`}
+                        className={`shrink-0 rounded-full px-1.5 text-micro ${statusColour(run.status)}`}
                       >
                         {statusWords(run)}
                       </span>
                       <span className="min-w-0 flex-1 truncate">{run.testName}</span>
-                      <span className="shrink-0 text-[11px] text-ink-faint">
+                      <span className="shrink-0 text-small text-ink-faint">
                         {timeAgo(run.createdAt)}
                       </span>
                     </button>

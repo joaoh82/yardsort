@@ -92,13 +92,13 @@ function PullRequestRow({
           </span>
           <span className="shrink-0 font-mono text-ink-muted">#{pr.number}</span>
           <span
-            className={`ml-auto shrink-0 rounded-full px-2 text-[11px] leading-5 ${pullRequestColour(pr)}`}
+            className={`ml-auto shrink-0 rounded-full px-2 text-small leading-5 ${pullRequestColour(pr)}`}
           >
             {pullRequestStateLabel(pr)}
           </span>
         </span>
         <span className="mt-0.5 block truncate text-ink">{pr.title}</span>
-        <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-ink-faint">
+        <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-small text-ink-faint">
           <span>{pr.author ?? "ghost"}</span>
           {summary && (
             <span className={checksColour[pr.checks]} aria-label={checksLabel(pr)}>
@@ -129,7 +129,7 @@ function PullRequestRow({
           type="button"
           title={`Go to the workspace ${workspace.name}`}
           onClick={() => selectWorkspace(workspace.id)}
-          className="mb-1.5 ml-3 max-w-[calc(100%-1.5rem)] truncate rounded px-1 text-[11px] text-ink-muted hover:bg-raised hover:text-ink"
+          className="mb-1.5 ml-3 max-w-[calc(100%-1.5rem)] truncate rounded px-1 text-small text-ink-muted hover:bg-raised hover:text-ink"
         >
           <span aria-hidden>↳ </span>
           {workspace.name}

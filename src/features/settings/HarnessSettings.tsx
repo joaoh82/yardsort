@@ -55,7 +55,7 @@ export function HarnessSettings() {
                 <span
                   aria-hidden
                   title={harness.resolvedPath ? "Installed" : "Not found on PATH"}
-                  className={`size-1.5 shrink-0 rounded-full ${
+                  className={`size-2 shrink-0 rounded-full ${
                     !harness.resolvedPath ? "bg-red-400" : harness.enabled ? "bg-accent" : "bg-line"
                   }`}
                 />
@@ -69,7 +69,7 @@ export function HarnessSettings() {
                 >
                   {harness.label}
                 </span>
-                <span className="ml-auto text-[10px] text-ink-faint">
+                <span className="ml-auto text-micro text-ink-faint">
                   {!harness.builtin ? "custom" : harness.modified ? "modified" : ""}
                 </span>
               </button>

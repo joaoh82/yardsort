@@ -199,7 +199,7 @@ function Destination({
       {collapsed ? (
         <div className="flex items-baseline gap-2">
           <span className="text-ink-muted">Location</span>
-          <span className="min-w-0 flex-1 truncate font-mono text-[12px] select-text">
+          <span className="min-w-0 flex-1 truncate font-mono text-detail select-text">
             {parent}
           </span>
           <button
@@ -220,7 +220,7 @@ function Destination({
               onChange={(event) => setParent(event.target.value)}
               placeholder="Choose a folder…"
               spellCheck={false}
-              className={`${field} min-w-0 flex-1 font-mono text-[12px] select-text`}
+              className={`${field} min-w-0 flex-1 font-mono text-detail select-text`}
             />
             <button
               type="button"
@@ -232,7 +232,7 @@ function Destination({
           </div>
         </div>
       )}
-      <p className="min-h-4 truncate font-mono text-[11px] text-ink-faint">
+      <p className="min-h-4 truncate font-mono text-small text-ink-faint">
         {ready || (name.trim() && parent)
           ? `${parent.replace(/[\\/]+$/, "")}${separator}${name.trim()}`
           : ""}
@@ -523,7 +523,7 @@ function CloneForm({
               }}
             />
           </ul>
-          <span className="text-xs text-ink-faint">
+          <span className="text-detail text-ink-faint">
             {chosen?.parent
               ? `A fork: ${chosen.parent.nameWithOwner} becomes its upstream remote.`
               : "owner/repository on GitHub, or an HTTPS or SSH URL from any host. Uses your existing git credentials."}
@@ -598,7 +598,7 @@ function RowItem({
   if (row.kind === "url") {
     return (
       <li {...common} className={`cursor-pointer px-3 py-1.5 ${shade}`}>
-        Clone <span className="font-mono text-[12px] select-text">{row.text}</span>
+        Clone <span className="font-mono text-detail select-text">{row.text}</span>
       </li>
     );
   }
@@ -634,9 +634,9 @@ function RowItem({
           <span className="ml-2 text-ink-muted">{repository.description}</span>
         )}
       </span>
-      <span className="shrink-0 text-xs text-ink-faint">{facts.join(" · ")}</span>
+      <span className="shrink-0 text-detail text-ink-faint">{facts.join(" · ")}</span>
       {repository.projectId && (
-        <span className="shrink-0 rounded bg-surface px-1.5 text-xs text-ink-muted">
+        <span className="shrink-0 rounded bg-surface px-1.5 text-detail text-ink-muted">
           Already added
         </span>
       )}
@@ -661,7 +661,7 @@ function ListNotice({
   onRetry: () => void;
   onBack: () => void;
 }) {
-  const line = "px-3 py-1.5 text-xs text-ink-faint";
+  const line = "px-3 py-1.5 text-detail text-ink-faint";
   const retry = (
     <button type="button" onClick={onRetry} className="ml-1 underline hover:text-ink">
       Retry

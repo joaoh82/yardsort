@@ -20,8 +20,8 @@ const WorkflowChart = lazy(() =>
 const CHECK_AFTER_MS = 250;
 
 const quiet =
-  "rounded border border-line px-3 py-1 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40";
-const primary = "rounded bg-accent px-3 py-1 font-medium text-canvas disabled:opacity-40";
+  "rounded border border-line px-3 py-1.5 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40";
+const primary = "rounded bg-accent px-3 py-1.5 font-medium text-canvas disabled:opacity-40";
 
 /**
  * One workflow in the center panel: its steps as a chart, its file in an editor, and its runs.
@@ -182,7 +182,7 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
       <header className="flex shrink-0 items-start gap-3 border-b border-line px-4 py-3">
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-base font-semibold">{name}</h2>
-          <p className="truncate text-[11px] text-ink-faint">
+          <p className="truncate text-small text-ink-faint">
             {isNew
               ? "Not saved yet"
               : builtIn
@@ -318,7 +318,7 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
           {problems.length > 0 && (
             <ul
               aria-label="Problems"
-              className="max-h-28 shrink-0 overflow-y-auto border-t border-line px-4 py-2 text-[12px]"
+              className="max-h-28 shrink-0 overflow-y-auto border-t border-line px-4 py-2 text-detail"
             >
               {problems.map((problem, i) => (
                 <li key={i} className="text-red-400 select-text">

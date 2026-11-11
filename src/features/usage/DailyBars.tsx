@@ -27,7 +27,7 @@ export function DailyBars(props: {
     <figure aria-label={props.label} className="m-0 flex gap-2">
       <div
         aria-hidden
-        className="flex shrink-0 flex-col justify-between text-right text-[11px] text-ink-faint tabular-nums"
+        className="flex shrink-0 flex-col justify-between text-right text-small text-ink-faint tabular-nums"
         style={{ height }}
       >
         {[top, (top * 2) / 3, top / 3, 0].map((value) => (
@@ -81,7 +81,7 @@ export function DailyBars(props: {
           {hover !== null && (
             <div
               role="tooltip"
-              className="pointer-events-none absolute top-1 z-10 min-w-36 rounded border border-line bg-raised px-2 py-1.5 text-[11px] shadow-lg"
+              className="pointer-events-none absolute top-1 z-10 min-w-36 rounded border border-line bg-raised px-2 py-1.5 text-small shadow-lg"
               style={
                 at(hover) > 60
                   ? { right: `${100 - at(hover) + 2}%` }
@@ -91,7 +91,11 @@ export function DailyBars(props: {
               <div className="mb-1 text-ink-muted">{days[hover]}</div>
               {series.map((s) => (
                 <div key={s.id} className="flex items-center gap-2">
-                  <span aria-hidden className="size-2 rounded-sm" style={{ background: s.color }} />
+                  <span
+                    aria-hidden
+                    className="size-2.5 rounded-sm"
+                    style={{ background: s.color }}
+                  />
                   <span className="flex-1 text-ink-muted">{s.label}</span>
                   <span className="text-ink tabular-nums">{format(s.values[hover] ?? 0)}</span>
                 </div>
@@ -105,7 +109,7 @@ export function DailyBars(props: {
             </div>
           )}
         </div>
-        <div aria-hidden className="relative mt-1 h-4 text-[11px] text-ink-faint">
+        <div aria-hidden className="relative mt-1 h-4 text-small text-ink-faint">
           {props.ticks.map((i) => (
             <span
               key={i}

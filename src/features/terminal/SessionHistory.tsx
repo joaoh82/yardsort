@@ -24,7 +24,7 @@ export function SessionHistory({ workspaceId }: { workspaceId: string }) {
 
   return (
     <section aria-label="Previous sessions" className="mx-auto mt-6 w-full max-w-xl text-left">
-      <h2 className="mb-2 text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+      <h2 className="mb-2 text-small font-semibold tracking-wider text-ink-faint uppercase">
         Previous sessions
       </h2>
       <ul className="divide-y divide-line rounded-md border border-line">
@@ -37,7 +37,7 @@ export function SessionHistory({ workspaceId }: { workspaceId: string }) {
                 {record.forkedFrom && <span className="text-ink-faint"> · fork</span>}
                 {record.title && <span className="text-ink-muted"> — {record.title}</span>}
               </div>
-              <div className="truncate text-[11px] text-ink-faint">
+              <div className="truncate text-small text-ink-faint">
                 {timeAgo(record.endedAt ?? record.startedAt)} · {describeEnd(record)}
                 {record.model ? ` · ${record.model}` : ""}
                 {record.unavailableReason ? ` · ${record.unavailableReason}` : ""}
@@ -48,7 +48,7 @@ export function SessionHistory({ workspaceId }: { workspaceId: string }) {
               disabled={!record.resumable}
               title={record.unavailableReason ?? "Continue this conversation"}
               onClick={() => void resume(record.id)}
-              className={`shrink-0 rounded px-3 py-1 disabled:opacity-40 ${
+              className={`shrink-0 rounded px-3 py-1.5 disabled:opacity-40 ${
                 index === 0
                   ? "bg-accent font-medium text-canvas"
                   : "border border-line text-ink-muted hover:border-accent hover:text-ink"
@@ -61,7 +61,7 @@ export function SessionHistory({ workspaceId }: { workspaceId: string }) {
               disabled={!record.forkable}
               title={record.unavailableReason ?? "Start a copy that goes its own way"}
               onClick={() => void fork(record.id)}
-              className="shrink-0 rounded border border-line px-3 py-1 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40"
+              className="shrink-0 rounded border border-line px-3 py-1.5 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40"
             >
               Fork
             </button>

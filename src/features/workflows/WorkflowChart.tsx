@@ -39,16 +39,16 @@ function StepBox({ data, selected }: NodeProps<StepNode>) {
     >
       <Handle type="target" position={Position.Top} className="!bg-line" isConnectable={false} />
       <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-[12px] font-medium text-ink">
+        <span className="truncate text-detail font-medium text-ink">
           {ACTION_WORDS[step.action]}
         </span>
         {status && (
-          <span className={`shrink-0 rounded-full px-1.5 text-[10px] ${statusColour(status)}`}>
+          <span className={`shrink-0 rounded-full px-1.5 text-micro ${statusColour(status)}`}>
             {status}
           </span>
         )}
       </div>
-      <span className="truncate font-mono text-[11px] text-ink-faint">{step.id}</span>
+      <span className="truncate font-mono text-small text-ink-faint">{step.id}</span>
       <Handle type="source" position={Position.Bottom} className="!bg-line" isConnectable={false} />
     </button>
   );

@@ -22,8 +22,8 @@ import { fieldsOf, KINDS, specOf, WEEKDAYS, type Unit, type WhenFields } from ".
 import { clockTime } from "./words";
 
 const control =
-  "h-8 w-full rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
-const label = "text-[11px] font-semibold tracking-wider text-ink-faint uppercase";
+  "h-9 w-full rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
+const label = "text-small font-semibold tracking-wider text-ink-faint uppercase";
 
 /** An input of a workflow or of a smoke test, with what it starts on. */
 type Asked = FieldInput & { default: string | null };

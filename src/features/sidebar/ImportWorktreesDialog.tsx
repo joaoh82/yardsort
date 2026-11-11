@@ -110,11 +110,11 @@ export function ImportWorktreesDialog({
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline gap-2">
                         <span className="truncate font-medium">{name}</span>
-                        <span className="truncate font-mono text-[11px] text-ink-faint">
+                        <span className="truncate font-mono text-small text-ink-faint">
                           {worktree.branch ?? "detached"}
                         </span>
                       </span>
-                      <span className="block truncate text-[11px] text-ink-faint select-text">
+                      <span className="block truncate text-small text-ink-faint select-text">
                         {worktree.path}
                       </span>
                     </span>

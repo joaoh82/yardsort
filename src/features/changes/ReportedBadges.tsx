@@ -28,7 +28,7 @@ export function ReportedBadges({ file }: { file: FileReports | undefined }) {
     if (!file.observed) return null;
     return (
       <span
-        className="shrink-0 rounded border border-dashed border-ink-faint/60 px-1 text-[10px] leading-4 text-ink-muted"
+        className="shrink-0 rounded border border-dashed border-ink-faint/60 px-1 text-micro leading-4.5 text-ink-muted"
         title={`${describeObserved(file.observed)} ${CAVEAT}`}
         data-testid="observed"
       >
@@ -46,7 +46,7 @@ export function ReportedBadges({ file }: { file: FileReports | undefined }) {
       {names.map((name) => (
         <span
           key={name}
-          className="rounded border border-accent/40 px-1 text-[10px] leading-4 text-accent"
+          className="rounded border border-accent/40 px-1 text-micro leading-4.5 text-accent"
         >
           {name}
         </span>
@@ -98,7 +98,7 @@ export function ProvenanceNote({ changes }: { changes: ChangeSet }) {
   ].filter(Boolean);
   const summary = sentences.join(" ");
   return (
-    <p className="px-3 py-1 text-[11px] text-ink-faint" title={CAVEAT}>
+    <p className="px-3 py-1 text-small text-ink-faint" title={CAVEAT}>
       {summary}
     </p>
   );
@@ -115,7 +115,7 @@ export function ReportedLine({ path }: { path: string }) {
       const tool = observedTool(file.observed);
       return (
         <span
-          className="shrink-0 text-[11px] text-ink-faint"
+          className="shrink-0 text-small text-ink-faint"
           title={`${describeObserved(file.observed)} ${CAVEAT}`}
         >
           last written while {whoObserved(file.observed)} ran {tool ?? "a tool"} ·{" "}
@@ -124,7 +124,7 @@ export function ReportedLine({ path }: { path: string }) {
       );
     }
     return (
-      <span className="shrink-0 text-[11px] text-ink-faint" title={CAVEAT}>
+      <span className="shrink-0 text-small text-ink-faint" title={CAVEAT}>
         no agent reported writing this
       </span>
     );
@@ -134,7 +134,7 @@ export function ReportedLine({ path }: { path: string }) {
   const writes = file.reports.reduce((sum, report) => sum + report.writes, 0);
   return (
     <span
-      className="shrink-0 text-[11px] text-ink-faint"
+      className="shrink-0 text-small text-ink-faint"
       title={`${describeReports(file.reports)} ${CAVEAT}`}
     >
       reported by {[...new Set(file.reports.map(who))].join(", ")} · {writes}{" "}

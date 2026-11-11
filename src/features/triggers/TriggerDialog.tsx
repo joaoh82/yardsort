@@ -29,8 +29,8 @@ import {
 } from "./words";
 
 const control =
-  "h-8 w-full rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
-const label = "text-[11px] font-semibold tracking-wider text-ink-faint uppercase";
+  "h-9 w-full rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
+const label = "text-small font-semibold tracking-wider text-ink-faint uppercase";
 const check = "flex items-center gap-2 text-ink";
 
 /** An input of a workflow or of a smoke test, with what it starts on. */
@@ -476,7 +476,7 @@ export function TriggerDialog(props: Props) {
             <legend className={label}>When</legend>
             {GROUPS.map((group) => (
               <div key={group} role="group" aria-label={group} className="flex flex-col gap-1">
-                <span className="mt-1 text-[12px] text-ink-faint">{group}</span>
+                <span className="mt-1 text-detail text-ink-faint">{group}</span>
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                   {EVENTS.filter((e) => e.group === group).map((e) => {
                     // About an open pull request elsewhere: not the workspace's events, and not
@@ -515,7 +515,7 @@ export function TriggerDialog(props: Props) {
 
             {(has("agent.settled") || has("agent.exited") || has("pr.opened") || posts) && (
               <div role="group" aria-label="Only when" className="flex flex-col gap-1">
-                <span className="mt-1 text-[12px] text-ink-faint">Only when</span>
+                <span className="mt-1 text-detail text-ink-faint">Only when</span>
                 {has("agent.settled") && (
                   <>
                     <label className={check}>
@@ -665,7 +665,7 @@ export function TriggerDialog(props: Props) {
                 </datalist>
                 <p
                   id={`${titleId}-names`}
-                  className={`text-[12px] ${namesProblem ? "text-red-400" : "text-ink-faint"}`}
+                  className={`text-detail ${namesProblem ? "text-red-400" : "text-ink-faint"}`}
                 >
                   {namesProblem ??
                     `Raised in the workspace with ys event emit <name>, by an agent, a smoke test's run step or a script; it listens for ${CUSTOM_PREFIX}<name>. More than one: separate them with commas.${namesInUse.length > 0 ? ` Used in this project: ${namesInUse.join(", ")}.` : ""}`}

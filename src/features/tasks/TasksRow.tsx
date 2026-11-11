@@ -28,7 +28,7 @@ export function TasksRow() {
       }
       title="Every project's tasks: its GitHub issues"
       onClick={() => useProjectsStore.getState().openTasks(!open)}
-      className={`flex h-9 w-full shrink-0 items-center gap-2 border-b border-line px-3 text-left hover:bg-raised ${
+      className={`flex h-10 w-full shrink-0 items-center gap-2 border-b border-line px-3.5 text-left hover:bg-raised ${
         open ? "bg-raised text-ink" : "text-ink-muted"
       }`}
     >
@@ -38,7 +38,7 @@ export function TasksRow() {
         <span
           aria-hidden
           title={`${count} ${count === 1 ? "needs" : "need"} an answer`}
-          className="shrink-0 rounded-full border border-amber-300/40 px-1.5 text-[10px] leading-4 text-amber-300 tabular-nums"
+          className="shrink-0 rounded-full border border-amber-300/40 px-1.5 text-micro leading-4.5 text-amber-300 tabular-nums"
         >
           {count}
         </span>
@@ -57,7 +57,7 @@ export function TasksIcon() {
       strokeWidth="1.3"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="size-3.5 shrink-0"
+      className="size-4 shrink-0"
     >
       <circle cx="8" cy="8" r="5.9" />
       <circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" />

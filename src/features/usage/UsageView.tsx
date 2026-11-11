@@ -23,7 +23,7 @@ export function UsageView() {
     setTab(next);
   };
   const tabClass = (which: Tab) =>
-    `rounded-full px-3 py-1 whitespace-nowrap ${
+    `rounded-full px-3 py-1.5 whitespace-nowrap ${
       tab === which ? "bg-raised text-ink" : "text-ink-muted hover:text-ink"
     }`;
 
@@ -73,7 +73,7 @@ export function UsageView() {
           aria-label="Close usage"
           title="Close"
           onClick={() => useProjectsStore.getState().openUsage(false)}
-          className="ml-2 size-6 rounded text-ink-muted hover:bg-raised hover:text-ink"
+          className="ml-2 size-7 rounded text-ink-muted hover:bg-raised hover:text-ink"
         >
           ×
         </button>

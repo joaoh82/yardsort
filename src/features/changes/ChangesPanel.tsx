@@ -92,7 +92,7 @@ export function ChangesPanel() {
 
   const count = changes ? changes.uncommitted.length + changes.committed.length : 0;
   const tabClass =
-    "rounded px-2 py-0.5 text-[11px] font-semibold tracking-wider text-ink-faint uppercase hover:text-ink aria-selected:bg-raised aria-selected:text-ink";
+    "rounded px-2 py-0.5 text-small font-semibold tracking-wider text-ink-faint uppercase hover:text-ink aria-selected:bg-raised aria-selected:text-ink";
 
   const list = (
     <div className="flex h-full min-h-0 flex-col">
@@ -117,7 +117,7 @@ export function ChangesPanel() {
 
   return (
     <aside aria-label="Changes" className="flex h-full flex-col bg-surface">
-      <header className="flex h-9 shrink-0 items-center gap-1 border-b border-line px-2">
+      <header className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2">
         <div role="tablist" className="flex gap-1">
           <button
             type="button"
@@ -144,7 +144,7 @@ export function ChangesPanel() {
             aria-pressed={showIgnored}
             title="Also show .git and files ignored by git (node_modules, build output…)"
             onClick={() => useProjectsStore.getState().remember(SHOW_IGNORED, !showIgnored)}
-            className="ml-auto rounded px-2 py-0.5 text-[11px] text-ink-faint hover:bg-raised hover:text-ink aria-pressed:bg-raised aria-pressed:text-accent"
+            className="ml-auto rounded px-2 py-0.5 text-small text-ink-faint hover:bg-raised hover:text-ink aria-pressed:bg-raised aria-pressed:text-accent"
           >
             ignored
           </button>

@@ -108,7 +108,7 @@ export function AppShell() {
         <Panel
           id="left"
           panelRef={leftRef}
-          defaultSize={260}
+          defaultSize={280}
           minSize={200}
           maxSize={480}
           collapsible
@@ -129,7 +129,7 @@ export function AppShell() {
         <Panel
           id="right"
           panelRef={rightRef}
-          defaultSize={340}
+          defaultSize={368}
           minSize={240}
           maxSize={720}
           collapsible

@@ -76,10 +76,10 @@ function ThresholdFields({
 
   return (
     <fieldset className="grid gap-3">
-      <legend className="mb-1 text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+      <legend className="mb-1 text-small font-semibold tracking-wider text-ink-muted uppercase">
         How sure Jev must be
       </legend>
-      <p className="text-[11px] text-ink-faint">
+      <p className="text-small text-ink-faint">
         Changing these re-reads the answers Jev has already given — nothing is sent again. The
         defaults are a starting point, not a measurement; tune them against your own work.
       </p>
@@ -95,7 +95,7 @@ function ThresholdFields({
             onChange={(event) =>
               setDraft({ ...shown, [key]: Number.parseInt(event.target.value, 10) || 0 })
             }
-            className={`${inputClass} w-24 font-mono text-[12px]`}
+            className={`${inputClass} w-24 font-mono text-detail`}
           />
         </Field>
       ))}
@@ -272,13 +272,13 @@ export function AssistSettings() {
             spellCheck={false}
             autoComplete="off"
             onChange={(event) => setKey(event.target.value)}
-            className={`${inputClass} font-mono text-[12px]`}
+            className={`${inputClass} font-mono text-detail`}
           />
         </Field>
       </form>
 
       <fieldset className="grid gap-3">
-        <legend className="mb-1 text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+        <legend className="mb-1 text-small font-semibold tracking-wider text-ink-muted uppercase">
           What Assist may do
         </legend>
         <label className="flex items-start gap-2">

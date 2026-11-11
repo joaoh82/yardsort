@@ -91,12 +91,12 @@ function TaskRow({
           <span className="min-w-0 truncate text-ink-muted">{project.name}</span>
           <span className="shrink-0 font-mono text-ink-muted">{task.key}</span>
           {task.needsAnswer && (
-            <span className="ml-auto shrink-0 rounded-full bg-amber-500/20 px-2 text-[11px] leading-5 text-amber-300">
+            <span className="ml-auto shrink-0 rounded-full bg-amber-500/20 px-2 text-small leading-5 text-amber-300">
               Needs an answer
             </span>
           )}
           <span
-            className={`${task.needsAnswer ? "" : "ml-auto"} shrink-0 rounded-full px-2 text-[11px] leading-5 ${stateColour(task)}`}
+            className={`${task.needsAnswer ? "" : "ml-auto"} shrink-0 rounded-full px-2 text-small leading-5 ${stateColour(task)}`}
           >
             {stateLabel(task)}
           </span>
@@ -104,7 +104,7 @@ function TaskRow({
         <span data-task-title className="mt-0.5 block truncate text-ink">
           {task.title}
         </span>
-        <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-faint">
+        <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-small text-ink-faint">
           <span>{task.author ?? "ghost"}</span>
           {updated !== null && (
             <span title={`Updated ${new Date(updated).toLocaleString()}`}>{age(updated, now)}</span>
@@ -132,7 +132,7 @@ function TaskRow({
           type="button"
           title={`Go to the workspace ${workspace.name}`}
           onClick={() => selectWorkspace(workspace.id)}
-          className="mb-1.5 ml-3 block max-w-[calc(100%-1.5rem)] truncate rounded px-1 text-[11px] text-ink-muted hover:bg-raised hover:text-ink"
+          className="mb-1.5 ml-3 block max-w-[calc(100%-1.5rem)] truncate rounded px-1 text-small text-ink-muted hover:bg-raised hover:text-ink"
         >
           <span aria-hidden>↳ </span>
           {workspace.name}

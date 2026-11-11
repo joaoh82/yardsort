@@ -71,16 +71,16 @@ export function ConversationsDialog({
         ) : (
           <div className="mt-3 flex min-h-0 flex-col gap-3">
             <section aria-label="The note">
-              <h3 className="mb-1 text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+              <h3 className="mb-1 text-small font-semibold tracking-wider text-ink-muted uppercase">
                 The note
               </h3>
               <p className="text-ink-muted select-text">{context.note}</p>
             </section>
             <section aria-label="What the agent reads" className="flex min-h-0 flex-col">
-              <h3 className="mb-1 text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+              <h3 className="mb-1 text-small font-semibold tracking-wider text-ink-muted uppercase">
                 What <code className="font-mono normal-case">ys workspace context</code> gives now
               </h3>
-              <pre className="min-h-0 overflow-auto rounded border border-line bg-canvas p-2 text-[11px] whitespace-pre-wrap select-text">
+              <pre className="min-h-0 overflow-auto rounded border border-line bg-canvas p-2 text-small whitespace-pre-wrap select-text">
                 {context.digest}
               </pre>
             </section>
@@ -90,7 +90,7 @@ export function ConversationsDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-line px-3 py-1 text-ink-muted hover:border-accent hover:text-ink"
+            className="rounded border border-line px-3 py-1.5 text-ink-muted hover:border-accent hover:text-ink"
           >
             Close
           </button>

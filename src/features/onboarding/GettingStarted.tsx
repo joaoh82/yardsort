@@ -141,7 +141,7 @@ function Checklist({ report, hasProjects }: { report: Preflight; hasProjects: bo
               nvm, Homebrew or cargo are found. That failed, so it is using the environment it was
               started with, and installed tools may appear missing.
             </p>
-            <p className="mt-1 font-mono text-[12px] text-ink-faint select-text">
+            <p className="mt-1 font-mono text-detail text-ink-faint select-text">
               {report.env.warning}
             </p>
           </Step>
@@ -210,7 +210,7 @@ function Step(props: {
         <div className="flex flex-wrap items-baseline gap-x-2">
           <span className="font-medium">{props.title}</span>
           {props.detail && (
-            <span className="truncate text-[12px] text-ink-faint">{props.detail}</span>
+            <span className="truncate text-detail text-ink-faint">{props.detail}</span>
           )}
         </div>
         {props.children && <div className="mt-1 text-ink-muted">{props.children}</div>}
@@ -229,14 +229,14 @@ function Command({ text }: { text: string }) {
   const copy = () => void writeText(text).then(() => setCopied(true), console.error);
   return (
     <div className="mt-1 flex items-center gap-2 rounded bg-raised px-2 py-1">
-      <code className="min-w-0 flex-1 overflow-x-auto font-mono text-[12px] whitespace-nowrap text-ink select-text">
+      <code className="min-w-0 flex-1 overflow-x-auto font-mono text-detail whitespace-nowrap text-ink select-text">
         {text}
       </code>
       <button
         type="button"
         onClick={copy}
         aria-label={`Copy: ${text}`}
-        className="shrink-0 rounded px-2 text-[11px] text-ink-faint hover:bg-line hover:text-ink"
+        className="shrink-0 rounded px-2 text-small text-ink-faint hover:bg-line hover:text-ink"
       >
         {copied ? "copied" : "copy"}
       </button>
@@ -250,7 +250,7 @@ function Link({ url, children }: { url: string; children: React.ReactNode }) {
       type="button"
       onClick={() => void openUrl(url).catch(console.error)}
       title={url}
-      className="mt-1 text-[12px] text-accent hover:underline"
+      className="mt-1 text-detail text-accent hover:underline"
     >
       {children} ↗
     </button>

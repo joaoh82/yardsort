@@ -199,7 +199,7 @@ function WorkspaceTerminals(props: {
       {timelineOffered && timelineOpen && (
         <ActivityPanel workspaceId={workspace.id} onClose={() => setTimelineOpen(false)} />
       )}
-      <footer className="flex h-6 shrink-0 items-center gap-2 border-t border-line bg-surface px-3 font-mono text-[11px] whitespace-nowrap text-ink-faint *:shrink-0">
+      <footer className="flex h-7 shrink-0 items-center gap-2 border-t border-line bg-surface px-3.5 font-mono text-small whitespace-nowrap text-ink-faint *:shrink-0">
         {timelineOffered && (
           <button
             type="button"
@@ -263,7 +263,7 @@ function LocalActions({ workspace }: { workspace: Workspace }) {
                   {action.keys.map((cap) => (
                     <kbd
                       key={cap}
-                      className="rounded border border-line bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-ink-faint"
+                      className="rounded border border-line bg-canvas px-1.5 py-0.5 font-mono text-micro text-ink-faint"
                     >
                       {cap}
                     </kbd>
@@ -281,7 +281,7 @@ function LocalActions({ workspace }: { workspace: Workspace }) {
 function LaunchButtons({ workspaceId, onShell }: { workspaceId: string; onShell: () => void }) {
   const harnesses = launchable(useHarnessStore((s) => s.harnesses));
   const button =
-    "rounded border border-line px-3 py-1 text-ink-muted hover:border-accent hover:text-ink";
+    "rounded border border-line px-3 py-1.5 text-ink-muted hover:border-accent hover:text-ink";
   return (
     <div className="mt-4 flex flex-wrap justify-center gap-2">
       <button type="button" onClick={onShell} className={button}>

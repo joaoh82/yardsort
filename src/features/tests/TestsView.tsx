@@ -133,7 +133,7 @@ export function TestsView() {
   return (
     <section aria-label="Tests" className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-4 py-2">
-        <h1 className="text-[11px] font-semibold tracking-wider text-ink-muted uppercase">Tests</h1>
+        <h1 className="text-small font-semibold tracking-wider text-ink-muted uppercase">Tests</h1>
         <div role="tablist" aria-label="Tab" className="flex gap-1">
           {TABS.map((tab) => (
             <button
@@ -145,7 +145,7 @@ export function TestsView() {
                 setFilters({ tab: tab.id });
                 setSelected(null);
               }}
-              className={`rounded-full px-3 py-1 whitespace-nowrap ${
+              className={`rounded-full px-3 py-1.5 whitespace-nowrap ${
                 filters.tab === tab.id ? "bg-raised text-ink" : "text-ink-muted hover:text-ink"
               }`}
             >
@@ -175,7 +175,7 @@ export function TestsView() {
           aria-label="Close tests"
           title="Close"
           onClick={() => useProjectsStore.getState().openTests(false)}
-          className="size-6 rounded text-ink-muted hover:bg-raised hover:text-ink"
+          className="size-7 rounded text-ink-muted hover:bg-raised hover:text-ink"
         >
           ×
         </button>
@@ -307,14 +307,14 @@ function TestsList({
                   {listing.item.name}
                 </span>
                 <span
-                  className={`shrink-0 text-[11px] ${statusColour(listing.lastRun?.status ?? "")}`}
+                  className={`shrink-0 text-small ${statusColour(listing.lastRun?.status ?? "")}`}
                 >
                   {listing.lastRun
                     ? statusWords({ status: listing.lastRun.status, stopping: false })
                     : "never run"}
                 </span>
               </div>
-              <div className="flex items-center gap-2 text-[12px] text-ink-faint">
+              <div className="flex items-center gap-2 text-detail text-ink-faint">
                 <span className="truncate">
                   {listing.projectName} / {listing.workspaceName}
                 </span>
@@ -329,7 +329,7 @@ function TestsList({
                   {badges.map((badge) => (
                     <span
                       key={badge}
-                      className="rounded-full border border-amber-300/40 px-1.5 text-[10px] leading-4 text-amber-300"
+                      className="rounded-full border border-amber-300/40 px-1.5 text-micro leading-4.5 text-amber-300"
                     >
                       {badge}
                     </span>
@@ -381,11 +381,11 @@ function RunsList({
           >
             <div className="flex items-baseline gap-2">
               <span className="min-w-0 flex-1 truncate font-medium text-ink">{run.testName}</span>
-              <span className={`shrink-0 text-[11px] ${statusColour(run.status)}`}>
+              <span className={`shrink-0 text-small ${statusColour(run.status)}`}>
                 {statusWords(run)}
               </span>
             </div>
-            <div className="flex items-center gap-2 text-[12px] text-ink-faint">
+            <div className="flex items-center gap-2 text-detail text-ink-faint">
               <span className="truncate">{run.workspaceName}</span>
               <span className="shrink-0 tabular-nums">· {timeAgo(run.createdAt, now)}</span>
               {scheduleOf(started, run.id) && (

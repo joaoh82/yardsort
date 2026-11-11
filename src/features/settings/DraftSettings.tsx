@@ -47,7 +47,7 @@ export function DraftSettings() {
   const wanted = model ?? status.model;
   return (
     <fieldset className="grid gap-3">
-      <legend className="mb-1 text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+      <legend className="mb-1 text-small font-semibold tracking-wider text-ink-muted uppercase">
         Writing commit messages, pull requests and workflows
       </legend>
 
@@ -188,7 +188,7 @@ export function DraftSettings() {
             spellCheck={false}
             autoComplete="off"
             onChange={(event) => setKey(event.target.value)}
-            className={`${inputClass} font-mono text-[12px]`}
+            className={`${inputClass} font-mono text-detail`}
           />
         </Field>
       </form>
@@ -219,7 +219,7 @@ export function DraftSettings() {
           spellCheck={false}
           autoComplete="off"
           onChange={(event) => setModel(event.target.value)}
-          className={`${inputClass} font-mono text-[12px]`}
+          className={`${inputClass} font-mono text-detail`}
         />
       </Field>
 

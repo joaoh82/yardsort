@@ -111,7 +111,7 @@ export function DescribeTest({
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5 pt-4">
           <label className="flex flex-col gap-1.5">
-            <span className="text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+            <span className="text-small font-semibold tracking-wider text-ink-faint uppercase">
               What it should check
             </span>
             <textarea
@@ -126,7 +126,7 @@ export function DescribeTest({
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              className="rounded border border-line px-3 py-1 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40"
+              className="rounded border border-line px-3 py-1.5 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40"
               disabled={!canWrite}
               onClick={() => void write()}
             >
@@ -145,12 +145,12 @@ export function DescribeTest({
           {text && (
             <>
               <label className="flex flex-col gap-1.5">
-                <span className="text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+                <span className="text-small font-semibold tracking-wider text-ink-faint uppercase">
                   The file
                 </span>
                 <textarea
                   aria-label="The smoke test file"
-                  className="min-h-48 rounded border border-line bg-canvas px-2 py-1.5 font-mono text-[12px] outline-none select-text focus:border-accent"
+                  className="min-h-48 rounded border border-line bg-canvas px-2 py-1.5 font-mono text-detail outline-none select-text focus:border-accent"
                   value={text}
                   onChange={(event) => setText(event.target.value)}
                   spellCheck={false}
@@ -178,14 +178,14 @@ export function DescribeTest({
         <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-line p-3">
           {text && (
             <label className="mr-auto flex items-center gap-2 text-ink-muted">
-              <span className="text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+              <span className="text-small font-semibold tracking-wider text-ink-faint uppercase">
                 Save in
               </span>
               <select
                 aria-label="Save in workspace"
                 value={workspace}
                 onChange={(event) => setWorkspace(event.target.value)}
-                className="h-8 rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent"
+                className="h-9 rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent"
               >
                 {workspaces.length === 0 && <option value="">No workspace</option>}
                 {workspaces.map((w) => (

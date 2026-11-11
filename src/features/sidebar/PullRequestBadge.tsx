@@ -50,13 +50,13 @@ export function PullRequestBadge({
       type="button"
       aria-label={`Open ${label}`}
       onClick={() => void openUrl(pr.url).catch(console.error)}
-      className={`shrink-0 rounded ${toolbar ? "px-2 py-1 text-xs" : "px-1 text-[10px]"} leading-4 font-medium tabular-nums hover:brightness-125 ${pr.state === "closed" ? "line-through" : ""} ${colour}`}
+      className={`shrink-0 rounded ${toolbar ? "px-2 py-1 text-detail" : "px-1 text-micro"} leading-4.5 font-medium tabular-nums hover:brightness-125 ${pr.state === "closed" ? "line-through" : ""} ${colour}`}
     >
       {toolbar && (
         <svg
           aria-hidden
           viewBox="0 0 16 16"
-          className="mr-1 inline size-3.5"
+          className="mr-1 inline size-4"
           fill="none"
           stroke="currentColor"
           strokeWidth="1.5"

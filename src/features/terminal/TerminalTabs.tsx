@@ -28,7 +28,7 @@ export function TerminalTabs({ workspaceId }: { workspaceId: string }) {
   const runs = useSmokeTestsStore((s) => s.runs);
 
   return (
-    <div className="flex h-9 shrink-0 items-stretch border-b border-line bg-surface">
+    <div className="flex h-10 shrink-0 items-stretch border-b border-line bg-surface">
       <div role="tablist" aria-label="Terminals" className="flex min-w-0 items-stretch">
         {tabs.map((tab) => (
           <Tab key={tab.id} tab={tab} active={tab.id === activeId && !shownRun} />
@@ -59,7 +59,7 @@ export function TerminalTabs({ workspaceId }: { workspaceId: string }) {
             workspaceId={workspaceId}
             harness={harness}
             iconSize={12}
-            className="flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px] text-ink-faint hover:bg-raised hover:text-ink"
+            className="flex items-center gap-1.5 rounded px-2 py-0.5 text-small text-ink-faint hover:bg-raised hover:text-ink"
           />
         ))}
       </div>
@@ -96,7 +96,7 @@ function RunTab({
       >
         <StatusDot activity={runActivity(run)} />
         <span className="max-w-40 truncate">{run.testName}</span>
-        <span className="text-[11px] text-ink-faint">{statusWords(run)}</span>
+        <span className="text-small text-ink-faint">{statusWords(run)}</span>
       </button>
       <button
         type="button"
@@ -179,9 +179,9 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
         className="flex h-full items-center gap-2 pr-1 pl-3"
       >
         <StatusDot activity={activity} attention={tab.attention} />
-        {record && <HarnessIcon id={record.harnessId} label={record.harnessLabel} size={12} />}
+        {record && <HarnessIcon id={record.harnessId} label={record.harnessLabel} size={14} />}
         <span className="max-w-40 truncate">{tab.title}</span>
-        {status && <span className="text-[11px] text-ink-faint">{status}</span>}
+        {status && <span className="text-small text-ink-faint">{status}</span>}
         {!tab.exit && tab.busySince !== null && <BusyClock since={tab.busySince} />}
       </button>
       {tab.toldAbout && (
@@ -190,7 +190,7 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
           aria-label={`Told about ${tab.toldAbout}: show`}
           title={`Told it can read ${tab.toldAbout}. Show what it reads.`}
           onClick={() => setShowing(true)}
-          className="rounded px-1 text-[11px] text-ink-faint hover:bg-line hover:text-ink"
+          className="rounded px-1 text-small text-ink-faint hover:bg-line hover:text-ink"
         >
           ⇄
         </button>
@@ -233,7 +233,7 @@ function HandOff({ workspaceId }: { workspaceId: string }) {
       disabled={busy}
       title="Start another agent here, with what Yardsort recorded about this workspace as its first message — to read and edit before it is sent"
       onClick={() => void start()}
-      className="mr-1 shrink-0 rounded border border-line px-2 py-0.5 text-[11px] whitespace-nowrap text-ink-faint hover:border-accent hover:text-ink disabled:opacity-40"
+      className="mr-1 shrink-0 rounded border border-line px-2 py-0.5 text-small whitespace-nowrap text-ink-faint hover:border-accent hover:text-ink disabled:opacity-40"
     >
       Hand off…
     </button>

@@ -4,7 +4,7 @@ import type { Project } from "@/lib/ipc";
 import { REQUESTED_BY, VERDICTS, type Filters } from "./filters";
 
 const control =
-  "h-7 rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent";
+  "h-8 rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent";
 const picker = `${control} max-w-48`;
 
 /**

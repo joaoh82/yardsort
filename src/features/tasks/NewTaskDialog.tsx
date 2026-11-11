@@ -82,7 +82,7 @@ export function NewTaskDialog({
         <h2 id={titleId} className="text-base font-semibold">
           New task
         </h2>
-        <label className="mt-4 block text-[12px] text-ink-muted">
+        <label className="mt-4 block text-detail text-ink-muted">
           Project
           <select
             value={projectId}
@@ -101,7 +101,7 @@ export function NewTaskDialog({
             ))}
           </select>
         </label>
-        <label className="mt-3 block text-[12px] text-ink-muted">
+        <label className="mt-3 block text-detail text-ink-muted">
           Title
           <input
             ref={titleRef}
@@ -113,7 +113,7 @@ export function NewTaskDialog({
             className={`${field} mt-1`}
           />
         </label>
-        <label className="mt-3 block text-[12px] text-ink-muted">
+        <label className="mt-3 block text-detail text-ink-muted">
           Description
           <textarea
             value={body}
@@ -127,10 +127,10 @@ export function NewTaskDialog({
         </label>
         {choices && choices.labels.length > 0 && (
           <fieldset className="mt-3">
-            <legend className="text-[12px] text-ink-muted">Labels</legend>
+            <legend className="text-detail text-ink-muted">Labels</legend>
             <div className="mt-1 flex max-h-24 flex-wrap gap-x-3 gap-y-1 overflow-y-auto">
               {choices.labels.map((label) => (
-                <label key={label.name} className="flex items-center gap-1.5 text-[12px]">
+                <label key={label.name} className="flex items-center gap-1.5 text-detail">
                   <input
                     type="checkbox"
                     checked={labels.includes(label.name)}
@@ -150,7 +150,7 @@ export function NewTaskDialog({
             </div>
           </fieldset>
         )}
-        <p className="mt-3 text-[12px] text-ink-faint">
+        <p className="mt-3 text-detail text-ink-faint">
           This opens an issue on {project ? <b>{project.name}</b> : "the project"}&rsquo;s
           repository on GitHub. It is there for everyone who can see the repository as soon as you
           press Create, and the people watching it are told.

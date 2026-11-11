@@ -80,7 +80,7 @@ export function StartFromLinkDialog({ onClose }: { onClose: () => void }) {
             className="w-full rounded border border-line bg-canvas px-2 py-1.5 outline-none select-text focus:border-accent"
           />
         </label>
-        <p className="mt-1 text-xs text-ink-faint">
+        <p className="mt-1 text-detail text-ink-faint">
           Opens it in Tasks or Pull requests, with Delegate or Start workspace a press away. A
           repository that is not a project yet is cloned first.
         </p>

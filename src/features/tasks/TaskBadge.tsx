@@ -14,7 +14,7 @@ export function TaskBadge({ projectId, task }: { projectId: string; task: TaskRe
       aria-label={`Open task ${task.key} — ${task.title}`}
       title={`Started from task ${task.key}: ${task.title}`}
       onClick={() => showTask(projectId, task)}
-      className="shrink-0 rounded border border-line px-1 text-[10px] leading-4 font-medium text-ink-muted tabular-nums hover:bg-raised hover:text-ink"
+      className="shrink-0 rounded border border-line px-1 text-micro leading-4.5 font-medium text-ink-muted tabular-nums hover:bg-raised hover:text-ink"
     >
       {task.key}
     </button>

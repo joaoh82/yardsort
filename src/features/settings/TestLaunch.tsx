@@ -37,7 +37,7 @@ export function TestLaunch({ def, onClose }: { def: HarnessDef; onClose: () => v
         aria-label={`Test launch: ${def.label}`}
         className="flex h-full max-h-[40rem] w-full max-w-4xl flex-col rounded-lg border border-line bg-surface shadow-2xl shadow-black/50"
       >
-        <header className="flex h-10 shrink-0 items-center justify-between border-b border-line px-3">
+        <header className="flex h-11 shrink-0 items-center justify-between border-b border-line px-3">
           <h2 className="font-medium">
             Test launch: {def.label}{" "}
             <span className="text-ink-faint">(home directory, no prompt)</span>

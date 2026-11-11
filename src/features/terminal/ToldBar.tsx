@@ -30,7 +30,7 @@ export function ToldBar({ tab }: { tab: TerminalTab }) {
         >
           <span className="min-w-0 flex-1 truncate text-ink-muted">
             Told about {tab.toldAbout}: it can read what was said there with{" "}
-            <code className="font-mono text-[12px]">ys workspace context</code>.
+            <code className="font-mono text-detail">ys workspace context</code>.
           </span>
           <button
             type="button"

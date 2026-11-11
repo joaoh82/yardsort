@@ -1,7 +1,7 @@
 import { Graph, layout } from "@dagrejs/dagre";
 
-export const NODE_WIDTH = 210;
-export const NODE_HEIGHT = 58;
+export const NODE_WIDTH = 226;
+export const NODE_HEIGHT = 62;
 
 export interface Placed {
   id: string;

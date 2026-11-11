@@ -29,14 +29,14 @@ export function WorkflowsSection() {
           aria-label="New workflow"
           title="New workflow"
           onClick={() => openWorkflow(NEW_WORKFLOW)}
-          className="size-6 rounded text-ink-muted hover:bg-raised hover:text-ink"
+          className="size-7 rounded text-ink-muted hover:bg-raised hover:text-ink"
         >
           +
         </button>
       </PanelHeader>
       {waits.length > 0 && (
         <div className="border-b border-line px-3 py-1">
-          <h3 className="py-1 text-[10px] font-semibold tracking-wider text-ink-faint uppercase">
+          <h3 className="py-1 text-micro font-semibold tracking-wider text-ink-faint uppercase">
             Waiting on you
           </h3>
           <ul>
@@ -53,7 +53,7 @@ export function WorkflowsSection() {
                   <span className="truncate">
                     {wait.workflowName} · {wait.blockedLine}
                   </span>
-                  <span className="truncate text-[11px] text-ink-faint">{wait.actionNeeded}</span>
+                  <span className="truncate text-small text-ink-faint">{wait.actionNeeded}</span>
                 </button>
               </li>
             ))}
@@ -62,7 +62,7 @@ export function WorkflowsSection() {
       )}
       <ul className="min-h-0 overflow-y-auto py-1">
         {open === NEW_WORKFLOW && (
-          <li className="flex h-7 items-center bg-raised px-3 text-ink-muted italic">
+          <li className="flex h-8 items-center bg-raised px-3.5 text-ink-muted italic">
             New workflow
           </li>
         )}
@@ -75,7 +75,7 @@ export function WorkflowsSection() {
                 type="button"
                 aria-current={selected ? "page" : undefined}
                 onClick={() => openWorkflow(item.id)}
-                className={`flex h-7 w-full items-center gap-2 px-3 text-left ${
+                className={`flex h-8 w-full items-center gap-2 px-3.5 text-left ${
                   selected ? "bg-raised text-ink" : "text-ink-muted hover:bg-raised"
                 }`}
               >
@@ -102,7 +102,7 @@ export function WorkflowsSection() {
                   <span
                     title={`${item.activeRuns} running`}
                     aria-label={`${item.activeRuns} running`}
-                    className="shrink-0 rounded-full border border-accent/50 px-1.5 text-[10px] leading-4 text-accent"
+                    className="shrink-0 rounded-full border border-accent/50 px-1.5 text-micro leading-4.5 text-accent"
                   >
                     {item.activeRuns}
                   </span>

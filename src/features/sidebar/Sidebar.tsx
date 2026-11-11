@@ -75,7 +75,7 @@ export function Sidebar() {
         title="Projects"
         search={
           searching ? (
-            <div className="mr-2 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-full bg-raised px-2 focus-within:ring-1 focus-within:ring-accent">
+            <div className="mr-2 flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-full bg-raised px-2 focus-within:ring-1 focus-within:ring-accent">
               <SearchIcon />
               <input
                 ref={searchInput}
@@ -105,7 +105,7 @@ export function Sidebar() {
                     closeSearch();
                   }
                 }}
-                className="size-5 shrink-0 rounded text-ink-muted hover:text-ink"
+                className="size-6 shrink-0 rounded text-ink-muted hover:text-ink"
               >
                 ×
               </button>
@@ -121,7 +121,7 @@ export function Sidebar() {
               aria-label="Search projects"
               title="Search projects"
               onClick={() => setSearching(true)}
-              className="flex size-6 items-center justify-center rounded text-ink-muted hover:bg-raised hover:text-ink"
+              className="flex size-7 items-center justify-center rounded text-ink-muted hover:bg-raised hover:text-ink"
             >
               <SearchIcon />
             </button>
@@ -131,7 +131,7 @@ export function Sidebar() {
             aria-label="Add project"
             title={`Add project (open a folder: ${openKey})`}
             onClick={() => useProjectsStore.getState().openAddProject()}
-            className="size-6 rounded text-ink-muted hover:bg-raised hover:text-ink"
+            className="size-7 rounded text-ink-muted hover:bg-raised hover:text-ink"
           >
             +
           </button>
@@ -144,7 +144,7 @@ export function Sidebar() {
           <button
             type="button"
             onClick={() => useProjectsStore.getState().openAddProject()}
-            className="mt-2 rounded border border-line px-3 py-1 text-ink-muted hover:border-accent hover:text-ink"
+            className="mt-2 rounded border border-line px-3 py-1.5 text-ink-muted hover:border-accent hover:text-ink"
           >
             Add a project
           </button>
@@ -186,7 +186,7 @@ export function Sidebar() {
           type="button"
           title={`Settings (${settingsKey})`}
           onClick={() => useLayoutStore.getState().setSettingsOpen(true)}
-          className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded px-2 text-ink-muted hover:bg-raised hover:text-ink"
+          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded px-2 text-ink-muted hover:bg-raised hover:text-ink"
         >
           <span aria-hidden>⚙</span> Settings
         </button>
@@ -214,11 +214,11 @@ function UsageButton() {
       aria-current={open ? "page" : undefined}
       title="Usage: machine resources and tokens"
       onClick={() => useProjectsStore.getState().openUsage(!open)}
-      className={`flex h-7 shrink-0 items-center gap-1.5 rounded px-2 hover:bg-raised hover:text-ink ${
+      className={`flex h-8 shrink-0 items-center gap-1.5 rounded px-2 hover:bg-raised hover:text-ink ${
         open ? "bg-raised text-ink" : "text-ink-muted"
       }`}
     >
-      <svg aria-hidden="true" viewBox="0 0 16 16" className="size-3.5" fill="currentColor">
+      <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4" fill="currentColor">
         <rect x="2" y="9" width="2.5" height="5" rx="0.5" />
         <rect x="6.75" y="5" width="2.5" height="9" rx="0.5" />
         <rect x="11.5" y="2" width="2.5" height="12" rx="0.5" />
@@ -260,9 +260,9 @@ function UpdatePill() {
       aria-label={`Update to ${update.version}`}
       title={`Yardsort ${update.version} is available`}
       onClick={() => useUpdatesStore.getState().show(true)}
-      className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-accent/15 px-2.5 text-[11px] font-medium text-accent hover:bg-accent/25"
+      className="flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-accent/15 px-2.5 text-small font-medium text-accent hover:bg-accent/25"
     >
-      <span aria-hidden className="size-1.5 rounded-full bg-accent" />
+      <span aria-hidden className="size-2 rounded-full bg-accent" />
       update
     </button>
   );
@@ -278,7 +278,7 @@ function OutcomePrompt() {
   if (!asking) return null;
   const { answer, dismiss } = useOutcomesStore.getState();
   const choice =
-    "rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink";
+    "rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink";
   return (
     <div role="status" aria-label="How did it go?" className="border-t border-line p-3">
       <div className="flex items-start gap-2">
