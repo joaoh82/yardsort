@@ -39,6 +39,15 @@ import { DecodeError, type Decoder, parse } from "./decode.ts";
 import type { DeviceId, GrantId, HostId, RemoteError } from "./protocol.ts";
 import { remoteError } from "./protocol.ts";
 import { relayTicket, type RelayTicket, type TicketRequest } from "./relay.ts";
+import {
+  type NoticeView,
+  type NotificationPreferences,
+  type PushRegistration,
+  type ReachableReceipt,
+  noticeView,
+  notificationPreferences,
+  reachableReceipt,
+} from "./notices.ts";
 import { Secret } from "./secret.ts";
 
 /** How long one request may take. */
@@ -245,6 +254,34 @@ export class Client {
   /** `POST /v1/grants/{grant}/revoke`: unpair. */
   revokeGrant(access: Secret, grant: GrantId): Promise<void> {
     return this.#send("POST", `v1/grants/${grant}/revoke`, null, { access });
+  }
+
+  /** `POST /v1/notifications/token`. The token is this phone's, and only this phone's. */
+  registerPushToken(access: Secret, registration: PushRegistration): Promise<void> {
+    return this.#send("POST", "v1/notifications/token", null, { access, body: registration });
+  }
+
+  /** `GET /v1/notifications/preferences`. */
+  notificationPreferences(access: Secret): Promise<NotificationPreferences> {
+    return this.#send("GET", "v1/notifications/preferences", notificationPreferences, { access });
+  }
+
+  /** `POST /v1/notifications/preferences`. */
+  setNotificationPreferences(access: Secret, preferences: NotificationPreferences): Promise<void> {
+    return this.#send("POST", "v1/notifications/preferences", null, {
+      access,
+      body: preferences,
+    });
+  }
+
+  /** `POST /v1/notifications/reachable`. Queued notices are delivered, up to the server's cap. */
+  markNotificationsReachable(access: Secret): Promise<ReachableReceipt> {
+    return this.#send("POST", "v1/notifications/reachable", reachableReceipt, { access });
+  }
+
+  /** `GET /v1/notifications/{id}`. Another account's notice is missing. */
+  notice(access: Secret, id: string): Promise<NoticeView> {
+    return this.#send("GET", `v1/notifications/${encodeURIComponent(id)}`, noticeView, { access });
   }
 
   /** `POST /v1/relay/tickets`: a ticket to reach `host`, under the grant the server has in force. */

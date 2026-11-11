@@ -134,6 +134,11 @@ function SignedIn({
     };
   }, [fetchDevices, profile.id]);
 
+  useEffect(() => {
+    // The queue can flush without a token. Asking for permission stays on Settings → Notifications.
+    void accounts.refreshQueuedNotifications().catch(() => {});
+  }, [accounts, profile.id]);
+
   const refresh = async () => {
     setRefreshing(true);
     setAsked((n) => n + 1);

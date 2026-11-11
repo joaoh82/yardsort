@@ -57,6 +57,8 @@ pub trait Home: Send + Sync + 'static {
 pub struct Remote {
     session: tokio::sync::Mutex<Option<Session>>,
     connector: Mutex<Option<Connector>>,
+    /// Hands queued phone notices to the server. One for the life of the process.
+    notices: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 /// Why something failed: a stable code, and words for a person. Signed out at the server is
@@ -208,12 +210,86 @@ pub fn connect<H: Home>(home: &Arc<H>) {
         Arc::new(HomeAccess(home.clone())),
         Arc::new(HomeServing(home.clone())),
     );
+    if tokio::runtime::Handle::try_current().is_ok() {
+        let mut notices = home
+            .remote()
+            .notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if notices.is_none() {
+            let home = Arc::clone(home);
+            *notices = Some(tokio::spawn(async move {
+                loop {
+                    flush_notices(home.as_ref()).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+                }
+            }));
+        }
+    }
     // An earlier one stops as it is dropped.
     let earlier = match home.remote().connector.lock() {
         Ok(mut slot) => slot.replace(connector),
         Err(_) => None,
     };
     drop(earlier);
+}
+
+/// Hand the local outbox to the server. A notice the server refuses for good is dropped.
+/// One the server cannot be reached for stays queued, and the rest of the batch waits.
+async fn flush_notices(home: &impl Home) {
+    if home.store().remote_host().ok().flatten().is_none() {
+        return;
+    }
+    let pending = match yardsort_core::notify::pending(home.store(), yardsort_core::store::now_ms())
+    {
+        Ok(pending) => pending,
+        Err(_) => return,
+    };
+    if pending.is_empty() {
+        return;
+    }
+    let (client, access) = {
+        let mut slot = home.remote().session.lock().await;
+        let Some(session) = slot.as_mut() else {
+            return;
+        };
+        let device = session.device.clone();
+        let access = match session
+            .access(|refresh| keep_refresh(home, device.as_str(), refresh))
+            .await
+        {
+            Ok(access) => access,
+            Err(_) => return,
+        };
+        (session.client.clone(), access)
+    };
+    for notice in pending {
+        let Some(category) =
+            serde_json::from_value(serde_json::Value::String(notice.category)).ok()
+        else {
+            let _ = yardsort_core::notify::settle(home.store(), &notice.event_key, false);
+            continue;
+        };
+        let submission = remote_proto::notify::NoticeSubmission {
+            event_key: notice.event_key.clone(),
+            category,
+            kind: notice.kind,
+        };
+        match client.submit_notice(&access, &submission).await {
+            Ok(_) => {
+                let _ = yardsort_core::notify::settle(home.store(), &notice.event_key, true);
+            }
+            Err(ClientError::Remote(error))
+                if matches!(
+                    error.code,
+                    ErrorCode::InvalidRequest | ErrorCode::Forbidden | ErrorCode::NotFound
+                ) =>
+            {
+                let _ = yardsort_core::notify::settle(home.store(), &notice.event_key, false);
+            }
+            Err(_) => break,
+        }
+    }
 }
 
 /// Close the link, and with it every device's channel.

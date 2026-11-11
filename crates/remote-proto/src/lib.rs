@@ -32,6 +32,7 @@ pub mod account;
 pub mod grant;
 pub mod ids;
 pub mod model;
+pub mod notify;
 pub mod pairing;
 pub mod relay;
 pub mod start;

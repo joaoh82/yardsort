@@ -25,15 +25,18 @@ use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod, Transacti
 use std::collections::BTreeSet;
 
 use remote_proto::account::{DeviceKind, Secret};
+use remote_proto::notify::{NotificationPreferences, FLUSH_CAP};
 use remote_proto::pairing::MAX_OFFER_MISSES;
 use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, Scope, ServerId};
 use tokio::sync::{broadcast, mpsc};
 use tokio_postgres::{AsyncMessage, Client, Row};
 
 use crate::records::{
-    allowance, AccountId, Allowance, Decision, Device, GrantFilter, GrantRecord, GrantStatus,
-    GrantView, Handoff, Host, HostOffer, Issued, LinkPlace, PendingLogin, Records, RecordsError,
-    Redemption, Result, RevokeReason, Revoked, Rotation, Signal, SEEN_RESOLUTION_MS, SIGNALS_KEPT,
+    allowance, category_allowed, AccountId, Allowance, Decision, DeliveryEnd, Device, GrantFilter,
+    GrantRecord, GrantStatus, GrantView, Handoff, Host, HostOffer, IncomingNotice, Issued,
+    LinkPlace, NoticePage, NoticeRecord, NoticeToSend, PendingLogin, Records, RecordsError,
+    Redemption, Result, RevokeReason, Revoked, Rotation, Signal, CLAIM_LEASE_MS, OPEN_NOTICE_CAP,
+    SEEN_RESOLUTION_MS, SIGNALS_KEPT,
 };
 use crate::tokens::TokenHash;
 
@@ -63,6 +66,11 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         5,
         "refresh_retry",
         include_str!("../migrations/0005_refresh_retry.sql"),
+    ),
+    (
+        6,
+        "push_routes",
+        include_str!("../migrations/0006_push_routes.sql"),
     ),
 ];
 
@@ -101,6 +109,7 @@ const PROBE: &str = "probe";
 /// Where an instance's signals are handed out: `None` while nothing listens for them.
 type Listeners = Arc<Mutex<Option<broadcast::Sender<Signal>>>>;
 
+#[derive(Clone)]
 pub struct PgRecords {
     pool: Pool,
     /// For the listening connection, which is not one of the pool's.
@@ -683,9 +692,8 @@ impl Records for PgRecords {
         revoked: Revoked,
     ) -> Result<bool> {
         // An earlier revocation, and its reason, stand.
-        let changed = self
-            .client()
-            .await?
+        let client = self.client().await?;
+        let changed = client
             .execute(
                 "UPDATE devices SET revoked_at = COALESCE(revoked_at, $3),
                                     revoked_reason = COALESCE(revoked_reason, $4)
@@ -696,6 +704,13 @@ impl Records for PgRecords {
                     &revoked.at,
                     &reason_spelled(revoked.reason),
                 ],
+            )
+            .await
+            .map_err(failed)?;
+        client
+            .execute(
+                "DELETE FROM push_tokens WHERE device = $1 AND account = $2",
+                &[&device.as_str(), &account.0],
             )
             .await
             .map_err(failed)?;
@@ -718,8 +733,13 @@ impl Records for PgRecords {
                      UPDATE devices SET revoked_at = $3, revoked_reason = $4
                      WHERE account IN (SELECT id FROM account) AND revoked_at IS NULL
                      RETURNING 1
+                 ), dropped AS (
+                     DELETE FROM push_tokens
+                     WHERE account IN (SELECT id FROM account)
+                     RETURNING 1
                  )
-                 SELECT (SELECT count(*) FROM account), (SELECT count(*) FROM revoked)",
+                 SELECT (SELECT count(*) FROM account), (SELECT count(*) FROM revoked),
+                        (SELECT count(*) FROM dropped)",
                 &[
                     &issuer,
                     &subject,
@@ -1200,6 +1220,381 @@ impl Records for PgRecords {
             .await
             .map_err(failed)?;
         Ok(())
+    }
+
+    async fn save_push_token(
+        &self,
+        account: &AccountId,
+        device: &DeviceId,
+        platform: &str,
+        token: &str,
+        now: i64,
+    ) -> Result<bool> {
+        let phone = spelled(&DeviceKind::Phone)?;
+        let row = self
+            .client()
+            .await?
+            .query_opt(
+                "INSERT INTO push_tokens (device, account, platform, token, updated_at)
+                 SELECT id, account, $3, $4, $5 FROM devices
+                 WHERE id = $1 AND account = $2 AND kind = $6 AND revoked_at IS NULL
+                 ON CONFLICT (device) DO UPDATE SET
+                     platform = EXCLUDED.platform,
+                     token = EXCLUDED.token,
+                     updated_at = EXCLUDED.updated_at,
+                     account = EXCLUDED.account
+                 RETURNING device",
+                &[
+                    &device.as_str(),
+                    &account.0,
+                    &platform,
+                    &token,
+                    &now,
+                    &phone,
+                ],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(row.is_some())
+    }
+
+    async fn notification_preferences(
+        &self,
+        account: &AccountId,
+    ) -> Result<NotificationPreferences> {
+        let row = self
+            .client()
+            .await?
+            .query_opt(
+                "SELECT muted, task, review, failure, desktop_update, workflow
+                 FROM notification_preferences WHERE account = $1",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(match row {
+            Some(row) => NotificationPreferences {
+                muted: row.get(0),
+                task: row.get(1),
+                review: row.get(2),
+                failure: row.get(3),
+                desktop_update: row.get(4),
+                workflow: row.get(5),
+            },
+            None => NotificationPreferences::default(),
+        })
+    }
+
+    async fn set_notification_preferences(
+        &self,
+        account: &AccountId,
+        preferences: &NotificationPreferences,
+    ) -> Result<()> {
+        self.client()
+            .await?
+            .execute(
+                "INSERT INTO notification_preferences
+                     (account, muted, task, review, failure, desktop_update, workflow)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 ON CONFLICT (account) DO UPDATE SET
+                     muted = EXCLUDED.muted,
+                     task = EXCLUDED.task,
+                     review = EXCLUDED.review,
+                     failure = EXCLUDED.failure,
+                     desktop_update = EXCLUDED.desktop_update,
+                     workflow = EXCLUDED.workflow",
+                &[
+                    &account.0,
+                    &preferences.muted,
+                    &preferences.task,
+                    &preferences.review,
+                    &preferences.failure,
+                    &preferences.desktop_update,
+                    &preferences.workflow,
+                ],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    async fn accept_notice(
+        &self,
+        account: &AccountId,
+        notice: &IncomingNotice,
+        now: i64,
+    ) -> Result<NoticeRecord> {
+        let phone = spelled(&DeviceKind::Phone)?;
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        tx.execute(
+            "DELETE FROM mobile_notices WHERE account = $1 AND expires_at <= $2",
+            &[&account.0, &now],
+        )
+        .await
+        .map_err(failed)?;
+        let open: i64 = tx
+            .query_one(
+                "SELECT COUNT(*) FROM mobile_notice_deliveries d
+                 JOIN mobile_notices n ON n.id = d.notice
+                 WHERE n.account = $1 AND d.state IN ('queued', 'sending')",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?
+            .get(0);
+        let suppressed = notice.suppressed || open >= OPEN_NOTICE_CAP as i64;
+        let inserted = tx
+            .query_opt(
+                "INSERT INTO mobile_notices
+                     (id, account, event_key, category, kind, title, body, created_at, expires_at, suppressed)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 ON CONFLICT (account, event_key) DO NOTHING
+                 RETURNING id, suppressed",
+                &[
+                    &notice.id,
+                    &account.0,
+                    &notice.event_key,
+                    &notice.category,
+                    &notice.kind,
+                    &notice.title,
+                    &notice.body,
+                    &now,
+                    &notice.expires_at,
+                    &suppressed,
+                ],
+            )
+            .await
+            .map_err(failed)?;
+        let Some(row) = inserted else {
+            let existing = tx
+                .query_one(
+                    "SELECT id, suppressed FROM mobile_notices
+                     WHERE account = $1 AND event_key = $2",
+                    &[&account.0, &notice.event_key],
+                )
+                .await
+                .map_err(failed)?;
+            tx.commit().await.map_err(failed)?;
+            return Ok(NoticeRecord {
+                id: existing.get(0),
+                fresh: false,
+                suppressed: existing.get(1),
+            });
+        };
+        if !notice.suppressed && open >= OPEN_NOTICE_CAP as i64 {
+            tracing::warn!(
+                account = %account.0,
+                count = open,
+                "notice cap dropped a notice"
+            );
+        }
+        if !row.get::<_, bool>(1) {
+            tx.execute(
+                "INSERT INTO mobile_notice_deliveries (notice, device, state, queued_at, expires_at)
+                 SELECT $1, id, 'queued', $2, $3 FROM devices
+                 WHERE account = $4 AND kind = $5 AND revoked_at IS NULL",
+                &[&notice.id, &now, &notice.expires_at, &account.0, &phone],
+            )
+            .await
+            .map_err(failed)?;
+        }
+        tx.commit().await.map_err(failed)?;
+        Ok(NoticeRecord {
+            id: notice.id.clone(),
+            fresh: true,
+            suppressed,
+        })
+    }
+
+    async fn prepare_flush(&self, account: &AccountId, now: i64) -> Result<Vec<NoticeToSend>> {
+        let prefs = self.notification_preferences(account).await?;
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        tx.execute(
+            "UPDATE mobile_notice_deliveries AS d SET state = 'expired'
+             FROM mobile_notices n
+             WHERE d.notice = n.id AND n.account = $1 AND d.expires_at <= $2
+               AND d.state IN ('queued', 'sending')",
+            &[&account.0, &now],
+        )
+        .await
+        .map_err(failed)?;
+        let stale = now.saturating_sub(CLAIM_LEASE_MS);
+        tx.execute(
+            "UPDATE mobile_notice_deliveries AS d
+             SET state = 'queued', claimed_at = NULL
+             FROM mobile_notices n
+             WHERE d.notice = n.id AND n.account = $1 AND d.state = 'sending'
+               AND (d.claimed_at IS NULL OR d.claimed_at <= $2)",
+            &[&account.0, &stale],
+        )
+        .await
+        .map_err(failed)?;
+        let refused: Vec<String> = ["task", "review", "failure", "desktopUpdate", "workflow"]
+            .into_iter()
+            .filter(|name| !category_allowed(&prefs, name))
+            .map(str::to_owned)
+            .collect();
+        if !refused.is_empty() {
+            tx.execute(
+                "UPDATE mobile_notice_deliveries AS d SET state = 'dropped'
+                 FROM mobile_notices n
+                 WHERE d.notice = n.id AND n.account = $1 AND d.state = 'queued'
+                   AND n.category = ANY($2)",
+                &[&account.0, &refused],
+            )
+            .await
+            .map_err(failed)?;
+        }
+        let queued = tx
+            .query(
+                "SELECT d.notice, d.device FROM mobile_notice_deliveries d
+                 JOIN mobile_notices n ON n.id = d.notice
+                 WHERE n.account = $1 AND d.state = 'queued'
+                 ORDER BY d.device, d.queued_at DESC, d.notice DESC",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?;
+        let mut device = String::new();
+        let mut kept = 0usize;
+        let mut dropped = 0u64;
+        for row in &queued {
+            let this: String = row.get(1);
+            if this != device {
+                device = this;
+                kept = 0;
+            }
+            if kept >= FLUSH_CAP {
+                let notice: String = row.get(0);
+                dropped += tx
+                    .execute(
+                        "UPDATE mobile_notice_deliveries SET state = 'dropped'
+                         WHERE notice = $1 AND device = $2 AND state = 'queued'",
+                        &[&notice, &device],
+                    )
+                    .await
+                    .map_err(failed)?;
+            } else {
+                kept += 1;
+            }
+        }
+        if dropped > 0 {
+            tracing::warn!(
+                account = %account.0,
+                count = dropped,
+                "notice flush cap dropped queued notices"
+            );
+        }
+        let rows = tx
+            .query(
+                "SELECT d.notice, d.device, t.platform, t.token, n.title, n.body, n.category, n.event_key
+                 FROM mobile_notice_deliveries d
+                 JOIN mobile_notices n ON n.id = d.notice
+                 JOIN push_tokens t ON t.device = d.device AND t.account = n.account
+                 JOIN devices dev ON dev.id = d.device AND dev.revoked_at IS NULL
+                 WHERE n.account = $1 AND d.state = 'queued'
+                 ORDER BY d.notice",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?;
+        tx.commit().await.map_err(failed)?;
+        let mut ready = Vec::with_capacity(rows.len());
+        for row in rows {
+            ready.push(NoticeToSend {
+                notice_id: row.get(0),
+                device: DeviceId::new(row.get::<_, String>(1)).map_err(failed)?,
+                platform: row.get(2),
+                token: row.get(3),
+                title: row.get(4),
+                body: row.get(5),
+                category: row.get(6),
+                event_key: row.get(7),
+            });
+        }
+        Ok(ready)
+    }
+
+    async fn claim_delivery(
+        &self,
+        notice: &str,
+        device: &DeviceId,
+        now: i64,
+    ) -> Result<Option<i64>> {
+        let row = self
+            .client()
+            .await?
+            .query_opt(
+                "UPDATE mobile_notice_deliveries SET state = 'sending', claimed_at = $3
+                 WHERE notice = $1 AND device = $2 AND state = 'queued'
+                 RETURNING claimed_at",
+                &[&notice, &device.as_str(), &now],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(row.map(|row| row.get(0)))
+    }
+
+    async fn finish_delivery(
+        &self,
+        notice: &str,
+        device: &DeviceId,
+        claimed_at: i64,
+        end: DeliveryEnd,
+    ) -> Result<()> {
+        let state = match end {
+            DeliveryEnd::Sent => "sent",
+            DeliveryEnd::Again | DeliveryEnd::Gone => "queued",
+        };
+        let client = self.client().await?;
+        let updated = client
+            .execute(
+                "UPDATE mobile_notice_deliveries SET state = $3,
+                     sent_at = CASE WHEN $3 = 'sent' THEN $4 ELSE sent_at END,
+                     claimed_at = CASE WHEN $3 = 'queued' THEN NULL ELSE claimed_at END
+                 WHERE notice = $1 AND device = $2 AND state = 'sending' AND claimed_at = $5",
+                &[
+                    &notice,
+                    &device.as_str(),
+                    &state,
+                    &crate::http::now_ms(),
+                    &claimed_at,
+                ],
+            )
+            .await
+            .map_err(failed)?;
+        if end == DeliveryEnd::Gone && updated > 0 {
+            client
+                .execute(
+                    "DELETE FROM push_tokens WHERE device = $1",
+                    &[&device.as_str()],
+                )
+                .await
+                .map_err(failed)?;
+        }
+        Ok(())
+    }
+
+    async fn notice_for(&self, account: &AccountId, id: &str) -> Result<Option<NoticePage>> {
+        let row = self
+            .client()
+            .await?
+            .query_opt(
+                "SELECT id, category, kind, title, body FROM mobile_notices
+                 WHERE id = $1 AND account = $2",
+                &[&id, &account.0],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(row.map(|row| NoticePage {
+            id: row.get(0),
+            category: row.get(1),
+            kind: row.get(2),
+            title: row.get(3),
+            body: row.get(4),
+        }))
     }
 }
 

@@ -80,6 +80,7 @@ async fn main() -> Result<(), String> {
             offers_per_minute: generous,
             pairings_per_minute: generous,
             tickets_per_minute: generous,
+            notices_per_minute: generous,
         },
         yardsort_server::relay::Relay::default(),
         yardsort_server::config::DEFAULT_DEVICE_REDIRECTS

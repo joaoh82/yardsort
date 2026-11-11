@@ -46,7 +46,9 @@ macro_rules! for_each_store {
 
 for_each_store!(a_device_signs_in_refreshes_and_is_revoked_over_http);
 
-async fn a_device_signs_in_refreshes_and_is_revoked_over_http(records: impl Records + 'static) {
+async fn a_device_signs_in_refreshes_and_is_revoked_over_http(
+    records: impl Records + Clone + 'static,
+) {
     let s = Served::start(records).await;
 
     let server: ServerDescription = s.get("v1/server").await.json().await.unwrap();

@@ -177,6 +177,16 @@ impl Client {
             .await
     }
 
+    /// `POST /v1/notices`: one activity notice for the phones on this account.
+    pub async fn submit_notice(
+        &self,
+        access: &Secret,
+        notice: &remote_proto::notify::NoticeSubmission,
+    ) -> Result<remote_proto::notify::NoticeReceipt> {
+        let request = self.http.post(self.url("v1/notices")?).json(notice);
+        self.send(self.authed(request, access)).await
+    }
+
     /// `POST /v1/hosts`.
     pub async fn register_host(
         &self,

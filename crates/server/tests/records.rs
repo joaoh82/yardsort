@@ -404,7 +404,7 @@ async fn a_lapsed_refresh_credential_is_expired(records: Arc<impl Records>) {
 }
 
 async fn racing_rotations_of_one_credential_let_exactly_one_through(
-    records: Arc<impl Records + 'static>,
+    records: Arc<impl Records + Clone + 'static>,
 ) {
     let account = records.account("https://id.one", "alice", T).await.unwrap();
     enroll(&*records, &account, "phone", T).await;
@@ -1170,7 +1170,7 @@ async fn revoking_a_grant_or_removing_its_host_ends_it(records: Arc<impl Records
     );
 }
 
-async fn racing_approvals_leave_one_grant_in_force(records: Arc<impl Records + 'static>) {
+async fn racing_approvals_leave_one_grant_in_force(records: Arc<impl Records + Clone + 'static>) {
     let alice = records.account("https://id.one", "alice", T).await.unwrap();
     let host = new_host(
         &alice,
@@ -1518,7 +1518,7 @@ async fn a_rate_limit_is_one_bucket_per_gate_and_key_and_refills_over_a_minute(
 }
 
 async fn racing_requests_take_no_more_than_a_rate_limit_holds(
-    records: Arc<impl Records + 'static>,
+    records: Arc<impl Records + Clone + 'static>,
 ) {
     let racers: Vec<_> = (0..12)
         .map(|_| {

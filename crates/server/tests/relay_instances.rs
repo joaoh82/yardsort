@@ -84,14 +84,17 @@ struct Instances {
     proxy: ReplayProxy,
 }
 
-async fn instances(a: impl Records + 'static, b: impl Records + 'static) -> Instances {
+async fn instances(
+    a: impl Records + Clone + 'static,
+    b: impl Records + Clone + 'static,
+) -> Instances {
     instances_with_rounds(a, b, RECHECK_EVERY).await
 }
 
 /// With rounds of checks `rounds` apart.
 async fn instances_with_rounds(
-    a: impl Records + 'static,
-    b: impl Records + 'static,
+    a: impl Records + Clone + 'static,
+    b: impl Records + Clone + 'static,
     rounds: Duration,
 ) -> Instances {
     instances_with(a, b, rounds, http::Options::default).await
@@ -99,8 +102,8 @@ async fn instances_with_rounds(
 
 /// With rounds of checks `rounds` apart, each instance with `options`.
 async fn instances_with(
-    a: impl Records + 'static,
-    b: impl Records + 'static,
+    a: impl Records + Clone + 'static,
+    b: impl Records + Clone + 'static,
     rounds: Duration,
     options: impl Fn() -> http::Options,
 ) -> Instances {
@@ -260,8 +263,8 @@ async fn closed_within(wait: Duration, reader: &mut LinkReader) -> CloseReason {
 }
 
 async fn a_phone_reaches_its_host_whichever_instance_it_lands_on(
-    a: impl Records + 'static,
-    b: impl Records + 'static,
+    a: impl Records + Clone + 'static,
+    b: impl Records + Clone + 'static,
     records: impl Records,
 ) {
     let i = instances(a, b).await;
@@ -304,8 +307,8 @@ async fn a_phone_reaches_its_host_whichever_instance_it_lands_on(
 }
 
 async fn a_host_that_connects_again_elsewhere_takes_its_link_with_it(
-    a: impl Records + 'static,
-    b: impl Records + 'static,
+    a: impl Records + Clone + 'static,
+    b: impl Records + Clone + 'static,
     records: impl Records,
 ) {
     let i = instances(a, b).await;
@@ -341,8 +344,8 @@ async fn a_host_that_connects_again_elsewhere_takes_its_link_with_it(
 }
 
 async fn a_place_nobody_keeps_is_not_believed(
-    a: impl Records + 'static,
-    b: impl Records + 'static,
+    a: impl Records + Clone + 'static,
+    b: impl Records + Clone + 'static,
     records: impl Records,
 ) {
     let i = instances(a, b).await;
@@ -386,8 +389,8 @@ async fn a_place_nobody_keeps_is_not_believed(
 }
 
 async fn a_host_hears_of_a_device_asking_through_the_other_instance(
-    a: impl Records + 'static,
-    b: impl Records + 'static,
+    a: impl Records + Clone + 'static,
+    b: impl Records + Clone + 'static,
     records: impl Records,
 ) {
     let i = instances(a, b).await;
@@ -437,8 +440,8 @@ async fn a_host_hears_of_a_device_asking_through_the_other_instance(
 }
 
 async fn what_happens_through_one_instance_reaches_the_other_at_once(
-    a: impl Records + 'static,
-    b: impl Records + 'static,
+    a: impl Records + Clone + 'static,
+    b: impl Records + Clone + 'static,
     _records: impl Records,
 ) {
     // A round a minute apart: only a signal gets anything there in time.
@@ -526,8 +529,8 @@ async fn what_happens_through_one_instance_reaches_the_other_at_once(
 }
 
 async fn a_host_link_taken_elsewhere_closes_at_once(
-    a: impl Records + 'static,
-    b: impl Records + 'static,
+    a: impl Records + Clone + 'static,
+    b: impl Records + Clone + 'static,
     _records: impl Records,
 ) {
     // A round a minute apart: only a signal gets anything there in time.
@@ -557,8 +560,8 @@ async fn a_host_link_taken_elsewhere_closes_at_once(
 }
 
 async fn two_instances_share_one_rate_limit(
-    a: impl Records + 'static,
-    b: impl Records + 'static,
+    a: impl Records + Clone + 'static,
+    b: impl Records + Clone + 'static,
     _records: impl Records,
 ) {
     let options = || http::Options {
@@ -591,8 +594,8 @@ async fn two_instances_share_one_rate_limit(
 }
 
 async fn a_ticket_request_sent_on_counts_once(
-    a: impl Records + 'static,
-    b: impl Records + 'static,
+    a: impl Records + Clone + 'static,
+    b: impl Records + Clone + 'static,
     _records: impl Records,
 ) {
     // Everyone's requests come from the proxy's address, so all count against one limit.

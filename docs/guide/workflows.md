@@ -320,7 +320,10 @@ reads one line from standard input. Passing the code as `--code <code>` still wo
 and `ys` warns, because that form stays in your shell history and in the process list.
 The code is about eight characters. Yardsort shows it on the run. The notification
 includes it unless Settings → General leaves it out, which is the default on Linux.
-The notice then says to open Yardsort for the code. `ys workflow runs` does not print
+The notice then says to open Yardsort for the code. That is the notification on this computer.
+A phone signed in through [Remote](remote.md#notifications) gets a separate notice that an
+approval is waiting. It opens the item and does not include the code. You approve on the computer.
+`ys workflow runs` does not print
 the code, and neither does `--json`. A wrong code is refused. After five wrong codes,
 `ys` stops until you press **Show a new code** in the window. Opening Yardsort again
 does not clear those wrong tries. Listing the run does not issue a code. Opening
@@ -426,8 +429,9 @@ summary and the session ends because `until` is `exited`, the brief says so.
 
 A session Yardsort started can ask and can record the summary. It cannot answer. That
 stays with you. This is not an approval. The one-time code works the same way as one:
-the window shows it, the notification includes it unless Settings → General leaves it
-out, and `ys workflow runs` does not print it. After five wrong codes the terminal
+the window shows it, the notification on this computer includes it unless Settings → General
+leaves it out, and `ys workflow runs` does not print it. A phone notice opens the question and
+does not include the code. You answer on the computer. After five wrong codes the terminal
 stops until you press **Show a new code**.
 
 `timeout` still fails the step when you have not answered in time, or when a summary

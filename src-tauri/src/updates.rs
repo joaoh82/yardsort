@@ -122,6 +122,18 @@ pub async fn update_check(app: AppHandle) -> IpcResult<UpdateStatus> {
         .0
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = update;
+    if let Some(available) = &status.available {
+        let version = available.version.clone();
+        let _ = crate::state::blocking(app, move |state| {
+            let _ = yardsort_core::notify::observe_desktop_update(
+                &state.store,
+                &version,
+                yardsort_core::store::now_ms(),
+            );
+            Ok(())
+        })
+        .await;
+    }
     Ok(status)
 }
 

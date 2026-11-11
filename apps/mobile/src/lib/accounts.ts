@@ -472,6 +472,90 @@ export class Accounts {
     return this.#withAccess((session, access) => session.client.devices(access));
   }
 
+  /** What this phone is set to receive. */
+  notificationPreferences(): Promise<import("@yardsort/remote-client").NotificationPreferences> {
+    return this.#withAccess((session, access) => session.client.notificationPreferences(access));
+  }
+
+  /** Replace what this phone is set to receive. */
+  setNotificationPreferences(
+    preferences: import("@yardsort/remote-client").NotificationPreferences,
+  ): Promise<void> {
+    return this.#withAccess((session, access) =>
+      session.client.setNotificationPreferences(access, preferences),
+    );
+  }
+
+  /** Ask for notices still queued. Does not ask the operating system for a token. */
+  refreshQueuedNotifications(): Promise<void> {
+    return this.#withAccess(async (session, access) => {
+      await session.client.markNotificationsReachable(access);
+    });
+  }
+
+  /**
+   * Register a push token when the phone has one, and ask for anything still queued, for every
+   * account this phone is signed in to. The one in use is first. One account that cannot be
+   * reached does not stop the others. When none could, the last error is thrown.
+   */
+  async registerForNotifications(
+    readToken: () => Promise<{ platform: "apns" | "fcm"; token: string } | null>,
+  ): Promise<void> {
+    const token = await readToken();
+    const index = this.#need();
+    const ordered = [
+      ...(index.active ? [index.active] : []),
+      ...index.all.filter((profile) => profile.id !== index.active?.id),
+    ];
+    if (ordered.length === 0) return;
+    let last: unknown;
+    let registered = false;
+    for (const profile of ordered) {
+      try {
+        await this.#withAccessOf(profile, this.#sessionOf(profile), async (session, access) => {
+          if (token) await session.client.registerPushToken(access, token);
+          await session.client.markNotificationsReachable(access);
+        });
+        registered = true;
+      } catch (error) {
+        last = error;
+      }
+    }
+    if (!registered && last !== undefined) throw last;
+  }
+
+  /**
+   * One notification, for the screen a tap opens. The notice may belong to any account this
+   * phone is signed in to, so each is asked, the one in use first. A miss on one account is not
+   * a miss on the next.
+   */
+  async notice(id: string): Promise<import("@yardsort/remote-client").NoticeView> {
+    const index = this.#need();
+    const ordered = [
+      ...(index.active ? [index.active] : []),
+      ...index.all.filter((profile) => profile.id !== index.active?.id),
+    ];
+    if (ordered.length === 0) throw new ClientError("invalid", "Not signed in.");
+    let last: unknown = new ClientError("invalid", "Not signed in.");
+    for (const profile of ordered) {
+      try {
+        return await this.#withAccessOf(profile, this.#sessionOf(profile), (session, access) =>
+          session.client.notice(access, id),
+        );
+      } catch (error) {
+        last = error;
+        if (
+          error instanceof ClientError &&
+          (error.code === "not_found" || error.code === "unauthenticated")
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw last;
+  }
+
   /**
    * The computers that let this phone in. A grant's computer no longer on the account is not one:
    * the server has taken it off, and nothing can reach it.

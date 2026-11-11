@@ -21,7 +21,11 @@ source of your changed version
 **What works today.** Signing in, listing and revoking devices, pairing a device with a host
 (approved at the host), and the relay, through which a paired device reaches its host's
 workspaces and terminals with neither of them listening for connections
-([docs/design/27-remote-r2.md](../../../docs/design/27-remote-r2.md)). The Yardsort app can be a host, in
+([docs/design/27-remote-r2.md](../../../docs/design/27-remote-r2.md)). A computer can also leave a
+notice for the phone: a task, a review, a failure, a desktop update, or a workflow question or
+approval. The phone opens the item. Answering and installing stay on the computer
+([docs/design/40-mobile-notifications.md](../../../docs/design/40-mobile-notifications.md)).
+Notices wait on the server until you set Apple or Google push credentials. The Yardsort app can be a host, in
 Settings → Remote, which is still under development. The phone app is in `apps/mobile`, and is not in
 the app stores yet, so you build it yourself; the repository's pairing tool also stands in for one. So
 for now this is for trying the server and getting ready for what comes next.

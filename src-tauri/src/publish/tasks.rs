@@ -287,7 +287,13 @@ pub async fn project_tasks(
     closed: bool,
 ) -> IpcResult<ProjectTasks> {
     blocking(app, move |state| {
-        Ok(look(state, &project_id, refresh, closed))
+        let found = look(state, &project_id, refresh, closed);
+        let _ = yardsort_core::notify::observe_tasks(
+            &state.store,
+            &found.tasks,
+            yardsort_core::store::now_ms(),
+        );
+        Ok(found)
     })
     .await
 }

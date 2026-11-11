@@ -2,12 +2,14 @@
 //! HTTP the way a device does.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use remote_proto::account::{Credentials, DeviceKind, NewDevice, Secret, TokenRequest};
 use remote_proto::{Platform, RemoteError, ServerId};
 use reqwest::header::LOCATION;
 use url::Url;
 use yardsort_server::oidc::{self, ProviderConfig};
+use yardsort_server::push::PushProvider;
 use yardsort_server::records::Records;
 use yardsort_server::relay::Relay;
 use yardsort_server::{http, tokens, ControlService, ServerConfig};
@@ -27,30 +29,66 @@ pub struct Served {
 }
 
 impl Served {
-    pub async fn start(records: impl Records + 'static) -> Self {
+    pub async fn start(records: impl Records + Clone + 'static) -> Self {
         Self::start_with(records, http::Options::default()).await
     }
 
-    pub async fn start_with(records: impl Records + 'static, options: http::Options) -> Self {
+    pub async fn start_with(
+        records: impl Records + Clone + 'static,
+        options: http::Options,
+    ) -> Self {
         Self::start_as(records, options, Relay::default()).await
     }
 
     /// As one of several instances of a server: `relay` names this one, and how requests reach
     /// the others.
     pub async fn start_as(
-        records: impl Records + 'static,
+        records: impl Records + Clone + 'static,
         options: http::Options,
         relay: Relay,
     ) -> Self {
         Self::start_allowing(records, options, relay, vec![APP.into()]).await
     }
 
+    /// With `push` recording or refusing what would be sent to a phone.
+    pub async fn start_notifying(
+        records: impl Records + Clone + 'static,
+        push: Arc<dyn PushProvider>,
+    ) -> Self {
+        Self::start_notifying_with(records, push, http::Options::default()).await
+    }
+
+    pub async fn start_notifying_with(
+        records: impl Records + Clone + 'static,
+        push: Arc<dyn PushProvider>,
+        options: http::Options,
+    ) -> Self {
+        Self::open(
+            records,
+            options,
+            Relay::default(),
+            vec![APP.into()],
+            Some(push),
+        )
+        .await
+    }
+
     /// With `redirects` as the device redirects the server allows.
     pub async fn start_allowing(
-        records: impl Records + 'static,
+        records: impl Records + Clone + 'static,
         options: http::Options,
         relay: Relay,
         redirects: Vec<String>,
+    ) -> Self {
+        Self::open(records, options, relay, redirects, None).await
+    }
+
+    async fn open(
+        records: impl Records + Clone + 'static,
+        options: http::Options,
+        relay: Relay,
+        redirects: Vec<String>,
+        push: Option<Arc<dyn PushProvider>>,
     ) -> Self {
         let idp = Idp::start(Some(SECRET)).await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -73,6 +111,10 @@ impl Served {
         )
         .unwrap()
         .with_relay(relay);
+        let service = match push {
+            Some(push) => service.with_push(push),
+            None => service,
+        };
         let relay = service.relay().clone();
         let app = http::router(service, options)
             .into_make_service_with_connect_info::<std::net::SocketAddr>();

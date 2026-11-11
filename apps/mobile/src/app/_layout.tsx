@@ -1,9 +1,9 @@
 // This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
+import { DarkTheme, DefaultTheme, router, Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { Accounts, messageOf } from "../lib/accounts";
@@ -18,6 +18,7 @@ import {
   systemBrowser,
 } from "../lib/native";
 import { incoming } from "../lib/pairing";
+import { installPushHandlers, registerGrantedPush } from "../lib/push-token";
 import { Button, FONTS, Problem, Screen, useColors, useScheme } from "../ui/parts";
 
 appearance.start(appearanceFile);
@@ -32,6 +33,11 @@ const app = {
 
 export default function Layout() {
   const [failed, setFailed] = useState<string | null>(null);
+  // A tap must not navigate while the sign-in list failed to load: the stack is not mounted then.
+  const blocked = useRef(false);
+  useEffect(() => {
+    blocked.current = failed !== null;
+  }, [failed]);
   const colors = useColors();
   // Android's header is drawn from this. Without it, a dark phone gets a white header, with the
   // status bar's white icons lost against it. iOS 26's glass bar and its title stay the system's.
@@ -48,10 +54,35 @@ export default function Layout() {
     },
   };
 
-  const load = () => app.accounts.load().catch((error: unknown) => setFailed(messageOf(error)));
+  const load = () =>
+    app.accounts
+      .load()
+      .then(() => {
+        setFailed(null);
+        // Permission was asked in Settings. When it is already granted, every signed-in account
+        // gets the token. This does not ask again.
+        void registerGrantedPush((read) => app.accounts.registerForNotifications(read));
+      })
+      .catch((error: unknown) => setFailed(messageOf(error)));
   useEffect(() => {
     void load();
   }, []);
+  // Taps, including one that launched the app, and a token the system rotates. Permission is
+  // asked from Settings → Notifications, not here. A tap that arrives while the saved sign-ins
+  // failed to load is dropped: the stack is not mounted then.
+  useEffect(
+    () =>
+      installPushHandlers(
+        (route) => {
+          if (blocked.current) return;
+          router.push(route);
+        },
+        (token) => {
+          void app.accounts.registerForNotifications(async () => token).catch(() => {});
+        },
+      ),
+    [],
+  );
 
   return (
     <SafeAreaProvider>

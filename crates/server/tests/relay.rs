@@ -222,7 +222,7 @@ fn refused(result: Result<RelayLink, ClientError>) -> ErrorCode {
     }
 }
 
-async fn a_phone_reaches_its_host_and_nothing_else_does(records: impl Records + 'static) {
+async fn a_phone_reaches_its_host_and_nothing_else_does(records: impl Records + Clone + 'static) {
     let s = Served::start(records).await;
     let p = pair(&s, "alice").await;
     let mut host = host_link(&s, &p).await;
@@ -321,7 +321,7 @@ async fn a_phone_reaches_its_host_and_nothing_else_does(records: impl Records + 
     );
 }
 
-async fn revoking_closes_a_live_socket(records: impl Records + 'static) {
+async fn revoking_closes_a_live_socket(records: impl Records + Clone + 'static) {
     let s = Served::start(records).await;
     let p = pair(&s, "alice").await;
     let mut host = host_link(&s, &p).await;
@@ -392,7 +392,7 @@ async fn revoking_closes_a_live_socket(records: impl Records + 'static) {
     assert_eq!(closed(&mut phone.reader).await, CloseReason::Revoked);
 }
 
-async fn a_slow_phone(records: impl Records + 'static) {
+async fn a_slow_phone(records: impl Records + Clone + 'static) {
     let s = Served::start(records).await;
     let p = pair(&s, "alice").await;
     let mut host = host_link(&s, &p).await;
@@ -439,7 +439,7 @@ async fn a_slow_phone(records: impl Records + 'static) {
     );
 }
 
-async fn host_comes_and_goes(records: impl Records + 'static) {
+async fn host_comes_and_goes(records: impl Records + Clone + 'static) {
     let s = Served::start(records).await;
     let p = pair(&s, "alice").await;
     let c = client(&s);
@@ -468,7 +468,7 @@ async fn host_comes_and_goes(records: impl Records + 'static) {
     assert_eq!(closed(&mut phone.reader).await, CloseReason::HostOffline);
 }
 
-async fn rule_breakers(records: impl Records + 'static) {
+async fn rule_breakers(records: impl Records + Clone + 'static) {
     let s = Served::start(records).await;
     let p = pair(&s, "alice").await;
     let mut host = host_link(&s, &p).await;
@@ -530,7 +530,7 @@ fn pairing(grant: &GrantId) -> Heard {
     Heard::Text(NOTICE_CHANNEL, serde_json::to_string(&notice).unwrap())
 }
 
-async fn a_host_hears_of_each_device_asking_to_pair_once(records: impl Records + 'static) {
+async fn a_host_hears_of_each_device_asking_to_pair_once(records: impl Records + Clone + 'static) {
     let s = Served::start(records).await;
     let (host, host_id) = host(&s, "alice").await;
 

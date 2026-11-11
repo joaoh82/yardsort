@@ -135,6 +135,11 @@ pub async fn project_pull_requests(
         }
         found.workspaces = owned;
         found.tracked = super::tracked::of_project(state, &project_id, refresh, asked);
+        let _ = yardsort_core::notify::observe_reviews(
+            &state.store,
+            &found.pull_requests,
+            yardsort_core::store::now_ms(),
+        );
         Ok(found)
     })
     .await

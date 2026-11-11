@@ -325,6 +325,11 @@ projects, and sends a fixed sentence: "An agent on Build box needs you" is too m
 is the person's content); "Yardsort: an agent needs you" is the default. Tapping opens the app, which
 signs in and fetches the current state; it approves nothing. PTY quiet never becomes "needs you".
 
+YARD-4 built the shared notices in [40](40-mobile-notifications.md). A computer posts a category
+and a stable event key over HTTP. The server chooses a fixed sentence and the phone opens that
+item. "An agent needs you" from a quiet terminal is still not this. A tap still approves nothing,
+and a one-time code is never in the push.
+
 **Self-hosted servers and the official app's push** (proposal §16, due at R4). Decided: option (b) of
 §8 now, and (a) left for R7. A self-hosted server works fully without push; its operator who wants
 push builds the app under their own identifiers with their own APNs and FCM credentials, as the README

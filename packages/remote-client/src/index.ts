@@ -14,6 +14,7 @@ export * from "./crypto.ts";
 export { chars, DecodeError, type Decoder, decode, parse, utf8Length } from "./decode.ts";
 export * from "./frame.ts";
 export * from "./limits.ts";
+export * from "./notices.ts";
 export * from "./protocol.ts";
 export * from "./relay.ts";
 export * from "./revoked.ts";

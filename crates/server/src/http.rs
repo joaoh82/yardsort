@@ -8,24 +8,27 @@
 //! ticket are limited per client address, across every instance ([`crate::limit`]). Behind a
 //! proxy, the address is the one the proxy names in [`Options::client_ip_header`]; otherwise the
 //! connection's own, which needs the router served with `into_make_service_with_connect_info`.
+//! Submitting a notice, registering a push token and saying the phone is reachable are limited
+//! per device, by a hash of its id. A request with no usable access token is limited by address.
 //!
 //! Nothing secret is logged: a request is logged by method, path and status, never its query
 //! (where sign-in codes travel) or its headers (where access credentials do).
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::WebSocketUpgrade;
-use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Extension, Path, Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use remote_proto::account::{LoginParams, TokenRequest};
+use remote_proto::notify::{NoticeSubmission, NotificationPreferences, PushRegistration};
 use remote_proto::pairing::{GrantDecision, HostRegistration, PairingRequest};
 use remote_proto::relay::{TicketRequest, MAX_MESSAGE};
 use remote_proto::{DeviceId, ErrorCode, GrantId, HostId, RemoteError};
@@ -58,6 +61,8 @@ pub const PAIRINGS_PER_MINUTE: u32 = 10;
 /// Relay tickets one address may ask for a minute. A host asks for one each time it connects,
 /// and a device each time it opens a host.
 pub const TICKETS_PER_MINUTE: u32 = 60;
+/// Notices, token registrations and reachable calls one device may make a minute.
+pub const NOTICES_PER_MINUTE: u32 = 60;
 
 pub struct Options {
     /// The header a trusted proxy puts the client's address in (`Fly-Client-IP` on Fly.io). Set
@@ -68,6 +73,7 @@ pub struct Options {
     pub offers_per_minute: u32,
     pub pairings_per_minute: u32,
     pub tickets_per_minute: u32,
+    pub notices_per_minute: u32,
 }
 
 impl Default for Options {
@@ -79,15 +85,19 @@ impl Default for Options {
             offers_per_minute: OFFERS_PER_MINUTE,
             pairings_per_minute: PAIRINGS_PER_MINUTE,
             tickets_per_minute: TICKETS_PER_MINUTE,
+            notices_per_minute: NOTICES_PER_MINUTE,
         }
     }
 }
 
 type Service<R> = Arc<ControlService<R>>;
 
-pub fn router<R: Records + 'static>(service: ControlService<R>, options: Options) -> Router {
+pub fn router<R: Records + Clone + 'static>(
+    service: ControlService<R>,
+    options: Options,
+) -> Router {
     let service = Arc::new(service);
-    let gate = |name, per_minute, answer| {
+    let gate = |name, per_minute, answer, per_device| {
         Arc::new(Gate {
             name,
             per_minute,
@@ -95,13 +105,15 @@ pub fn router<R: Records + 'static>(service: ControlService<R>, options: Options
             service: Arc::clone(&service),
             client_ip_header: options.client_ip_header.clone(),
             answer,
+            per_device,
         })
     };
-    let logins = gate("logins", options.logins_per_minute, Answer::Page);
-    let tokens = gate("tokens", options.tokens_per_minute, Answer::Json);
-    let offers = gate("offers", options.offers_per_minute, Answer::Json);
-    let pairings = gate("pairings", options.pairings_per_minute, Answer::Json);
-    let tickets = gate("tickets", options.tickets_per_minute, Answer::Json);
+    let logins = gate("logins", options.logins_per_minute, Answer::Page, false);
+    let tokens = gate("tokens", options.tokens_per_minute, Answer::Json, false);
+    let offers = gate("offers", options.offers_per_minute, Answer::Json, false);
+    let pairings = gate("pairings", options.pairings_per_minute, Answer::Json, false);
+    let tickets = gate("tickets", options.tickets_per_minute, Answer::Json, false);
+    let notices = gate("notices", options.notices_per_minute, Answer::Json, true);
     crate::relay::start_rechecks(Arc::clone(&service));
     crate::limit::start_sweeping(Arc::downgrade(&service));
     Router::new()
@@ -139,6 +151,30 @@ pub fn router<R: Records + 'static>(service: ControlService<R>, options: Options
             post(ticket::<R>).route_layer(middleware::from_fn_with_state(tickets, limited::<R>)),
         )
         .route("/v1/relay", get(relay::<R>))
+        .route(
+            "/v1/notices",
+            post(submit_notice::<R>).route_layer(middleware::from_fn_with_state(
+                Arc::clone(&notices),
+                limited::<R>,
+            )),
+        )
+        .route(
+            "/v1/notifications/token",
+            post(save_push_token::<R>).route_layer(middleware::from_fn_with_state(
+                Arc::clone(&notices),
+                limited::<R>,
+            )),
+        )
+        .route(
+            "/v1/notifications/preferences",
+            get(notification_preferences::<R>).post(set_notification_preferences::<R>),
+        )
+        .route(
+            "/v1/notifications/reachable",
+            post(mark_reachable::<R>)
+                .route_layer(middleware::from_fn_with_state(notices, limited::<R>)),
+        )
+        .route("/v1/notifications/{id}", get(read_notice::<R>))
         .fallback(|| async { failure(RemoteError::not_found()) })
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .layer(middleware::from_fn(guard))
@@ -154,6 +190,8 @@ struct Gate<R> {
     service: Service<R>,
     client_ip_header: Option<HeaderName>,
     answer: Answer,
+    /// Count the signed-in device, rather than the address the request came from.
+    per_device: bool,
 }
 
 /// How a refusal is shown: as a page to a browser, or as JSON to an app.
@@ -164,10 +202,18 @@ enum Answer {
 
 async fn limited<R: Records>(
     State(gate): State<Arc<Gate<R>>>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Response {
-    let address = client_address(&request, gate.client_ip_header.as_ref());
+    // The bearer is copied out before any await. Holding a borrow of the request across one
+    // makes this middleware's future unsendable, which axum refuses.
+    let bearer = presented_bearer(&request);
+    let fallback = client_address(&request, gate.client_ip_header.as_ref());
+    let (address, known) = device_or_address(&gate, bearer.as_deref(), fallback).await;
+    if let Some(caller) = known {
+        // The three notice routes read this and skip a second authenticate of the same token.
+        request.extensions_mut().insert(caller);
+    }
     let records = &gate.service.records;
     let shared = match gate.limiter.check(address, Instant::now()) {
         Ok(()) => crate::limit::take_shared(records, gate.name, address, gate.per_minute).await,
@@ -185,7 +231,11 @@ async fn limited<R: Records>(
             return response;
         }
     };
-    let message = "Too many attempts from this address. Try again in a minute.";
+    let message = if gate.per_device {
+        "Too many attempts from this device. Try again in a minute."
+    } else {
+        "Too many attempts from this address. Try again in a minute."
+    };
     let mut response = match gate.answer {
         Answer::Page => page(StatusCode::TOO_MANY_REQUESTS, message),
         Answer::Json => failure(RemoteError::new(ErrorCode::RateLimited, message)),
@@ -195,6 +245,55 @@ async fn limited<R: Records>(
         response.headers_mut().insert(header::RETRY_AFTER, value);
     }
     response
+}
+
+/// The access token a request presents, owned so the request itself is not borrowed across an await.
+fn presented_bearer(request: &Request) -> Option<String> {
+    request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+/// The device, when this gate counts devices and the access token names one. Otherwise `fallback`.
+/// A caller that authenticated is returned so the handler does not ask again.
+async fn device_or_address<R: Records>(
+    gate: &Gate<R>,
+    bearer: Option<&str>,
+    fallback: IpAddr,
+) -> (IpAddr, Option<Caller>) {
+    if !gate.per_device {
+        return (fallback, None);
+    }
+    let Some(access) = bearer else {
+        return (fallback, None);
+    };
+    match gate.service.authenticate(access, now_ms()).await {
+        Ok(caller) => (device_address(&caller.device), Some(caller)),
+        Err(_) => (fallback, None),
+    }
+}
+
+/// A stable address for one device. The first 64 bits are its own, so it does not share a bucket
+/// with another device the way an IPv6 /64 does.
+fn device_address(device: &DeviceId) -> IpAddr {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(device.as_str().as_bytes());
+    let word = |index: usize| u16::from_be_bytes([digest[index], digest[index + 1]]);
+    IpAddr::V6(Ipv6Addr::new(
+        word(0),
+        word(2),
+        word(4),
+        word(6),
+        0,
+        0,
+        0,
+        0,
+    ))
 }
 
 /// Who is asking: the trusted proxy's word, else the connection's address.
@@ -601,6 +700,112 @@ fn answer<T: Serialize>(result: Result<T, RemoteError>) -> Response {
         Ok(value) => Json(value).into_response(),
         Err(error) => failure(error),
     }
+}
+
+async fn submit_notice<R: Records + Clone + 'static>(
+    State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
+    headers: HeaderMap,
+    body: Result<Json<NoticeSubmission>, JsonRejection>,
+) -> Response {
+    let caller = match known {
+        Some(Extension(caller)) => caller,
+        None => match caller(&service, &headers).await {
+            Ok(caller) => caller,
+            Err(error) => return failure(error),
+        },
+    };
+    let submission = match body_of(body, "That notice is not one Yardsort sends.") {
+        Ok(submission) => submission,
+        Err(error) => return error.into_response(),
+    };
+    answer(service.submit_notice(&caller, submission, now_ms()).await)
+}
+
+async fn save_push_token<R: Records>(
+    State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
+    headers: HeaderMap,
+    body: Result<Json<PushRegistration>, JsonRejection>,
+) -> Response {
+    let caller = match known {
+        Some(Extension(caller)) => caller,
+        None => match caller(&service, &headers).await {
+            Ok(caller) => caller,
+            Err(error) => return failure(error),
+        },
+    };
+    let registration = match body_of(body, "That push token cannot be used.") {
+        Ok(registration) => registration,
+        Err(error) => return error.into_response(),
+    };
+    match service
+        .save_push_token(&caller, registration, now_ms())
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => failure(error),
+    }
+}
+
+async fn notification_preferences<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+) -> Response {
+    let caller = match caller(&service, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    answer(service.notification_preferences(&caller).await)
+}
+
+async fn set_notification_preferences<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    body: Result<Json<NotificationPreferences>, JsonRejection>,
+) -> Response {
+    let caller = match caller(&service, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    let preferences = match body_of(body, "Those notification settings are not usable.") {
+        Ok(preferences) => preferences,
+        Err(error) => return error.into_response(),
+    };
+    match service
+        .set_notification_preferences(&caller, preferences)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => failure(error),
+    }
+}
+
+async fn mark_reachable<R: Records>(
+    State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
+    headers: HeaderMap,
+) -> Response {
+    let caller = match known {
+        Some(Extension(caller)) => caller,
+        None => match caller(&service, &headers).await {
+            Ok(caller) => caller,
+            Err(error) => return failure(error),
+        },
+    };
+    answer(service.mark_reachable(&caller, now_ms()).await)
+}
+
+async fn read_notice<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let caller = match caller(&service, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    answer(service.read_notice(&caller, &id).await)
 }
 
 /// The device behind `Authorization: Bearer …`.

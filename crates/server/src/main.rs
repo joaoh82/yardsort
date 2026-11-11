@@ -58,6 +58,11 @@ async fn serve() -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     let http_client = oidc::http_client().map_err(|e| e.to_string())?;
+    let push = std::sync::Arc::new(yardsort_server::push::ConfiguredPush::new(
+        http_client.clone(),
+        settings.push.apns,
+        settings.push.fcm,
+    ));
     let service = ControlService::new(
         ServerConfig {
             server,
@@ -70,7 +75,8 @@ async fn serve() -> Result<(), String> {
         http_client,
     )
     .map_err(|e| e.to_string())?
-    .with_relay(Relay::new(settings.instance, settings.routing));
+    .with_relay(Relay::new(settings.instance, settings.routing))
+    .with_push(push);
     tracing::info!(
         server = %service.describe().server,
         issuer = %service.describe().issuer,

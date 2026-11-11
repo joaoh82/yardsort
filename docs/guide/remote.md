@@ -181,3 +181,36 @@ second copy of Yardsort used to cause that. Now only one copy runs on a profile,
 It is in [`apps/mobile`](https://github.com/joaoh82/yardsort/tree/main/apps/mobile), and is not in the
 app stores yet. To run a server of your own, see the
 [self-host recipe](https://github.com/joaoh82/yardsort/tree/main/crates/server/self-host).
+
+## Notifications
+
+With Remote on, this computer can tell your phone when something needs a look.
+
+- A task moved forward, or finished.
+- A review needs attention: checks failed, it conflicts, changes were requested, or it has no review yet.
+- A workflow run failed.
+- A newer desktop version is available. The same version can be mentioned again after a week.
+  Installing it stays on this computer.
+- A workflow is waiting for a question or an approval. You answer and approve on this computer.
+
+The notification opens that item in the phone app. The phone does not answer, approve, or install.
+A one-time code stays on this computer. It can still appear in a notification here when
+Settings → General includes it. It is never in the one the phone receives.
+
+On the phone, Settings → Notifications asks once for permission to send notifications. After
+that, the token is registered for every account this phone is signed in to, when the app starts
+and after a sign-in. The screen can
+mute everything for this account, or turn one of those categories off. A tap opens the item,
+including when the app was not running. A notice that was skipped while a category was off is not
+sent later if you turn it back on. A new event after that is.
+
+A task or review notice is sent when this computer loads that list. It is not sent on a timer of
+its own. Opening a list of tasks that were already finished, or a pull request this computer has
+not shown before, does not notify. A change after that does.
+
+If this computer cannot reach the server, or the phone cannot be reached, the notice waits up to a
+day and is delivered once when the path is open again. The same event from two computers is one
+notification. A long wait does not arrive as a burst: only the newest few are sent.
+
+The server can do this without Apple or Google push credentials. Notices wait until those are set.
+What to set is in [Mobile notifications](../design/40-mobile-notifications.md#what-to-configure).

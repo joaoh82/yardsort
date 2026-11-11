@@ -8,9 +8,11 @@
 //! [`crate::postgres::PgRecords`] is the store a server runs on. Both pass the same tests
 //! (`tests/records.rs`).
 //!
-//! Nothing here is a secret: credentials and one-time values are kept as [`TokenHash`]es. The one
-//! exception is the identity provider's PKCE verifier for a sign-in in progress, which has to be
-//! sent to the provider as it is; it lives for at most [`crate::LOGIN_TTL_MS`].
+//! Nothing here is a secret except two values the next hop needs as themselves. Credentials and
+//! one-time values are kept as [`TokenHash`]es. The identity provider's PKCE verifier for a
+//! sign-in in progress has to be sent to the provider as it is, and lives for at most
+//! [`crate::LOGIN_TTL_MS`]. A phone's push token has to be handed to APNs or FCM as it is. It is
+//! never returned by an API and never written to a log.
 
 use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
@@ -18,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use remote_proto::account::{DeviceKind, Secret};
+use remote_proto::notify::NotificationPreferences;
 use remote_proto::pairing::MAX_OFFER_MISSES;
 use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, Scope};
 use tokio::sync::broadcast;
@@ -523,6 +526,71 @@ pub trait Records: Send + Sync {
     /// Forget the buckets untouched since `before`, which are full again if `before` is at least
     /// [`ALLOWANCE_REFILLS_MS`] ago.
     fn sweep_allowances(&self, before: i64) -> impl Future<Output = Result<()>> + Send;
+
+    /// Keep this phone's push token. False when `device` is not a live phone of `account`.
+    fn save_push_token(
+        &self,
+        account: &AccountId,
+        device: &DeviceId,
+        platform: &str,
+        token: &str,
+        now: i64,
+    ) -> impl Future<Output = Result<bool>> + Send;
+
+    fn notification_preferences(
+        &self,
+        account: &AccountId,
+    ) -> impl Future<Output = Result<NotificationPreferences>> + Send;
+
+    fn set_notification_preferences(
+        &self,
+        account: &AccountId,
+        preferences: &NotificationPreferences,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Record a notice once per account and event key. A repeat is the same id and is not fresh.
+    /// When it is fresh and not suppressed, one queued delivery is opened for each live phone.
+    fn accept_notice(
+        &self,
+        account: &AccountId,
+        notice: &IncomingNotice,
+        now: i64,
+    ) -> impl Future<Output = Result<NoticeRecord>> + Send;
+
+    /// Expire what has lapsed, take back claims older than [`CLAIM_LEASE_MS`], drop what the
+    /// preferences now refuse, keep the newest [`crate::FLUSH_CAP`] queued deliveries per phone,
+    /// and return those that have a token on a phone that is still signed in.
+    fn prepare_flush(
+        &self,
+        account: &AccountId,
+        now: i64,
+    ) -> impl Future<Output = Result<Vec<NoticeToSend>>> + Send;
+
+    /// Claim a queued delivery so a second flush does not send it too. The claim time, when this
+    /// caller took it. `None` when it was not queued.
+    fn claim_delivery(
+        &self,
+        notice: &str,
+        device: &DeviceId,
+        now: i64,
+    ) -> impl Future<Output = Result<Option<i64>>> + Send;
+
+    /// Finish a delivery this caller still holds. A row claimed again after the lease is left
+    /// for whoever holds it now.
+    fn finish_delivery(
+        &self,
+        notice: &str,
+        device: &DeviceId,
+        claimed_at: i64,
+        end: DeliveryEnd,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// The notice, when it belongs to `account`.
+    fn notice_for(
+        &self,
+        account: &AccountId,
+        id: &str,
+    ) -> impl Future<Output = Result<Option<NoticePage>>> + Send;
 }
 
 /// Records kept in this process. A restart forgets every account, device and credential: for
@@ -546,6 +614,124 @@ impl Default for MemoryRecords {
     }
 }
 
+/// How many notices one account may still have waiting to be delivered. Already sent notices
+/// do not count. Past this, a new one is remembered for deduplication and is not sent.
+pub const OPEN_NOTICE_CAP: usize = 100;
+
+/// How long a flush may hold a delivery before another flush may take it. Two minutes.
+pub const CLAIM_LEASE_MS: i64 = 2 * 60 * 1000;
+
+/// What a host asked the server to tell the phone. The words are already the server's own.
+#[derive(Debug, Clone)]
+pub struct IncomingNotice {
+    pub id: String,
+    pub event_key: String,
+    pub category: String,
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    pub expires_at: i64,
+    /// Preferences refused it. Kept so a later change does not send it after the fact.
+    pub suppressed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoticeRecord {
+    pub id: String,
+    pub fresh: bool,
+    pub suppressed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct NoticeToSend {
+    pub notice_id: String,
+    pub device: DeviceId,
+    pub platform: String,
+    pub token: String,
+    pub title: String,
+    pub body: String,
+    pub category: String,
+    pub event_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoticePage {
+    pub id: String,
+    pub category: String,
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+}
+
+/// What a delivery attempt came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryEnd {
+    /// The provider accepted it.
+    Sent,
+    /// The phone or the provider could not be reached. Try again later.
+    Again,
+    /// The provider says the token is gone. Forget it and try again when a new one is registered.
+    Gone,
+}
+
+struct PushTokenRow {
+    account: String,
+    platform: String,
+    token: String,
+}
+
+struct NoticeRow {
+    id: String,
+    account: String,
+    event_key: String,
+    category: String,
+    kind: String,
+    title: String,
+    body: String,
+    expires_at: i64,
+    suppressed: bool,
+}
+
+struct DeliveryRow {
+    notice: String,
+    device: String,
+    state: &'static str,
+    queued_at: i64,
+    expires_at: i64,
+    claimed_at: Option<i64>,
+}
+
+fn undelivered(state: &State, account: &str) -> usize {
+    state
+        .deliveries
+        .iter()
+        .filter(|delivery| matches!(delivery.state, "queued" | "sending"))
+        .filter(|delivery| {
+            state
+                .notices
+                .iter()
+                .any(|notice| notice.id == delivery.notice && notice.account == account)
+        })
+        .count()
+}
+
+fn claim_expired(claimed_at: Option<i64>, now: i64) -> bool {
+    claimed_at.is_none_or(|at| now.saturating_sub(at) >= CLAIM_LEASE_MS)
+}
+
+/// Whether `category` (the wire name) is one `preferences` still delivers.
+pub(crate) fn category_allowed(preferences: &NotificationPreferences, category: &str) -> bool {
+    use remote_proto::notify::NoticeCategory;
+    match category {
+        "task" => preferences.allows(NoticeCategory::Task),
+        "review" => preferences.allows(NoticeCategory::Review),
+        "failure" => preferences.allows(NoticeCategory::Failure),
+        "desktopUpdate" => preferences.allows(NoticeCategory::DesktopUpdate),
+        "workflow" => preferences.allows(NoticeCategory::Workflow),
+        _ => false,
+    }
+}
+
 #[derive(Default)]
 struct State {
     accounts: HashMap<(String, String), AccountId>,
@@ -562,6 +748,10 @@ struct State {
     links: HashMap<HostId, LinkPlace>,
     /// Each gate's and key's bucket: what it held, and when.
     allowances: HashMap<(String, TokenHash), (f64, i64)>,
+    push_tokens: HashMap<String, PushTokenRow>,
+    preferences: HashMap<String, NotificationPreferences>,
+    notices: Vec<NoticeRow>,
+    deliveries: Vec<DeliveryRow>,
 }
 
 #[derive(Debug, Clone)]
@@ -811,6 +1001,7 @@ impl Records for MemoryRecords {
         self.with(|s| match s.device_mut(device) {
             Some(d) if d.account == *account => {
                 d.revoked.get_or_insert(revoked);
+                s.push_tokens.remove(device.as_str());
                 true
             }
             _ => false,
@@ -828,11 +1019,18 @@ impl Records for MemoryRecords {
                 .get(&(issuer.to_owned(), subject.to_owned()))?
                 .clone();
             let mut count = 0;
+            let mut gone = Vec::new();
             for device in &mut s.devices {
-                if device.account == account && device.revoked.is_none() {
-                    device.revoked = Some(revoked);
-                    count += 1;
+                if device.account == account {
+                    gone.push(device.id.as_str().to_owned());
+                    if device.revoked.is_none() {
+                        device.revoked = Some(revoked);
+                        count += 1;
+                    }
                 }
+            }
+            for id in gone {
+                s.push_tokens.remove(&id);
             }
             Some(count)
         })
@@ -1098,5 +1296,308 @@ impl Records for MemoryRecords {
 
     async fn sweep_allowances(&self, before: i64) -> Result<()> {
         self.with(|s| s.allowances.retain(|_, (_, at)| *at >= before))
+    }
+
+    async fn save_push_token(
+        &self,
+        account: &AccountId,
+        device: &DeviceId,
+        platform: &str,
+        token: &str,
+        _now: i64,
+    ) -> Result<bool> {
+        self.with(|s| {
+            let live = s.devices.iter().any(|d| {
+                d.id == *device
+                    && d.account == *account
+                    && d.kind == DeviceKind::Phone
+                    && d.revoked.is_none()
+            });
+            if !live {
+                return false;
+            }
+            s.push_tokens.insert(
+                device.as_str().to_owned(),
+                PushTokenRow {
+                    account: account.0.clone(),
+                    platform: platform.to_owned(),
+                    token: token.to_owned(),
+                },
+            );
+            true
+        })
+    }
+
+    async fn notification_preferences(
+        &self,
+        account: &AccountId,
+    ) -> Result<NotificationPreferences> {
+        self.with(|s| s.preferences.get(&account.0).cloned().unwrap_or_default())
+    }
+
+    async fn set_notification_preferences(
+        &self,
+        account: &AccountId,
+        preferences: &NotificationPreferences,
+    ) -> Result<()> {
+        self.with(|s| {
+            s.preferences.insert(account.0.clone(), preferences.clone());
+        })
+    }
+
+    async fn accept_notice(
+        &self,
+        account: &AccountId,
+        notice: &IncomingNotice,
+        now: i64,
+    ) -> Result<NoticeRecord> {
+        self.with(|s| {
+            let gone: Vec<String> = s
+                .notices
+                .iter()
+                .filter(|n| n.account == account.0 && n.expires_at <= now)
+                .map(|n| n.id.clone())
+                .collect();
+            s.notices
+                .retain(|n| n.account != account.0 || n.expires_at > now);
+            s.deliveries.retain(|d| !gone.contains(&d.notice));
+            if let Some(existing) = s
+                .notices
+                .iter()
+                .find(|n| n.account == account.0 && n.event_key == notice.event_key)
+            {
+                return NoticeRecord {
+                    id: existing.id.clone(),
+                    fresh: false,
+                    suppressed: existing.suppressed,
+                };
+            }
+            let open = undelivered(s, &account.0);
+            let suppressed = notice.suppressed || open >= OPEN_NOTICE_CAP;
+            if !notice.suppressed && open >= OPEN_NOTICE_CAP {
+                tracing::warn!(
+                    account = %account.0,
+                    count = open,
+                    "notice cap dropped a notice"
+                );
+            }
+            s.notices.push(NoticeRow {
+                id: notice.id.clone(),
+                account: account.0.clone(),
+                event_key: notice.event_key.clone(),
+                category: notice.category.clone(),
+                kind: notice.kind.clone(),
+                title: notice.title.clone(),
+                body: notice.body.clone(),
+                expires_at: notice.expires_at,
+                suppressed,
+            });
+            if !suppressed {
+                for device in s.devices.iter().filter(|d| {
+                    d.account == *account && d.kind == DeviceKind::Phone && d.revoked.is_none()
+                }) {
+                    s.deliveries.push(DeliveryRow {
+                        notice: notice.id.clone(),
+                        device: device.id.as_str().to_owned(),
+                        state: "queued",
+                        queued_at: now,
+                        expires_at: notice.expires_at,
+                        claimed_at: None,
+                    });
+                }
+            }
+            NoticeRecord {
+                id: notice.id.clone(),
+                fresh: true,
+                suppressed,
+            }
+        })
+    }
+
+    async fn prepare_flush(&self, account: &AccountId, now: i64) -> Result<Vec<NoticeToSend>> {
+        self.with(|s| s.prepare_flush(account, now))
+    }
+
+    async fn claim_delivery(
+        &self,
+        notice: &str,
+        device: &DeviceId,
+        now: i64,
+    ) -> Result<Option<i64>> {
+        self.with(|s| {
+            let row = s.deliveries.iter_mut().find(|d| {
+                d.notice == notice && d.device == device.as_str() && d.state == "queued"
+            })?;
+            row.state = "sending";
+            row.claimed_at = Some(now);
+            Some(now)
+        })
+    }
+
+    async fn finish_delivery(
+        &self,
+        notice: &str,
+        device: &DeviceId,
+        claimed_at: i64,
+        end: DeliveryEnd,
+    ) -> Result<()> {
+        self.with(|s| {
+            let found = s.deliveries.iter().position(|d| {
+                d.notice == notice
+                    && d.device == device.as_str()
+                    && d.state == "sending"
+                    && d.claimed_at == Some(claimed_at)
+            });
+            let Some(index) = found else {
+                return;
+            };
+            match end {
+                DeliveryEnd::Sent => s.deliveries[index].state = "sent",
+                DeliveryEnd::Again | DeliveryEnd::Gone => {
+                    s.deliveries[index].state = "queued";
+                    s.deliveries[index].claimed_at = None;
+                }
+            }
+            if end == DeliveryEnd::Gone {
+                s.push_tokens.remove(device.as_str());
+            }
+        })
+    }
+
+    async fn notice_for(&self, account: &AccountId, id: &str) -> Result<Option<NoticePage>> {
+        self.with(|s| {
+            s.notices
+                .iter()
+                .find(|n| n.id == id && n.account == account.0)
+                .map(|n| NoticePage {
+                    id: n.id.clone(),
+                    category: n.category.clone(),
+                    kind: n.kind.clone(),
+                    title: n.title.clone(),
+                    body: n.body.clone(),
+                })
+        })
+    }
+}
+
+impl State {
+    fn prepare_flush(&mut self, account: &AccountId, now: i64) -> Vec<NoticeToSend> {
+        let prefs = self
+            .preferences
+            .get(&account.0)
+            .cloned()
+            .unwrap_or_default();
+        for delivery in &mut self.deliveries {
+            if notice_of(&self.notices, &delivery.notice)
+                .is_none_or(|notice| notice.account != account.0)
+            {
+                continue;
+            }
+            if delivery.expires_at <= now && matches!(delivery.state, "queued" | "sending") {
+                delivery.state = "expired";
+            } else if delivery.state == "sending" && claim_expired(delivery.claimed_at, now) {
+                delivery.state = "queued";
+                delivery.claimed_at = None;
+            }
+        }
+        fn notice_of<'a>(rows: &'a [NoticeRow], id: &str) -> Option<&'a NoticeRow> {
+            rows.iter().find(|row| row.id == id)
+        }
+        let mut drop_ids = Vec::new();
+        for delivery in &self.deliveries {
+            if delivery.state != "queued" {
+                continue;
+            }
+            let Some(notice) = notice_of(&self.notices, &delivery.notice) else {
+                continue;
+            };
+            if notice.account != account.0 {
+                continue;
+            }
+            if !category_allowed(&prefs, &notice.category) {
+                drop_ids.push((delivery.notice.clone(), delivery.device.clone()));
+            }
+        }
+        for (notice, device) in &drop_ids {
+            if let Some(row) = self
+                .deliveries
+                .iter_mut()
+                .find(|d| d.notice == *notice && d.device == *device)
+            {
+                row.state = "dropped";
+            }
+        }
+        let mut by_device: HashMap<String, Vec<usize>> = HashMap::new();
+        for (index, delivery) in self.deliveries.iter().enumerate() {
+            let Some(notice) = notice_of(&self.notices, &delivery.notice) else {
+                continue;
+            };
+            if notice.account == account.0 && delivery.state == "queued" {
+                by_device
+                    .entry(delivery.device.clone())
+                    .or_default()
+                    .push(index);
+            }
+        }
+        let mut dropped = 0usize;
+        for indexes in by_device.values_mut() {
+            indexes.sort_by(|a, b| {
+                self.deliveries[*b]
+                    .queued_at
+                    .cmp(&self.deliveries[*a].queued_at)
+                    .then(self.deliveries[*b].notice.cmp(&self.deliveries[*a].notice))
+            });
+            for index in indexes.iter().skip(remote_proto::notify::FLUSH_CAP) {
+                self.deliveries[*index].state = "dropped";
+                dropped += 1;
+            }
+        }
+        if dropped > 0 {
+            tracing::warn!(
+                account = %account.0,
+                count = dropped,
+                "notice flush cap dropped queued notices"
+            );
+        }
+        let mut ready = Vec::new();
+        for delivery in &self.deliveries {
+            if delivery.state != "queued" {
+                continue;
+            }
+            let Some(notice) = notice_of(&self.notices, &delivery.notice) else {
+                continue;
+            };
+            if notice.account != account.0 {
+                continue;
+            }
+            let Some(token) = self.push_tokens.get(&delivery.device) else {
+                continue;
+            };
+            if token.account != account.0 {
+                continue;
+            }
+            let revoked = self
+                .devices
+                .iter()
+                .any(|device| device.id.as_str() == delivery.device && device.revoked.is_some());
+            if revoked {
+                continue;
+            }
+            let Ok(device) = DeviceId::new(delivery.device.clone()) else {
+                continue;
+            };
+            ready.push(NoticeToSend {
+                notice_id: notice.id.clone(),
+                device,
+                platform: token.platform.clone(),
+                token: token.token.clone(),
+                title: notice.title.clone(),
+                body: notice.body.clone(),
+                category: notice.category.clone(),
+                event_key: notice.event_key.clone(),
+            });
+        }
+        ready.sort_by(|a, b| a.notice_id.cmp(&b.notice_id));
+        ready
     }
 }

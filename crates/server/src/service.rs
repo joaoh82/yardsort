@@ -1,5 +1,7 @@
 //! Signing in, refreshing, and an account's devices, over any [`Records`].
 
+use std::sync::Arc;
+
 use remote_proto::account::{
     Credentials, DeviceKind, DevicePage, DeviceSummary, LoginParams, Secret, ServerDescription,
     TokenRequest,
@@ -8,6 +10,7 @@ use remote_proto::{DeviceId, ErrorCode, ProtocolVersion, RemoteError, ServerId};
 use url::Url;
 
 use crate::oidc::{OidcError, Provider, ProviderConfig};
+use crate::push::{DisabledPush, PushProvider};
 use crate::records::{
     AccountId, Device, Handoff, Issued, PendingLogin, Records, RevokeReason, Revoked, Rotation,
     Signal,
@@ -61,6 +64,7 @@ pub struct ControlService<R> {
     provider: Provider,
     pub(crate) records: R,
     pub(crate) relay: Relay,
+    pub(crate) push: Arc<dyn PushProvider>,
 }
 
 impl<R: Records> ControlService<R> {
@@ -87,7 +91,15 @@ impl<R: Records> ControlService<R> {
             redirects,
             records,
             relay: Relay::default(),
+            push: Arc::new(DisabledPush),
         })
+    }
+
+    /// Replace the push provider. Tests pass a recording one. A server passes APNs and FCM
+    /// when they are configured, and a provider that queues when they are not.
+    pub fn with_push(mut self, push: Arc<dyn PushProvider>) -> Self {
+        self.push = push;
+        self
     }
 
     pub fn records(&self) -> &R {

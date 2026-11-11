@@ -15,6 +15,7 @@
 
 import { parsePairingLink } from "@yardsort/remote-client";
 
+import { noticeRoute } from "../lib/notice-link";
 import { incoming } from "../lib/pairing";
 
 const SIGN_IN_RETURN = /^yardsort:\/*signed-in(?:[/?#]|$)/;
@@ -27,6 +28,8 @@ export function redirectSystemPath({
   initial: boolean;
 }): string | null {
   if (SIGN_IN_RETURN.test(path)) return initial ? "/" : null;
+  const notice = noticeRoute(path);
+  if (notice) return notice;
   const link = parsePairingLink(path);
   if (!link) return path;
   incoming.hold(link, false);
