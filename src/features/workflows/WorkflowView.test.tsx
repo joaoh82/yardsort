@@ -12,6 +12,7 @@ const core = vi.hoisted(() => ({
   workflowRuns: vi.fn(),
   workflowRunSteps: vi.fn(),
   workflowDecide: vi.fn(),
+  workflowAnswer: vi.fn(),
   workflowShowApprovalCode: vi.fn(),
   workflowWaits: vi.fn(),
   workflowWriterStatus: vi.fn(),
@@ -453,5 +454,68 @@ describe("WorkflowView", () => {
     );
     await userEvent.setup().click(within(runs).getByRole("button", { name: "Approve" }));
     expect(core.workflowDecide).toHaveBeenCalledWith("run-1", "sign-off", "approved", null);
+  });
+
+  it("shows a clarification and records the answer", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    core.workflowRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "demo",
+        workflowName: "Demo",
+        workspaceId: "w",
+        workspaceName: "fix-login",
+        status: "running",
+        requestedBy: "app",
+        error: null,
+        inputs: {},
+        pullRequest: null,
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+        blockedOn: "your answer",
+      },
+    ]);
+    core.workflowRunSteps.mockResolvedValue([
+      {
+        stepId: "discover",
+        action: "wait_session",
+        status: "waiting",
+        startedAt: null,
+        endedAt: null,
+        outputs: {},
+        note: null,
+        outcome: null,
+        artifacts: [],
+        consumed: [],
+        approvalCode: null,
+        approvalLocked: false,
+        clarificationPrompt: "1. What should the timeout be?",
+      },
+    ]);
+    core.workflowAnswer.mockResolvedValue(undefined);
+    core.workflowList.mockResolvedValue([item("demo", { kind: "builtIn" })]);
+    render(<WorkflowView workflowId="demo" />);
+    const runs = await screen.findByRole("region", { name: "Runs" });
+    await userEvent
+      .setup()
+      .click(await within(runs).findByRole("button", { name: "Run in fix-login, running" }));
+    expect(within(runs).getAllByText("Blocked: waiting for your answer.").length).toBeGreaterThan(
+      0,
+    );
+    expect(within(runs).getByText("1. What should the timeout be?")).toBeInTheDocument();
+    expect(
+      within(runs).getByText(
+        "The code is not in this window yet. Show a new code to use a terminal.",
+      ),
+    ).toBeInTheDocument();
+    core.workflowShowApprovalCode.mockResolvedValue(undefined);
+    await userEvent.setup().click(within(runs).getByRole("button", { name: "Show a new code" }));
+    expect(core.workflowShowApprovalCode).toHaveBeenCalledWith("run-1", "discover");
+    const answer = within(runs).getByRole("button", { name: "Answer" });
+    expect(answer).toBeDisabled();
+    await userEvent.setup().type(within(runs).getByLabelText("Answer for discover"), "30 seconds");
+    await userEvent.setup().click(answer);
+    expect(core.workflowAnswer).toHaveBeenCalledWith("run-1", "discover", "30 seconds");
   });
 });

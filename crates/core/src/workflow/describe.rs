@@ -46,7 +46,12 @@ pub const SYSTEM: &str = concat!(
      `\"{{ inputs.<id> }}\"` for an input of kind harness), `prompt` (the agent's first \
      message), optional `model`, `effort`, `skip_memory`.\n\
        - `wait_session`: `session`, optional `until` (`settled`, the default, or `exited`), \
-     optional `timeout`.\n\
+     optional `timeout`. Optional `clarify: true` lets the agent ask the person questions \
+     with `ys workflow ask` before the session counts as finished. Optional `max_rounds` \
+     (1 to 10, default 3) bounds how many rounds. A question only printed in the session is \
+     not asked. `clarify` is not an approval. With `clarify: true` the step may \
+     `produces` a `from: brief` artifact: the questions, the answers and the summary the \
+     agent records with `ys workflow summary`.\n\
        - `send_to_session`: `session`, `prompt` (typed into the agent once it is quiet), \
      optional `timeout`.\n\
        - `wait_pr_activity`: waits for a review or comment on the workspace's pull request \
@@ -84,8 +89,9 @@ pub const SYSTEM: &str = concat!(
      when the run starts.\n\n\
      `produces` is a list. Each item has `name` and where the text comes from when the step \
      succeeds: `path` for a file in the workspace, `text` for text written here, `field` for \
-     one field this step leaves (such as `summary`), or `from: transcript` with `session` and \
-     optional `raw: true`. `session` or `raw` alone does not copy a transcript: the step must \
+     one field this step leaves (such as `summary`), `from: transcript` with `session` and \
+     optional `raw: true`, or `from: brief` on a `wait_session` with `clarify: true`. \
+     `session` or `raw` alone does not copy a transcript: the step must \
      say `from: transcript`. The step that produces a name must be among the consumer's \
      `needs`, directly or through other steps. A `start_session` or `send_to_session` that \
      consumes an artifact and does not place `{{ artifacts.<name> }}` in its own prompt is \

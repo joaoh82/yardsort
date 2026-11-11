@@ -5,6 +5,32 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **An agent in a workflow can ask you a question and continue in the same session.**
+  On a `wait_session` with `clarify: true`, the agent asks with `ys workflow ask`
+  (one `--question` each) and the run waits. You answer in the run view, or with
+  `ys workflow answer` from a terminal Yardsort did not start. The terminal needs the
+  one-time code shown in the window and, unless the run is set not to notify, in the
+  notification. The code is issued either way. The window does not ask for it.
+  The answer is typed back into that same session. A question only printed in the
+  terminal is not asked. The step finishes when the agent records `ys workflow summary`.
+  A summary is refused while a question is still waiting for an answer. The step also
+  finishes when `until: exited` and the session has ended with no question still open.
+  Going quiet does not finish it. Without a summary, a session that is still running
+  waits until the step's timeout and then fails. If the session ends first, the step
+  fails and says the session ended without a summary. Rounds are
+  limited by `max_rounds` (3 when left out, 10 at most). One more than that fails the
+  step. `from: brief` hands the questions, the answers and that summary to the next
+  phase. This is not an approval. The run says `Blocked: waiting for your answer.`
+  and `ys workflow runs` shows `your answer`. An answer that has not been claimed yet
+  is typed once when Yardsort opens again. If the process stopped after the claim and
+  before the typing was confirmed, the step fails and says the answer may not have
+  reached the session, and it is not typed again. A busy session does not keep the
+  claim, so the next pass tries again. See
+  [Asking a question](docs/guide/workflows.md#asking-a-question).
+- **Two workflow steps that loop back over the same steps in one pass both keep their notes.**
+  A failed check and a request for changes that send the same earlier steps back are
+  stored together, so neither `failure-<step>` nor `changes-<step>` is dropped. Each
+  note is stored at that step's own attempt count.
 - **A workflow can branch on a step's outcome, and send work back a limited number of times.**
   An `approve` or `run_test` step may set `on`. `approved` can go on to implementation,
   `changes_requested` can return the note to planning, a failed test can return to

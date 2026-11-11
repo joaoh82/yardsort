@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use super::*;
+use crate::workflow::clarify::{ClarificationState, PendingAnswer};
 use crate::workflow::{parse, PrActivity};
 
 const WORKFLOW: &str = r#"id: t
@@ -46,6 +47,8 @@ struct Fake {
     artifacts: BTreeMap<String, String>,
     /// Decisions a person has recorded, by step id.
     approvals: HashMap<String, RecordedApproval>,
+    /// Clarification rounds, by step id. Empty means the session finishing is not a question.
+    clarifications: HashMap<String, ClarificationState>,
 }
 
 impl World for Fake {
@@ -83,6 +86,12 @@ impl World for Fake {
     }
     fn test_run(&self, run_id: &str) -> Option<TestRun> {
         self.test_runs.get(run_id).cloned()
+    }
+    fn clarification(&self, step_id: &str) -> ClarificationState {
+        self.clarifications
+            .get(step_id)
+            .cloned()
+            .unwrap_or_default()
     }
     fn approval(&self, step_id: &str) -> Option<RecordedApproval> {
         self.approvals.get(step_id).cloned()
@@ -131,6 +140,7 @@ impl Run {
                 test_runs: HashMap::new(),
                 artifacts: BTreeMap::new(),
                 approvals: HashMap::new(),
+                clarifications: HashMap::new(),
             },
             finished: None,
         }
@@ -220,7 +230,7 @@ impl Run {
             self.world.artifacts.retain(|name, _| {
                 crate::workflow::artifact::feedback_step(name).is_none_or(|id| !reset.contains(id))
             });
-            if let Some(copy) = feedback {
+            for copy in feedback {
                 self.world.artifacts.insert(copy.name, copy.body);
             }
             return true;
@@ -2352,4 +2362,429 @@ steps:
     assert_eq!(attempts(&stopped, "prep"), 1);
     assert!(matches!(stopped.finished, Some(Finish::Succeeded)));
     assert!(stopped.rows.iter().all(|row| row.status != "pending"));
+}
+
+const CLARIFY: &str = r#"id: clarify
+name: Clarify
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: start
+    action: start_session
+    harness: claude
+    prompt: Clarify the problem.
+  - id: discover
+    needs: [start]
+    action: wait_session
+    session: "{{ steps.start.session }}"
+    until: settled
+    clarify: true
+    max_rounds: 3
+"#;
+
+fn session_up(run: &mut Run) {
+    run.advance();
+    assert!(run.apply(&done(
+        "start",
+        &Outputs::from([("session".to_owned(), "pty-9".to_owned())])
+    )));
+    // Alive before the wait starts. A missing session is one that has already ended,
+    // and the step would finish as exited instead of waiting.
+    run.world.sessions.insert(
+        "pty-9".into(),
+        SessionFacts {
+            alive: true,
+            busy: false,
+            settled_at: None,
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "waiting");
+    run.world.sessions.insert(
+        "pty-9".into(),
+        SessionFacts {
+            alive: true,
+            busy: false,
+            settled_at: Some(run.world.now),
+        },
+    );
+}
+
+#[test]
+fn a_settled_session_with_no_question_finishes_and_a_printed_question_is_not_one() {
+    let mut run = Run::from(CLARIFY);
+    let effects = run.advance();
+    let prompt = effects.iter().find_map(|effect| match effect {
+        Effect::Start { prompt, .. } => prompt.clone(),
+        _ => None,
+    });
+    assert!(
+        prompt.unwrap().contains("ys workflow ask"),
+        "the session was not told how to ask"
+    );
+    session_up(&mut run);
+    run.advance();
+    assert_eq!(
+        run.status("discover"),
+        "waiting",
+        "a quiet session does not finish a clarifying step"
+    );
+    run.world.clarifications.insert(
+        "discover".into(),
+        ClarificationState {
+            summary: true,
+            ..ClarificationState::default()
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "succeeded");
+    assert_eq!(
+        run.rows
+            .iter()
+            .find(|row| row.step_id == "discover")
+            .and_then(|row| parse_outputs(&row.outputs).get("outcome").cloned())
+            .as_deref(),
+        Some("summary")
+    );
+}
+
+#[test]
+fn a_clarifying_step_finishes_when_until_exited_and_the_session_ends() {
+    let source = CLARIFY.replace("until: settled", "until: exited");
+    let mut run = Run::from(&source);
+    session_up(&mut run);
+    run.advance();
+    assert_eq!(run.status("discover"), "waiting");
+    run.world.sessions.insert(
+        "pty-9".into(),
+        SessionFacts {
+            alive: false,
+            busy: false,
+            settled_at: None,
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "succeeded");
+    assert_eq!(
+        run.rows
+            .iter()
+            .find(|row| row.step_id == "discover")
+            .and_then(|row| parse_outputs(&row.outputs).get("outcome").cloned())
+            .as_deref(),
+        Some("exited")
+    );
+}
+
+#[test]
+fn a_claimed_answer_that_was_not_typed_fails_the_step() {
+    let mut run = Run::from(CLARIFY);
+    session_up(&mut run);
+    run.world.clarifications.insert(
+        "discover".into(),
+        ClarificationState {
+            rounds: 1,
+            undelivered: true,
+            ..ClarificationState::default()
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "failed");
+    assert!(run
+        .note("discover")
+        .unwrap()
+        .contains("may not have reached the session"));
+}
+
+#[test]
+fn a_clarifying_step_without_a_summary_fails_at_its_timeout() {
+    let source = CLARIFY.replace("until: settled", "until: settled\n    timeout: 1m");
+    let mut run = Run::from(&source);
+    session_up(&mut run);
+    let started = run
+        .rows
+        .iter()
+        .find(|row| row.step_id == "discover")
+        .and_then(|row| row.started_at)
+        .unwrap();
+    run.world.now = started + 61_000;
+    run.advance();
+    assert_eq!(run.status("discover"), "failed");
+    assert!(run
+        .note("discover")
+        .unwrap()
+        .contains("waiting for a summary"));
+}
+
+#[test]
+fn a_dead_session_with_no_summary_fails_without_a_timeout() {
+    let mut run = Run::from(CLARIFY);
+    session_up(&mut run);
+    run.advance();
+    assert_eq!(run.status("discover"), "waiting");
+    run.world.sessions.insert(
+        "pty-9".into(),
+        SessionFacts {
+            alive: false,
+            busy: false,
+            settled_at: None,
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "failed");
+    assert!(run
+        .note("discover")
+        .unwrap()
+        .contains("The session ended without a summary."));
+}
+
+#[test]
+fn a_recorded_summary_finishes_a_dead_session_that_still_has_a_question() {
+    let mut run = Run::from(CLARIFY);
+    session_up(&mut run);
+    run.world.clarifications.insert(
+        "discover".into(),
+        ClarificationState {
+            rounds: 1,
+            waiting: true,
+            summary: true,
+            ..ClarificationState::default()
+        },
+    );
+    run.world.sessions.insert(
+        "pty-9".into(),
+        SessionFacts {
+            alive: false,
+            busy: false,
+            settled_at: None,
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "succeeded");
+    assert_eq!(
+        run.rows
+            .iter()
+            .find(|row| row.step_id == "discover")
+            .and_then(|row| parse_outputs(&row.outputs).get("outcome").cloned())
+            .as_deref(),
+        Some("summary")
+    );
+}
+
+#[test]
+fn an_open_question_fails_when_the_session_ends() {
+    let mut run = Run::from(CLARIFY);
+    session_up(&mut run);
+    run.world.clarifications.insert(
+        "discover".into(),
+        ClarificationState {
+            rounds: 1,
+            waiting: true,
+            ..ClarificationState::default()
+        },
+    );
+    run.world.sessions.insert(
+        "pty-9".into(),
+        SessionFacts {
+            alive: false,
+            busy: false,
+            settled_at: None,
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "failed");
+    assert!(run
+        .note("discover")
+        .unwrap()
+        .contains("The session ended without a summary."));
+}
+
+#[test]
+fn a_pending_answer_fails_when_the_session_ends() {
+    let mut run = Run::from(CLARIFY);
+    session_up(&mut run);
+    run.world.clarifications.insert(
+        "discover".into(),
+        ClarificationState {
+            rounds: 1,
+            pending: Some(PendingAnswer {
+                round: 1,
+                text: "The person answered.\n\nAnswer:\n30 seconds\n".into(),
+            }),
+            ..ClarificationState::default()
+        },
+    );
+    run.world.sessions.insert(
+        "pty-9".into(),
+        SessionFacts {
+            alive: false,
+            busy: false,
+            settled_at: None,
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "failed");
+    assert!(run
+        .note("discover")
+        .unwrap()
+        .contains("before the answer could be sent back"));
+}
+
+#[test]
+fn an_open_question_does_not_finish_a_settled_session() {
+    let mut run = Run::from(CLARIFY);
+    session_up(&mut run);
+    run.world.clarifications.insert(
+        "discover".into(),
+        ClarificationState {
+            rounds: 1,
+            pending: None,
+            waiting: true,
+            summary: false,
+            undelivered: false,
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "waiting");
+    assert!(run.finished.is_none());
+}
+
+#[test]
+fn a_pending_answer_is_sent_back_to_the_same_session() {
+    let mut run = Run::from(CLARIFY);
+    session_up(&mut run);
+    run.world.clarifications.insert(
+        "discover".into(),
+        ClarificationState {
+            rounds: 1,
+            waiting: false,
+            summary: false,
+            undelivered: false,
+            pending: Some(PendingAnswer {
+                round: 1,
+                text: "The person answered.\n\nAnswer:\n30 seconds\n".into(),
+            }),
+        },
+    );
+    let plan = advance(&run.workflow, &run.inputs, &run.rows, &run.world);
+    let change = plan
+        .moves
+        .iter()
+        .find(|change| change.step == "discover")
+        .expect("a delivery");
+    let delivery = change
+        .apply_answer
+        .as_ref()
+        .expect("the answer is typed back");
+    assert_eq!(delivery.pty_id, "pty-9");
+    assert_eq!(delivery.round, 1);
+    assert!(delivery.text.contains("30 seconds"));
+    assert_eq!(change.to, StepStatus::Waiting);
+    assert!(plan.effects.is_empty());
+}
+
+#[test]
+fn too_many_clarification_rounds_fail_the_step() {
+    let mut run = Run::from(CLARIFY);
+    session_up(&mut run);
+    run.world.clarifications.insert(
+        "discover".into(),
+        ClarificationState {
+            rounds: 4,
+            pending: None,
+            waiting: true,
+            summary: false,
+            undelivered: false,
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "failed");
+    assert!(run.note("discover").unwrap().contains("past the limit (3)"));
+}
+
+#[test]
+fn two_parallel_loops_keep_both_failure_notes() {
+    let source = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: plan
+    action: notify
+    title: Plan
+  - id: left
+    needs: [plan]
+    action: run_test
+    test: left
+    on:
+      passed: stop
+      failed: plan
+    max_attempts: 3
+  - id: right
+    needs: [plan]
+    action: run_test
+    test: right
+    on:
+      passed: stop
+      failed: plan
+    max_attempts: 3
+"#;
+    let mut run = Run::from(source);
+    run.advance();
+    finish_notify(&mut run, "plan");
+    run.advance();
+    assert!(run.apply(&queued(
+        "left",
+        &Outputs::from([("run".to_owned(), "left-run".to_owned())])
+    )));
+    assert!(run.apply(&queued(
+        "right",
+        &Outputs::from([("run".to_owned(), "right-run".to_owned())])
+    )));
+    run.world.test_runs.insert(
+        "left-run".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "left broke".into(),
+        },
+    );
+    run.world.test_runs.insert(
+        "right-run".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "right broke".into(),
+        },
+    );
+    let plan = advance(&run.workflow, &run.inputs, &run.rows, &run.world);
+    let rewinds: Vec<_> = plan
+        .moves
+        .iter()
+        .filter(|change| change.rewind.is_some())
+        .collect();
+    assert_eq!(rewinds.len(), 1, "overlapping rewinds are one change");
+    let notes: Vec<_> = rewinds[0]
+        .rewind
+        .as_ref()
+        .unwrap()
+        .feedback
+        .iter()
+        .map(|copy| copy.name.as_str())
+        .collect();
+    assert!(notes.contains(&"failure-left"), "{notes:?}");
+    assert!(notes.contains(&"failure-right"), "{notes:?}");
+    run.advance();
+    assert_eq!(run.status("plan"), "pending");
+    assert_eq!(run.status("left"), "pending");
+    assert_eq!(run.status("right"), "pending");
+    assert!(run
+        .world
+        .artifacts
+        .get("failure-left")
+        .is_some_and(|body| body.contains("left broke")));
+    assert!(run
+        .world
+        .artifacts
+        .get("failure-right")
+        .is_some_and(|body| body.contains("right broke")));
 }

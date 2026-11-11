@@ -1,10 +1,12 @@
 //! A human wait: the row that says why a run is blocked and what the person must do.
 //!
 //! An approval opens one when its step starts waiting. A clarification question uses the
-//! same row, with `kind` `question`, the question in `prompt` and the reply in `answer`,
-//! so that later change does not add a table or a second resume path. The engine applies
-//! a recorded approval through the decision row it already reads. `applied_at` is set in
-//! that same change, and a restart applies a wait that has not been applied exactly once.
+//! same row, with `kind` `question`, the question in `prompt` and the reply in `answer`.
+//! The engine applies a recorded approval through the decision row it already reads.
+//! `applied_at` is set in that same change, and a restart applies a wait that has not been
+//! applied exactly once. A question's answer is claimed with `applied_at` before it is typed,
+//! and `typed_at` on the round is set only after the keystrokes return. A terminal answer
+//! takes the same one-time code as an approval. The window does not.
 //!
 //! [`list_open`] and [`decide_with_code`] are what a phone or a remote crate calls. They
 //! read and write this database. A remote caller must use [`decide_with_code`]. The
@@ -201,6 +203,10 @@ pub fn notice_body(
 
 /// Titles the waiting and replacement notifications use. A schedule set to never sends neither.
 pub const TITLE_WAITING: &str = "Waiting for your approval";
+/// A clarifying step is waiting. The notification carries the one-time code, as an approval's does.
+pub const TITLE_ANSWER: &str = "Waiting for your answer";
+/// The plaintext died with the last process, so a new one was issued.
+pub const TITLE_ANSWER_REPLACED: &str = "Answer code replaced";
 pub const TITLE_REPLACED: &str = "Approval code replaced";
 
 pub fn artifact_refs(raw: &str) -> Vec<String> {
@@ -305,24 +311,49 @@ pub fn decide_in_window(
     store.record_workflow_approval(run_id, step_id, decision, feedback, actor, None)
 }
 
-/// Why an answer was not stored. The words are for a later clarification, not shown yet.
+/// Why an answer was not stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnswerWrite {
     Recorded,
     Missing,
     NotAQuestion,
     AlreadyAnswered,
+    /// The step has left `waiting` (failed, timed out, skipped) while the run is still going.
+    NotWaiting,
+    /// The run is not running. `status` is the word the row has.
+    RunEnded {
+        status: String,
+    },
+    WrongCode,
+    CodeLocked,
+    NoCode,
+    CodeUnusable,
 }
 
-/// Store a clarification's answer on the wait. The engine, when a question step exists,
-/// applies it the way it applies an approval. This build has no question step and does
-/// not call this from the window or from `ys`.
-pub fn answer(
+/// Store a clarification's answer from a terminal or a remote caller. The code is required.
+/// Nothing here types into the session. The engine does that once. A remote crate uses this,
+/// not the window path.
+pub fn answer_with_code(
     store: &Store,
     run_id: &str,
     step_id: &str,
     text: &str,
     actor: &str,
+    code: &str,
 ) -> StoreResult<AnswerWrite> {
-    store.answer_workflow_wait(run_id, step_id, text, actor)
+    store.answer_workflow_wait(run_id, step_id, text, actor, Some(code))
+}
+
+/// Store a clarification's answer from the desktop window. The person is already there, so
+/// no code is asked. A remote crate cannot construct [`DesktopWindow`].
+#[cfg(feature = "desktop-window")]
+pub fn answer_in_window(
+    store: &Store,
+    _window: DesktopWindow,
+    run_id: &str,
+    step_id: &str,
+    text: &str,
+    actor: &str,
+) -> StoreResult<AnswerWrite> {
+    store.answer_workflow_wait(run_id, step_id, text, actor, None)
 }

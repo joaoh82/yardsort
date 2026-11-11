@@ -10,6 +10,7 @@
 //! `docs/design/21-workflows.md`.
 
 pub mod artifact;
+pub mod clarify;
 pub mod code;
 pub mod describe;
 pub mod driver;
@@ -302,11 +303,21 @@ pub enum Action {
         effort: Option<String>,
         skip_memory: bool,
     },
-    /// Wait for a session to settle or to end.
+    /// Wait for a session to settle or to end. With `clarify`, the agent may ask the person
+    /// questions first. The session going quiet is still not a question.
     WaitSession {
         session: SessionRef,
         until: Until,
+        #[serde(default)]
         timeout_secs: Option<u32>,
+        /// The agent may call `ys workflow ask`. The step waits for each answer, then
+        /// finishes only once no question is open.
+        #[serde(default)]
+        clarify: bool,
+        /// How many rounds of questions this step allows. `0` when `clarify` is false.
+        /// The file's default, when clarify is on and this is left out, is 3.
+        #[serde(default)]
+        max_rounds: u32,
     },
     /// Paste a message into a live session once it is quiet. A busy agent is never written to.
     SendToSession {
@@ -404,6 +415,9 @@ pub enum ArtifactSource {
     /// One session's conversation. Without `raw`, the budgeted digest. With `raw`, each turn's
     /// own text. Tool output is not part of either: a turn does not keep it.
     Transcript { session: SessionRef, raw: bool },
+    /// The questions, the answers, and the agent's summary for a clarifying `wait_session`.
+    /// Compiled when the step finishes. Nothing is read from the terminal.
+    Brief,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]

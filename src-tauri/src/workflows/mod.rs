@@ -79,6 +79,16 @@ impl Driver {
             .issue_approval_code(store, run_id, step_id, true)
     }
 
+    /// Issue a replacement answer code and remember it, so the next tick does not issue another.
+    pub fn issue_answer_code(
+        &self,
+        store: &yardsort_core::store::Store,
+        run_id: &str,
+        step_id: &str,
+    ) -> yardsort_core::store::StoreResult<Option<(String, bool)>> {
+        self.driver.issue_answer_code(store, run_id, step_id, true)
+    }
+
     /// Look at the runs now rather than at the next tick: one was just queued, say.
     pub fn wake(&self) {
         let _ = self

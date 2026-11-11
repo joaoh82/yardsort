@@ -95,6 +95,11 @@ enum StopAfter {
     AfterNextClaim,
     /// The engine has planned a rewind and the store has not applied it.
     BeforeRewindApplied,
+    /// An answer is about to be marked sent. It has not been, and it has not been typed.
+    BeforeAnswerApplied,
+    /// The answer is claimed, and it has not been typed. A restart fails the step and does
+    /// not type it: the keystrokes may already have landed.
+    AfterAnswerApplied,
 }
 
 /// How far a transcript read got. A slow read must not fail the step, and must not be started
@@ -212,6 +217,44 @@ impl Driver {
         };
         codes.insert(key, code.clone());
         Ok(Some((code, had)))
+    }
+
+    /// Issue the one-time code for an open question. `force` is Show a new code, which
+    /// resets the wrong-try count. A restart (`force` false) keeps that count. A round that
+    /// cleared the hash is issued again even when this process still holds the previous code.
+    pub fn issue_answer_code(
+        &self,
+        store: &Store,
+        run_id: &str,
+        step_id: &str,
+        force: bool,
+    ) -> crate::store::StoreResult<Option<(String, bool)>> {
+        let key = (run_id.to_owned(), step_id.to_owned());
+        let present = store.answer_code_present(run_id, step_id)?;
+        {
+            let codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
+            if !force && present && codes.contains_key(&key) {
+                return Ok(None);
+            }
+        }
+        let (code, salt, hash) = crate::workflow::code::issue();
+        let mut codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
+        if !force && present && codes.contains_key(&key) {
+            return Ok(None);
+        }
+        let Some(code) = store.save_answer_code(run_id, step_id, &code, &salt, &hash, force)?
+        else {
+            return Ok(None);
+        };
+        codes.insert(key, code.clone());
+        Ok(Some((code, present)))
+    }
+
+    fn holds_code(&self, run_id: &str, step_id: &str) -> bool {
+        self.codes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(&(run_id.to_owned(), step_id.to_owned()))
     }
 
     fn forget_code(&self, run_id: &str, step_id: &str) {
@@ -433,7 +476,7 @@ fn move_on(
         .insert(run.id.clone())
     {
         for change in engine::recover(&store.workflow_steps(&run.id)?) {
-            apply(driver, store, &run.id, &change)?;
+            apply(driver, store, host, &run.id, &change)?;
             if driver.halt_now() {
                 return Ok(());
             }
@@ -442,6 +485,7 @@ fn move_on(
         // A decision already recorded is left for the engine to apply, and is not replaced.
         resume_human_waits(driver, store, hands, &workflow, run)?;
     }
+    tell_open_questions(driver, store, hands, run)?;
     let inputs: Inputs = serde_json::from_str(&run.inputs).unwrap_or_default();
 
     // Sessions typed to during this tick. The host marks a session busy only once output comes
@@ -485,7 +529,7 @@ fn move_on(
                 if change.rewind.is_some() && driver.arm_halt(StopAfter::BeforeRewindApplied) {
                     return Ok(());
                 }
-                if apply(driver, store, &run.id, change)? {
+                if apply(driver, store, host, &run.id, change)? {
                     if driver.halt_now() {
                         return Ok(());
                     }
@@ -513,7 +557,7 @@ fn move_on(
             let Some(claim) = claims.remove(&step) else {
                 continue;
             };
-            if !apply(driver, store, &run.id, &claim)? {
+            if !apply(driver, store, host, &run.id, &claim)? {
                 if !still_running(store, &run.id)? {
                     return Ok(()); // Cancelled: nothing more of this run happens.
                 }
@@ -534,6 +578,7 @@ fn move_on(
                 delivered |= deliver(
                     driver,
                     store,
+                    host,
                     &run.id,
                     finishing.finish(&step, outputs, note.clone(), outcome.clone()),
                 )?;
@@ -553,6 +598,7 @@ fn move_on(
                     delivered |= deliver(
                         driver,
                         store,
+                        host,
                         &run.id,
                         finishing.finish(&step, &outputs, None, None),
                     )?;
@@ -564,7 +610,7 @@ fn move_on(
                 Outcome::NotYet => engine::not_yet(&step),
             };
             delivered |= change.to != StepStatus::Waiting;
-            apply(driver, store, &run.id, &change)?;
+            apply(driver, store, host, &run.id, &change)?;
         }
         if let Some(finish) = plan.finish {
             let (status, error) = match finish {
@@ -589,6 +635,7 @@ fn move_on(
 fn deliver(
     driver: &Driver,
     store: &Store,
+    host: &dyn TerminalHost,
     run_id: &str,
     (change, committed): (Move, bool),
 ) -> IpcResult<bool> {
@@ -597,7 +644,7 @@ fn deliver(
         driver.touch();
         return Ok(moved);
     }
-    apply(driver, store, run_id, &change)?;
+    apply(driver, store, host, run_id, &change)?;
     Ok(moved)
 }
 
@@ -645,6 +692,71 @@ fn still_running(store: &Store, run_id: &str) -> IpcResult<bool> {
 /// Type `text` into a session and submit it, as the first-prompt delivery does. Nobody here
 /// typed it, so it takes no control; while someone controls the session from elsewhere it
 /// waits rather than type over them.
+///
+/// The claim (`applied_at`) is taken before the keystrokes. `typed_at` is set only when
+/// typing returns done. A session that is held rolls the claim back, and the next tick
+/// tries again. A crash after the claim and before `typed_at` is not retried: the engine
+/// fails the step, because the keystrokes may already have landed.
+fn deliver_answer(
+    driver: &Driver,
+    store: &Store,
+    host: &dyn TerminalHost,
+    run_id: &str,
+    step_id: &str,
+    delivery: &engine::AnswerDelivery,
+) -> IpcResult<bool> {
+    if driver.arm_halt(StopAfter::BeforeAnswerApplied) {
+        return Ok(true);
+    }
+    let id = SessionId(delivery.pty_id.clone());
+    let info = match host.info(&id) {
+        Ok(info) => info,
+        Err(_) => return Ok(false),
+    };
+    if !matches!(info.state, SessionState::Running) || info.busy {
+        return Ok(false);
+    }
+    let (note, _) = crate::workflow::artifact::cap(&format!("Answered.\n{}", delivery.text));
+    let claimed = store.claim_clarification_answer(run_id, step_id, delivery.round, &note)?;
+    if !claimed {
+        return Ok(false);
+    }
+    driver.touch();
+    if driver.arm_halt(StopAfter::AfterAnswerApplied) {
+        return Ok(true);
+    }
+    match type_into(host, &id, &delivery.text) {
+        Outcome::Done(_) => {
+            store.mark_clarification_typed(run_id, step_id, delivery.round)?;
+            Ok(true)
+        }
+        Outcome::Failed(why) => {
+            store.move_workflow_step(
+                run_id,
+                step_id,
+                &[StepStatus::Waiting],
+                StepStatus::Failed,
+                None,
+                Some(&format!(
+                    "The answer was recorded and could not be typed into the session: {why}"
+                )),
+                None,
+                false,
+            )?;
+            Ok(true)
+        }
+        Outcome::NotYet => {
+            // Nothing was typed. The next tick claims it again.
+            store.release_clarification_claim(run_id, step_id, delivery.round)?;
+            Ok(false)
+        }
+        Outcome::Skipped(_) | Outcome::Queued(_) => {
+            store.release_clarification_claim(run_id, step_id, delivery.round)?;
+            Ok(false)
+        }
+    }
+}
+
 fn type_into(host: &dyn TerminalHost, id: &SessionId, text: &str) -> Outcome {
     let failed =
         |error: HostError| Outcome::Failed(format!("Could not type into the session: {error}"));
@@ -674,18 +786,31 @@ enum Outcome {
     NotYet,
 }
 
-fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResult<bool> {
+fn apply(
+    driver: &Driver,
+    store: &Store,
+    host: &dyn TerminalHost,
+    run_id: &str,
+    change: &Move,
+) -> IpcResult<bool> {
+    if let Some(delivery) = &change.apply_answer {
+        return deliver_answer(driver, store, host, run_id, &change.step, delivery);
+    }
     // A loop is one change: the steps go back to pending, the old decision is removed, and
     // the feedback is kept. It is not the path that records a decision. Checked first, so a
     // request for changes that routes back is not also applied as a finished decision.
     if let Some(rewind) = &change.rewind {
-        let feedback = rewind.feedback.as_ref().map(|copy| NewWorkflowArtifact {
-            name: copy.name.clone(),
-            source: copy.source.clone(),
-            detail: None,
-            body: copy.body.clone(),
-            truncated: false,
-        });
+        let feedback: Vec<NewWorkflowArtifact> = rewind
+            .feedback
+            .iter()
+            .map(|copy| NewWorkflowArtifact {
+                name: copy.name.clone(),
+                source: copy.source.clone(),
+                detail: None,
+                body: copy.body.clone(),
+                truncated: false,
+            })
+            .collect();
         // The rewind cancels a smoke test it sends back, in the same transaction, so a
         // crash after the commit still leaves that test cancelled.
         let moved = store.rewind_workflow(
@@ -694,7 +819,7 @@ fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResu
             &change.from,
             rewind.seen,
             &rewind.steps,
-            feedback.as_ref(),
+            &feedback,
         )?;
         if !moved {
             return Ok(false);
@@ -1048,6 +1173,18 @@ impl Capture<'_> {
                     .ok_or_else(|| failed(format!("The step left no `{field}` to hand on.")))?;
                 Ok(("output".into(), Some(field.clone()), text))
             }
+            ArtifactSource::Brief => {
+                let rounds = self
+                    .store
+                    .clarification_rounds(self.run_id, &self.step.id)
+                    .map_err(|error| failed(error.to_string()))?;
+                let summary = self
+                    .store
+                    .clarification_summary(self.run_id, &self.step.id)
+                    .map_err(|error| failed(error.to_string()))?;
+                let text = super::clarify::render_brief(&rounds, summary.as_deref());
+                Ok(("brief".into(), None, text))
+            }
             ArtifactSource::Transcript { session, raw } => {
                 let pty = self.session_pty(session).ok_or_else(|| {
                     failed("There is no session to copy a conversation from.".to_owned())
@@ -1234,6 +1371,21 @@ impl World for Seen<'_> {
         })
     }
 
+    fn clarification(&self, step_id: &str) -> super::clarify::ClarificationState {
+        let rounds = self
+            .store
+            .clarification_rounds(self.run_id, step_id)
+            .unwrap_or_default();
+        let mut state = super::clarify::state_from(&rounds);
+        state.summary = self
+            .store
+            .clarification_summary(self.run_id, step_id)
+            .ok()
+            .flatten()
+            .is_some_and(|text| !text.trim().is_empty());
+        state
+    }
+
     fn approval(&self, step_id: &str) -> Option<RecordedApproval> {
         let row = self
             .store
@@ -1260,6 +1412,62 @@ fn is_applied_decision(change: &Move) -> bool {
 
 /// Open the wait and issue the first code when an approval starts waiting. A notification
 /// that cannot be shown does not fail the step. The code is not written into the step.
+/// A question opened since the last tick, or reopened for another round. The one-time code
+/// is issued the same way as an approval, including when `notify` is `never`: a terminal
+/// still has to present it. The notification is what stays quiet.
+fn tell_open_questions(
+    driver: &Driver,
+    store: &Store,
+    hands: &dyn Hands,
+    run: &WorkflowRunRow,
+) -> IpcResult<()> {
+    // A lookup error is told anyway: missing a notice is worse than an extra one.
+    // The code is issued either way, so `ys workflow answer` is not left with no code.
+    let tell = store.tell_workflow_approval(&run.id).unwrap_or(true);
+    for wait in store.workflow_waits_unapplied()? {
+        if wait.run_id != run.id || wait.kind != super::waits::KIND_QUESTION {
+            continue;
+        }
+        if wait.answer.is_some() || wait.applied_at.is_some() {
+            continue;
+        }
+        let present = store
+            .answer_code_present(&run.id, &wait.step_id)
+            .unwrap_or(false);
+        if wait.notified_at.is_some() && present && driver.holds_code(&run.id, &wait.step_id) {
+            continue;
+        }
+        let Some((code, had)) = driver.issue_answer_code(store, &run.id, &wait.step_id, false)?
+        else {
+            continue;
+        };
+        hands.approval_code(&run.id, &wait.step_id, &code);
+        if !tell {
+            continue;
+        }
+        let replaced = had && wait.notified_at.is_some();
+        let title = if replaced {
+            super::waits::TITLE_ANSWER_REPLACED
+        } else {
+            super::waits::TITLE_ANSWER
+        };
+        let _ = hands.notify(
+            title,
+            Some(&approval_body(
+                run,
+                &wait.step_id,
+                wait.prompt.as_deref(),
+                shown_code(hands, Some(&code)),
+                replaced,
+            )),
+        );
+        if wait.notified_at.is_none() {
+            store.mark_workflow_wait_notified(&run.id, &wait.step_id)?;
+        }
+    }
+    Ok(())
+}
+
 fn follow_approval(
     driver: &Driver,
     store: &Store,

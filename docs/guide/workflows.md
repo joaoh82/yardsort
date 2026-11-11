@@ -369,6 +369,71 @@ waits until you decide. A timeout fails that step, records no decision, and does
 stop a step that does not need it. `gate: false` is refused, because an approval is a
 gate. Leaving `gate` out is the same as writing `gate: true`.
 
+### Asking a question
+
+An approval judges something the agent has already written. A clarification is earlier
+than that: the agent does not know enough yet, so it asks, and the same session continues
+with the answer.
+
+```yaml
+- id: discover
+  needs: [draft]
+  action: wait_session
+  session: "{{ steps.draft.session }}"
+  until: settled
+  clarify: true
+  max_rounds: 3
+  produces:
+    - name: brief
+      from: brief
+```
+
+`clarify: true` is what makes the step able to wait for you. The agent asks with
+`ys workflow ask --question "..."`, one `--question` for each question in the round.
+Yardsort stores that round and the run waits. A question the agent only prints is not
+asked. The step does not finish because the session went quiet. It finishes when the
+agent records a summary, or when `until: exited` and the session has ended with no
+question still open. With `until: settled`, a quiet session that is still running and
+has no summary keeps waiting until `timeout`, and then the step fails. If that session
+ends first, with no summary, the step fails and says the session ended without a
+summary. The same happens when a question is still waiting for an answer. An answer
+that was given and not yet typed fails because it could not be sent back.
+
+You answer in the run view, which does not ask for a code, or from a terminal Yardsort
+did not start. The terminal needs the one-time code the window and the notification
+show, the same way an approval does:
+
+```sh
+ys workflow answer 3f2a9c1e discover --text "30 seconds"
+```
+
+Leave `--code` out and type the code when asked, or pass `--code -` and the code on
+standard input. The answer is typed back into the same session. If that session is busy,
+nothing is typed and the next pass tries again. If Yardsort stops after it has claimed
+the answer and before the typing is confirmed, the step fails and says the answer may
+not have reached the session. It is not typed a second time. The agent can ask again, up
+to `max_rounds` (3 when left out, 10 at most). One more than that fails the step. The run
+says `Blocked: waiting for your answer.` and `ys workflow runs` shows `your answer` in
+WAITING ON.
+
+When the agent is finished it records the outcome with `ys workflow summary --text`.
+That is refused while a question is still waiting for an answer. That text, with every
+question and answer, is the `brief` artifact. A later step
+`consumes` it like any other named artifact. The brief is not read out of the terminal.
+A summary is what finishes the step when `until` is `settled`. If the agent records no
+summary and the session ends because `until` is `exited`, the brief says so.
+
+A session Yardsort started can ask and can record the summary. It cannot answer. That
+stays with you. This is not an approval. The one-time code works the same way as one:
+the window shows it, the notification includes it unless Settings → General leaves it
+out, and `ys workflow runs` does not print it. After five wrong codes the terminal
+stops until you press **Show a new code**.
+
+`timeout` still fails the step when you have not answered in time, or when a summary
+never arrives. A schedule or a trigger whose notify is not `never` tells you a
+question is waiting. `notify: never` stays quiet, and the code is still issued, so a
+terminal can answer.
+
 ### Conditional paths
 
 `on` sends a step to a different place depending on its outcome. It is only for `approve`
@@ -532,15 +597,15 @@ Every step has an `id`, named the same way as an input, and an `action`. `needs`
 steps that must finish first. A step cannot need itself. Steps that wait for each other in a
 circle are reported, because none of them could ever start.
 
-| Action             | Keys                                                             | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `start_session`    | `harness` (required), `prompt`, `model`, `effort`, `skip_memory` | Starts an agent in the workspace, like the composer does, with `prompt` as its first message. It opens as a tab there. `harness` is an agent's id, like `claude`, or exactly `{{ inputs.<id> }}` for an input of kind `harness`.                                                                                                                                                                                                                              |
-| `wait_session`     | `session` (required), `until`, `timeout`                         | Waits for a session. `until: settled`, the default, means it has gone quiet after at least 8 seconds of output, or its harness reported a finished turn. `until: exited` means the program has ended.                                                                                                                                                                                                                                                         |
-| `send_to_session`  | `session` (required), `prompt` (required), `timeout`             | Types `prompt` into a running session. It waits until that session is quiet: a busy agent is never interrupted. If the session is gone, the step is skipped.                                                                                                                                                                                                                                                                                                  |
-| `wait_pr_activity` | `kind`, `timeout`                                                | Waits for a new review or comment on the workspace's pull request, since the run started. `kind` is `review`, `comment` or `any`, the default.                                                                                                                                                                                                                                                                                                                |
-| `run_test`         | `test` (required), `inputs`, `timeout`, `gate`                   | Runs a smoke test in the workspace and waits for its verdict. The step succeeds whether the test passed or failed, so a later step can read `verdict` and act on either; it fails only on no verdict or a timeout. `gate: true` makes a failed verdict fail the step, skip the steps still going, and stop the run. `test` is a test id, or exactly `{{ inputs.<id> }}` for an input of kind `test`. `inputs` is a map of the test's own input ids to values. |
-| `notify`           | `title` (required), `body`                                       | Tells you, with a system notification.                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `approve`          | `prompt`, `timeout`, `gate`                                      | Waits for you to approve, reject, or request changes. Always a gate: a rejection or a request for changes stops the run. `prompt` is the question, and can use variables. `timeout`, when set, fails the step with no decision and does not stop a step that does not need it. `gate: false` is refused. Waiting for a GitHub review is `wait_pr_activity`, not this.                                                                                         |
+| Action             | Keys                                                              | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `start_session`    | `harness` (required), `prompt`, `model`, `effort`, `skip_memory`  | Starts an agent in the workspace, like the composer does, with `prompt` as its first message. It opens as a tab there. `harness` is an agent's id, like `claude`, or exactly `{{ inputs.<id> }}` for an input of kind `harness`.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `wait_session`     | `session` (required), `until`, `timeout`, `clarify`, `max_rounds` | Waits for a session. `until: settled`, the default, means it has gone quiet after at least 8 seconds of output, or its harness reported a finished turn. `until: exited` means the program has ended. `clarify: true` lets the agent ask you questions. That step finishes when the agent records `ys workflow summary`, or when `until` is `exited` and the session has ended with no question still open. Going quiet does not finish it. A session that ends with no summary fails the step. A session that is still running and has no summary waits until `timeout` and then fails. `max_rounds` is how many rounds, from 1 to 10, and 3 when left out. |
+| `send_to_session`  | `session` (required), `prompt` (required), `timeout`              | Types `prompt` into a running session. It waits until that session is quiet: a busy agent is never interrupted. If the session is gone, the step is skipped.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `wait_pr_activity` | `kind`, `timeout`                                                 | Waits for a new review or comment on the workspace's pull request, since the run started. `kind` is `review`, `comment` or `any`, the default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `run_test`         | `test` (required), `inputs`, `timeout`, `gate`                    | Runs a smoke test in the workspace and waits for its verdict. The step succeeds whether the test passed or failed, so a later step can read `verdict` and act on either; it fails only on no verdict or a timeout. `gate: true` makes a failed verdict fail the step, skip the steps still going, and stop the run. `test` is a test id, or exactly `{{ inputs.<id> }}` for an input of kind `test`. `inputs` is a map of the test's own input ids to values.                                                                                                                                                                                                |
+| `notify`           | `title` (required), `body`                                        | Tells you, with a system notification.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `approve`          | `prompt`, `timeout`, `gate`                                       | Waits for you to approve, reject, or request changes. Always a gate: a rejection or a request for changes stops the run. `prompt` is the question, and can use variables. `timeout`, when set, fails the step with no decision and does not stop a step that does not need it. `gate: false` is refused. Waiting for a GitHub review is `wait_pr_activity`, not this.                                                                                                                                                                                                                                                                                        |
 
 A key that belongs to another action is reported as misplaced. `title` on a `start_session` step
 is an example.
@@ -577,15 +642,15 @@ A step can hand a named document to a later step, so the next agent does not sta
 `produces` lists what this step leaves when it succeeds. `consumes` lists what a later step is
 given. The step that produces a name must be among its needs, directly or through other steps.
 
-| Key       | What it is                                                                       |
-| --------- | -------------------------------------------------------------------------------- |
-| `name`    | A lowercase name, like a step id: `spec`, `plan`, `report`.                      |
-| `path`    | A file inside the workspace, read when the step succeeds.                        |
-| `text`    | Text written here, with variables filled in.                                     |
-| `field`   | One field this step already leaves, such as `summary`.                           |
-| `from`    | `file`, `text`, `output` or `transcript`. A transcript needs `from: transcript`. |
-| `session` | For a transcript. `origin`, or a session this workflow started.                  |
-| `raw`     | For a transcript only. Keeps each turn's text. Otherwise the digest.             |
+| Key       | What it is                                                                                                                                          |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`    | A lowercase name, like a step id: `spec`, `plan`, `report`.                                                                                         |
+| `path`    | A file inside the workspace, read when the step succeeds.                                                                                           |
+| `text`    | Text written here, with variables filled in.                                                                                                        |
+| `field`   | One field this step already leaves, such as `summary`.                                                                                              |
+| `from`    | `file`, `text`, `output`, `transcript` or `brief`. A transcript needs `from: transcript`. `brief` is only on a `wait_session` with `clarify: true`. |
+| `session` | For a transcript. `origin`, or a session this workflow started.                                                                                     |
+| `raw`     | For a transcript only. Keeps each turn's text. Otherwise the digest.                                                                                |
 
 A `start_session` or `send_to_session` that consumes an artifact, and does not write
 `{{ artifacts.<name> }}` in its own prompt, is given the text under a heading. A notification is

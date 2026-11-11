@@ -112,6 +112,49 @@ pub enum Command {
         #[arg(long, value_name = "CODE")]
         code: Option<String>,
     },
+    /// Ask the person a question from inside a workflow session. This is how an agent asks.
+    /// A question only printed in the terminal is not asked.
+    Ask {
+        /// The workflow run, when this is not the session the run started. The start of the id.
+        #[arg(long, value_name = "RUN")]
+        run: Option<String>,
+        /// The clarifying step, when more than one session could match.
+        #[arg(long, value_name = "STEP")]
+        step: Option<String>,
+        /// One question. Repeat for each question in this round.
+        #[arg(long = "question", required = true)]
+        questions: Vec<String>,
+    },
+    /// Record the outcome of a clarifying step. The next phase reads this in the brief.
+    /// Text printed in the terminal is not the summary.
+    Summary {
+        /// The workflow run, when this is not the session the run started.
+        #[arg(long, value_name = "RUN")]
+        run: Option<String>,
+        /// The clarifying step, when more than one session could match.
+        #[arg(long, value_name = "STEP")]
+        step: Option<String>,
+        /// The outcome, in the agent's own words.
+        #[arg(long)]
+        text: String,
+    },
+    /// Answer a clarifying step that is waiting. A session Yardsort started cannot answer.
+    /// The one-time code is required, the same way an approval is decided.
+    Answer {
+        /// The run: its id, or the start of it.
+        run: String,
+        /// The step's id.
+        step: String,
+        /// The answer. One reply covers every question in the round.
+        #[arg(long)]
+        text: String,
+        /// The code Yardsort showed you. Leave this out to type it with echo off, in a real
+        /// console (cmd, PowerShell, or Windows Terminal on Windows). `-` reads one line
+        /// from standard input. Passing the code here puts it in your shell history and in
+        /// the process list. Not printed by `ys workflow runs`.
+        #[arg(long, value_name = "CODE")]
+        code: Option<String>,
+    },
     /// Check a workflow file. Prints each problem with its line and column; exits 1 if there
     /// are any. Needs no Yardsort profile, so it works anywhere.
     Validate {
@@ -199,6 +242,27 @@ pub fn run(data_dir: Option<PathBuf>, command: Command, out: &Output) -> Result<
                 code.as_deref(),
                 out,
             )
+        }
+        Command::Ask {
+            run,
+            step,
+            questions,
+        } => {
+            let ys = Yardsort::open(data_dir)?;
+            ask(&ys, run.as_deref(), step.as_deref(), &questions, out)
+        }
+        Command::Summary { run, step, text } => {
+            let ys = Yardsort::open(data_dir)?;
+            summarise(&ys, run.as_deref(), step.as_deref(), &text, out)
+        }
+        Command::Answer {
+            run,
+            step,
+            text,
+            code,
+        } => {
+            let ys = Yardsort::open(data_dir)?;
+            answer(&ys, &run, &step, &text, code.as_deref(), out)
         }
         Command::RequestChanges {
             run,
@@ -667,6 +731,19 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
             })
             .collect(),
     };
+    let questions: Vec<(String, Option<String>)> = steps
+        .iter()
+        .filter_map(|step| {
+            let wait = ys.store.workflow_wait(&run.id, &step.step_id).ok()??;
+            if wait.kind != workflow::waits::KIND_QUESTION
+                || wait.answer.is_some()
+                || wait.applied_at.is_some()
+            {
+                return None;
+            }
+            Some((step.step_id.clone(), wait.prompt))
+        })
+        .collect();
     out.emit(&shown, || {
         sayln!(
             "Run {} of `{}` in {}: {}",
@@ -755,6 +832,19 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                 );
             }
         }
+        for (step_id, prompt) in &questions {
+            sayln!();
+            sayln!("Blocked: waiting for your answer.");
+            sayln!("  {step_id}");
+            if let Some(prompt) = prompt {
+                sayln!("  {prompt}");
+            }
+            sayln!(
+                "  Answer in Yardsort, or with `ys workflow answer {} {step_id} --text` \
+                 and the code Yardsort showed you.",
+                memory::short_id(&run.id)
+            );
+        }
         if !decision_lines.is_empty() {
             sayln!();
             sayln!("Decisions");
@@ -781,6 +871,122 @@ fn note_line(note: Option<&str>) -> String {
         .to_owned()
 }
 
+fn ask(
+    ys: &Yardsort,
+    run: Option<&str>,
+    step: Option<&str>,
+    questions: &[String],
+    out: &Output,
+) -> Result<(), Failure> {
+    let (run_id, step_id) = clarifying_step(ys, run, step)?;
+    let written = workflow::clarify::ask(&ys.store, &run_id, &step_id, questions)?;
+    if let Some(message) =
+        workflow::clarify::ask_refusal(&written, memory::short_id(&run_id), &step_id)
+    {
+        return Err(Failure::new(message));
+    }
+    let round = match written {
+        workflow::clarify::AskWrite::Recorded { round } => round,
+        _ => 0,
+    };
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Asked<'a> {
+        run: &'a str,
+        step: &'a str,
+        round: u32,
+    }
+    out.emit(
+        &Asked {
+            run: &run_id,
+            step: &step_id,
+            round,
+        },
+        || sayln!("Asked {step_id} (round {round}). The run waits for an answer."),
+    )
+}
+
+fn summarise(
+    ys: &Yardsort,
+    run: Option<&str>,
+    step: Option<&str>,
+    text: &str,
+    out: &Output,
+) -> Result<(), Failure> {
+    let (run_id, step_id) = clarifying_step(ys, run, step)?;
+    let written = workflow::clarify::summary(&ys.store, &run_id, &step_id, text)?;
+    if let Some(message) =
+        workflow::clarify::summary_refusal(&written, memory::short_id(&run_id), &step_id)
+    {
+        return Err(Failure::new(message));
+    }
+    #[derive(Serialize)]
+    struct Recorded<'a> {
+        run: &'a str,
+        step: &'a str,
+    }
+    out.emit(
+        &Recorded {
+            run: &run_id,
+            step: &step_id,
+        },
+        || sayln!("Recorded the summary for {step_id}."),
+    )
+}
+
+fn answer(
+    ys: &Yardsort,
+    wanted: &str,
+    step: &str,
+    text: &str,
+    code: Option<&str>,
+    out: &Output,
+) -> Result<(), Failure> {
+    if let Some(why) = launched_here() {
+        return Err(Failure::new(why));
+    }
+    let code = read_one_time_code(code, "Answer code: ")?;
+    let run = find_run(ys, wanted)?;
+    let written =
+        workflow::waits::answer_with_code(&ys.store, &run.id, step, text, &cli_actor(), &code)?;
+    if let Some(message) =
+        workflow::clarify::answer_refusal(&written, memory::short_id(&run.id), step)
+    {
+        return Err(Failure::new(message));
+    }
+    #[derive(Serialize)]
+    struct Answered<'a> {
+        run: &'a str,
+        step: &'a str,
+    }
+    out.emit(&Answered { run: &run.id, step }, || {
+        sayln!("Answered {step}. The same session receives it.")
+    })
+}
+
+/// The clarifying step: the one this session was started for, or `--run` and `--step`.
+fn clarifying_step(
+    ys: &Yardsort,
+    run: Option<&str>,
+    step: Option<&str>,
+) -> Result<(String, String), Failure> {
+    if let Some(run) = run {
+        let found = find_run(ys, run)?;
+        let step = step.ok_or_else(|| Failure::new("Name the step with --step."))?;
+        return Ok((found.id, step.to_owned()));
+    }
+    let activity = std::env::var("YARDSORT_RUN_ID").unwrap_or_default();
+    match workflow::clarify::locate(&ys.store, activity.trim(), step)? {
+        Ok(found) => Ok((found.run_id, found.step_id)),
+        Err(workflow::clarify::LocateMiss::None) => Err(Failure::new(
+            "This is not a workflow session that is asking. Pass --run and --step.",
+        )),
+        Err(workflow::clarify::LocateMiss::Many(n)) => Err(Failure::new(format!(
+            "{n} steps could be this session. Pass --step."
+        ))),
+    }
+}
+
 fn decide(
     ys: &Yardsort,
     wanted: &str,
@@ -793,7 +999,7 @@ fn decide(
     if let Some(why) = launched_here() {
         return Err(Failure::new(why));
     }
-    let code = read_decision_code(code)?;
+    let code = read_one_time_code(code, "Approval code: ")?;
     let run = find_run(ys, wanted)?;
     let feedback = feedback.map(str::trim).filter(|text| !text.is_empty());
     let actor = cli_actor();
@@ -826,16 +1032,16 @@ fn decide(
     )
 }
 
-/// The code for a decision. Left out, it is typed at the terminal with echo off. `-` reads
-/// one line from standard input. Anything else was passed on the command line, which keeps
-/// the code in shell history and in the process list, so that form warns.
-fn read_decision_code(code: Option<&str>) -> Result<String, Failure> {
+/// The code for a decision or an answer. Left out, it is typed at the terminal with echo
+/// off. `-` reads one line from standard input. Anything else was passed on the command
+/// line, which keeps the code in shell history and in the process list, so that form warns.
+fn read_one_time_code(code: Option<&str>, prompt: &str) -> Result<String, Failure> {
     match code.map(str::trim).filter(|text| !text.is_empty()) {
-        None => prompt_decision_code(),
+        None => prompt_one_time_code(prompt),
         Some("-") => stdin_decision_code(),
         Some(given) => {
             eprintln!(
-                "warning: --code puts the approval code in your shell history and in the \
+                "warning: --code puts the code in your shell history and in the \
                  process list. Leave --code out, or pass --code - and the code on standard \
                  input."
             );
@@ -844,7 +1050,7 @@ fn read_decision_code(code: Option<&str>) -> Result<String, Failure> {
     }
 }
 
-fn prompt_decision_code() -> Result<String, Failure> {
+fn prompt_one_time_code(prompt: &str) -> Result<String, Failure> {
     // Both streams: rpassword opens the console (CONIN$ on Windows), not stdin, so a
     // script or a scheduled task that merely has a console would wait forever.
     if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
@@ -852,7 +1058,7 @@ fn prompt_decision_code() -> Result<String, Failure> {
             "No terminal to ask for the code. Pass --code - and pipe it in.",
         ));
     }
-    match rpassword::prompt_password("Approval code: ") {
+    match rpassword::prompt_password(prompt) {
         Ok(code) => {
             let code = code.trim().to_owned();
             if code.is_empty() {
@@ -899,7 +1105,8 @@ fn launched_here() -> Option<&'static str> {
     });
     inside.then_some(
         "This ys is running inside a session Yardsort started, so it cannot decide an \
-         approval. Decide in the app, or from a terminal Yardsort did not start.",
+         approval or answer a question. Do that in the app, or from a terminal Yardsort did \
+         not start.",
     )
 }
 

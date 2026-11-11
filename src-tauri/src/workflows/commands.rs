@@ -88,11 +88,13 @@ pub struct WorkflowStepRun {
     pub artifacts: Vec<WorkflowArtifact>,
     /// Named documents this step reads, from earlier steps. An approval shows these.
     pub consumed: Vec<WorkflowArtifact>,
-    /// The one-time code for a waiting approval. Shown only in this window. Absent when this
-    /// process does not hold one. Listing a run does not issue a code.
+    /// The one-time code for a waiting approval or a clarifying answer. Shown only in this
+    /// window. Absent when this process does not hold one. Listing a run does not issue a code.
     pub approval_code: Option<String>,
     /// A terminal has tried too many wrong codes. A new code comes from Show a new code.
     pub approval_locked: bool,
+    /// The questions a clarifying step is waiting on. Absent when it is not.
+    pub clarification_prompt: Option<String>,
 }
 
 /// A named document stored on a run, as the run view shows it.
@@ -161,6 +163,7 @@ fn step_from(
     consumes: &[String],
     approval_code: Option<String>,
     approval_locked: bool,
+    clarification_prompt: Option<String>,
 ) -> WorkflowStepRun {
     WorkflowStepRun {
         outputs: serde_json::from_str(&row.outputs).unwrap_or_default(),
@@ -186,6 +189,7 @@ fn step_from(
             .collect(),
         approval_code,
         approval_locked,
+        clarification_prompt,
     }
 }
 
@@ -376,9 +380,23 @@ pub async fn workflow_run_steps(app: AppHandle, run_id: String) -> IpcResult<Vec
                     .find(|step| step.id == row.step_id)
                     .map(|step| step.consumes.as_slice())
                     .unwrap_or(&[]);
+                let clarification_prompt = state
+                    .store
+                    .workflow_wait(&run_id, &row.step_id)?
+                    .filter(|wait| {
+                        wait.kind == workflow::waits::KIND_QUESTION
+                            && wait.answer.is_none()
+                            && wait.applied_at.is_none()
+                    })
+                    .and_then(|wait| wait.prompt);
                 let (approval_code, approval_locked) =
                     if row.action == "approve" && row.status == "waiting" {
                         shown_approval_code(&state.store, &run_id, &row.step_id)?
+                    } else if clarification_prompt.is_some() {
+                        (
+                            super::approval_code_for(&run_id, &row.step_id),
+                            state.store.answer_code_locked(&run_id, &row.step_id)?,
+                        )
                     } else {
                         (None, false)
                     };
@@ -388,6 +406,7 @@ pub async fn workflow_run_steps(app: AppHandle, run_id: String) -> IpcResult<Vec
                     names,
                     approval_code,
                     approval_locked,
+                    clarification_prompt,
                 ))
             })
             .collect()
@@ -578,6 +597,38 @@ pub async fn workflow_describe(app: AppHandle, description: String) -> IpcResult
     })
 }
 
+/// Record an answer to a clarifying step. The driver types it into the same session on
+/// its next tick. Only the person at this window calls this.
+#[tauri::command]
+#[specta::specta]
+pub async fn workflow_answer(
+    app: AppHandle,
+    run_id: String,
+    step_id: String,
+    text: String,
+) -> IpcResult<()> {
+    blocking(app.clone(), move |state| {
+        let written = workflow::waits::answer_in_window(
+            &state.store,
+            workflow::waits::DesktopWindow::new(),
+            &run_id,
+            &step_id,
+            &text,
+            "app",
+        )?;
+        if let Some(message) = workflow::clarify::answer_refusal(&written, &run_id, &step_id) {
+            return Err(IpcError::new("answer_refused", message));
+        }
+        Ok(())
+    })
+    .await?;
+    if let Some(driver) = tauri::Manager::try_state::<super::Driver>(&app) {
+        driver.wake();
+    }
+    changed(&app);
+    Ok(())
+}
+
 /// Record an approval. The driver applies it on its next tick. Only the person at this
 /// window calls this. The Floor Manager's `ys` is refused before it can.
 #[tauri::command]
@@ -684,7 +735,13 @@ fn issue_approval_code(
     let Some(run) = state.store.workflow_run(run_id)? else {
         return Err(IpcError::new("run_not_found", "That run is not there."));
     };
-    let (code, had) = if let Some(driver) = app.try_state::<super::Driver>() {
+    let question = state
+        .store
+        .workflow_wait(run_id, step_id)?
+        .is_some_and(|wait| wait.kind == workflow::waits::KIND_QUESTION && wait.answer.is_none());
+    let (code, had) = if question {
+        issue_answer_code(state, app, run_id, step_id)?
+    } else if let Some(driver) = app.try_state::<super::Driver>() {
         driver
             .issue_approval_code(&state.store, run_id, step_id)?
             .ok_or_else(|| IpcError::new("approval_decided", "This step already has a decision."))?
@@ -699,19 +756,30 @@ fn issue_approval_code(
         (code, had)
     };
     super::remember_approval_code(run_id, step_id, &code);
-    let prompt = state
-        .store
-        .workflow_steps(run_id)?
-        .into_iter()
-        .find(|step| step.step_id == step_id)
-        .and_then(|step| {
-            yardsort_core::workflow::engine::parse_outputs(&step.outputs)
-                .get("prompt")
-                .cloned()
-        });
+    let prompt = if question {
+        state
+            .store
+            .workflow_wait(run_id, step_id)?
+            .and_then(|wait| wait.prompt)
+    } else {
+        state
+            .store
+            .workflow_steps(run_id)?
+            .into_iter()
+            .find(|step| step.step_id == step_id)
+            .and_then(|step| {
+                yardsort_core::workflow::engine::parse_outputs(&step.outputs)
+                    .get("prompt")
+                    .cloned()
+            })
+    };
     let include = state.settings.get().workflows.show_approval_code();
     let replaced = had;
-    let title = if replaced {
+    let title = if question && replaced {
+        workflow::waits::TITLE_ANSWER_REPLACED
+    } else if question {
+        workflow::waits::TITLE_ANSWER
+    } else if replaced {
         workflow::waits::TITLE_REPLACED
     } else {
         workflow::waits::TITLE_WAITING
@@ -734,6 +802,25 @@ fn issue_approval_code(
         body,
         tell,
     })
+}
+
+/// Show a new code for an open question. The hash is replaced and the wrong-try count resets.
+fn issue_answer_code(
+    state: &AppState,
+    app: &AppHandle,
+    run_id: &str,
+    step_id: &str,
+) -> IpcResult<(String, bool)> {
+    let had = state.store.answer_code_present(run_id, step_id)?;
+    let code = if let Some(driver) = app.try_state::<super::Driver>() {
+        driver
+            .issue_answer_code(&state.store, run_id, step_id)?
+            .map(|(code, _)| code)
+    } else {
+        state.store.begin_answer_code(run_id, step_id)?
+    }
+    .ok_or_else(|| IpcError::new("answer_closed", "This step is not waiting for an answer."))?;
+    Ok((code, had))
 }
 
 /// Cancel a run. Agents it started keep running.

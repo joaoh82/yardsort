@@ -1044,6 +1044,9 @@ export const ipc = {
     decision: ApprovalDecision,
     feedback: string | null,
   ) => unwrap(commands.workflowDecide(runId, stepId, decision, feedback)),
+  /** Answer a clarifying step. The same session receives it on the next tick. */
+  workflowAnswer: (runId: string, stepId: string, text: string) =>
+    unwrap(commands.workflowAnswer(runId, stepId, text)),
   /** Runs waiting on the person, across every workflow. */
   workflowWaits: () => unwrap(commands.workflowOpenWaits()),
   /** Issue a new approval code and tell the person. Listing a run does not do this. */
