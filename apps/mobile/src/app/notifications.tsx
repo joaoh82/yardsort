@@ -12,15 +12,6 @@ import { useApp, useSnapshot } from "../lib/context";
 import { readPushToken, requestPushPermissionOnce } from "../lib/push-token";
 import { Body, Group, Problem, Row, Screen, Section, Waiting } from "../ui/parts";
 
-const DEFAULTS: NotificationPreferences = {
-  muted: false,
-  task: true,
-  review: true,
-  failure: true,
-  desktopUpdate: true,
-  workflow: true,
-};
-
 export default function Notifications() {
   const { accounts } = useApp();
   const snapshot = useSnapshot();
