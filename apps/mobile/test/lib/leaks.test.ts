@@ -111,7 +111,7 @@ test("no marker reaches a log, the phone's cache or vault, or its diagnostics", 
     await until("every line shown", () => phone.shown().includes(`got:${TYPED} ${LINES - 1}`));
   }
   // Typing at the computer takes control back, so it comes once the phone's lines are in.
-  await standIn.typeHere(`${PRINTED}\n`);
+  await standIn.typeHere(`${PRINTED}\r`);
   for (const phone of phones) {
     await until("the printed line shown", () => phone.shown().includes(`got:${PRINTED}`));
   }
