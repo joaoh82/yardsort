@@ -636,18 +636,6 @@ fn cancel_tests_a_halt_skipped(
     }
 }
 
-/// Test runs a rewind is about to clear off `run_test` steps. Read before the rewind, because
-/// it wipes the step outputs that name the test.
-fn tests_a_rewind_sends_back(store: &Store, run_id: &str, steps: &[String]) -> Vec<String> {
-    let Ok(rows) = store.workflow_steps(run_id) else {
-        return Vec::new();
-    };
-    rows.into_iter()
-        .filter(|row| row.action == "run_test" && steps.iter().any(|id| id == &row.step_id))
-        .filter_map(|row| engine::parse_outputs(&row.outputs).get("run").cloned())
-        .collect()
-}
-
 fn still_running(store: &Store, run_id: &str) -> IpcResult<bool> {
     Ok(store
         .workflow_run(run_id)?
@@ -698,9 +686,8 @@ fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResu
             body: copy.body.clone(),
             truncated: false,
         });
-        // Read the test ids before the rewind clears the steps' outputs. Cancel only if
-        // the rewind itself is applied, so a second apply does not cancel a test again.
-        let tests = tests_a_rewind_sends_back(store, run_id, &rewind.steps);
+        // The rewind cancels a smoke test it sends back, in the same transaction, so a
+        // crash after the commit still leaves that test cancelled.
         let moved = store.rewind_workflow(
             run_id,
             &change.step,
@@ -711,15 +698,6 @@ fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResu
         )?;
         if !moved {
             return Ok(false);
-        }
-        for test_run in tests {
-            if let Err(error) =
-                store.cancel_test_run(&test_run, "The workflow is running this step again.")
-            {
-                eprintln!(
-                    "workflows: could not cancel smoke test {test_run} after a rewind: {error}"
-                );
-            }
         }
         for step in &rewind.steps {
             driver.forget_code(run_id, step);

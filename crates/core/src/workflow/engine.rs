@@ -343,8 +343,9 @@ pub fn advance(
     let mut handed: BTreeMap<String, String> = BTreeMap::new();
 
     // Steps are visited in file order until a pass changes nothing, which is at most one pass
-    // per step: a step can only be unblocked by one before it in the graph. A loop stops the
-    // pass: the next tick starts the steps again, after the stored decision has been cleared.
+    // per step: a step can only be unblocked by one before it in the graph. A rewind does not
+    // start later steps in this pass. Judged steps later in the file still conclude, so a halt
+    // or a stop in the same tick wins over the rewind whichever step comes first.
     let mut rewound = false;
     loop {
         let before = plan.moves.len();
@@ -353,6 +354,9 @@ pub fn advance(
             let Some(&current) = status.get(id) else {
                 continue;
             };
+            if rewound && current == StepStatus::Pending {
+                continue;
+            }
             let lookup = |path: &[String]| {
                 if let [namespace, name] = path {
                     if namespace == "artifacts" {
@@ -438,14 +442,9 @@ pub fn advance(
                     }
                 }
                 if change.rewind.is_some() {
-                    if let Some(text) = change.outcome.as_deref() {
-                        if let Ok(parsed) = serde_json::from_str(text) {
-                            outcomes.insert(step.id.clone(), parsed);
-                        }
-                    }
                     plan.moves.push(change);
                     rewound = true;
-                    break;
+                    continue;
                 }
                 if let Some(text) = change.outcome.as_deref() {
                     if let Ok(parsed) = serde_json::from_str::<StepOutcome>(text) {
@@ -468,7 +467,9 @@ pub fn advance(
 
     // A failed gate stops the whole run, not only the steps that name it in `needs`.
     // Done before the finish check, so the steps it skips count as finished this tick.
-    halt_the_run(&mut plan, workflow, &mut status);
+    // A step that already succeeded onto `stop` (after its artifacts were stored, including
+    // on a later tick) stops the run the same way.
+    halt_the_run(&mut plan, workflow, &mut status, &outcomes);
 
     if status.values().all(|s| s.is_final()) {
         // Name the gate that halted the run. Another step may already be failed, earlier
@@ -507,6 +508,29 @@ pub fn advance(
     plan
 }
 
+/// A step that has already succeeded, whose stored outcome routes to `stop`.
+///
+/// Saving artifacts finishes the step on a later tick, after the move that chose `stop`
+/// was turned into "still running". The stored outcome is what says the branch ends.
+fn finished_route_stop(
+    workflow: &Workflow,
+    status: &BTreeMap<&str, StepStatus>,
+    outcomes: &BTreeMap<String, StepOutcome>,
+) -> Option<String> {
+    workflow.steps.iter().find_map(|step| {
+        if status.get(step.id.as_str()) != Some(&StepStatus::Succeeded) {
+            return None;
+        }
+        let outcome = outcomes.get(&step.id)?;
+        if outcome.verdict == StepVerdict::Failed {
+            return None;
+        }
+        let when = judged_name(step, outcome)?;
+        let route = step.routes.iter().find(|route| route.when == when)?;
+        route.stops().then(|| step.id.clone())
+    })
+}
+
 /// Skip every step that has not finished, because a gate failed.
 ///
 /// An effect this plan was about to carry out is dropped, so it never starts. A step that
@@ -514,7 +538,12 @@ pub fn advance(
 /// The driver then cancels a smoke test a skipped `run_test` step was waiting on. Anything
 /// else that effect already started is left running: stopping it here could throw away
 /// work, and the run ending is what the gate asked for.
-fn halt_the_run(plan: &mut Plan, workflow: &Workflow, status: &mut BTreeMap<&str, StepStatus>) {
+fn halt_the_run(
+    plan: &mut Plan,
+    workflow: &Workflow,
+    status: &mut BTreeMap<&str, StepStatus>,
+    outcomes: &BTreeMap<String, StepOutcome>,
+) {
     let gate = plan
         .moves
         .iter()
@@ -524,7 +553,8 @@ fn halt_the_run(plan: &mut Plan, workflow: &Workflow, status: &mut BTreeMap<&str
         .moves
         .iter()
         .find(|change| change.stop)
-        .map(|change| change.step.clone());
+        .map(|change| change.step.clone())
+        .or_else(|| finished_route_stop(workflow, status, outcomes));
     let Some(cause) = gate.clone().or(ended) else {
         return;
     };

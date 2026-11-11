@@ -16,8 +16,10 @@ has the downloads and the full commit lists.
   report is an artifact the step being run again can read, and each attempt is kept. A
   failed route that goes forward leaves that report for the step it goes to as well. An
   earlier loop's note is not handed out again when a later loop runs those steps. A step
-  cannot be named `stop`. A rewind is not applied when the run is already stopping, and a
-  smoke test still running on a step that is sent back is cancelled. The count survives a
+  cannot be named `stop`. A pass that goes to `stop` still ends the run after the step
+  saves what it `produces`. A rewind is not applied when the run is already stopping, even
+  when the looping step comes first in the file, and a smoke test still running on a step
+  that is sent back is cancelled with that rewind. The count survives a
   restart and is not increased twice. A file with no `on` still loads.
   See [Conditional paths](docs/guide/workflows.md#conditional-paths).
 - **A workflow that is waiting on you stays waiting across a restart.** The run view

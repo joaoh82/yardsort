@@ -2185,3 +2185,171 @@ steps:
     assert!(matches!(stopped.finished, Some(Finish::Succeeded)));
     assert!(stopped.rows.iter().all(|row| row.status != "pending"));
 }
+
+#[test]
+fn a_pass_that_stops_still_stops_after_the_step_saves_what_it_produces() {
+    let source = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: verify
+    action: run_test
+    test: login
+    produces:
+      - name: report
+        text: The report.
+    on:
+      passed: stop
+      failed: stop
+  - id: side
+    action: notify
+    title: Side
+"#;
+    let mut run = Run::from(source);
+    let started = run.advance();
+    assert!(
+        started
+            .iter()
+            .any(|effect| matches!(effect, Effect::RunTest { step, .. } if step == "verify")),
+        "{started:?}"
+    );
+    assert!(
+        started
+            .iter()
+            .any(|effect| matches!(effect, Effect::Notify { step, .. } if step == "side")),
+        "{started:?}"
+    );
+    assert!(run.apply(&queued(
+        "verify",
+        &Outputs::from([("run".to_owned(), "tr-1".to_owned())])
+    )));
+    assert_eq!(run.status("side"), "running");
+    run.world.test_runs.insert(
+        "tr-1".into(),
+        TestRun {
+            status: "passed".into(),
+            summary: "ok".into(),
+        },
+    );
+    let saving = run.advance();
+    assert_eq!(run.status("verify"), "running");
+    assert_eq!(run.status("side"), "running");
+    assert!(run.finished.is_none());
+    let Effect::Capture {
+        outputs,
+        note,
+        outcome,
+        ..
+    } = saving
+        .iter()
+        .find(|effect| matches!(effect, Effect::Capture { step, .. } if step == "verify"))
+        .unwrap()
+    else {
+        panic!("the pass should wait to save the report: {saving:?}");
+    };
+    assert!(run.apply(&recorded("verify", outputs, note.clone(), outcome.clone())));
+    assert_eq!(run.status("verify"), "succeeded");
+    run.advance();
+    assert_eq!(run.status("side"), "skipped");
+    assert_eq!(run.status("verify"), "succeeded");
+    assert!(matches!(run.finished, Some(Finish::Succeeded)));
+    assert!(run.rows.iter().all(|row| row.status != "pending"));
+}
+
+#[test]
+fn a_halt_wins_over_a_rewind_when_the_looping_step_comes_first() {
+    let source = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: prep
+    action: notify
+    title: Prep
+  - id: loop
+    needs: [prep]
+    action: run_test
+    test: loop
+    on:
+      passed: stop
+      failed: prep
+    max_attempts: 3
+  - id: gate
+    needs: [prep]
+    action: run_test
+    test: gate
+    on:
+      passed: stop
+      failed: stop
+"#;
+    let mut halted = Run::from(source);
+    halted.advance();
+    finish_notify(&mut halted, "prep");
+    halted.advance();
+    assert!(halted.apply(&queued(
+        "loop",
+        &Outputs::from([("run".to_owned(), "loop-run".to_owned())])
+    )));
+    assert!(halted.apply(&queued(
+        "gate",
+        &Outputs::from([("run".to_owned(), "gate-run".to_owned())])
+    )));
+    halted.world.test_runs.insert(
+        "loop-run".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "loop broke".into(),
+        },
+    );
+    halted.world.test_runs.insert(
+        "gate-run".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "gate broke".into(),
+        },
+    );
+    halted.advance();
+    assert_eq!(halted.status("gate"), "failed");
+    assert_eq!(halted.status("loop"), "skipped");
+    assert_eq!(halted.status("prep"), "succeeded");
+    assert_eq!(attempts(&halted, "prep"), 1);
+    assert!(matches!(halted.finished, Some(Finish::Failed(_))));
+    assert!(halted.rows.iter().all(|row| row.status != "pending"));
+
+    let mut stopped = Run::from(source);
+    stopped.advance();
+    finish_notify(&mut stopped, "prep");
+    stopped.advance();
+    assert!(stopped.apply(&queued(
+        "loop",
+        &Outputs::from([("run".to_owned(), "loop-run".to_owned())])
+    )));
+    assert!(stopped.apply(&queued(
+        "gate",
+        &Outputs::from([("run".to_owned(), "gate-run".to_owned())])
+    )));
+    stopped.world.test_runs.insert(
+        "loop-run".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "loop broke".into(),
+        },
+    );
+    stopped.world.test_runs.insert(
+        "gate-run".into(),
+        TestRun {
+            status: "passed".into(),
+            summary: "ok".into(),
+        },
+    );
+    stopped.advance();
+    assert_eq!(stopped.status("gate"), "succeeded");
+    assert_eq!(stopped.status("loop"), "skipped");
+    assert_eq!(stopped.status("prep"), "succeeded");
+    assert_eq!(attempts(&stopped, "prep"), 1);
+    assert!(matches!(stopped.finished, Some(Finish::Succeeded)));
+    assert!(stopped.rows.iter().all(|row| row.status != "pending"));
+}

@@ -399,7 +399,9 @@ step id or `stop`. Yardsort does not branch on the text of a note or a report.
 `approved` goes on to `implement`. `changes_requested` runs `plan` again and gives it the
 note as `changes-sign-off`. `rejected` stops the run. A failed `verify` runs `implement`
 again and gives it `failure-verify`, the report. A failed route that goes forward leaves
-`failure-<step>` for the step it goes to. A pass goes on to `ship`.
+`failure-<step>` for the step it goes to. A pass goes on to `ship`. A pass that goes to
+`stop` still ends the run when that step also `produces` an artifact: the run stops once
+the artifact is saved.
 
 Leave `on` out and the step behaves as before: a failed gate stops the run, and a success
 lets every step that needs this one start.

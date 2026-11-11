@@ -780,7 +780,9 @@ loops is a parse error too. The engine also stops at 10. An inner loop's `max_at
 counts entries across outer loops, because `attempts` is never reset.
 
 `stop` on a failed verdict halts the run. `stop` on a passed verdict skips steps that
-have not finished and ends the run succeeded. A route to a later step succeeds this
+have not finished and ends the run succeeded. A step that `produces` something stays
+running while those artifacts are stored, and the stored outcome is what stops the run
+once the step has succeeded, including on a later tick. A route to a later step succeeds this
 step even when the verdict failed, so the chosen step can start, and skips the other
 steps that needed this one and were not chosen.
 
@@ -816,7 +818,10 @@ approval waits, issues a new one-time code, and needs a new decision. An old dec
 is not applied again. The checks that refuse a session Yardsort started, and the Floor
 Manager, still apply on that new decision. A rewind is not applied when the same plan
 is already halting or stopping the run, so those steps are skipped rather than sent
-back to pending. A `run_test` step that rewind sends back has its smoke test cancelled.
+back to pending. Judged steps later in the file still conclude in that same pass, so a
+halt or a stop wins over a rewind even when the looping step comes first. A `run_test`
+step that rewind sends back has its smoke test cancelled in the same transaction, so a
+crash after the rewind still leaves that test cancelled.
 
 A file with no `on` still loads, and a run queued from it keeps today's behaviour.
 

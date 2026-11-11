@@ -879,6 +879,35 @@ fn retire_step_feedback(tx: &Connection, run_id: &str, step_id: &str) -> rusqlit
     Ok(())
 }
 
+/// Smoke-test run ids a rewind is about to clear off `run_test` steps.
+fn test_runs_a_rewind_clears(
+    tx: &Connection,
+    run_id: &str,
+    steps: &[String],
+) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = tx.prepare(
+        "SELECT step_id, outputs FROM workflow_step_runs
+         WHERE run_id = ?1 AND action = 'run_test'",
+    )?;
+    let rows = stmt.query_map(params![run_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut ids = Vec::new();
+    for row in rows {
+        let (step_id, outputs) = row?;
+        if !steps.iter().any(|id| id == &step_id) {
+            continue;
+        }
+        if let Some(test_run) = crate::workflow::engine::parse_outputs(&outputs)
+            .get("run")
+            .cloned()
+        {
+            ids.push(test_run);
+        }
+    }
+    Ok(ids)
+}
+
 /// Remember who decided, before a rewind deletes the row. The next pass needs a new decision.
 fn archive_approval(
     tx: &Connection,
@@ -3716,6 +3745,8 @@ impl Store {
     /// attempt `seen`: a restart already applied it, or the step moved. Attempt counts stay as
     /// they are. Approval decisions and waits on the steps that run again are removed, so the
     /// next pass needs a new decision. `feedback`, when set, is stored at attempt `seen`.
+    /// A smoke test those steps were still running is cancelled in this same change, so a
+    /// crash after the commit still leaves it cancelled.
     pub fn rewind_workflow(
         &self,
         run_id: &str,
@@ -3728,6 +3759,8 @@ impl Store {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let now = now_ms();
+        // Read before the updates below clear the outputs that name the test.
+        let tests = test_runs_a_rewind_clears(&tx, run_id, steps)?;
         let marks = from.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let sql = format!(
             "UPDATE workflow_step_runs
@@ -3809,6 +3842,14 @@ impl Store {
                 artifact.detail.as_deref(),
                 &artifact.body,
                 artifact.truncated,
+                now,
+            )?;
+        }
+        for test_run in &tests {
+            smoke::cancel_test_in(
+                &tx,
+                test_run,
+                "The workflow is running this step again.",
                 now,
             )?;
         }
@@ -5593,6 +5634,73 @@ steps:
             .unwrap();
         assert_eq!(kept, "two");
         assert_eq!(store.workflow_artifacts("run-1").unwrap()[0].body, "two");
+    }
+
+    #[test]
+    fn a_forward_failure_moves_the_step_and_writes_the_note_together() {
+        let store = Store::in_memory();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_runs
+                 (id, workflow_id, workflow_name, definition, workspace_name, inputs, status,
+                  requested_by, created_at)
+                 VALUES ('run-1', 'demo', 'Demo', 'id: demo\n', 'fix', '{}', 'running', 'cli', 1)",
+                [],
+            )
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_step_runs
+                 (run_id, step_id, position, action, status, attempts)
+                 VALUES ('run-1', 'verify', 0, 'run_test', 'waiting', 1)",
+                [],
+            )
+            .unwrap();
+        let note = NewWorkflowArtifact {
+            name: "failure-verify".into(),
+            source: "verdict".into(),
+            detail: None,
+            body: "login broke".into(),
+            truncated: false,
+        };
+        assert!(!store
+            .move_workflow_step_leaving(
+                "run-1",
+                "verify",
+                &[StepStatus::Pending],
+                StepStatus::Succeeded,
+                Some(r#"{"verdict":"failed"}"#),
+                Some("The test failed."),
+                None,
+                false,
+                std::slice::from_ref(&note),
+            )
+            .unwrap());
+        let still = store.workflow_steps("run-1").unwrap();
+        assert_eq!(still[0].status, "waiting");
+        assert!(store.workflow_artifacts("run-1").unwrap().is_empty());
+
+        assert!(store
+            .move_workflow_step_leaving(
+                "run-1",
+                "verify",
+                &[StepStatus::Waiting],
+                StepStatus::Succeeded,
+                Some(r#"{"verdict":"failed"}"#),
+                Some("The test failed."),
+                None,
+                false,
+                &[note],
+            )
+            .unwrap());
+        let moved = store.workflow_steps("run-1").unwrap();
+        assert_eq!(moved[0].status, "succeeded");
+        let saved = store.workflow_artifacts("run-1").unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].name, "failure-verify");
+        assert_eq!(saved[0].body, "login broke");
     }
 
     #[test]
