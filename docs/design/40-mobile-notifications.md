@@ -134,7 +134,9 @@ An account may have 100 notices still waiting. Notices already sent do not count
 new one is stored so it is not sent later, and the drop is logged with the account and the count.
 Sent, dropped and expired rows in the computer's outbox are deleted after a week. An item
 still in the list just fetched keeps its seen row, so a week of quiet does not hide the next
-change, including a completion. An item no longer listed is deleted after a week. A desktop
+change, including a completion. An item no longer listed is deleted after a week. A project
+unopened for over a week, or a task not seen in any list for a week, returns to a quiet baseline.
+A desktop
 update that was sent more than a week ago is removed on purpose, so the same version can be
 offered again as a reminder.
 

@@ -44,6 +44,8 @@ export interface ForegroundNotices {
     id: string,
     channel: { name: string; importance: number },
   ): Promise<unknown>;
+  /** `AndroidImportance.HIGH` is a heads-up. The real module's enum is passed through. */
+  AndroidImportance: { HIGH: number };
 }
 
 /** Shown while the app is open: banner, list and sound. The badge is left alone. */
@@ -62,7 +64,10 @@ export async function enableForegroundNotices(runtime: ForegroundNotices): Promi
   runtime.setNotificationHandler({
     handleNotification: async () => FOREGROUND,
   });
-  await runtime.setNotificationChannelAsync("default", { name: "Notices", importance: 5 });
+  await runtime.setNotificationChannelAsync("default", {
+    name: "Notices",
+    importance: runtime.AndroidImportance.HIGH,
+  });
 }
 
 /** iOS is APNs and Android is FCM. Anything else, or an empty token, is not registered. */

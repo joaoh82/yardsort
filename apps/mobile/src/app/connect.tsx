@@ -50,7 +50,7 @@ export default function Connect() {
     try {
       if (await accounts.signIn(server, deviceName, browser)) {
         // Permission stays a Settings choice. A grant already given covers this account too.
-        await registerGrantedPush((read) => accounts.registerForNotifications(read));
+        void registerGrantedPush((read) => accounts.registerForNotifications(read));
         onward();
       } else setProblem("The sign-in was closed before it finished.");
     } catch (error) {

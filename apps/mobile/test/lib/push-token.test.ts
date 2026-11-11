@@ -95,21 +95,22 @@ describe("a notification tap", () => {
   });
 
   test("shows a foreground notice and creates the default channel first", async () => {
-    const channels: string[] = [];
+    const channels: { id: string; importance: number }[] = [];
     let shown = false;
     await enableForegroundNotices({
+      AndroidImportance: { HIGH: 6 },
       setNotificationHandler: (handler) => {
         void handler.handleNotification().then((behavior) => {
           shown = behavior.shouldShowBanner && behavior.shouldShowList && behavior.shouldPlaySound;
         });
       },
-      setNotificationChannelAsync: async (id) => {
-        channels.push(id);
+      setNotificationChannelAsync: async (id, channel) => {
+        channels.push({ id, importance: channel.importance });
         return null;
       },
     });
     await Promise.resolve();
-    expect(channels).toEqual(["default"]);
+    expect(channels).toEqual([{ id: "default", importance: 6 }]);
     expect(shown).toBe(true);
   });
 });

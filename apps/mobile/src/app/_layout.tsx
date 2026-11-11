@@ -34,8 +34,10 @@ const app = {
 export default function Layout() {
   const [failed, setFailed] = useState<string | null>(null);
   // A tap must not navigate while the sign-in list failed to load: the stack is not mounted then.
-  // Written from the load callbacks and the retry press. Writing it during render is refused.
   const blocked = useRef(false);
+  useEffect(() => {
+    blocked.current = failed !== null;
+  }, [failed]);
   const colors = useColors();
   // Android's header is drawn from this. Without it, a dark phone gets a white header, with the
   // status bar's white icons lost against it. iOS 26's glass bar and its title stay the system's.
@@ -56,21 +58,18 @@ export default function Layout() {
     app.accounts
       .load()
       .then(() => {
-        blocked.current = false;
         setFailed(null);
         // Permission was asked in Settings. When it is already granted, every signed-in account
         // gets the token. This does not ask again.
         void registerGrantedPush((read) => app.accounts.registerForNotifications(read));
       })
-      .catch((error: unknown) => {
-        blocked.current = true;
-        setFailed(messageOf(error));
-      });
+      .catch((error: unknown) => setFailed(messageOf(error)));
   useEffect(() => {
     void load();
   }, []);
   // Taps, including one that launched the app, and a token the system rotates. Permission is
-  // asked from Settings → Notifications, not here.
+  // asked from Settings → Notifications, not here. A tap that arrives while the saved sign-ins
+  // failed to load is dropped: the stack is not mounted then.
   useEffect(
     () =>
       installPushHandlers(
@@ -98,7 +97,6 @@ export default function Layout() {
               title="Try again"
               kind="primary"
               onPress={() => {
-                blocked.current = false;
                 setFailed(null);
                 void load();
               }}
