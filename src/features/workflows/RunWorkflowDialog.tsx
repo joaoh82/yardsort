@@ -306,11 +306,11 @@ export function RunWorkflowDialog({
                   <p role="alert" className="text-red-400 select-text">
                     {preview.pullRequestProblem}
                   </p>
-                ) : (
+                ) : preview.pullRequestNote ? (
                   <p className="rounded border border-line bg-canvas/40 p-2.5 text-ink-muted">
-                    {preview.pullRequestNote ?? "Will use the PR the run opens."}
+                    {preview.pullRequestNote}
                   </p>
-                )}
+                ) : null}
                 {openElsewhere.length > 0 &&
                   (twin ? (
                     <div className="flex flex-col gap-1.5">

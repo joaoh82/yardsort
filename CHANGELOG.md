@@ -8,10 +8,13 @@ has the downloads and the full commit lists.
 - **Software factory.** A built-in workflow, `software-factory`, takes a task from a brief the
   agent clarifies with you, through context, a plan you approve, implementation, a smoke test
   that must pass, and a review, and stops when you say it is ready to release. The run starts
-  without an open pull request. Implementation pushes and, when the branch has none, opens a
-  draft with `gh pr create --draft`; otherwise it updates the one already open. The review
-  wait follows that pull request once it exists, and a review from before this wait began does
-  not count. Requesting changes on the plan runs planning again. A failed smoke test, or
+  without an open pull request, because every step that names `{{ pr.* }}` comes after the
+  review wait. A workflow that names the pull request before any `wait_pr_activity` — code
+  review, address review, fix checks — still needs one open before it can start. Implementation
+  pushes and, when the branch has none, opens a draft with `gh pr create --draft`; otherwise
+  it updates the one already open. The review wait follows that pull request once it exists,
+  and a review from before this wait began does not count. Requesting changes on the plan runs
+  planning again. A failed smoke test, or
   changes after review, runs implementation again, up to three times including the first. You
   answer and decide in Yardsort, from a terminal, or on the phone. It does not merge, deploy,
   or roll back. See [The software factory](docs/guide/workflows.md#the-software-factory).

@@ -206,24 +206,39 @@ fn a_named_harness_in_a_step_is_checked_too() {
 }
 
 #[test]
-fn a_workflow_that_uses_the_pull_request_queues_without_one_and_keeps_an_open_one() {
+fn a_workflow_that_names_the_pull_request_before_waiting_needs_one_open() {
     let mut fx = Fixture::new();
-    let id = fx.queue("code-review", &[("reviewer", "claude")]).unwrap();
-    let run = fx.store.workflow_run(&id).unwrap().unwrap();
+    let code_review = crate::workflow::find(fx.dir.path(), "code-review")
+        .unwrap()
+        .workflow
+        .unwrap();
     assert!(
-        Facts::parse(&run.context).pr.is_none(),
-        "no open pull request is stored as none, and the run still queues"
+        !defers_pull_request(&code_review),
+        "code review names the pull request before it waits"
     );
-    assert!(fx.store.cancel_workflow_run(&id, "done").unwrap());
+    assert_eq!(
+        missing_pull_request_preview(&code_review, "fix-login"),
+        (Some("`fix-login` has no open pull request.".into()), None)
+    );
+
+    let error = fx
+        .queue("code-review", &[("reviewer", "claude")])
+        .unwrap_err();
+    assert_eq!(error.code, "pull_request_missing");
+    assert!(
+        error.message.contains("has no open one") && error.message.contains("Open one first"),
+        "{}",
+        error.message
+    );
 
     fx.look.pr = Some(pull_request(7, PullRequestState::Merged));
-    let id = fx.queue("code-review", &[("reviewer", "claude")]).unwrap();
-    let run = fx.store.workflow_run(&id).unwrap().unwrap();
-    assert!(
-        Facts::parse(&run.context).pr.is_none(),
-        "a merged pull request is not the open one"
+    let error = fx
+        .queue("code-review", &[("reviewer", "claude")])
+        .unwrap_err();
+    assert_eq!(
+        error.code, "pull_request_missing",
+        "a merged one is not open"
     );
-    assert!(fx.store.cancel_workflow_run(&id, "done").unwrap());
 
     fx.look.forge_down = Some("gh is not logged in.".into());
     let error = fx
@@ -233,7 +248,7 @@ fn a_workflow_that_uses_the_pull_request_queues_without_one_and_keeps_an_open_on
         (error.code.as_str(), error.message.as_str()),
         ("pull_request_unknown", "gh is not logged in.")
     );
-    assert_eq!(fx.store.workflow_runs(None, 10).unwrap().len(), 2);
+    assert!(fx.store.workflow_runs(None, 10).unwrap().is_empty());
 
     fx.look.forge_down = None;
     fx.look.pr = Some(pull_request(7, PullRequestState::Open));
@@ -257,6 +272,18 @@ fn a_workflow_that_uses_the_pull_request_queues_without_one_and_keeps_an_open_on
 #[test]
 fn the_software_factory_queues_before_the_branch_has_a_pull_request() {
     let fx = Fixture::new();
+    let factory = crate::workflow::find(fx.dir.path(), "software-factory")
+        .unwrap()
+        .workflow
+        .unwrap();
+    assert!(
+        defers_pull_request(&factory),
+        "the factory names the pull request only after it waits for a review"
+    );
+    assert_eq!(
+        missing_pull_request_preview(&factory, "fix-login"),
+        (None, Some("Will use the PR the run opens.".into()))
+    );
     let id = fx
         .queue(
             "software-factory",

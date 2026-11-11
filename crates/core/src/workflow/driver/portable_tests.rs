@@ -3064,26 +3064,81 @@ fn a_run_queued_without_a_pull_request_waits_then_follows_the_one_it_finds() {
 }
 
 #[test]
-fn a_step_that_names_a_missing_pull_request_fails_instead_of_leaving_it_blank() {
+fn a_step_that_names_the_pull_request_with_nothing_waiting_before_it_is_not_queued() {
     let profile = Profile::new(&[("name-pr", NAME_THE_PULL_REQUEST)]);
-    let run = queue_without_pull_request(&profile, "name-pr");
-    let hands = LatePr {
-        answer: Mutex::new(None),
-        posts: Mutex::new(Vec::new()),
-        notified: Mutex::new(Vec::new()),
-    };
-    let driver = Driver::new(1, Duration::ZERO);
-    profile.until(&driver, &hands, || {
-        profile.step(&run, "say").status == "failed"
-    });
-    let note = profile.step(&run, "say").note.unwrap();
+    let error = queue(
+        &profile.store,
+        profile.dir.path(),
+        &Request {
+            workflow_id: "name-pr",
+            workspace_id: &profile.workspace,
+            inputs: &BTreeMap::new(),
+            requested_by: "cli",
+            unattended: false,
+            origin_record: None,
+            depth: 0,
+            event: None,
+            tracked: None,
+        },
+        &crate::workflow::runs::Accepting::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "pull_request_missing");
     assert!(
-        note.contains("no open pull request"),
-        "the failure did not say there is no pull request: {note}"
+        error.message.contains("Open one first"),
+        "{}",
+        error.message
     );
-    assert!(note.contains("pr.number"), "{note}");
-    assert_eq!(profile.status(&run), "failed");
-    assert!(hands.notified.lock().unwrap().is_empty());
+    assert!(profile.store.workflow_runs(None, 10).unwrap().is_empty());
+}
+
+/// Counts lookups that fail, so a second tick can be seen asking again.
+struct FailingLookup {
+    asked: std::sync::atomic::AtomicU32,
+}
+
+impl Hands for FailingLookup {
+    fn start(&self, _: &str, _: HarnessRequest) -> Result<SessionInfo, String> {
+        unreachable!("this workflow starts no agent")
+    }
+
+    fn notify(&self, _: &str, _: Option<&str>) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn handoff(&self, _: &str) -> Option<String> {
+        None
+    }
+
+    fn pr_posts(&self, _: &str, _: &crate::workflow::runs::PrFacts) -> PrAsk {
+        Box::new(|| Ok(Vec::new()))
+    }
+
+    fn open_pull_request(&self, _: &str) -> OpenPr {
+        self.asked.fetch_add(1, Ordering::Relaxed);
+        Box::new(|| Err("gh is not logged in.".into()))
+    }
+}
+
+#[test]
+fn a_failed_pull_request_lookup_is_not_retried_on_the_next_tick() {
+    let profile = Profile::new(&[("find-pr", FIND_THE_PULL_REQUEST)]);
+    queue_without_pull_request(&profile, "find-pr");
+    let hands = FailingLookup {
+        asked: std::sync::atomic::AtomicU32::new(0),
+    };
+    let driver = Driver::new(1, Duration::from_secs(3600));
+    let host = PtyHost::new(Arc::new(|_| {}));
+    driver.tick(&profile.store, &host, &hands, &git()).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(hands.asked.load(Ordering::Relaxed), 1);
+    driver.tick(&profile.store, &host, &hands, &git()).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        hands.asked.load(Ordering::Relaxed),
+        1,
+        "a failed lookup was asked again before the interval"
+    );
 }
 
 /// Writes a note the following wait captures. A stale file must not survive the start.
@@ -3105,6 +3160,8 @@ steps:
     produces:
       - name: plan
         path: factory/plan.md
+      - name: source
+        path: src.md
 "#;
 
 struct Starting {
@@ -3131,12 +3188,23 @@ impl Hands for Starting {
 }
 
 #[test]
-fn starting_a_session_clears_the_file_it_will_write_and_excludes_factory() {
-    let repo = tempfile::tempdir().unwrap();
+fn starting_a_session_clears_an_untracked_factory_note_and_not_the_shared_exclude() {
+    let scratch = tempfile::tempdir().unwrap();
+    let repo = scratch.path().join("main");
+    let linked = scratch.path().join("linked");
+    std::fs::create_dir(&repo).unwrap();
     let git = git();
-    git.run(repo.path(), &["init"]).unwrap();
-    std::fs::create_dir_all(repo.path().join("factory")).unwrap();
-    std::fs::write(repo.path().join("factory/plan.md"), "stale plan").unwrap();
+    git.run(&repo, &["init"]).unwrap();
+    std::fs::write(repo.join("src.md"), "the project's file").unwrap();
+    git.run(&repo, &["add", "src.md"]).unwrap();
+    git.run(&repo, &["commit", "-m", "init"]).unwrap();
+    git.run(
+        &repo,
+        &["worktree", "add", "-b", "feature", linked.to_str().unwrap()],
+    )
+    .unwrap();
+    std::fs::create_dir_all(linked.join("factory")).unwrap();
+    std::fs::write(linked.join("factory/plan.md"), "stale plan").unwrap();
 
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(&dir.path().join("yardsort.db")).unwrap();
@@ -3145,8 +3213,8 @@ fn starting_a_session_clears_the_file_it_will_write_and_excludes_factory() {
         .add_worktree(
             &project.id,
             "fix-login",
-            repo.path().to_str().unwrap(),
-            Some("main"),
+            linked.to_str().unwrap(),
+            Some("feature"),
             None,
         )
         .unwrap();
@@ -3178,36 +3246,51 @@ fn starting_a_session_clears_the_file_it_will_write_and_excludes_factory() {
     let driver = Driver::default();
     driver.tick(&store, &host, &hands, &git).unwrap();
     assert!(
-        !repo.path().join("factory/plan.md").exists(),
+        !linked.join("factory/plan.md").exists(),
         "the stale plan was still there when the session started"
     );
-    let exclude = git
-        .run(repo.path(), &["rev-parse", "--git-path", "info/exclude"])
-        .unwrap();
-    let exclude_path = {
-        let printed = std::path::Path::new(exclude.trim());
-        if printed.is_absolute() {
-            printed.to_path_buf()
-        } else {
-            repo.path().join(printed)
-        }
-    };
-    let text = std::fs::read_to_string(&exclude_path).unwrap();
     assert_eq!(
-        text.lines()
-            .filter(|line| line.trim() == "factory/")
-            .count(),
-        1,
-        "factory/ was not excluded once: {text}"
+        std::fs::read_to_string(linked.join("src.md")).unwrap(),
+        "the project's file",
+        "a tracked file was deleted with the notes"
     );
+    let gitignore = std::fs::read_to_string(linked.join("factory/.gitignore")).unwrap();
+    assert!(
+        gitignore.lines().any(|line| line.trim() == "*"),
+        "factory/.gitignore did not ignore the notes: {gitignore}"
+    );
+    assert!(
+        git.run(&linked, &["check-ignore", "factory/plan.md"])
+            .is_ok(),
+        "the linked worktree does not ignore factory/"
+    );
+    assert!(
+        git.run(&repo, &["check-ignore", "factory/plan.md"])
+            .is_err(),
+        "the main checkout ignores factory/ too"
+    );
+    let exclude = git
+        .run(
+            &repo,
+            &[
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-path",
+                "info/exclude",
+            ],
+        )
+        .unwrap();
+    let shared = std::fs::read_to_string(exclude.trim()).unwrap_or_default();
+    assert!(
+        !shared.lines().any(|line| line.trim() == "factory/"),
+        "the shared exclude lists factory/: {shared}"
+    );
+
+    // The next tick must not write the gitignore again.
+    std::fs::remove_file(linked.join("factory/.gitignore")).unwrap();
     driver.tick(&store, &host, &hands, &git).unwrap();
-    let again = std::fs::read_to_string(&exclude_path).unwrap();
-    assert_eq!(
-        again
-            .lines()
-            .filter(|line| line.trim() == "factory/")
-            .count(),
-        1,
-        "a second tick added factory/ again: {again}"
+    assert!(
+        !linked.join("factory/.gitignore").exists(),
+        "a second tick wrote factory/.gitignore again"
     );
 }

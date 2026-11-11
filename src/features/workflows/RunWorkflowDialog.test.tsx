@@ -348,18 +348,6 @@ describe("RunWorkflowDialog", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 
-  it("starts when the branch has no pull request yet, and says the run will open one", async () => {
-    core.workflowPreview.mockResolvedValue({
-      ...withPr,
-      pullRequest: null,
-      pullRequestNote: "Will use the PR the run opens.",
-    });
-    render(<RunWorkflowDialog workflowId="code-review" workspace={fixLogin} onClose={() => {}} />);
-    expect(await screen.findByText("Will use the PR the run opens.")).toBeInTheDocument();
-    expect(screen.queryByRole("alert")).toBeNull();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Run" })).toBeEnabled());
-  });
-
   it("asks which workflow and which workspace when neither is given", async () => {
     core.workflowPreview.mockResolvedValue({ ...withPr, needsOrigin: false });
     const user = userEvent.setup();

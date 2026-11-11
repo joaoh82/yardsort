@@ -151,6 +151,8 @@ pub struct Driver {
     forge: std::sync::Arc<Mutex<HashMap<String, Asked>>>,
     /// A pull request looked up after the run was queued, because the branch had none then.
     pulls: std::sync::Arc<Mutex<HashMap<String, PullLookup>>>,
+    /// Runs whose `factory/` directory was already kept out of commits.
+    factory_excluded: Mutex<HashSet<String>>,
     forge_every_ms: i64,
     /// Something about a run changed during the current tick.
     touched: std::sync::atomic::AtomicBool,
@@ -180,6 +182,7 @@ impl Driver {
             recovered: Mutex::new(HashSet::new()),
             forge: std::sync::Arc::new(Mutex::new(HashMap::new())),
             pulls: std::sync::Arc::new(Mutex::new(HashMap::new())),
+            factory_excluded: Mutex::new(HashSet::new()),
             forge_every_ms: i64::try_from(forge_every.as_millis()).unwrap_or(i64::MAX),
             touched: std::sync::atomic::AtomicBool::new(false),
             active: Mutex::new(HashSet::new()),
@@ -379,6 +382,10 @@ impl Driver {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .retain(|id, _| runs.iter().any(|run| &run.id == id));
+        self.factory_excluded
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|id| runs.iter().any(|run| &run.id == id));
         // What is active now, after this tick's own moves, is what the next tick compares to:
         // a run this tick finished is not news then.
         *self.active.lock().unwrap_or_else(PoisonError::into_inner) = store
@@ -443,7 +450,9 @@ impl Driver {
         let now = now_ms();
         let mut pulls = self.pulls.lock().unwrap_or_else(PoisonError::into_inner);
         let slot = pulls.entry(run_id.to_owned()).or_default();
-        let due = slot.found.is_none() || now - slot.at >= self.forge_every_ms;
+        // An error leaves `found` empty. The next ask waits out the same interval as an answer
+        // that there is no pull request: asking again on the next tick would hammer `gh`.
+        let due = slot.at == 0 || now.saturating_sub(slot.at) >= self.forge_every_ms;
         if due && !slot.waiting {
             slot.at = now;
             slot.waiting = true;
@@ -612,8 +621,14 @@ fn move_on(
         resume_human_waits(driver, store, hands, &workflow, run)?;
     }
     tell_open_questions(driver, store, hands, run)?;
-    if writes_factory(&workflow) {
-        exclude_factory_dir(git, Path::new(&place.workspace.path));
+    if writes_factory(&workflow)
+        && driver
+            .factory_excluded
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(run.id.clone())
+    {
+        exclude_factory_dir(Path::new(&place.workspace.path));
     }
     let inputs: Inputs = serde_json::from_str(&run.inputs).unwrap_or_default();
 
@@ -714,7 +729,7 @@ fn move_on(
                 continue;
             }
             if let Effect::Start { step, .. } = &effect {
-                clear_rewritten_files(&workflow, step, Path::new(&place.workspace.path));
+                clear_rewritten_files(&workflow, step, Path::new(&place.workspace.path), git);
             }
             let outcome = carry_out(
                 store,
@@ -1610,8 +1625,9 @@ fn writes_factory(workflow: &super::Workflow) -> bool {
 }
 
 /// Drop files a session is about to write again, so a previous pass cannot be captured as
-/// this one. A wait on `step` that produces a file is that file.
-fn clear_rewritten_files(workflow: &super::Workflow, step: &str, root: &Path) {
+/// this one. Only an untracked file under `factory/`: a tracked file is the project's, and a
+/// file elsewhere is not one of these notes.
+fn clear_rewritten_files(workflow: &super::Workflow, step: &str, root: &Path, git: &Git) {
     for later in &workflow.steps {
         let super::Action::WaitSession {
             session: super::SessionRef::Step(source),
@@ -1627,6 +1643,9 @@ fn clear_rewritten_files(workflow: &super::Workflow, step: &str, root: &Path) {
             let super::ArtifactSource::File { path } = &decl.source else {
                 continue;
             };
+            if !under_factory(path) || tracked(git, root, path) {
+                continue;
+            }
             if let Err(why) = super::artifact::remove_file(root, path) {
                 eprintln!("workflows: could not clear `{path}` before `{step}`: {why}");
             }
@@ -1634,33 +1653,40 @@ fn clear_rewritten_files(workflow: &super::Workflow, step: &str, root: &Path) {
     }
 }
 
-/// Keep `factory/` out of commits in this worktree. `git` records it in `info/exclude`, which
-/// is this worktree's and is not a file in the project. A failure leaves the prompt's request
-/// not to commit the notes; it does not fail the run.
-fn exclude_factory_dir(git: &Git, root: &Path) {
-    let Ok(printed) = git.run(root, &["rev-parse", "--git-path", "info/exclude"]) else {
-        return;
-    };
-    let printed = Path::new(printed.trim());
-    let path = if printed.is_absolute() {
-        printed.to_path_buf()
-    } else {
-        root.join(printed)
-    };
-    if let Some(parent) = path.parent() {
-        if std::fs::create_dir_all(parent).is_err() {
-            return;
-        }
+fn under_factory(path: &str) -> bool {
+    let path = path.trim().trim_start_matches("./");
+    path == "factory" || path.starts_with("factory/")
+}
+
+/// `git ls-files` prints a tracked path and nothing for an untracked or ignored one. When git
+/// cannot say, the file stays: clearing it might delete the project's own work.
+fn tracked(git: &Git, root: &Path, path: &str) -> bool {
+    match git.run(root, &["ls-files", "--", path.trim()]) {
+        Ok(listed) => !listed.trim().is_empty(),
+        Err(_) => true,
     }
+}
+
+/// Keep `factory/` out of commits in this worktree only.
+///
+/// `info/exclude` belongs to the repository and is shared with every linked worktree, so a line
+/// there would ignore `factory/` in the main checkout too. `factory/.gitignore` lives in this
+/// worktree. `*` ignores the notes and the gitignore itself, and git still applies it here.
+/// A failure leaves the prompt's request not to commit the notes; it does not fail the run.
+fn exclude_factory_dir(root: &Path) {
+    let path = root.join("factory/.gitignore");
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    if existing.lines().any(|line| line.trim() == "factory/") {
+    if existing.lines().any(|line| line.trim() == "*") {
+        return;
+    }
+    if std::fs::create_dir_all(root.join("factory")).is_err() {
         return;
     }
     let mut next = existing;
     if !next.is_empty() && !next.ends_with('\n') {
         next.push('\n');
     }
-    next.push_str("factory/\n");
+    next.push_str("*\n");
     let _ = std::fs::write(&path, next);
 }
 

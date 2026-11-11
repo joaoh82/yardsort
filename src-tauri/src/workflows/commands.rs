@@ -463,11 +463,11 @@ pub async fn workflow_preview(
                         None,
                         None,
                     ),
-                    Ok(_) => (
-                        None,
-                        None,
-                        Some("Will use the PR the run opens.".to_owned()),
-                    ),
+                    Ok(_) => {
+                        let (problem, note) =
+                            runs::missing_pull_request_preview(&workflow, &workspace.name);
+                        (None, problem, note)
+                    }
                     Err(why) => (None, Some(why), None),
                 }
             } else {
