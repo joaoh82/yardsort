@@ -235,6 +235,19 @@ function AnswerBox({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
 
+  async function showCode() {
+    onError(null);
+    setBusy(true);
+    try {
+      await ipc.workflowShowApprovalCode(runId, step.stepId);
+      await onDone();
+    } catch (failed) {
+      onError(errorMessage(failed));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function send() {
     onError(null);
     setBusy(true);
@@ -252,6 +265,20 @@ function AnswerBox({
   return (
     <div className="mt-1 flex flex-col gap-1 pl-1">
       <span className="text-[11px] text-amber-300">Blocked: waiting for your answer.</span>
+      {step.approvalCode ? (
+        <span className="text-[11px] text-ink select-text">
+          Code {step.approvalCode}. A terminal needs this. This window does not.
+        </span>
+      ) : (
+        <span className="text-[11px] text-ink-muted">
+          The code is not in this window yet. Show a new code to use a terminal.
+        </span>
+      )}
+      {step.approvalLocked ? (
+        <span className="text-[11px] text-ink-muted">
+          Too many wrong codes. Show a new code to use a terminal again.
+        </span>
+      ) : null}
       <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-[11px] text-ink select-text">
         {step.clarificationPrompt}
       </pre>
@@ -271,6 +298,14 @@ function AnswerBox({
           onClick={() => void send()}
         >
           Answer
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          className="ml-1 rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          onClick={() => void showCode()}
+        >
+          Show a new code
         </button>
       </span>
     </div>

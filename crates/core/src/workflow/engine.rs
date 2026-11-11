@@ -155,8 +155,8 @@ pub trait World {
     fn approval(&self, _step_id: &str) -> Option<RecordedApproval> {
         None
     }
-    /// Rounds a clarifying step has asked. The default is none, so a world that has no
-    /// questions does not have to say so, and a settled session is not a question.
+    /// Rounds a clarifying step has asked, and whether a summary was recorded. The default
+    /// is none. A clarifying step does not finish because the session went quiet.
     fn clarification(&self, _step_id: &str) -> ClarificationState {
         ClarificationState::default()
     }
@@ -1138,6 +1138,115 @@ fn begin(
     change
 }
 
+/// A clarifying wait. It finishes on a recorded summary, or when `until` is exited and the
+/// session has ended. A quiet session keeps waiting until the timeout, then the step fails.
+/// A claim that was not confirmed typed fails the step and is not typed again.
+#[allow(clippy::too_many_arguments)]
+fn clarify_wait(
+    id: &str,
+    session: &super::SessionRef,
+    until: super::Until,
+    timeout_secs: &Option<u32>,
+    max_rounds: u32,
+    since: i64,
+    now: i64,
+    session_of: &dyn Fn(&super::SessionRef) -> Option<String>,
+    world: &dyn World,
+) -> Option<Move> {
+    let state = world.clarification(id);
+    let limit = max_rounds.clamp(1, clarify::MAX_ROUNDS);
+    let timed_out = timeout_secs.is_some_and(|secs| now - since >= i64::from(secs) * 1000);
+    if state.rounds > limit {
+        return Some(fail(
+            id,
+            StepStatus::Waiting,
+            &format!(
+                "Clarification was asked {} times, which is past the limit ({limit}).",
+                state.rounds
+            ),
+        ));
+    }
+    if state.undelivered {
+        return Some(fail(
+            id,
+            StepStatus::Waiting,
+            "The answer may not have reached the session.",
+        ));
+    }
+    if let Some(pending) = &state.pending {
+        let pty = session_of(session);
+        let facts = pty
+            .as_deref()
+            .map(|pty| world.session(pty))
+            .unwrap_or_default();
+        if !facts.alive {
+            return Some(fail(
+                id,
+                StepStatus::Waiting,
+                "The session ended before the answer could be sent back.",
+            ));
+        }
+        if facts.busy {
+            return None;
+        }
+        let Some(pty_id) = pty else {
+            return Some(fail(
+                id,
+                StepStatus::Waiting,
+                "There is no session to send the answer to.",
+            ));
+        };
+        return Some(Move {
+            apply_answer: Some(AnswerDelivery {
+                round: pending.round,
+                pty_id,
+                text: pending.text.clone(),
+            }),
+            ..to(id, StepStatus::Waiting, StepStatus::Waiting)
+        });
+    }
+    if state.waiting {
+        return if timed_out {
+            Some(fail(
+                id,
+                StepStatus::Waiting,
+                &format!(
+                    "Timed out waiting for an answer after {}.",
+                    duration(timeout_secs.unwrap_or(0))
+                ),
+            ))
+        } else {
+            None
+        };
+    }
+    if state.summary {
+        return Some(Move {
+            outputs: Some("{\"outcome\":\"summary\"}".to_owned()),
+            ..to(id, StepStatus::Waiting, StepStatus::Succeeded)
+        });
+    }
+    let facts = session_of(session)
+        .map(|pty| world.session(&pty))
+        .unwrap_or_default();
+    if until == super::Until::Exited && !facts.alive {
+        return Some(Move {
+            outputs: Some("{\"outcome\":\"exited\"}".to_owned()),
+            ..to(id, StepStatus::Waiting, StepStatus::Succeeded)
+        });
+    }
+    if timed_out {
+        return Some(fail(
+            id,
+            StepStatus::Waiting,
+            &format!(
+                "Timed out waiting for a summary after {}.",
+                duration(timeout_secs.unwrap_or(0))
+            ),
+        ));
+    }
+    None
+}
+
 /// A waiting step: has what it waits for happened, or has it waited too long?
 #[allow(clippy::too_many_arguments)]
 fn wait(
@@ -1163,64 +1272,17 @@ fn wait(
             max_rounds,
         } => {
             if *clarify {
-                let state = world.clarification(id);
-                let limit = (*max_rounds).clamp(1, clarify::MAX_ROUNDS);
-                if state.rounds > limit {
-                    return Some(fail(
-                        id,
-                        StepStatus::Waiting,
-                        &format!(
-                            "Clarification was asked {} times, which is past the limit ({limit}).",
-                            state.rounds
-                        ),
-                    ));
-                }
-                if let Some(pending) = &state.pending {
-                    let pty = session_of(session);
-                    let facts = pty
-                        .as_deref()
-                        .map(|pty| world.session(pty))
-                        .unwrap_or_default();
-                    if !facts.alive {
-                        return Some(fail(
-                            id,
-                            StepStatus::Waiting,
-                            "The session ended before the answer could be sent back.",
-                        ));
-                    }
-                    if facts.busy {
-                        return None;
-                    }
-                    let Some(pty_id) = pty else {
-                        return Some(fail(
-                            id,
-                            StepStatus::Waiting,
-                            "There is no session to send the answer to.",
-                        ));
-                    };
-                    return Some(Move {
-                        apply_answer: Some(AnswerDelivery {
-                            round: pending.round,
-                            pty_id,
-                            text: pending.text.clone(),
-                        }),
-                        ..to(id, StepStatus::Waiting, StepStatus::Waiting)
-                    });
-                }
-                if state.waiting {
-                    return if timed_out(timeout_secs) {
-                        Some(fail(
-                            id,
-                            StepStatus::Waiting,
-                            &format!(
-                                "Timed out waiting for an answer after {}.",
-                                duration(timeout_secs.unwrap_or(0))
-                            ),
-                        ))
-                    } else {
-                        None
-                    };
-                }
+                return clarify_wait(
+                    id,
+                    session,
+                    *until,
+                    timeout_secs,
+                    *max_rounds,
+                    since,
+                    now,
+                    session_of,
+                    world,
+                );
             }
             let facts = session_of(session)
                 .map(|pty| world.session(&pty))

@@ -26,8 +26,8 @@ pub const MAX_QUESTION_CHARS: usize = 2_000;
 pub const ASK_NOTE: &str = "\
 If you need the person to decide something before you can finish, ask with \
 `ys workflow ask`, one `--question` per question. A question you only print is not \
-asked, and this step can finish without it. When you are done, record the outcome \
-with `ys workflow summary --text`. This is not an approval.";
+asked. When you are done, record the outcome with `ys workflow summary --text`. \
+Going quiet does not finish this step. This is not an approval.";
 
 /// Put [`ASK_NOTE`] after `prompt`. An empty prompt becomes the note on its own.
 pub fn with_note(prompt: Option<String>) -> Option<String> {
@@ -46,16 +46,20 @@ pub fn with_note(prompt: Option<String>) -> Option<String> {
 }
 
 /// What the engine needs to know about one step's rounds. The driver fills this from the
-/// tables. A world with no clarifications leaves it empty, and the step then finishes the
-/// way a `wait_session` always has.
+/// tables. A world with no clarifications leaves it empty. A clarifying step does not
+/// finish on a quiet session: it finishes on [`Self::summary`], or on `until: exited`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClarificationState {
     /// Rounds stored, including one the limit already refused.
     pub rounds: u32,
-    /// An answer recorded and not yet sent back into the session.
+    /// An answer recorded and not yet claimed for the session.
     pub pending: Option<PendingAnswer>,
     /// A round is open and nobody has answered it. The step does not finish while this is set.
     pub waiting: bool,
+    /// `ys workflow summary` was recorded. The step finishes on this.
+    pub summary: bool,
+    /// Claimed (`applied_at`) and not confirmed typed. Do not type it again.
+    pub undelivered: bool,
 }
 
 /// One answer to type into the session that asked.
@@ -76,6 +80,8 @@ pub struct Round {
     pub asked_at: i64,
     pub answered_at: Option<i64>,
     pub applied_at: Option<i64>,
+    /// Set only after the keystrokes returned. Null means the claim was not confirmed.
+    pub typed_at: Option<i64>,
 }
 
 /// Why `ys workflow ask` did not store a round.
@@ -147,10 +153,7 @@ pub fn locate(
         return Ok(Err(LocateMiss::None));
     }
     let mut found = Vec::new();
-    for run in store.workflow_runs(None, usize::MAX)? {
-        if run.status != "running" {
-            continue;
-        }
+    for run in store.running_workflow_runs()? {
         let Ok(workflow) = parse(&run.definition) else {
             continue;
         };
@@ -300,20 +303,42 @@ pub fn answer_refusal(result: &AnswerWrite, run: &str, step: &str) -> Option<Str
         }
         AnswerWrite::NotAQuestion => format!("Step `{step}` is not a clarification."),
         AnswerWrite::AlreadyAnswered => format!("Step `{step}` already has an answer."),
+        AnswerWrite::NotWaiting => format!("Step `{step}` is not waiting for an answer."),
+        AnswerWrite::RunEnded { status } => format!("Run {run} has already ended ({status})."),
+        AnswerWrite::WrongCode => "That code is not the one Yardsort showed you.".to_owned(),
+        AnswerWrite::CodeLocked => {
+            "Too many wrong codes. Open Yardsort to be shown a new one.".to_owned()
+        }
+        AnswerWrite::NoCode => {
+            "There is no code for this step. Open Yardsort to be shown one.".to_owned()
+        }
+        AnswerWrite::CodeUnusable => {
+            "That code cannot be checked. Open Yardsort to be shown a new one.".to_owned()
+        }
     };
-    let _ = run;
     Some(message)
 }
 
 /// Build the engine's view of the stored rounds.
 pub fn state_from(rounds: &[Round]) -> ClarificationState {
-    let pending = rounds.iter().rev().find(|round| {
+    let answered = |round: &&Round| {
         round
             .answer
             .as_ref()
             .is_some_and(|text| !text.trim().is_empty())
-            && round.applied_at.is_none()
-    });
+    };
+    let undelivered = rounds
+        .iter()
+        .any(|round| answered(&round) && round.applied_at.is_some() && round.typed_at.is_none());
+    // A claim that was not confirmed is not typed again. A later round waits behind that failure.
+    let pending = if undelivered {
+        None
+    } else {
+        rounds
+            .iter()
+            .rev()
+            .find(|round| answered(round) && round.applied_at.is_none())
+    };
     ClarificationState {
         rounds: u32::try_from(rounds.len()).unwrap_or(u32::MAX),
         pending: pending.map(|round| PendingAnswer {
@@ -326,6 +351,8 @@ pub fn state_from(rounds: &[Round]) -> ClarificationState {
         waiting: rounds
             .iter()
             .any(|round| round.answer.is_none() && round.applied_at.is_none()),
+        summary: false,
+        undelivered,
     }
 }
 

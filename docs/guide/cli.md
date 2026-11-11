@@ -589,14 +589,18 @@ ys workflow reject 3f2a9c1e sign-off
 ys workflow request-changes 3f2a9c1e sign-off --feedback "split the migration"
 ys workflow ask --question "What should the timeout be?"   # from the workflow's agent
 ys workflow summary --text "The timeout should be 30 seconds."
-ys workflow answer 3f2a9c1e discover --text "30 seconds"    # you, not the agent
+ys workflow answer 3f2a9c1e discover --text "30 seconds"    # you, not the agent; asks for the code
 ys workflow cancel 3f2a9c1e      # stop a run; agents it started keep running
 ```
 
 `ask` and `summary` are how an agent in a clarifying step talks to you. They find the
 step from the session Yardsort started, or you name `--run` and `--step`. A question
 only printed in the terminal is not asked. `answer` is yours: a session Yardsort started
-cannot use it, and neither can the Floor Manager. The same session receives the answer.
+cannot use it, and neither can the Floor Manager. It asks for the one-time code shown in
+the window and in the notification, the same way `approve` does. Leave `--code` out to
+type it with echo off, or pass `--code -` and the code on standard input. The window does
+not ask for the code. The same session receives the answer. A clarifying step finishes
+when the agent records `summary`, not when the session goes quiet.
 See [Asking a question](workflows.md#asking-a-question).
 
 `copy` writes into the `workflows` folder and never overwrites; `--as <new-id>` makes a second

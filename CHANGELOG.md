@@ -7,19 +7,26 @@ has the downloads and the full commit lists.
 
 - **An agent in a workflow can ask you a question and continue in the same session.**
   On a `wait_session` with `clarify: true`, the agent asks with `ys workflow ask`
-  (one `--question` each) and the run waits. You answer in the run view or with
-  `ys workflow answer`. The answer is typed back into that same session. A question
-  only printed in the terminal is not asked, and the session going quiet is not a
-  question either. Rounds are limited by `max_rounds` (3 when left out, 10 at most).
-  One more than that fails the step. `ys workflow summary` records the outcome, and
-  `from: brief` hands the questions, the answers and that summary to the next phase.
-  This is not an approval. The run says `Blocked: waiting for your answer.` and
-  `ys workflow runs` shows `your answer`. An answer recorded while Yardsort was
-  closed is typed once when it opens again, and not twice. See
+  (one `--question` each) and the run waits. You answer in the run view, or with
+  `ys workflow answer` from a terminal Yardsort did not start. The terminal needs the
+  one-time code shown in the window and in the notification. The window does not.
+  The answer is typed back into that same session. A question only printed in the
+  terminal is not asked. The step finishes when the agent records `ys workflow summary`,
+  or when `until: exited` and the session has ended. Going quiet does not finish it.
+  Without a summary it waits until the step's timeout and then fails. Rounds are
+  limited by `max_rounds` (3 when left out, 10 at most). One more than that fails the
+  step. `from: brief` hands the questions, the answers and that summary to the next
+  phase. This is not an approval. The run says `Blocked: waiting for your answer.`
+  and `ys workflow runs` shows `your answer`. An answer that has not been claimed yet
+  is typed once when Yardsort opens again. If the process stopped after the claim and
+  before the typing was confirmed, the step fails and says the answer may not have
+  reached the session, and it is not typed again. A busy session does not keep the
+  claim, so the next pass tries again. See
   [Asking a question](docs/guide/workflows.md#asking-a-question).
 - **Two workflow steps that loop back over the same steps in one pass both keep their notes.**
   A failed check and a request for changes that send the same earlier steps back are
-  stored together, so neither `failure-<step>` nor `changes-<step>` is dropped.
+  stored together, so neither `failure-<step>` nor `changes-<step>` is dropped. Each
+  note is stored at that step's own attempt count.
 - **A workflow can branch on a step's outcome, and send work back a limited number of times.**
   An `approve` or `run_test` step may set `on`. `approved` can go on to implementation,
   `changes_requested` can return the note to planning, a failed test can return to

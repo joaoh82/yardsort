@@ -97,7 +97,8 @@ enum StopAfter {
     BeforeRewindApplied,
     /// An answer is about to be marked sent. It has not been, and it has not been typed.
     BeforeAnswerApplied,
-    /// The answer is marked sent, and it has not been typed. A restart must not type it again.
+    /// The answer is claimed, and it has not been typed. A restart fails the step and does
+    /// not type it: the keystrokes may already have landed.
     AfterAnswerApplied,
 }
 
@@ -216,6 +217,44 @@ impl Driver {
         };
         codes.insert(key, code.clone());
         Ok(Some((code, had)))
+    }
+
+    /// Issue the one-time code for an open question. `force` is Show a new code, which
+    /// resets the wrong-try count. A restart (`force` false) keeps that count. A round that
+    /// cleared the hash is issued again even when this process still holds the previous code.
+    pub fn issue_answer_code(
+        &self,
+        store: &Store,
+        run_id: &str,
+        step_id: &str,
+        force: bool,
+    ) -> crate::store::StoreResult<Option<(String, bool)>> {
+        let key = (run_id.to_owned(), step_id.to_owned());
+        let present = store.answer_code_present(run_id, step_id)?;
+        {
+            let codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
+            if !force && present && codes.contains_key(&key) {
+                return Ok(None);
+            }
+        }
+        let (code, salt, hash) = crate::workflow::code::issue();
+        let mut codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
+        if !force && present && codes.contains_key(&key) {
+            return Ok(None);
+        }
+        let Some(code) = store.save_answer_code(run_id, step_id, &code, &salt, &hash, force)?
+        else {
+            return Ok(None);
+        };
+        codes.insert(key, code.clone());
+        Ok(Some((code, present)))
+    }
+
+    fn holds_code(&self, run_id: &str, step_id: &str) -> bool {
+        self.codes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(&(run_id.to_owned(), step_id.to_owned()))
     }
 
     fn forget_code(&self, run_id: &str, step_id: &str) {
@@ -446,7 +485,7 @@ fn move_on(
         // A decision already recorded is left for the engine to apply, and is not replaced.
         resume_human_waits(driver, store, hands, &workflow, run)?;
     }
-    tell_open_questions(store, hands, run)?;
+    tell_open_questions(driver, store, hands, run)?;
     let inputs: Inputs = serde_json::from_str(&run.inputs).unwrap_or_default();
 
     // Sessions typed to during this tick. The host marks a session busy only once output comes
@@ -653,8 +692,11 @@ fn still_running(store: &Store, run_id: &str) -> IpcResult<bool> {
 /// Type `text` into a session and submit it, as the first-prompt delivery does. Nobody here
 /// typed it, so it takes no control; while someone controls the session from elsewhere it
 /// waits rather than type over them.
-/// Mark the answer sent, then type it into the same session. A crash before the mark
-/// types it on the next start. A crash after the mark does not type it again.
+///
+/// The claim (`applied_at`) is taken before the keystrokes. `typed_at` is set only when
+/// typing returns done. A session that is held rolls the claim back, and the next tick
+/// tries again. A crash after the claim and before `typed_at` is not retried: the engine
+/// fails the step, because the keystrokes may already have landed.
 fn deliver_answer(
     driver: &Driver,
     store: &Store,
@@ -684,7 +726,10 @@ fn deliver_answer(
         return Ok(true);
     }
     match type_into(host, &id, &delivery.text) {
-        Outcome::Done(_) => Ok(true),
+        Outcome::Done(_) => {
+            store.mark_clarification_typed(run_id, step_id, delivery.round)?;
+            Ok(true)
+        }
         Outcome::Failed(why) => {
             store.move_workflow_step(
                 run_id,
@@ -701,21 +746,14 @@ fn deliver_answer(
             Ok(true)
         }
         Outcome::NotYet => {
-            store.move_workflow_step(
-                run_id,
-                step_id,
-                &[StepStatus::Waiting],
-                StepStatus::Waiting,
-                None,
-                Some(
-                    "The answer was recorded. It could not be typed because the session was busy.",
-                ),
-                None,
-                false,
-            )?;
-            Ok(true)
+            // Nothing was typed. The next tick claims it again.
+            store.release_clarification_claim(run_id, step_id, delivery.round)?;
+            Ok(false)
         }
-        Outcome::Skipped(_) | Outcome::Queued(_) => Ok(true),
+        Outcome::Skipped(_) | Outcome::Queued(_) => {
+            store.release_clarification_claim(run_id, step_id, delivery.round)?;
+            Ok(false)
+        }
     }
 }
 
@@ -1338,7 +1376,14 @@ impl World for Seen<'_> {
             .store
             .clarification_rounds(self.run_id, step_id)
             .unwrap_or_default();
-        super::clarify::state_from(&rounds)
+        let mut state = super::clarify::state_from(&rounds);
+        state.summary = self
+            .store
+            .clarification_summary(self.run_id, step_id)
+            .ok()
+            .flatten()
+            .is_some_and(|text| !text.trim().is_empty());
+        state
     }
 
     fn approval(&self, step_id: &str) -> Option<RecordedApproval> {
@@ -1367,9 +1412,14 @@ fn is_applied_decision(change: &Move) -> bool {
 
 /// Open the wait and issue the first code when an approval starts waiting. A notification
 /// that cannot be shown does not fail the step. The code is not written into the step.
-/// A question opened since the last tick, or reopened for another round. No code: an
-/// answer is not an approval. `notify: never` stays quiet, the same as an approval.
-fn tell_open_questions(store: &Store, hands: &dyn Hands, run: &WorkflowRunRow) -> IpcResult<()> {
+/// A question opened since the last tick, or reopened for another round. The one-time code
+/// is issued the same way as an approval. `notify: never` stays quiet.
+fn tell_open_questions(
+    driver: &Driver,
+    store: &Store,
+    hands: &dyn Hands,
+    run: &WorkflowRunRow,
+) -> IpcResult<()> {
     let tell = store.tell_workflow_approval(&run.id).unwrap_or(true);
     if !tell {
         return Ok(());
@@ -1378,18 +1428,39 @@ fn tell_open_questions(store: &Store, hands: &dyn Hands, run: &WorkflowRunRow) -
         if wait.run_id != run.id || wait.kind != super::waits::KIND_QUESTION {
             continue;
         }
-        if wait.answer.is_some() || wait.notified_at.is_some() || wait.applied_at.is_some() {
+        if wait.answer.is_some() || wait.applied_at.is_some() {
             continue;
         }
-        let prompt = wait.prompt.unwrap_or_default();
+        let present = store
+            .answer_code_present(&run.id, &wait.step_id)
+            .unwrap_or(false);
+        if wait.notified_at.is_some() && present && driver.holds_code(&run.id, &wait.step_id) {
+            continue;
+        }
+        let Some((code, had)) = driver.issue_answer_code(store, &run.id, &wait.step_id, false)?
+        else {
+            continue;
+        };
+        hands.approval_code(&run.id, &wait.step_id, &code);
+        let replaced = had && wait.notified_at.is_some();
+        let title = if replaced {
+            super::waits::TITLE_ANSWER_REPLACED
+        } else {
+            super::waits::TITLE_ANSWER
+        };
         let _ = hands.notify(
-            super::waits::TITLE_ANSWER,
-            Some(&format!(
-                "{} · {}\n{prompt}\n\nAnswer in Yardsort, or with ys workflow answer.",
-                run.workspace_name, wait.step_id
+            title,
+            Some(&approval_body(
+                run,
+                &wait.step_id,
+                wait.prompt.as_deref(),
+                shown_code(hands, Some(&code)),
+                replaced,
             )),
         );
-        store.mark_workflow_wait_notified(&run.id, &wait.step_id)?;
+        if wait.notified_at.is_none() {
+            store.mark_workflow_wait_notified(&run.id, &wait.step_id)?;
+        }
     }
     Ok(())
 }

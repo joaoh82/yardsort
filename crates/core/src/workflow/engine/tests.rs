@@ -2425,6 +2425,19 @@ fn a_settled_session_with_no_question_finishes_and_a_printed_question_is_not_one
     );
     session_up(&mut run);
     run.advance();
+    assert_eq!(
+        run.status("discover"),
+        "waiting",
+        "a quiet session does not finish a clarifying step"
+    );
+    run.world.clarifications.insert(
+        "discover".into(),
+        ClarificationState {
+            summary: true,
+            ..ClarificationState::default()
+        },
+    );
+    run.advance();
     assert_eq!(run.status("discover"), "succeeded");
     assert_eq!(
         run.rows
@@ -2432,8 +2445,75 @@ fn a_settled_session_with_no_question_finishes_and_a_printed_question_is_not_one
             .find(|row| row.step_id == "discover")
             .and_then(|row| parse_outputs(&row.outputs).get("outcome").cloned())
             .as_deref(),
-        Some("settled")
+        Some("summary")
     );
+}
+
+#[test]
+fn a_clarifying_step_finishes_when_until_exited_and_the_session_ends() {
+    let source = CLARIFY.replace("until: settled", "until: exited");
+    let mut run = Run::from(&source);
+    session_up(&mut run);
+    run.advance();
+    assert_eq!(run.status("discover"), "waiting");
+    run.world.sessions.insert(
+        "pty-9".into(),
+        SessionFacts {
+            alive: false,
+            busy: false,
+            settled_at: None,
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "succeeded");
+    assert_eq!(
+        run.rows
+            .iter()
+            .find(|row| row.step_id == "discover")
+            .and_then(|row| parse_outputs(&row.outputs).get("outcome").cloned())
+            .as_deref(),
+        Some("exited")
+    );
+}
+
+#[test]
+fn a_claimed_answer_that_was_not_typed_fails_the_step() {
+    let mut run = Run::from(CLARIFY);
+    session_up(&mut run);
+    run.world.clarifications.insert(
+        "discover".into(),
+        ClarificationState {
+            rounds: 1,
+            undelivered: true,
+            ..ClarificationState::default()
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "failed");
+    assert!(run
+        .note("discover")
+        .unwrap()
+        .contains("may not have reached the session"));
+}
+
+#[test]
+fn a_clarifying_step_without_a_summary_fails_at_its_timeout() {
+    let source = CLARIFY.replace("until: settled", "until: settled\n    timeout: 1m");
+    let mut run = Run::from(&source);
+    session_up(&mut run);
+    let started = run
+        .rows
+        .iter()
+        .find(|row| row.step_id == "discover")
+        .and_then(|row| row.started_at)
+        .unwrap();
+    run.world.now = started + 61_000;
+    run.advance();
+    assert_eq!(run.status("discover"), "failed");
+    assert!(run
+        .note("discover")
+        .unwrap()
+        .contains("waiting for a summary"));
 }
 
 #[test]
@@ -2446,6 +2526,8 @@ fn an_open_question_does_not_finish_a_settled_session() {
             rounds: 1,
             pending: None,
             waiting: true,
+            summary: false,
+            undelivered: false,
         },
     );
     run.advance();
@@ -2462,6 +2544,8 @@ fn a_pending_answer_is_sent_back_to_the_same_session() {
         ClarificationState {
             rounds: 1,
             waiting: false,
+            summary: false,
+            undelivered: false,
             pending: Some(PendingAnswer {
                 round: 1,
                 text: "The person answered.\n\nAnswer:\n30 seconds\n".into(),
@@ -2495,6 +2579,8 @@ fn too_many_clarification_rounds_fail_the_step() {
             rounds: 4,
             pending: None,
             waiting: true,
+            summary: false,
+            undelivered: false,
         },
     );
     run.advance();

@@ -504,6 +504,14 @@ describe("WorkflowView", () => {
       0,
     );
     expect(within(runs).getByText("1. What should the timeout be?")).toBeInTheDocument();
+    expect(
+      within(runs).getByText(
+        "The code is not in this window yet. Show a new code to use a terminal.",
+      ),
+    ).toBeInTheDocument();
+    core.workflowShowApprovalCode.mockResolvedValue(undefined);
+    await userEvent.setup().click(within(runs).getByRole("button", { name: "Show a new code" }));
+    expect(core.workflowShowApprovalCode).toHaveBeenCalledWith("run-1", "discover");
     const answer = within(runs).getByRole("button", { name: "Answer" });
     expect(answer).toBeDisabled();
     await userEvent.setup().type(within(runs).getByLabelText("Answer for discover"), "30 seconds");

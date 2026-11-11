@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -2291,12 +2292,15 @@ const PRINTED_QUESTION: &str = "What is the timeout for the login?";
 
 struct QuietHost {
     pastes: Mutex<Vec<String>>,
+    /// The next paste is refused because someone else holds the session.
+    hold: AtomicBool,
 }
 
 impl QuietHost {
     fn new() -> Self {
         Self {
             pastes: Mutex::new(Vec::new()),
+            hold: AtomicBool::new(false),
         }
     }
 
@@ -2370,6 +2374,14 @@ impl pty_host::TerminalHost for QuietHost {
     ) -> pty_host::Result<()> {
         if id.0 != "pty-9" {
             return Err(pty_host::HostError::UnknownSession(id.clone()));
+        }
+        if paste && self.hold.load(Ordering::SeqCst) {
+            return Err(pty_host::HostError::ControlHeld {
+                id: id.clone(),
+                by: pty_host::Controller::Leased {
+                    holder: "other".into(),
+                },
+            });
         }
         if paste {
             self.pastes.lock().unwrap().push(text.to_owned());
@@ -2470,7 +2482,9 @@ fn a_clarification_round_pauses_and_the_same_session_receives_the_answer() {
     driver.tick(&store, &host, &hands, &git()).unwrap();
     assert_eq!(step(&store, &run, "discover").status, "waiting");
     assert_eq!(
-        crate::workflow::waits::answer(&store, &run, "discover", "30 seconds", "ada").unwrap(),
+        store
+            .answer_workflow_wait(&run, "discover", "30 seconds", "ada", None)
+            .unwrap(),
         crate::workflow::waits::AnswerWrite::Recorded
     );
     driver.tick(&store, &host, &hands, &git()).unwrap();
@@ -2492,6 +2506,7 @@ fn a_clarification_round_pauses_and_the_same_session_receives_the_answer() {
         .next()
         .unwrap();
     assert!(round.applied_at.is_some());
+    assert!(round.typed_at.is_some(), "typed only after the keystrokes");
     assert_eq!(step(&store, &run, "discover").status, "waiting");
     assert_eq!(
         crate::workflow::clarify::summary(
@@ -2544,9 +2559,16 @@ fn a_question_only_printed_in_the_session_does_not_pause_the_step() {
     assert!(store.workflow_wait(&run, "discover").unwrap().is_none());
     quiet(&driver);
     driver.tick(&store, &host, &hands, &git()).unwrap();
-    assert_eq!(step(&store, &run, "discover").status, "succeeded");
+    assert_eq!(
+        step(&store, &run, "discover").status,
+        "waiting",
+        "a quiet session does not finish a clarifying step"
+    );
     assert!(store.workflow_wait(&run, "discover").unwrap().is_none());
     assert!(host.pastes.lock().unwrap().is_empty());
+    crate::workflow::clarify::summary(&store, &run, "discover", "Nothing to ask.").unwrap();
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(step(&store, &run, "discover").status, "succeeded");
     let brief = store
         .workflow_artifacts(&run)
         .unwrap()
@@ -2559,11 +2581,7 @@ fn a_question_only_printed_in_the_session_does_not_pause_the_step() {
         brief.body
     );
     assert!(!brief.body.contains(PRINTED_QUESTION), "{}", brief.body);
-    assert!(
-        brief.body.contains("finished without recording a summary"),
-        "{}",
-        brief.body
-    );
+    assert!(brief.body.contains("Nothing to ask."), "{}", brief.body);
 }
 
 #[test]
@@ -2579,7 +2597,9 @@ fn clarification_can_take_more_than_one_round() {
         crate::workflow::clarify::ask(&store, &run, "discover", &["First?".to_owned()]).unwrap(),
         crate::workflow::clarify::AskWrite::Recorded { round: 1 }
     );
-    crate::workflow::waits::answer(&store, &run, "discover", "one", "ada").unwrap();
+    store
+        .answer_workflow_wait(&run, "discover", "one", "ada", None)
+        .unwrap();
     driver.tick(&store, &host, &hands, &git()).unwrap();
     assert_eq!(
         crate::workflow::clarify::ask(&store, &run, "discover", &["Second?".to_owned()]).unwrap(),
@@ -2592,7 +2612,9 @@ fn clarification_can_take_more_than_one_round() {
             .as_deref(),
         Some("your answer")
     );
-    crate::workflow::waits::answer(&store, &run, "discover", "two", "ada").unwrap();
+    store
+        .answer_workflow_wait(&run, "discover", "two", "ada", None)
+        .unwrap();
     driver.tick(&store, &host, &hands, &git()).unwrap();
     let pastes = host.pastes.lock().unwrap().clone();
     assert_eq!(pastes.len(), 2, "{pastes:?}");
@@ -2629,7 +2651,9 @@ fn a_clarification_past_the_round_limit_fails_the_step() {
     let driver = Driver::new(1, Duration::from_secs(3600));
     driver.tick(&store, &host, &hands, &git()).unwrap();
     crate::workflow::clarify::ask(&store, &run, "discover", &["Only once?".to_owned()]).unwrap();
-    crate::workflow::waits::answer(&store, &run, "discover", "yes", "ada").unwrap();
+    store
+        .answer_workflow_wait(&run, "discover", "yes", "ada", None)
+        .unwrap();
     driver.tick(&store, &host, &hands, &git()).unwrap();
     assert_eq!(
         crate::workflow::clarify::ask(&store, &run, "discover", &["Again?".to_owned()]).unwrap(),
@@ -2658,7 +2682,9 @@ fn an_answer_is_typed_once_across_a_restart() {
     let driver = Driver::new(1, Duration::from_secs(3600));
     driver.tick(&store, &host, &hands, &git()).unwrap();
     crate::workflow::clarify::ask(&store, &run, "discover", &["Which name?".to_owned()]).unwrap();
-    crate::workflow::waits::answer(&store, &run, "discover", "Ship it", "ada").unwrap();
+    store
+        .answer_workflow_wait(&run, "discover", "Ship it", "ada", None)
+        .unwrap();
 
     driver.testing_stop_after(StopAfter::BeforeAnswerApplied);
     driver.tick(&store, &host, &hands, &git()).unwrap();
@@ -2671,9 +2697,9 @@ fn an_answer_is_typed_once_across_a_restart() {
     again.tick(&store, &host, &hands, &git()).unwrap();
     assert_eq!(host.pastes.lock().unwrap().len(), 1);
     assert!(host.pastes.lock().unwrap()[0].contains("Ship it"));
-    let applied = store.clarification_rounds(&run, "discover").unwrap()[0]
-        .applied_at
-        .expect("the answer was marked sent");
+    let rounds = store.clarification_rounds(&run, "discover").unwrap();
+    let applied = rounds[0].applied_at.expect("the answer was claimed");
+    assert!(rounds[0].typed_at.is_some());
     let restarted = Driver::new(1, Duration::from_secs(3600));
     restarted.tick(&store, &host, &hands, &git()).unwrap();
     assert_eq!(host.pastes.lock().unwrap().len(), 1);
@@ -2687,20 +2713,103 @@ fn an_answer_is_typed_once_across_a_restart() {
     let driver = Driver::new(1, Duration::from_secs(3600));
     driver.tick(&store, &host, &hands, &git()).unwrap();
     crate::workflow::clarify::ask(&store, &run, "discover", &["Which name?".to_owned()]).unwrap();
-    crate::workflow::waits::answer(&store, &run, "discover", "Keep it", "ada").unwrap();
+    store
+        .answer_workflow_wait(&run, "discover", "Keep it", "ada", None)
+        .unwrap();
     driver.testing_stop_after(StopAfter::AfterAnswerApplied);
     driver.tick(&store, &host, &hands, &git()).unwrap();
     assert!(
         host.pastes.lock().unwrap().is_empty(),
-        "the process died after the mark and before the keystrokes"
+        "the process died after the claim and before the keystrokes"
     );
-    assert!(store.clarification_rounds(&run, "discover").unwrap()[0]
-        .applied_at
-        .is_some());
+    let claimed = store.clarification_rounds(&run, "discover").unwrap();
+    assert!(claimed[0].applied_at.is_some());
+    assert!(claimed[0].typed_at.is_none());
     let resumed = Driver::new(1, Duration::from_secs(3600));
     resumed.tick(&store, &host, &hands, &git()).unwrap();
     assert!(
         host.pastes.lock().unwrap().is_empty(),
-        "a restart after the mark does not type the answer again"
+        "a restart after the claim does not type the answer"
     );
+    let discover = step(&store, &run, "discover");
+    assert_eq!(discover.status, "failed");
+    assert!(
+        discover
+            .note
+            .unwrap()
+            .contains("may not have reached the session"),
+        "the step says the answer may not have arrived"
+    );
+}
+
+#[test]
+fn a_busy_session_releases_the_claim_and_the_next_tick_types_the_answer() {
+    let (_dir, store, run) = clarify_run(CLARIFY_YAML);
+    let host = QuietHost::new();
+    host.hold.store(true, Ordering::SeqCst);
+    let hands = Asking {
+        notices: Mutex::new(Vec::new()),
+    };
+    let driver = Driver::new(1, Duration::from_secs(3600));
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    crate::workflow::clarify::ask(&store, &run, "discover", &["Which name?".to_owned()]).unwrap();
+    store
+        .answer_workflow_wait(&run, "discover", "Hold on", "ada", None)
+        .unwrap();
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert!(
+        host.pastes.lock().unwrap().is_empty(),
+        "a held session is not typed into"
+    );
+    let round = store.clarification_rounds(&run, "discover").unwrap();
+    assert!(round[0].applied_at.is_none(), "the claim was rolled back");
+    assert!(round[0].typed_at.is_none());
+    assert_eq!(step(&store, &run, "discover").status, "waiting");
+    host.hold.store(false, Ordering::SeqCst);
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(host.pastes.lock().unwrap().len(), 1);
+    assert!(host.pastes.lock().unwrap()[0].contains("Hold on"));
+    let round = store.clarification_rounds(&run, "discover").unwrap();
+    assert!(round[0].applied_at.is_some());
+    assert!(round[0].typed_at.is_some());
+}
+
+#[test]
+fn a_cancelled_or_halted_run_is_not_typed_an_answer() {
+    let (_dir, store, run) = clarify_run(CLARIFY_YAML);
+    let host = QuietHost::new();
+    let hands = Asking {
+        notices: Mutex::new(Vec::new()),
+    };
+    let driver = Driver::new(1, Duration::from_secs(3600));
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    crate::workflow::clarify::ask(&store, &run, "discover", &["Which name?".to_owned()]).unwrap();
+    store
+        .answer_workflow_wait(&run, "discover", "Too late", "ada", None)
+        .unwrap();
+    assert!(store
+        .cancel_workflow_run(&run, "Cancelled from ys.")
+        .unwrap());
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert!(host.pastes.lock().unwrap().is_empty());
+    assert!(!store
+        .claim_clarification_answer(&run, "discover", 1, "note")
+        .unwrap());
+
+    let (_dir, store, run) = clarify_run(CLARIFY_YAML);
+    let host = QuietHost::new();
+    let driver = Driver::new(1, Duration::from_secs(3600));
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    crate::workflow::clarify::ask(&store, &run, "discover", &["Which name?".to_owned()]).unwrap();
+    store
+        .answer_workflow_wait(&run, "discover", "Stopped", "ada", None)
+        .unwrap();
+    assert!(store
+        .finish_workflow_run(&run, "failed", Some("a gate failed"))
+        .unwrap());
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert!(host.pastes.lock().unwrap().is_empty());
+    assert!(!store
+        .claim_clarification_answer(&run, "discover", 1, "note")
+        .unwrap());
 }

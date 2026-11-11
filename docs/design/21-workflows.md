@@ -741,24 +741,48 @@ gate that has no decision.
 A clarification uses the same row, `kind` `question`, the questions in `prompt`
 and the reply in `answer`. It is a mode of `wait_session` (`clarify: true`), not
 an approval and not a new action. The agent asks with `ys workflow ask`. The
-person answers with `ys workflow answer` or in the run view. There is no one-time
-code. `applied_at` is set in the same change as handing that answer to the driver
-to type into the same session. A restart types an answer whose `applied_at` is
-still null once, and does not type it again after that.
+person answers in the run view, or with `ys workflow answer` from a terminal
+Yardsort did not start. The terminal must present the one-time code. The window
+does not: `answer_in_window` takes a `DesktopWindow`, the same guard as
+`decide_in_window`. The code lives on the question wait (`code_salt`, `code_hash`,
+`code_rounds`, `attempts`, migration `0036_clarification_delivery`, index 35). It
+is checked before the write, and the update matches that hash and attempt count.
+Five wrong codes lock the terminal until Show a new code. A new round clears the
+hash, so the next question gets a new code.
+
+`applied_at` on the round and the wait is the claim, taken before the keystrokes.
+`typed_at` on the round is set only after typing returns done. A session that is
+held (`ControlHeld`) rolls both `applied_at` values back, and the next tick claims
+again. A restart that finds `applied_at` set and `typed_at` null does not type
+again. The step fails with "The answer may not have reached the session." The
+keystrokes may already have landed, so a second paste would not be exactly once.
+The claim also requires the run to be `running` and the step to be `waiting`, so
+a cancel or a halt cannot type into a dead run. An answer to a step that has
+already failed or timed out is refused, even when the run is still going.
+
+A clarifying step finishes only when `ys workflow summary` has been recorded, or
+when `until` is `exited` and the session has ended. A settled session with no
+summary keeps waiting until the step's timeout, then the step fails. A question
+only printed in the terminal is not a round, and a session going quiet is not a
+summary.
 
 Each round is also a row in `workflow_clarification_rounds` (migration
 `0035_workflow_clarifications`, index 34), because the wait is one row per step
 and a later round reuses it. The agent's `ys workflow summary` is one row in
 `workflow_clarification_summaries`. When the step finishes, `from: brief` compiles
-those rows into a named artifact. Nothing is read from the terminal. A question
-only printed there is not a round, and a session going quiet is not one either.
+those rows into a named artifact. Nothing is read from the terminal.
 Past `max_rounds` the extra round is stored and the step fails. It does not open
-another wait.
+another wait. A rewind archives the rounds and the summary into
+`workflow_clarification_history` and `workflow_clarification_summary_history` at
+that step's attempt, then removes the live rows, the same way an approval decision
+is archived. A merged rewind stores each `failure-<step>` or `changes-<step>` note
+at that step's own attempt count, not at the attempt that gated the rewind.
 
-`workflow::waits::list_open` and `decide_with_code` are the boundary a phone or a
-remote crate calls. They read and write this database. A remote caller must use
-`decide_with_code`, which always takes the one-time code. The window calls
-`decide_in_window` with a `DesktopWindow` token. Only the app enables the
+`workflow::waits::list_open`, `decide_with_code` and `answer_with_code` are the
+boundary a phone or a remote crate calls. They read and write this database. A
+remote caller must use `decide_with_code` or `answer_with_code`, which always take
+the one-time code. The window calls `decide_in_window` or `answer_in_window` with a
+`DesktopWindow` token. Only the app enables the
 `desktop-window` feature, so a remote crate cannot construct that token. This
 build adds no remote route, no protocol message and no phone screen. A decision
 recorded while the app was closed is not in `list_open`: the person has done

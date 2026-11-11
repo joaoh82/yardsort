@@ -4159,8 +4159,8 @@ export type WorkflowStepRun = {
 	/**  Named documents this step reads, from earlier steps. An approval shows these. */
 	consumed: WorkflowArtifact[],
 	/**
-	 *  The one-time code for a waiting approval. Shown only in this window. Absent when this
-	 *  process does not hold one. Listing a run does not issue a code.
+	 *  The one-time code for a waiting approval or a clarifying answer. Shown only in this
+	 *  window. Absent when this process does not hold one. Listing a run does not issue a code.
 	 */
 	approvalCode: string | null,
 	/**  A terminal has tried too many wrong codes. A new code comes from Show a new code. */
