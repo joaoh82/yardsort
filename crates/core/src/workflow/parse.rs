@@ -54,7 +54,7 @@ const ACTIONS: &[&str] = &[
 fn allowed(action: &str) -> &'static [&'static str] {
     match action {
         "start_session" => &["harness", "prompt", "model", "effort", "skip_memory"],
-        "wait_session" => &["session", "until", "timeout"],
+        "wait_session" => &["session", "until", "timeout", "clarify", "max_rounds"],
         "send_to_session" => &["session", "prompt", "timeout"],
         "wait_pr_activity" => &["kind", "timeout"],
         "run_test" => &["test", "inputs", "timeout", "gate", "on", "max_attempts"],
@@ -150,6 +150,12 @@ struct RawStep {
     /// How many times this step may run when a route comes back to it.
     #[serde(default)]
     max_attempts: Option<Spanned<u64>>,
+    /// A wait_session may ask the person questions before it finishes.
+    #[serde(default)]
+    clarify: Option<Spanned<bool>>,
+    /// How many rounds of questions that wait allows.
+    #[serde(default)]
+    max_rounds: Option<Spanned<u64>>,
 }
 
 /// One named document, as the file writes it. `from` may be left out when only one source key
@@ -195,6 +201,8 @@ impl RawStep {
             ("gate", at(&self.gate)),
             ("on", at(&self.on)),
             ("max_attempts", at(&self.max_attempts)),
+            ("clarify", at(&self.clarify)),
+            ("max_rounds", at(&self.max_rounds)),
         ]
         .into_iter()
         .filter_map(|(key, at)| at.map(|at| (key, at)))
@@ -749,6 +757,7 @@ impl Checker<'_> {
                 skip_memory: raw.skip_memory.as_ref().is_some_and(|s| s.value),
             },
             "wait_session" => {
+                let clarify = raw.clarify.as_ref().is_some_and(|flag| flag.value);
                 Action::WaitSession {
                     session: self.session(raw, scope),
                     until: match raw
@@ -767,6 +776,8 @@ impl Checker<'_> {
                         }
                     },
                     timeout_secs: self.timeout(raw),
+                    clarify,
+                    max_rounds: self.max_rounds(raw, clarify),
                 }
             }
             "send_to_session" => Action::SendToSession {
@@ -1118,8 +1129,17 @@ impl Checker<'_> {
                 session: self.artifact_session(item, action, scope),
                 raw: item.raw.as_ref().is_some_and(|raw| raw.value),
             },
+            "brief" => ArtifactSource::Brief,
             _ => return None,
         };
+        if matches!(source, ArtifactSource::Brief)
+            && !matches!(action, Action::WaitSession { clarify: true, .. })
+        {
+            self.problem(
+                &item.name.referenced,
+                "A brief comes from a `wait_session` that asks questions (`clarify: true`).",
+            );
+        }
         // These two succeed as soon as the session is open or the text is typed. A file or a
         // conversation read then is whatever was already there, not what this step asked for.
         if matches!(action_name, "start_session" | "send_to_session")
@@ -1164,12 +1184,13 @@ impl Checker<'_> {
                 "text" => "text",
                 "output" => "output",
                 "transcript" => "transcript",
+                "brief" => "brief",
                 other => {
                     self.problem(
                         &from.referenced,
                         format!(
                             "`{other}` is not a place an artifact comes from. Use `file`, \
-                             `text`, `output` or `transcript`."
+                             `text`, `output`, `transcript` or `brief`."
                         ),
                     );
                     return "";
@@ -1533,6 +1554,31 @@ impl Checker<'_> {
             self.variable(var, &field.referenced, value, scope);
         }
         SessionRef::Step(var.path[1].clone())
+    }
+
+    /// Rounds a clarifying wait allows. `0` when the step does not ask.
+    fn max_rounds(&mut self, step: &RawStep, clarify: bool) -> u32 {
+        let Some(given) = &step.max_rounds else {
+            return if clarify {
+                super::clarify::DEFAULT_ROUNDS
+            } else {
+                0
+            };
+        };
+        if !clarify {
+            self.problem(&given.referenced, "`max_rounds` needs `clarify: true`.");
+            return 0;
+        }
+        let value = given.value;
+        let limit = u64::from(super::clarify::MAX_ROUNDS);
+        if value == 0 || value > limit {
+            self.problem(
+                &given.referenced,
+                format!("`max_rounds` must be from 1 to {limit}. It is {value}."),
+            );
+            return super::clarify::DEFAULT_ROUNDS;
+        }
+        u32::try_from(value).unwrap_or(super::clarify::DEFAULT_ROUNDS)
     }
 
     fn timeout(&mut self, step: &RawStep) -> Option<u32> {

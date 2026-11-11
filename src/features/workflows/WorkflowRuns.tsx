@@ -161,6 +161,14 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                               onDone={() => useWorkflowStore.getState().refresh()}
                             />
                           )}
+                          {step.clarificationPrompt && step.status === "waiting" && active && (
+                            <AnswerBox
+                              runId={run.id}
+                              step={step}
+                              onError={setError}
+                              onDone={() => useWorkflowStore.getState().refresh()}
+                            />
+                          )}
                           {step.outcome?.decision && (
                             <span className="pl-1 text-[11px] text-ink-muted select-text">
                               {decisionWord(step.outcome.decision)}
@@ -210,6 +218,63 @@ function decisionWord(decision: string): string {
   if (decision === "rejected") return "Rejected";
   if (decision === "changes_requested") return "Changes requested";
   return decision;
+}
+
+/** A clarifying step: the questions, and one answer for the round. */
+function AnswerBox({
+  runId,
+  step,
+  onError,
+  onDone,
+}: {
+  runId: string;
+  step: WorkflowStepRun;
+  onError: (message: string | null) => void;
+  onDone: () => Promise<void>;
+}) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function send() {
+    onError(null);
+    setBusy(true);
+    try {
+      await ipc.workflowAnswer(runId, step.stepId, text.trim());
+      setText("");
+      await onDone();
+    } catch (failed) {
+      onError(errorMessage(failed));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-1 flex flex-col gap-1 pl-1">
+      <span className="text-[11px] text-amber-300">Blocked: waiting for your answer.</span>
+      <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-[11px] text-ink select-text">
+        {step.clarificationPrompt}
+      </pre>
+      <textarea
+        aria-label={`Answer for ${step.stepId}`}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        rows={2}
+        className="rounded border border-line bg-canvas px-1.5 py-1 text-[11px] text-ink"
+        placeholder="Your answer"
+      />
+      <span>
+        <button
+          type="button"
+          disabled={busy || text.trim() === ""}
+          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          onClick={() => void send()}
+        >
+          Answer
+        </button>
+      </span>
+    </div>
+  );
 }
 
 /** The pending approval: the documents it reads, and the three decisions. */

@@ -44,6 +44,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0032_workflow_human_waits.sql"),
     include_str!("../migrations/0033_workflow_attempts.sql"),
     include_str!("../migrations/0034_workflow_approval_history.sql"),
+    include_str!("../migrations/0035_workflow_clarifications.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -3245,18 +3246,34 @@ impl Store {
             return Ok(AnswerWrite::Missing);
         }
         let actor = crate::workflow::artifact::actor_name(actor);
-        let written = self.conn().execute(
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let now = now_ms();
+        let written = tx.execute(
             "UPDATE workflow_waits SET answer = ?3, actor = ?4, answered_at = ?5
              WHERE run_id = ?1 AND step_id = ?2 AND kind = 'question'
                AND answer IS NULL AND applied_at IS NULL
                AND EXISTS (SELECT 1 FROM workflow_runs WHERE id = ?1 AND status = 'running')",
-            params![run_id, step_id, answer, actor, now_ms()],
+            params![run_id, step_id, answer, actor, now],
         )?;
         if written > 0 {
+            // The open round, when this wait was opened by `ys workflow ask`. A wait
+            // stored on its own, with no round, is still answered.
+            tx.execute(
+                "UPDATE workflow_clarification_rounds
+                 SET answer = ?3, actor = ?4, answered_at = ?5
+                 WHERE run_id = ?1 AND step_id = ?2 AND answer IS NULL AND applied_at IS NULL
+                   AND round = (
+                     SELECT MAX(round) FROM workflow_clarification_rounds
+                     WHERE run_id = ?1 AND step_id = ?2 AND answer IS NULL AND applied_at IS NULL
+                   )",
+                params![run_id, step_id, answer, actor, now],
+            )?;
+            tx.commit()?;
             return Ok(AnswerWrite::Recorded);
         }
-        let kind: Option<String> = self
-            .conn()
+        // Same connection: a second `conn()` would wait on the guard this transaction holds.
+        let kind: Option<String> = tx
             .query_row(
                 "SELECT kind FROM workflow_waits WHERE run_id = ?1 AND step_id = ?2",
                 params![run_id, step_id],
@@ -3268,6 +3285,215 @@ impl Store {
             Some(_) => AnswerWrite::NotAQuestion,
             None => AnswerWrite::Missing,
         })
+    }
+
+    /// Store one clarification round. Opens or reopens the question wait when `next` is
+    /// still within `limit`. Past the limit the round is kept, so the engine can fail the
+    /// step, and the person is not asked again.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_clarification(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        questions: &str,
+        prompt: &str,
+        limit: u32,
+        artifact_refs: &str,
+        phase: &str,
+    ) -> StoreResult<crate::workflow::clarify::AskWrite> {
+        use crate::workflow::clarify::AskWrite;
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let running: Option<String> = tx
+            .query_row(
+                "SELECT status FROM workflow_runs WHERE id = ?1",
+                params![run_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(status) = running else {
+            return Ok(AskWrite::MissingRun);
+        };
+        if status != "running" {
+            return Ok(AskWrite::RunEnded { status });
+        }
+        let step_status: Option<String> = tx
+            .query_row(
+                "SELECT status FROM workflow_step_runs WHERE run_id = ?1 AND step_id = ?2",
+                params![run_id, step_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(step_status) = step_status else {
+            return Ok(AskWrite::MissingStep);
+        };
+        if !matches!(step_status.as_str(), "pending" | "running" | "waiting") {
+            return Ok(AskWrite::NotWaiting {
+                status: step_status,
+            });
+        }
+        let (count, unanswered, unsent): (i64, i64, i64) = tx.query_row(
+            "SELECT COUNT(*),
+                    COALESCE(SUM(CASE WHEN applied_at IS NULL AND answer IS NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN applied_at IS NULL AND answer IS NOT NULL THEN 1 ELSE 0 END), 0)
+             FROM workflow_clarification_rounds
+             WHERE run_id = ?1 AND step_id = ?2",
+            params![run_id, step_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if unanswered > 0 {
+            return Ok(AskWrite::AlreadyWaiting);
+        }
+        if unsent > 0 {
+            return Ok(AskWrite::NotSentBack);
+        }
+        let next = u32::try_from(count).unwrap_or(u32::MAX).saturating_add(1);
+        let now = now_ms();
+        tx.execute(
+            "INSERT INTO workflow_clarification_rounds
+             (run_id, step_id, round, questions, asked_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![run_id, step_id, i64::from(next), questions, now],
+        )?;
+        if next > limit {
+            tx.commit()?;
+            return Ok(AskWrite::TooMany { asked: next, limit });
+        }
+        tx.execute(
+            "INSERT INTO workflow_waits
+             (run_id, step_id, kind, blocked_on, action_needed, prompt, artifact_refs, phase,
+              created_at)
+             VALUES (?1, ?2, 'question', ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(run_id, step_id) DO UPDATE SET
+               kind = 'question',
+               blocked_on = excluded.blocked_on,
+               action_needed = excluded.action_needed,
+               prompt = excluded.prompt,
+               artifact_refs = excluded.artifact_refs,
+               phase = excluded.phase,
+               answer = NULL,
+               actor = NULL,
+               answered_at = NULL,
+               applied_at = NULL,
+               notified_at = NULL",
+            params![
+                run_id,
+                step_id,
+                crate::workflow::waits::BLOCKED_QUESTION,
+                crate::workflow::waits::ACTION_QUESTION,
+                prompt,
+                artifact_refs,
+                phase,
+                now,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(AskWrite::Recorded { round: next })
+    }
+
+    /// Replace the agent's written outcome for one step.
+    pub fn record_clarification_summary(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        summary: &str,
+    ) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT INTO workflow_clarification_summaries
+             (run_id, step_id, summary, recorded_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(run_id, step_id) DO UPDATE SET
+               summary = excluded.summary,
+               recorded_at = excluded.recorded_at",
+            params![run_id, step_id, summary, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    /// Every round for one step, oldest first.
+    pub fn clarification_rounds(
+        &self,
+        run_id: &str,
+        step_id: &str,
+    ) -> StoreResult<Vec<crate::workflow::clarify::Round>> {
+        let conn = self.conn();
+        let mut statement = conn.prepare(
+            "SELECT round, questions, answer, actor, asked_at, answered_at, applied_at
+             FROM workflow_clarification_rounds
+             WHERE run_id = ?1 AND step_id = ?2
+             ORDER BY round",
+        )?;
+        let rows = statement
+            .query_map(params![run_id, step_id], |row| {
+                let round: i64 = row.get(0)?;
+                Ok(crate::workflow::clarify::Round {
+                    round: u32::try_from(round).unwrap_or(0),
+                    questions: row.get(1)?,
+                    answer: row.get(2)?,
+                    actor: row.get(3)?,
+                    asked_at: row.get(4)?,
+                    answered_at: row.get(5)?,
+                    applied_at: row.get(6)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// The summary recorded for one step, if the agent wrote one.
+    pub fn clarification_summary(
+        &self,
+        run_id: &str,
+        step_id: &str,
+    ) -> StoreResult<Option<String>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT summary FROM workflow_clarification_summaries
+                 WHERE run_id = ?1 AND step_id = ?2",
+                params![run_id, step_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Mark one answered round, and its wait, as sent back to the session. False when
+    /// that round was already marked, so a restart does not type it again. The answer
+    /// text is left where it was.
+    pub fn claim_clarification_answer(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        round: u32,
+        note: &str,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let now = now_ms();
+        let claimed = tx.execute(
+            "UPDATE workflow_clarification_rounds SET applied_at = ?4
+             WHERE run_id = ?1 AND step_id = ?2 AND round = ?3
+               AND answer IS NOT NULL AND applied_at IS NULL",
+            params![run_id, step_id, i64::from(round), now],
+        )?;
+        if claimed == 0 {
+            return Ok(false);
+        }
+        let waited = tx.execute(
+            "UPDATE workflow_waits SET applied_at = ?3
+             WHERE run_id = ?1 AND step_id = ?2 AND kind = 'question' AND applied_at IS NULL",
+            params![run_id, step_id, now],
+        )?;
+        if waited == 0 {
+            return Ok(false);
+        }
+        tx.execute(
+            "UPDATE workflow_step_runs SET note = ?3
+             WHERE run_id = ?1 AND step_id = ?2",
+            params![run_id, step_id, note],
+        )?;
+        tx.commit()?;
+        Ok(true)
     }
 
     /// Replace these artifacts in one change. A second call with the same names updates the
@@ -3754,7 +3980,7 @@ impl Store {
         from: &[StepStatus],
         seen: u32,
         steps: &[String],
-        feedback: Option<&NewWorkflowArtifact>,
+        feedback: &[NewWorkflowArtifact],
     ) -> StoreResult<bool> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
@@ -3804,9 +4030,20 @@ impl Store {
                 "DELETE FROM workflow_waits WHERE run_id = ?1 AND step_id = ?2",
                 params![run_id, id],
             )?;
+            tx.execute(
+                "DELETE FROM workflow_clarification_rounds WHERE run_id = ?1 AND step_id = ?2",
+                params![run_id, id],
+            )?;
+            tx.execute(
+                "DELETE FROM workflow_clarification_summaries WHERE run_id = ?1 AND step_id = ?2",
+                params![run_id, id],
+            )?;
         }
-        if let Some(artifact) = feedback {
-            let attempt = i64::from(seen).max(1);
+        let attempt = i64::from(seen).max(1);
+        for artifact in feedback {
+            // The note belongs to the step named in changes-<step> or failure-<step>,
+            // which may not be the step whose attempt count gated this rewind.
+            let owner = crate::workflow::artifact::feedback_step(&artifact.name).unwrap_or(step_id);
             archive_named_artifact(&tx, run_id, &artifact.name)?;
             tx.execute(
                 "INSERT INTO workflow_artifacts
@@ -3823,7 +4060,7 @@ impl Store {
                 params![
                     run_id,
                     artifact.name,
-                    step_id,
+                    owner,
                     artifact.source,
                     artifact.detail,
                     artifact.body,
@@ -3837,7 +4074,7 @@ impl Store {
                 run_id,
                 &artifact.name,
                 attempt,
-                step_id,
+                owner,
                 &artifact.source,
                 artifact.detail.as_deref(),
                 &artifact.body,
@@ -5029,7 +5266,7 @@ steps:
         {
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[30].contains("CREATE TABLE workflow_approval_decisions"));
-            assert_eq!(MIGRATIONS.len(), 34);
+            assert_eq!(MIGRATIONS.len(), 35);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -5096,7 +5333,7 @@ steps:
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[31].contains("CREATE TABLE workflow_waits"));
             assert!(MIGRATIONS[31].contains("code_rounds"));
-            assert_eq!(MIGRATIONS.len(), 34);
+            assert_eq!(MIGRATIONS.len(), 35);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -5406,7 +5643,7 @@ steps:
                 &[StepStatus::Waiting],
                 1,
                 &steps,
-                Some(&feedback),
+                std::slice::from_ref(&feedback),
             )
             .unwrap());
         // A restart applies the same plan again and must not add another attempt or version.
@@ -5417,7 +5654,7 @@ steps:
                 &[StepStatus::Waiting],
                 1,
                 &steps,
-                Some(&feedback),
+                std::slice::from_ref(&feedback),
             )
             .unwrap());
         let rows = store.workflow_steps("run-1").unwrap();
@@ -5562,7 +5799,7 @@ steps:
                 &[StepStatus::Waiting],
                 2,
                 &steps,
-                Some(&later),
+                std::slice::from_ref(&later),
             )
             .unwrap());
         let kept: Vec<(i64, String)> = {

@@ -93,6 +93,8 @@ pub struct WorkflowStepRun {
     pub approval_code: Option<String>,
     /// A terminal has tried too many wrong codes. A new code comes from Show a new code.
     pub approval_locked: bool,
+    /// The questions a clarifying step is waiting on. Absent when it is not.
+    pub clarification_prompt: Option<String>,
 }
 
 /// A named document stored on a run, as the run view shows it.
@@ -161,6 +163,7 @@ fn step_from(
     consumes: &[String],
     approval_code: Option<String>,
     approval_locked: bool,
+    clarification_prompt: Option<String>,
 ) -> WorkflowStepRun {
     WorkflowStepRun {
         outputs: serde_json::from_str(&row.outputs).unwrap_or_default(),
@@ -186,6 +189,7 @@ fn step_from(
             .collect(),
         approval_code,
         approval_locked,
+        clarification_prompt,
     }
 }
 
@@ -382,12 +386,22 @@ pub async fn workflow_run_steps(app: AppHandle, run_id: String) -> IpcResult<Vec
                     } else {
                         (None, false)
                     };
+                let clarification_prompt = state
+                    .store
+                    .workflow_wait(&run_id, &row.step_id)?
+                    .filter(|wait| {
+                        wait.kind == workflow::waits::KIND_QUESTION
+                            && wait.answer.is_none()
+                            && wait.applied_at.is_none()
+                    })
+                    .and_then(|wait| wait.prompt);
                 Ok(step_from(
                     row,
                     &artifacts,
                     names,
                     approval_code,
                     approval_locked,
+                    clarification_prompt,
                 ))
             })
             .collect()
@@ -576,6 +590,31 @@ pub async fn workflow_describe(app: AppHandle, description: String) -> IpcResult
         tries: done.tries,
         writer,
     })
+}
+
+/// Record an answer to a clarifying step. The driver types it into the same session on
+/// its next tick. Only the person at this window calls this.
+#[tauri::command]
+#[specta::specta]
+pub async fn workflow_answer(
+    app: AppHandle,
+    run_id: String,
+    step_id: String,
+    text: String,
+) -> IpcResult<()> {
+    blocking(app.clone(), move |state| {
+        let written = workflow::waits::answer(&state.store, &run_id, &step_id, &text, "app")?;
+        if let Some(message) = workflow::clarify::answer_refusal(&written, &run_id, &step_id) {
+            return Err(IpcError::new("answer_refused", message));
+        }
+        Ok(())
+    })
+    .await?;
+    if let Some(driver) = tauri::Manager::try_state::<super::Driver>(&app) {
+        driver.wake();
+    }
+    changed(&app);
+    Ok(())
 }
 
 /// Record an approval. The driver applies it on its next tick. Only the person at this

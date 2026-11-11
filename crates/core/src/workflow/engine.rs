@@ -10,6 +10,7 @@
 use std::collections::BTreeMap;
 
 use super::artifact;
+use super::clarify::{self, ClarificationState};
 use super::template;
 use super::{
     ancestors, steps_from, Action, OutcomeName, PrActivity, SessionRef, Until, Workflow,
@@ -154,6 +155,11 @@ pub trait World {
     fn approval(&self, _step_id: &str) -> Option<RecordedApproval> {
         None
     }
+    /// Rounds a clarifying step has asked. The default is none, so a world that has no
+    /// questions does not have to say so, and a settled session is not a question.
+    fn clarification(&self, _step_id: &str) -> ClarificationState {
+        ClarificationState::default()
+    }
 }
 
 /// A smoke test run as a `run_test` step sees it.
@@ -213,6 +219,19 @@ pub struct Move {
     /// A note this step leaves for a later step, on a route that does not loop. A loop
     /// carries its note on [`Rewind::feedback`] instead, in the same change as the rewind.
     pub feedback: Option<FeedbackCopy>,
+    /// An answer to type into the session that asked, then leave the step waiting.
+    /// The driver sets `applied_at` and types it. The step does not finish.
+    pub apply_answer: Option<AnswerDelivery>,
+}
+
+/// An answer the driver types into the same session, once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnswerDelivery {
+    pub round: u32,
+    /// The terminal the session is running in.
+    pub pty_id: String,
+    /// The questions and the person's reply.
+    pub text: String,
 }
 
 /// A loop back to an earlier step. The driver applies it in one change.
@@ -223,9 +242,9 @@ pub struct Rewind {
     /// The branching step's attempt count when this was planned. A second apply, or one
     /// after a restart already counted a new entry, does not match and does nothing.
     pub seen: u32,
-    /// A named artifact for the step being run again. Absent when the outcome carried
-    /// nothing to hand back.
-    pub feedback: Option<FeedbackCopy>,
+    /// A named artifact for each step this rewind runs again. Two overlapping rewinds
+    /// in one tick share one change, and both notes are here.
+    pub feedback: Vec<FeedbackCopy>,
 }
 
 /// One attempt's feedback, stored under a reserved artifact name.
@@ -357,6 +376,15 @@ pub fn advance(
             if rewound && current == StepStatus::Pending {
                 continue;
             }
+            // An answer is typed back while the step stays waiting. Planning it again on the
+            // next pass of this same tick would never stop.
+            if plan
+                .moves
+                .iter()
+                .any(|planned| planned.step == id && planned.apply_answer.is_some())
+            {
+                continue;
+            }
             let lookup = |path: &[String]| {
                 if let [namespace, name] = path {
                     if namespace == "artifacts" {
@@ -401,7 +429,14 @@ pub fn advance(
                         if let Some(why) = branch_blocked(step, workflow, &outcomes) {
                             Some(skip(id, StepStatus::Pending, &why))
                         } else {
-                            Some(begin(step, &lookup, &session_of, world, &mut plan.effects))
+                            Some(begin(
+                                step,
+                                &lookup,
+                                &session_of,
+                                world,
+                                &mut plan.effects,
+                                clarifies(workflow, id),
+                            ))
                         }
                     } else {
                         None
@@ -441,7 +476,26 @@ pub fn advance(
                         handed.insert(copy.name.clone(), copy.body.clone());
                     }
                 }
-                if change.rewind.is_some() {
+                if let Some(rewind) = change.rewind.clone() {
+                    // Two looping steps in one tick can name overlapping sets. A second
+                    // rewind would find its step already pending and drop its note. Fold
+                    // it into the rewind already planned, and keep both notes.
+                    if let Some(earlier) = plan.moves.iter_mut().find(|planned| {
+                        planned.rewind.as_ref().is_some_and(|first| {
+                            first.steps.iter().any(|id| rewind.steps.contains(id))
+                        })
+                    }) {
+                        if let Some(first) = &mut earlier.rewind {
+                            for id in rewind.steps {
+                                if !first.steps.contains(&id) {
+                                    first.steps.push(id);
+                                }
+                            }
+                            first.feedback.extend(rewind.feedback);
+                        }
+                        rewound = true;
+                        continue;
+                    }
                     plan.moves.push(change);
                     rewound = true;
                     continue;
@@ -594,6 +648,7 @@ fn halt_the_run(
             existing.rewind = None;
             existing.stop = false;
             existing.feedback = None;
+            existing.apply_answer = None;
         } else {
             plan.moves.push(skip(id, current, &why));
         }
@@ -690,6 +745,7 @@ pub fn recover(rows: &[WorkflowStepRow]) -> Vec<Move> {
                     stop: false,
                     rewind: None,
                     feedback: None,
+                    apply_answer: None,
                 };
             }
             Move {
@@ -705,6 +761,7 @@ pub fn recover(rows: &[WorkflowStepRow]) -> Vec<Move> {
                 stop: false,
                 rewind: None,
                 feedback: None,
+                apply_answer: None,
             }
         })
         .collect()
@@ -753,6 +810,7 @@ pub fn react(
         stop: false,
         rewind: None,
         feedback: None,
+        apply_answer: None,
     }
 }
 
@@ -787,6 +845,7 @@ pub fn recorded(
         stop: false,
         rewind: None,
         feedback: None,
+        apply_answer: None,
     }
 }
 
@@ -805,6 +864,7 @@ pub fn done(step: &str, outputs: &Outputs) -> Move {
         stop: false,
         rewind: None,
         feedback: None,
+        apply_answer: None,
     }
 }
 
@@ -824,6 +884,7 @@ pub fn queued(step: &str, outputs: &Outputs) -> Move {
         stop: false,
         rewind: None,
         feedback: None,
+        apply_answer: None,
     }
 }
 
@@ -842,6 +903,7 @@ pub fn skipped(step: &str, why: &str) -> Move {
         stop: false,
         rewind: None,
         feedback: None,
+        apply_answer: None,
     }
 }
 
@@ -868,6 +930,7 @@ pub fn still_reading(
         stop: false,
         rewind: None,
         feedback: None,
+        apply_answer: None,
     }
 }
 
@@ -887,6 +950,7 @@ pub fn not_yet(step: &str) -> Move {
         stop: false,
         rewind: None,
         feedback: None,
+        apply_answer: None,
     }
 }
 
@@ -905,6 +969,7 @@ pub fn failed(step: &str, why: &str) -> Move {
         stop: false,
         rewind: None,
         feedback: None,
+        apply_answer: None,
     }
 }
 
@@ -928,12 +993,27 @@ fn value(
 }
 
 /// A pending step whose needs have all succeeded.
+/// A later step asks questions in the session this step starts.
+fn clarifies(workflow: &Workflow, id: &str) -> bool {
+    workflow.steps.iter().any(|other| {
+        matches!(
+            &other.action,
+            Action::WaitSession {
+                session: SessionRef::Step(source),
+                clarify: true,
+                ..
+            } if source == id
+        )
+    })
+}
+
 fn begin(
     step: &super::Step,
     lookup: &dyn Fn(&[String]) -> Option<String>,
     session_of: &dyn Fn(&SessionRef) -> Option<String>,
     world: &dyn World,
     effects: &mut Vec<Effect>,
+    clarify: bool,
 ) -> Move {
     let id = step.id.as_str();
     let render = |text: &str| template::render(text, lookup);
@@ -952,17 +1032,23 @@ fn begin(
                     .iter()
                     .any(|var| var.path == ["memory"])
             });
+            let prompt = prompt
+                .as_deref()
+                .map(|text| handoff_prompt(text, &step.consumes, lookup))
+                .or_else(|| {
+                    let only = handoff_prompt("", &step.consumes, lookup);
+                    (!only.trim().is_empty()).then_some(only)
+                })
+                .filter(|p| !p.trim().is_empty());
+            let prompt = if clarify {
+                clarify::with_note(prompt)
+            } else {
+                prompt
+            };
             effects.push(Effect::Start {
                 step: id.to_owned(),
                 harness: render(harness),
-                prompt: prompt
-                    .as_deref()
-                    .map(|text| handoff_prompt(text, &step.consumes, lookup))
-                    .or_else(|| {
-                        let only = handoff_prompt("", &step.consumes, lookup);
-                        (!only.trim().is_empty()).then_some(only)
-                    })
-                    .filter(|p| !p.trim().is_empty()),
+                prompt,
                 model: model
                     .as_deref()
                     .map(render)
@@ -1073,7 +1159,69 @@ fn wait(
             session,
             until,
             timeout_secs,
+            clarify,
+            max_rounds,
         } => {
+            if *clarify {
+                let state = world.clarification(id);
+                let limit = (*max_rounds).clamp(1, clarify::MAX_ROUNDS);
+                if state.rounds > limit {
+                    return Some(fail(
+                        id,
+                        StepStatus::Waiting,
+                        &format!(
+                            "Clarification was asked {} times, which is past the limit ({limit}).",
+                            state.rounds
+                        ),
+                    ));
+                }
+                if let Some(pending) = &state.pending {
+                    let pty = session_of(session);
+                    let facts = pty
+                        .as_deref()
+                        .map(|pty| world.session(pty))
+                        .unwrap_or_default();
+                    if !facts.alive {
+                        return Some(fail(
+                            id,
+                            StepStatus::Waiting,
+                            "The session ended before the answer could be sent back.",
+                        ));
+                    }
+                    if facts.busy {
+                        return None;
+                    }
+                    let Some(pty_id) = pty else {
+                        return Some(fail(
+                            id,
+                            StepStatus::Waiting,
+                            "There is no session to send the answer to.",
+                        ));
+                    };
+                    return Some(Move {
+                        apply_answer: Some(AnswerDelivery {
+                            round: pending.round,
+                            pty_id,
+                            text: pending.text.clone(),
+                        }),
+                        ..to(id, StepStatus::Waiting, StepStatus::Waiting)
+                    });
+                }
+                if state.waiting {
+                    return if timed_out(timeout_secs) {
+                        Some(fail(
+                            id,
+                            StepStatus::Waiting,
+                            &format!(
+                                "Timed out waiting for an answer after {}.",
+                                duration(timeout_secs.unwrap_or(0))
+                            ),
+                        ))
+                    } else {
+                        None
+                    };
+                }
+            }
             let facts = session_of(session)
                 .map(|pty| world.session(&pty))
                 .unwrap_or_default();
@@ -1303,6 +1451,7 @@ fn resume_capture(
         stop: false,
         rewind: None,
         feedback: None,
+        apply_answer: None,
     }
 }
 
@@ -1454,9 +1603,10 @@ fn route_judged(
         rewind: Some(Rewind {
             steps: steps_from(&workflow.steps, &route.to),
             seen,
-            feedback: feedback_copy(&step.id, when, outcome),
+            feedback: feedback_copy(&step.id, when, outcome).into_iter().collect(),
         }),
         feedback: None,
+        apply_answer: None,
     }
 }
 
@@ -1561,6 +1711,7 @@ fn to(step: &str, from: StepStatus, to: StepStatus) -> Move {
         stop: false,
         rewind: None,
         feedback: None,
+        apply_answer: None,
     }
 }
 

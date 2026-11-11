@@ -601,6 +601,11 @@ export const commands = {
 	 */
 	workflowDecide: (runId: string, stepId: string, decision: ApprovalDecision, feedback: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("workflow_decide", { runId, stepId, decision, feedback })),
 	/**
+	 *  Record an answer to a clarifying step. The driver types it into the same session on
+	 *  its next tick. Only the person at this window calls this.
+	 */
+	workflowAnswer: (runId: string, stepId: string, text: string) => typedError<null, IpcError>(__TAURI_INVOKE("workflow_answer", { runId, stepId, text })),
+	/**
 	 *  Runs waiting on a person, across every workflow. The sidebar's list. A later phone
 	 *  reads the same rows through the core. This command does not decide anything.
 	 */
@@ -797,8 +802,21 @@ export const events = {
 export type Action = 
 /**  Start a harness in the run's workspace, with a first message. */
 { action: "start_session"; harness: string; prompt: string | null; model: string | null; effort: string | null; skipMemory: boolean } | 
-/**  Wait for a session to settle or to end. */
-{ action: "wait_session"; session: SessionRef; until: Until; timeoutSecs: number | null } | 
+/**
+ *  Wait for a session to settle or to end. With `clarify`, the agent may ask the person
+ *  questions first. The session going quiet is still not a question.
+ */
+{ action: "wait_session"; session: SessionRef; until: Until; timeoutSecs?: number | null; 
+/**
+ *  The agent may call `ys workflow ask`. The step waits for each answer, then
+ *  finishes only once no question is open.
+ */
+clarify?: boolean; 
+/**
+ *  How many rounds of questions this step allows. `0` when `clarify` is false.
+ *  The file's default, when clarify is on and this is left out, is 3.
+ */
+maxRounds?: number } | 
 /**  Paste a message into a live session once it is quiet. A busy agent is never written to. */
 { action: "send_to_session"; session: SessionRef; prompt: string; timeoutSecs: number | null } | 
 /**  Wait for a review or a comment on the workspace's pull request, newer than the run. */
@@ -994,7 +1012,12 @@ export type ArtifactSource =
  *  One session's conversation. Without `raw`, the budgeted digest. With `raw`, each turn's
  *  own text. Tool output is not part of either: a turn does not keep it.
  */
-{ from: "transcript"; session: SessionRef; raw: boolean };
+{ from: "transcript"; session: SessionRef; raw: boolean } | 
+/**
+ *  The questions, the answers, and the agent's summary for a clarifying `wait_session`.
+ *  Compiled when the step finishes. Nothing is read from the terminal.
+ */
+{ from: "brief" };
 
 export type AssistStatus = {
 	keySource: KeySource,
@@ -4142,6 +4165,8 @@ export type WorkflowStepRun = {
 	approvalCode: string | null,
 	/**  A terminal has tried too many wrong codes. A new code comes from Show a new code. */
 	approvalLocked: boolean,
+	/**  The questions a clarifying step is waiting on. Absent when it is not. */
+	clarificationPrompt: string | null,
 };
 
 /**  A run waiting on a person, as the sidebar lists it. The same rows a later phone reads. */

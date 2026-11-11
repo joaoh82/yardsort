@@ -587,8 +587,17 @@ ys workflow runs                 # runs, newest first, with a WAITING ON column
 ys workflow approve 3f2a9c1e sign-off --feedback "ship it"
 ys workflow reject 3f2a9c1e sign-off
 ys workflow request-changes 3f2a9c1e sign-off --feedback "split the migration"
+ys workflow ask --question "What should the timeout be?"   # from the workflow's agent
+ys workflow summary --text "The timeout should be 30 seconds."
+ys workflow answer 3f2a9c1e discover --text "30 seconds"    # you, not the agent
 ys workflow cancel 3f2a9c1e      # stop a run; agents it started keep running
 ```
+
+`ask` and `summary` are how an agent in a clarifying step talks to you. They find the
+step from the session Yardsort started, or you name `--run` and `--step`. A question
+only printed in the terminal is not asked. `answer` is yours: a session Yardsort started
+cannot use it, and neither can the Floor Manager. The same session receives the answer.
+See [Asking a question](workflows.md#asking-a-question).
 
 `copy` writes into the `workflows` folder and never overwrites; `--as <new-id>` makes a second
 workflow instead of a replacement. `validate` needs no profile, so it works on any machine, in CI, or on a file an agent has just

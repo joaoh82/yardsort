@@ -210,10 +210,13 @@ fn effect(command: &Command) -> Action {
             | workflow::Command::Validate { .. } => Action::Read,
             workflow::Command::Copy { .. }
             | workflow::Command::Run { .. }
-            | workflow::Command::Cancel { .. } => Action::Act,
+            | workflow::Command::Cancel { .. }
+            | workflow::Command::Ask { .. }
+            | workflow::Command::Summary { .. } => Action::Act,
             workflow::Command::Approve { .. }
             | workflow::Command::Reject { .. }
-            | workflow::Command::RequestChanges { .. } => Action::Deny,
+            | workflow::Command::RequestChanges { .. }
+            | workflow::Command::Answer { .. } => Action::Deny,
         },
         Command::Test(command) => match command {
             test::Command::List { .. }

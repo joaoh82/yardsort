@@ -112,6 +112,42 @@ pub enum Command {
         #[arg(long, value_name = "CODE")]
         code: Option<String>,
     },
+    /// Ask the person a question from inside a workflow session. This is how an agent asks.
+    /// A question only printed in the terminal is not asked.
+    Ask {
+        /// The workflow run, when this is not the session the run started. The start of the id.
+        #[arg(long, value_name = "RUN")]
+        run: Option<String>,
+        /// The clarifying step, when more than one session could match.
+        #[arg(long, value_name = "STEP")]
+        step: Option<String>,
+        /// One question. Repeat for each question in this round.
+        #[arg(long = "question", required = true)]
+        questions: Vec<String>,
+    },
+    /// Record the outcome of a clarifying step. The next phase reads this in the brief.
+    /// Text printed in the terminal is not the summary.
+    Summary {
+        /// The workflow run, when this is not the session the run started.
+        #[arg(long, value_name = "RUN")]
+        run: Option<String>,
+        /// The clarifying step, when more than one session could match.
+        #[arg(long, value_name = "STEP")]
+        step: Option<String>,
+        /// The outcome, in the agent's own words.
+        #[arg(long)]
+        text: String,
+    },
+    /// Answer a clarifying step that is waiting. A session Yardsort started cannot answer.
+    Answer {
+        /// The run: its id, or the start of it.
+        run: String,
+        /// The step's id.
+        step: String,
+        /// The answer. One reply covers every question in the round.
+        #[arg(long)]
+        text: String,
+    },
     /// Check a workflow file. Prints each problem with its line and column; exits 1 if there
     /// are any. Needs no Yardsort profile, so it works anywhere.
     Validate {
@@ -199,6 +235,22 @@ pub fn run(data_dir: Option<PathBuf>, command: Command, out: &Output) -> Result<
                 code.as_deref(),
                 out,
             )
+        }
+        Command::Ask {
+            run,
+            step,
+            questions,
+        } => {
+            let ys = Yardsort::open(data_dir)?;
+            ask(&ys, run.as_deref(), step.as_deref(), &questions, out)
+        }
+        Command::Summary { run, step, text } => {
+            let ys = Yardsort::open(data_dir)?;
+            summarise(&ys, run.as_deref(), step.as_deref(), &text, out)
+        }
+        Command::Answer { run, step, text } => {
+            let ys = Yardsort::open(data_dir)?;
+            answer(&ys, &run, &step, &text, out)
         }
         Command::RequestChanges {
             run,
@@ -667,6 +719,19 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
             })
             .collect(),
     };
+    let questions: Vec<(String, Option<String>)> = steps
+        .iter()
+        .filter_map(|step| {
+            let wait = ys.store.workflow_wait(&run.id, &step.step_id).ok()??;
+            if wait.kind != workflow::waits::KIND_QUESTION
+                || wait.answer.is_some()
+                || wait.applied_at.is_some()
+            {
+                return None;
+            }
+            Some((step.step_id.clone(), wait.prompt))
+        })
+        .collect();
     out.emit(&shown, || {
         sayln!(
             "Run {} of `{}` in {}: {}",
@@ -755,6 +820,18 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                 );
             }
         }
+        for (step_id, prompt) in &questions {
+            sayln!();
+            sayln!("Blocked: waiting for your answer.");
+            sayln!("  {step_id}");
+            if let Some(prompt) = prompt {
+                sayln!("  {prompt}");
+            }
+            sayln!(
+                "  Answer in Yardsort, or with `ys workflow answer {} {step_id} --text`.",
+                memory::short_id(&run.id)
+            );
+        }
         if !decision_lines.is_empty() {
             sayln!();
             sayln!("Decisions");
@@ -779,6 +856,119 @@ fn note_line(note: Option<&str>) -> String {
     note.and_then(|text| text.lines().next())
         .unwrap_or("")
         .to_owned()
+}
+
+fn ask(
+    ys: &Yardsort,
+    run: Option<&str>,
+    step: Option<&str>,
+    questions: &[String],
+    out: &Output,
+) -> Result<(), Failure> {
+    let (run_id, step_id) = clarifying_step(ys, run, step)?;
+    let written = workflow::clarify::ask(&ys.store, &run_id, &step_id, questions)?;
+    if let Some(message) =
+        workflow::clarify::ask_refusal(&written, memory::short_id(&run_id), &step_id)
+    {
+        return Err(Failure::new(message));
+    }
+    let round = match written {
+        workflow::clarify::AskWrite::Recorded { round } => round,
+        _ => 0,
+    };
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Asked<'a> {
+        run: &'a str,
+        step: &'a str,
+        round: u32,
+    }
+    out.emit(
+        &Asked {
+            run: &run_id,
+            step: &step_id,
+            round,
+        },
+        || sayln!("Asked {step_id} (round {round}). The run waits for an answer."),
+    )
+}
+
+fn summarise(
+    ys: &Yardsort,
+    run: Option<&str>,
+    step: Option<&str>,
+    text: &str,
+    out: &Output,
+) -> Result<(), Failure> {
+    let (run_id, step_id) = clarifying_step(ys, run, step)?;
+    let written = workflow::clarify::summary(&ys.store, &run_id, &step_id, text)?;
+    if let Some(message) =
+        workflow::clarify::summary_refusal(&written, memory::short_id(&run_id), &step_id)
+    {
+        return Err(Failure::new(message));
+    }
+    #[derive(Serialize)]
+    struct Recorded<'a> {
+        run: &'a str,
+        step: &'a str,
+    }
+    out.emit(
+        &Recorded {
+            run: &run_id,
+            step: &step_id,
+        },
+        || sayln!("Recorded the summary for {step_id}."),
+    )
+}
+
+fn answer(
+    ys: &Yardsort,
+    wanted: &str,
+    step: &str,
+    text: &str,
+    out: &Output,
+) -> Result<(), Failure> {
+    if let Some(why) = launched_here() {
+        return Err(Failure::new(why));
+    }
+    let run = find_run(ys, wanted)?;
+    let written = workflow::waits::answer(&ys.store, &run.id, step, text, &cli_actor())?;
+    if let Some(message) =
+        workflow::clarify::answer_refusal(&written, memory::short_id(&run.id), step)
+    {
+        return Err(Failure::new(message));
+    }
+    #[derive(Serialize)]
+    struct Answered<'a> {
+        run: &'a str,
+        step: &'a str,
+    }
+    out.emit(&Answered { run: &run.id, step }, || {
+        sayln!("Answered {step}. The same session receives it.")
+    })
+}
+
+/// The clarifying step: the one this session was started for, or `--run` and `--step`.
+fn clarifying_step(
+    ys: &Yardsort,
+    run: Option<&str>,
+    step: Option<&str>,
+) -> Result<(String, String), Failure> {
+    if let Some(run) = run {
+        let found = find_run(ys, run)?;
+        let step = step.ok_or_else(|| Failure::new("Name the step with --step."))?;
+        return Ok((found.id, step.to_owned()));
+    }
+    let activity = std::env::var("YARDSORT_RUN_ID").unwrap_or_default();
+    match workflow::clarify::locate(&ys.store, activity.trim(), step)? {
+        Ok(found) => Ok((found.run_id, found.step_id)),
+        Err(workflow::clarify::LocateMiss::None) => Err(Failure::new(
+            "This is not a workflow session that is asking. Pass --run and --step.",
+        )),
+        Err(workflow::clarify::LocateMiss::Many(n)) => Err(Failure::new(format!(
+            "{n} steps could be this session. Pass --step."
+        ))),
+    }
 }
 
 fn decide(

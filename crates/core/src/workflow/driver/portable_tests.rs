@@ -2257,3 +2257,450 @@ steps:
         "failed"
     );
 }
+
+const CLARIFY_YAML: &str = r#"id: clarify
+name: Clarify
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: start
+    action: start_session
+    harness: claude
+    prompt: Clarify the problem.
+  - id: discover
+    needs: [start]
+    action: wait_session
+    session: "{{ steps.start.session }}"
+    until: settled
+    clarify: true
+    max_rounds: 3
+    produces:
+      - name: brief
+        from: brief
+  - id: next
+    needs: [discover]
+    action: notify
+    title: Next
+    consumes: [brief]
+    body: "{{ artifacts.brief }}"
+"#;
+
+/// A question printed by the stand-in. It is never asked, because nothing called `ys workflow ask`.
+const PRINTED_QUESTION: &str = "What is the timeout for the login?";
+
+struct QuietHost {
+    pastes: Mutex<Vec<String>>,
+}
+
+impl QuietHost {
+    fn new() -> Self {
+        Self {
+            pastes: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn session() -> SessionInfo {
+        let mut labels = BTreeMap::new();
+        labels.insert(crate::launch::RUN_LABEL.to_owned(), "activity-1".to_owned());
+        SessionInfo {
+            id: pty_host::SessionId("pty-9".into()),
+            program: "claude".into(),
+            args: Vec::new(),
+            cwd: None,
+            pid: Some(7),
+            size: pty_host::TermSize::DEFAULT,
+            labels,
+            state: pty_host::SessionState::Running,
+            has_output: true,
+            busy: false,
+            busy_ms: 0,
+            idle_ms: 1_000,
+        }
+    }
+}
+
+impl pty_host::TerminalHost for QuietHost {
+    fn spawn(&self, _: pty_host::LaunchPlan) -> pty_host::Result<SessionInfo> {
+        Ok(Self::session())
+    }
+    fn attach(
+        &self,
+        _: &pty_host::SessionId,
+        _: pty_host::OutputSink,
+    ) -> pty_host::Result<pty_host::AttachmentId> {
+        Err(pty_host::HostError::UnknownSession(pty_host::SessionId(
+            "pty-9".into(),
+        )))
+    }
+    fn detach(&self, _: &pty_host::SessionId, _: pty_host::AttachmentId) -> pty_host::Result<()> {
+        Ok(())
+    }
+    fn write(&self, _: &pty_host::SessionId, _: &[u8]) -> pty_host::Result<()> {
+        Ok(())
+    }
+    fn paste(&self, _: &pty_host::SessionId, text: &str) -> pty_host::Result<()> {
+        self.pastes.lock().unwrap().push(text.to_owned());
+        Ok(())
+    }
+    fn resize(&self, _: &pty_host::SessionId, _: pty_host::TermSize) -> pty_host::Result<()> {
+        Ok(())
+    }
+    fn kill(&self, _: &pty_host::SessionId) -> pty_host::Result<()> {
+        Ok(())
+    }
+    fn remove(&self, _: &pty_host::SessionId) -> pty_host::Result<()> {
+        Ok(())
+    }
+    fn info(&self, id: &pty_host::SessionId) -> pty_host::Result<SessionInfo> {
+        if id.0 == "pty-9" {
+            Ok(Self::session())
+        } else {
+            Err(pty_host::HostError::UnknownSession(id.clone()))
+        }
+    }
+    fn list(&self) -> Vec<SessionInfo> {
+        vec![Self::session()]
+    }
+    fn type_unattended(
+        &self,
+        id: &pty_host::SessionId,
+        text: &str,
+        paste: bool,
+    ) -> pty_host::Result<()> {
+        if id.0 != "pty-9" {
+            return Err(pty_host::HostError::UnknownSession(id.clone()));
+        }
+        if paste {
+            self.pastes.lock().unwrap().push(text.to_owned());
+        }
+        Ok(())
+    }
+}
+
+struct Asking {
+    notices: Mutex<Vec<(String, String)>>,
+}
+
+impl Hands for Asking {
+    fn start(&self, _: &str, _: HarnessRequest) -> Result<SessionInfo, String> {
+        Ok(QuietHost::session())
+    }
+    fn notify(&self, title: &str, body: Option<&str>) -> Result<(), String> {
+        self.notices
+            .lock()
+            .unwrap()
+            .push((title.to_owned(), body.unwrap_or("").to_owned()));
+        Ok(())
+    }
+    fn handoff(&self, _: &str) -> Option<String> {
+        None
+    }
+    fn pr_posts(&self, _: &str, _: &crate::workflow::runs::PrFacts) -> PrAsk {
+        unreachable!("this workflow waits on no pull request")
+    }
+    fn conversation(
+        &self,
+        _: &str,
+        _: &str,
+        _: bool,
+        _: &str,
+        _: &str,
+    ) -> Result<Conversation, String> {
+        Ok(Conversation::Ready(Some(PRINTED_QUESTION.to_owned())))
+    }
+}
+
+fn clarify_run(yaml: &str) -> (tempfile::TempDir, Store, String) {
+    let (dir, store, run, _) = queue_folder(yaml, "clarify", &BTreeMap::new());
+    (dir, store, run)
+}
+
+fn quiet(driver: &Driver) {
+    driver.observe(&pty_host::HostEvent::Quiet {
+        id: pty_host::SessionId("pty-9".into()),
+        busy_ms: 1,
+    });
+}
+
+#[test]
+fn a_clarification_round_pauses_and_the_same_session_receives_the_answer() {
+    let (_dir, store, run) = clarify_run(CLARIFY_YAML);
+    let host = QuietHost::new();
+    let hands = Asking {
+        notices: Mutex::new(Vec::new()),
+    };
+    let driver = Driver::new(1, Duration::from_secs(3600));
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(step(&store, &run, "start").status, "succeeded");
+    assert_eq!(
+        crate::workflow::engine::parse_outputs(&step(&store, &run, "start").outputs).get("session"),
+        Some(&"pty-9".to_owned())
+    );
+    let located = crate::workflow::clarify::locate(&store, "activity-1", None)
+        .unwrap()
+        .expect("the activity run names the clarifying step");
+    assert_eq!(located.step_id, "discover");
+    assert_eq!(
+        crate::workflow::clarify::ask(
+            &store,
+            &run,
+            "discover",
+            &["What should the timeout be?".to_owned()]
+        )
+        .unwrap(),
+        crate::workflow::clarify::AskWrite::Recorded { round: 1 }
+    );
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(step(&store, &run, "discover").status, "waiting");
+    assert_eq!(
+        crate::workflow::waits::waiting_on(&store, &run)
+            .unwrap()
+            .as_deref(),
+        Some("your answer")
+    );
+    assert!(hands
+        .notices
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(title, _)| { title == crate::workflow::waits::TITLE_ANSWER }));
+    // Settled, and the terminal has the question as text. That is not a finished phase.
+    quiet(&driver);
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(step(&store, &run, "discover").status, "waiting");
+    assert_eq!(
+        crate::workflow::waits::answer(&store, &run, "discover", "30 seconds", "ada").unwrap(),
+        crate::workflow::waits::AnswerWrite::Recorded
+    );
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    let pastes = host.pastes.lock().unwrap().clone();
+    assert_eq!(pastes.len(), 1, "{pastes:?}");
+    assert!(pastes[0].contains("30 seconds"), "{pastes:?}");
+    assert!(
+        pastes[0].contains("What should the timeout be?"),
+        "{pastes:?}"
+    );
+    assert_eq!(
+        crate::workflow::engine::parse_outputs(&step(&store, &run, "start").outputs).get("session"),
+        Some(&"pty-9".to_owned())
+    );
+    let round = store
+        .clarification_rounds(&run, "discover")
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap();
+    assert!(round.applied_at.is_some());
+    assert_eq!(step(&store, &run, "discover").status, "waiting");
+    assert_eq!(
+        crate::workflow::clarify::summary(
+            &store,
+            &run,
+            "discover",
+            "The timeout should be 30 seconds."
+        )
+        .unwrap(),
+        crate::workflow::clarify::SummaryWrite::Recorded
+    );
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(host.pastes.lock().unwrap().len(), 1);
+    assert_eq!(step(&store, &run, "discover").status, "succeeded");
+    let brief = store
+        .workflow_artifacts(&run)
+        .unwrap()
+        .into_iter()
+        .find(|artifact| artifact.name == "brief")
+        .expect("the brief");
+    assert!(brief.body.contains("30 seconds"), "{}", brief.body);
+    assert!(
+        brief.body.contains("What should the timeout be?"),
+        "{}",
+        brief.body
+    );
+    assert!(
+        brief.body.contains("The timeout should be 30 seconds."),
+        "{}",
+        brief.body
+    );
+    assert!(!brief.body.contains(PRINTED_QUESTION), "{}", brief.body);
+    assert_eq!(step(&store, &run, "next").status, "succeeded");
+    assert!(hands.notices.lock().unwrap().iter().any(|(title, body)| {
+        title == "Next"
+            && body.contains("30 seconds")
+            && body.contains("What should the timeout be?")
+    }));
+}
+
+#[test]
+fn a_question_only_printed_in_the_session_does_not_pause_the_step() {
+    let (_dir, store, run) = clarify_run(CLARIFY_YAML);
+    let host = QuietHost::new();
+    let hands = Asking {
+        notices: Mutex::new(Vec::new()),
+    };
+    let driver = Driver::new(1, Duration::from_secs(3600));
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert!(store.workflow_wait(&run, "discover").unwrap().is_none());
+    quiet(&driver);
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(step(&store, &run, "discover").status, "succeeded");
+    assert!(store.workflow_wait(&run, "discover").unwrap().is_none());
+    assert!(host.pastes.lock().unwrap().is_empty());
+    let brief = store
+        .workflow_artifacts(&run)
+        .unwrap()
+        .into_iter()
+        .find(|artifact| artifact.name == "brief")
+        .unwrap();
+    assert!(
+        brief.body.contains("No questions were asked"),
+        "{}",
+        brief.body
+    );
+    assert!(!brief.body.contains(PRINTED_QUESTION), "{}", brief.body);
+    assert!(
+        brief.body.contains("finished without recording a summary"),
+        "{}",
+        brief.body
+    );
+}
+
+#[test]
+fn clarification_can_take_more_than_one_round() {
+    let (_dir, store, run) = clarify_run(CLARIFY_YAML);
+    let host = QuietHost::new();
+    let hands = Asking {
+        notices: Mutex::new(Vec::new()),
+    };
+    let driver = Driver::new(1, Duration::from_secs(3600));
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(
+        crate::workflow::clarify::ask(&store, &run, "discover", &["First?".to_owned()]).unwrap(),
+        crate::workflow::clarify::AskWrite::Recorded { round: 1 }
+    );
+    crate::workflow::waits::answer(&store, &run, "discover", "one", "ada").unwrap();
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(
+        crate::workflow::clarify::ask(&store, &run, "discover", &["Second?".to_owned()]).unwrap(),
+        crate::workflow::clarify::AskWrite::Recorded { round: 2 }
+    );
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(
+        crate::workflow::waits::waiting_on(&store, &run)
+            .unwrap()
+            .as_deref(),
+        Some("your answer")
+    );
+    crate::workflow::waits::answer(&store, &run, "discover", "two", "ada").unwrap();
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    let pastes = host.pastes.lock().unwrap().clone();
+    assert_eq!(pastes.len(), 2, "{pastes:?}");
+    assert!(pastes[0].contains("one") && pastes[0].contains("First?"));
+    assert!(pastes[1].contains("two") && pastes[1].contains("Second?"));
+    crate::workflow::clarify::summary(&store, &run, "discover", "Both answers are in.").unwrap();
+    quiet(&driver);
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    let brief = store
+        .workflow_artifacts(&run)
+        .unwrap()
+        .into_iter()
+        .find(|artifact| artifact.name == "brief")
+        .unwrap();
+    assert!(brief.body.contains("First?"), "{}", brief.body);
+    assert!(brief.body.contains("one"), "{}", brief.body);
+    assert!(brief.body.contains("Second?"), "{}", brief.body);
+    assert!(brief.body.contains("two"), "{}", brief.body);
+    assert!(
+        brief.body.contains("Both answers are in."),
+        "{}",
+        brief.body
+    );
+}
+
+#[test]
+fn a_clarification_past_the_round_limit_fails_the_step() {
+    let yaml = CLARIFY_YAML.replace("max_rounds: 3", "max_rounds: 1");
+    let (_dir, store, run) = clarify_run(&yaml);
+    let host = QuietHost::new();
+    let hands = Asking {
+        notices: Mutex::new(Vec::new()),
+    };
+    let driver = Driver::new(1, Duration::from_secs(3600));
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    crate::workflow::clarify::ask(&store, &run, "discover", &["Only once?".to_owned()]).unwrap();
+    crate::workflow::waits::answer(&store, &run, "discover", "yes", "ada").unwrap();
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(
+        crate::workflow::clarify::ask(&store, &run, "discover", &["Again?".to_owned()]).unwrap(),
+        crate::workflow::clarify::AskWrite::TooMany { asked: 2, limit: 1 }
+    );
+    assert!(crate::workflow::waits::waiting_on(&store, &run)
+        .unwrap()
+        .is_none());
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    let discover = step(&store, &run, "discover");
+    assert_eq!(discover.status, "failed");
+    assert!(
+        discover.note.unwrap().contains("past the limit (1)"),
+        "the limit was not named"
+    );
+    assert_eq!(host.pastes.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn an_answer_is_typed_once_across_a_restart() {
+    let (_dir, store, run) = clarify_run(CLARIFY_YAML);
+    let host = QuietHost::new();
+    let hands = Asking {
+        notices: Mutex::new(Vec::new()),
+    };
+    let driver = Driver::new(1, Duration::from_secs(3600));
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    crate::workflow::clarify::ask(&store, &run, "discover", &["Which name?".to_owned()]).unwrap();
+    crate::workflow::waits::answer(&store, &run, "discover", "Ship it", "ada").unwrap();
+
+    driver.testing_stop_after(StopAfter::BeforeAnswerApplied);
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert!(host.pastes.lock().unwrap().is_empty());
+    assert!(store.clarification_rounds(&run, "discover").unwrap()[0]
+        .applied_at
+        .is_none());
+
+    let again = Driver::new(1, Duration::from_secs(3600));
+    again.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(host.pastes.lock().unwrap().len(), 1);
+    assert!(host.pastes.lock().unwrap()[0].contains("Ship it"));
+    let applied = store.clarification_rounds(&run, "discover").unwrap()[0]
+        .applied_at
+        .expect("the answer was marked sent");
+    let restarted = Driver::new(1, Duration::from_secs(3600));
+    restarted.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(host.pastes.lock().unwrap().len(), 1);
+    assert_eq!(
+        store.clarification_rounds(&run, "discover").unwrap()[0].applied_at,
+        Some(applied)
+    );
+
+    let (_dir, store, run) = clarify_run(CLARIFY_YAML);
+    let host = QuietHost::new();
+    let driver = Driver::new(1, Duration::from_secs(3600));
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    crate::workflow::clarify::ask(&store, &run, "discover", &["Which name?".to_owned()]).unwrap();
+    crate::workflow::waits::answer(&store, &run, "discover", "Keep it", "ada").unwrap();
+    driver.testing_stop_after(StopAfter::AfterAnswerApplied);
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert!(
+        host.pastes.lock().unwrap().is_empty(),
+        "the process died after the mark and before the keystrokes"
+    );
+    assert!(store.clarification_rounds(&run, "discover").unwrap()[0]
+        .applied_at
+        .is_some());
+    let resumed = Driver::new(1, Duration::from_secs(3600));
+    resumed.tick(&store, &host, &hands, &git()).unwrap();
+    assert!(
+        host.pastes.lock().unwrap().is_empty(),
+        "a restart after the mark does not type the answer again"
+    );
+}

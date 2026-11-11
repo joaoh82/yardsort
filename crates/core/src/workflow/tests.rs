@@ -96,6 +96,8 @@ fn the_built_in_code_review_is_valid_and_ends_in_two_branches() {
             session: SessionRef::Step("review".into()),
             until: Until::Settled,
             timeout_secs: Some(2 * 60 * 60),
+            clarify: false,
+            max_rounds: 0,
         }
     );
 }
@@ -1390,4 +1392,63 @@ fn feedback_is_only_consumed_when_that_outcome_comes_back() {
         reserved.contains("`failure-sign-off` is reserved"),
         "{reserved}"
     );
+}
+
+#[test]
+fn a_clarifying_wait_names_its_rounds_and_a_brief_comes_only_from_it() {
+    let source = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: start
+    action: start_session
+    harness: claude
+    prompt: Look
+  - id: discover
+    needs: [start]
+    action: wait_session
+    session: "{{ steps.start.session }}"
+    clarify: true
+    produces:
+      - name: brief
+        from: brief
+"#;
+    let workflow = parse(source).unwrap();
+    match &workflow.steps[1].action {
+        Action::WaitSession {
+            clarify,
+            max_rounds,
+            ..
+        } => {
+            assert!(*clarify);
+            assert_eq!(*max_rounds, 3);
+        }
+        other => panic!("expected a wait, got {other:?}"),
+    }
+    assert!(matches!(
+        workflow.steps[1].produces[0].source,
+        ArtifactSource::Brief
+    ));
+    let limited = source.replace("clarify: true", "clarify: true\n    max_rounds: 2");
+    match &parse(&limited).unwrap().steps[1].action {
+        Action::WaitSession { max_rounds, .. } => assert_eq!(*max_rounds, 2),
+        other => panic!("expected a wait, got {other:?}"),
+    }
+    let bare = problem(&source.replace("    clarify: true\n", ""));
+    assert!(
+        bare.contains("A brief comes from a `wait_session`"),
+        "{bare}"
+    );
+    let extra = problem(&with_steps(
+        "  - id: discover\n    needs: [start]\n    action: wait_session\n    \
+         session: \"{{ steps.start.session }}\"\n    max_rounds: 4\n",
+    ));
+    assert!(
+        extra.contains("`max_rounds` needs `clarify: true`"),
+        "{extra}"
+    );
+    let high = problem(&source.replace("clarify: true", "clarify: true\n    max_rounds: 11"));
+    assert!(high.contains("`max_rounds` must be from 1 to 10"), "{high}");
 }

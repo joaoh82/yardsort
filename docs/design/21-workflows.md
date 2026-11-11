@@ -738,10 +738,22 @@ in the same change as the engine applying the decision. A restart applies a
 decision whose `applied_at` is still null exactly once, and does not approve a
 gate that has no decision.
 
-A clarification uses the same row, `kind` `question`, the question in `prompt`
-and the reply in `answer`. This build has no question step. `answer` stores the
-reply and does not move a step. A later question step reads this row. It does
-not add a table.
+A clarification uses the same row, `kind` `question`, the questions in `prompt`
+and the reply in `answer`. It is a mode of `wait_session` (`clarify: true`), not
+an approval and not a new action. The agent asks with `ys workflow ask`. The
+person answers with `ys workflow answer` or in the run view. There is no one-time
+code. `applied_at` is set in the same change as handing that answer to the driver
+to type into the same session. A restart types an answer whose `applied_at` is
+still null once, and does not type it again after that.
+
+Each round is also a row in `workflow_clarification_rounds` (migration
+`0035_workflow_clarifications`, index 34), because the wait is one row per step
+and a later round reuses it. The agent's `ys workflow summary` is one row in
+`workflow_clarification_summaries`. When the step finishes, `from: brief` compiles
+those rows into a named artifact. Nothing is read from the terminal. A question
+only printed there is not a round, and a session going quiet is not one either.
+Past `max_rounds` the extra round is stored and the step fails. It does not open
+another wait.
 
 `workflow::waits::list_open` and `decide_with_code` are the boundary a phone or a
 remote crate calls. They read and write this database. A remote caller must use
@@ -758,10 +770,11 @@ its effect runs. The next start does not write the artifact again, and it fails
 a step that was claimed and not carried out, so a notification or a session is
 not started twice.
 
-What this leaves for later, and does not do: a question step that asks mid-run, and
-notifications and controls from a phone. Those read this wait, this outcome
-and the same failed run error. The phone does not get a decision route here.
-Branching on a verdict or on `changes_requested` is [Conditional paths](#conditional-paths).
+What this leaves for later, and does not do: notifications and controls from a
+phone. Those read this wait, this outcome and the same failed run error. The
+phone does not get a decision route here. Branching on a verdict or on
+`changes_requested` is [Conditional paths](#conditional-paths). Asking mid-run is
+the clarifying `wait_session` above.
 
 ## Conditional paths
 
@@ -787,7 +800,11 @@ step even when the verdict failed, so the chosen step can start, and skips the o
 steps that needed this one and were not chosen.
 
 A route back sets the target, and every step that needs it, back to pending. That
-includes the step that branched. The plan is one database change, taken only while
+includes the step that branched. Two looping steps in the same tick whose sets
+overlap are one change: the sets are joined and both `failure-<step>` or
+`changes-<step>` notes are stored. A second rewind is not planned for a step the
+first rewind already sends back, because that step would no longer be waiting and
+its note would be dropped. The plan is one database change, taken only while
 that step is still in the status the plan saw and its `attempts` count is still the
 count the plan saw. A second apply, including after a restart, changes nothing.
 `attempts` is not reset and is not increased by the rewind. It increases by one when

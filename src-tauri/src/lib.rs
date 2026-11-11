@@ -244,6 +244,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             workflows::commands::workflow_start,
             workflows::commands::workflow_cancel,
             workflows::commands::workflow_decide,
+            workflows::commands::workflow_answer,
             workflows::commands::workflow_open_waits,
             workflows::commands::workflow_show_approval_code,
             workflows::commands::workflow_describe,

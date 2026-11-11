@@ -201,6 +201,8 @@ pub fn notice_body(
 
 /// Titles the waiting and replacement notifications use. A schedule set to never sends neither.
 pub const TITLE_WAITING: &str = "Waiting for your approval";
+/// A clarifying step is waiting. There is no one-time code.
+pub const TITLE_ANSWER: &str = "Waiting for your answer";
 pub const TITLE_REPLACED: &str = "Approval code replaced";
 
 pub fn artifact_refs(raw: &str) -> Vec<String> {
@@ -314,9 +316,8 @@ pub enum AnswerWrite {
     AlreadyAnswered,
 }
 
-/// Store a clarification's answer on the wait. The engine, when a question step exists,
-/// applies it the way it applies an approval. This build has no question step and does
-/// not call this from the window or from `ys`.
+/// Store a clarification's answer on the wait and, when a round is open, on that round.
+/// The engine types it back into the same session once. It does not finish the step.
 pub fn answer(
     store: &Store,
     run_id: &str,
