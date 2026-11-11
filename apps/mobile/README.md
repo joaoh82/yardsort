@@ -30,6 +30,7 @@ a server from the phone. Choose light, dark or automatic in Settings.
 | `src/lib/profiles.ts`    | The profiles, kept in the phone's credential store: each server's address, its id, this phone's device there and its refresh credential.                                                                                                                                                                                                                                                                                                               |
 | `src/lib/pairing.ts`     | A pairing link held in memory until used, where it belongs among the profiles, and waiting for the person at the computer.                                                                                                                                                                                                                                                                                                                             |
 | `src/lib/presence.ts`    | Whether each computer can be reached, from a channel held to it while someone is looking.                                                                                                                                                                                                                                                                                                                                                              |
+| `src/lib/diagnostics.ts` | What happened to the connections since the app started, as ids, states and codes with times, for Settings → Diagnostics. In memory only.                                                                                                                                                                                                                                                                                                               |
 | `src/lib/activity.ts`    | A workspace's activity followed through a channel, and what each event says. In memory only.                                                                                                                                                                                                                                                                                                                                                           |
 | `src/lib/control.ts`     | Having control of a terminal: asking for it, what is typed going one at a time, what may not have arrived, and letting go.                                                                                                                                                                                                                                                                                                                             |
 | `src/lib/appearance.ts`  | Light, dark or as the phone is: the choice, keeping it, and telling the system.                                                                                                                                                                                                                                                                                                                                                                        |
@@ -68,7 +69,8 @@ Things it holds to:
   on its own say: one from outside the app, or naming another server, is asked about first. **A
   sign-in's code** stays out of the router too, though Android hands it to the app as a link.
 - **Online is what the socket says.** Channels are held only while the computers are on screen and
-  the app is in the foreground. Offline never means a computer's agents stopped.
+  the app is in the foreground. Offline never means a computer's agents stopped, nor that they run
+  on: it says when the computer was last seen, and what was read before is marked with when.
 - **A computer refusing this phone** does not say why, so the server is asked before anything goes.
   Taken back or off the account: that computer's kept entries go, and every other computer goes on
   working. The phone's own credential refused: signed out, as below. Not known: nothing goes, it
@@ -79,6 +81,10 @@ Things it holds to:
   back and with the profile. Taking control of a terminal, and what a device that may take control
   can do besides — start an agent, give one a picture — are the only things here that change
   anything on the computer.
+- **Diagnostics** are ids, states and codes with their times, never a name, title, path or a
+  server's words, kept in memory and shown whole before **Share** sends that same text. The app
+  writes no log. A test types, prints, titles and notes markers through the real server and host,
+  and finds none in their logs, the cache, the credential store or the diagnostics.
 - **Nothing is started twice.** A start whose answer was lost is said to be so, and never sent
   again by itself.
 - **A terminal is drawn, and nothing more.** Its page connects to nothing, goes nowhere, and keeps

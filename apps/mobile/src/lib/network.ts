@@ -8,6 +8,8 @@
  * waiting out a backoff (35 §17, slice 8).
  */
 
+import type { Diagnostics } from "./diagnostics";
+
 /** What the platform says about the network, as much as this needs. */
 export interface NetworkState {
   type?: string | undefined;
@@ -24,7 +26,11 @@ export class NetworkChanges {
   #stop: (() => void) | null = null;
   #last: string | null = null;
 
-  constructor(readonly source: NetworkSource) {}
+  constructor(
+    readonly source: NetworkSource,
+    /** Where each change is recorded: the kind of network and whether it is connected. */
+    readonly diagnostics?: Diagnostics,
+  ) {}
 
   /** Hear each change from now on; returns how to stop hearing them. */
   listen(changed: () => void): () => void {
@@ -46,6 +52,7 @@ export class NetworkChanges {
     this.#last = now;
     // The first state heard is where it starts, not a change.
     if (before === null || before === now) return;
+    this.diagnostics?.record({ what: "network", network: now });
     for (const listener of this.#listeners) listener();
   }
 }

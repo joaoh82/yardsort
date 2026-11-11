@@ -32,11 +32,17 @@
 //! - `{"op":"typed"}`: the lines the program printed back.
 //! - `{"op":"typeHere","text":…}`: type into the program as the person at the computer does.
 //! - `{"op":"note","text":…}`: write an approved memory note in the workspace's project.
+//! - `{"op":"conversation","title":…}`: record a conversation in the workspace by that title,
+//!   started with it as its first message, on the program's terminal.
 //! - `{"op":"signInAs","subject":…}`: whom the provider signs in from now on, for a second
 //!   account. Everyone is `someone` until then.
 //! - `{"op":"removeHost"}`: take the host off the account.
 //! - `{"op":"hostOffline"}` and `{"op":"hostOnline"}`: the host drops its link to the relay, and
 //!   makes it again, as a computer asleep and awake does.
+//!
+//! With `YARDSORT_STAND_IN_LOGS=1`, what the server and the host log goes to stderr: every level
+//! of Yardsort's own crates, and the server's default for the rest. The leak tests read it for what
+//! a person typed (35 §19). Any other value is a filter of its own, as `RUST_LOG` would be.
 //!
 //! It stops when stdin closes, so a test that dies takes it with it. Nothing here is a secret
 //! worth keeping: the server, its keys and its accounts last as long as the process.
@@ -68,6 +74,20 @@ mod served;
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
+    if let Ok(asked) = std::env::var("YARDSORT_STAND_IN_LOGS") {
+        let filter = match asked.as_str() {
+            "1" => {
+                "info,yardsort_server=trace,yardsort_core=trace,remote_host=trace,\
+                    remote_client=trace,remote_proto=trace,pty_host=trace"
+            }
+            other => other,
+        };
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(std::io::stderr)
+            .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
+            .init();
+    }
     // Every client of the stand-in comes from this machine's one address, so the limits per
     // address are raised past what a test run asks. The server's own tests hold it to them.
     let generous = 10_000;
@@ -299,6 +319,11 @@ async fn obey(
                 .map_err(|e| e.message)?;
             Ok(Value::Null)
         }
+        "conversation" => {
+            let title = command["title"].as_str().ok_or("say what it is called")?;
+            here.converse(title)?;
+            Ok(Value::Null)
+        }
         "signInAs" => {
             let subject = command["subject"]
                 .as_str()
@@ -489,6 +514,24 @@ impl Here {
             }
         });
         Ok(())
+    }
+
+    /// A conversation in the workspace, as a harness's launch records one, on the program's
+    /// terminal.
+    fn converse(&self, title: &str) -> Result<(), String> {
+        static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.store
+            .add_session(&yardsort_core::store::NewSession {
+                id: &format!("rec-stand-in-{n}"),
+                workspace_id: &self.workspace,
+                harness_id: "claude",
+                title,
+                pty_session_id: &self.program.0,
+                prompt: Some(title),
+                ..Default::default()
+            })
+            .map_err(|e| e.to_string())
     }
 
     fn stop(&self) {

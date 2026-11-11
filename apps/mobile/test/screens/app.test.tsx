@@ -9,11 +9,12 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globa
 import { Secret } from "@yardsort/remote-client";
 import { router, Stack } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
-import { Alert, type AlertButton, AppState, Linking } from "react-native";
+import { Alert, type AlertButton, AppState, Linking, Share } from "react-native";
 
 import Account from "../../src/app/account";
 import ComputerScreen from "../../src/app/computer";
 import Connect from "../../src/app/connect";
+import DiagnosticsScreen from "../../src/app/diagnostics";
 import Start from "../../src/app/index";
 import MemoryScreen from "../../src/app/memory";
 import TerminalScreen from "../../src/app/terminal";
@@ -25,6 +26,7 @@ import WorkspaceScreen from "../../src/app/workspace";
 import { Accounts, type Browser, type Env } from "../../src/lib/accounts";
 import type { PickImage } from "../../src/lib/attach";
 import { AppProvider } from "../../src/lib/context";
+import { Diagnostics } from "../../src/lib/diagnostics";
 import { Incoming } from "../../src/lib/pairing";
 import { MemoryVault } from "../lib/memory-vault";
 import { ADDRESS, envFor, event, FakeServer } from "./fake-server";
@@ -40,6 +42,7 @@ async function start({
   env = envFor(server),
   incoming = new Incoming(),
   pickImage = async () => null,
+  diagnostics = new Diagnostics(),
 }: {
   server?: FakeServer;
   vault?: MemoryVault;
@@ -47,9 +50,18 @@ async function start({
   env?: Env;
   incoming?: Incoming;
   pickImage?: PickImage;
+  diagnostics?: Diagnostics;
 } = {}) {
-  const accounts = new Accounts(env, vault);
-  const app = { accounts, browser, deviceName: "iPhone", incoming, pickImage };
+  const accounts = new Accounts({ diagnostics, ...env }, vault);
+  const app = {
+    accounts,
+    browser,
+    deviceName: "iPhone",
+    incoming,
+    pickImage,
+    diagnostics,
+    about: { app: "0.1.5", system: "ios 18.1" },
+  };
   void accounts.load();
   await renderRouter(
     {
@@ -71,6 +83,7 @@ async function start({
       memory: MemoryScreen,
       terminal: TerminalScreen,
       start: StartWork,
+      diagnostics: DiagnosticsScreen,
     },
     { initialUrl: "/" },
   );
@@ -1093,6 +1106,18 @@ describe("A computer", () => {
       expect(outputs()).toEqual(["the screen as it is", "and then this"]);
     });
 
+    test("a computer gone offline says when it was last seen, and not that the program runs on", async () => {
+      const { server } = await watching();
+      server.offline.add("host-work");
+      await act(async () => server.closeChannelsTo("host-work", 4004));
+      expect(
+        await screen.findByText(
+          /^Offline, last seen .+\. That does not mean the program stopped\.$/,
+        ),
+      ).toBeTruthy();
+      expect(screen.queryByText(/keeps running/)).toBeNull();
+    });
+
     describe("taking control", () => {
       const button = (name: string | RegExp) => screen.findByRole("button", { name });
 
@@ -1910,6 +1935,29 @@ describe("A computer", () => {
   });
 
   describe("what was last seen", () => {
+    test("a workspace on a computer gone offline says when it was last seen", async () => {
+      const { server } = await paired();
+      await fireEvent.press(await open());
+      await screen.findByText("The login page times out");
+      server.offline.add("host-work");
+      await act(async () => server.closeChannelsTo("host-work", 4004));
+      expect(await screen.findByText(/^Offline, last seen/)).toBeTruthy();
+      expect(screen.getByText(/^As of /)).toBeTruthy();
+    });
+
+    test("memory read before the computer went offline says when it was read", async () => {
+      const { server } = await paired();
+      await fireEvent.press(await open());
+      await fireEvent.press(await screen.findByRole("button", { name: "Approved memory" }));
+      await screen.findByText("Migrations are append-only.");
+      expect(screen.queryByText(/^As of /)).toBeNull();
+      server.offline.add("host-work");
+      await act(async () => server.closeChannelsTo("host-work", 4004));
+      expect(await screen.findByText(/^Offline, last seen/)).toBeTruthy();
+      expect(screen.getByText(/^As of /)).toBeTruthy();
+      expect(screen.getByText("Migrations are append-only.")).toBeTruthy();
+    });
+
     test("shows when the computer is offline, marked as such", async () => {
       const { server } = await paired();
       await open();
@@ -1971,6 +2019,68 @@ describe("A computer", () => {
       await waitFor(() => expect(shelf.kept.size).toBeGreaterThan(0));
       await act(async () => accounts.signOut());
       await waitFor(() => expect(shelf.kept.size).toBe(0));
+    });
+  });
+
+  describe("diagnostics", () => {
+    async function readThem(diagnostics: Diagnostics) {
+      const server = new FakeServer();
+      const app = await start({
+        server,
+        diagnostics,
+        env: { ...envFor(server), shelf: new MemoryVault() },
+      });
+      await signIn();
+      await fireEvent.press(await screen.findByRole("button", { name: "Pair a computer" }));
+      await fireEvent.changeText(await screen.findByLabelText("Pairing code"), "ABCD2345");
+      await fireEvent.press(screen.getByRole("button", { name: "Pair with ABCD-2345" }));
+      await screen.findByText("Say yes at Workstation");
+      app.server.answer("approved");
+      await screen.findByText("Workstation let this phone in", undefined, ANSWER);
+      await fireEvent.press(screen.getByRole("button", { name: "Done" }));
+      await fireEvent.press(await open());
+      await screen.findByText("The login page times out");
+      app.server.offline.add("host-work");
+      await act(async () => app.server.closeChannelsTo("host-work", 4004));
+      await screen.findByText(/^Offline, last seen/);
+      await act(async () => router.push("/settings"));
+      await fireEvent.press(await screen.findByRole("button", { name: "Diagnostics" }));
+      return app;
+    }
+
+    test("show versions, the server and device, and how each computer stood, with codes", async () => {
+      const { accounts } = await readThem(new Diagnostics());
+      const shown = (await screen.findByText(/^Yardsort phone diagnostics/)).props
+        .children as string;
+      const active = accounts.getSnapshot().active;
+      expect(shown).toContain("App 0.1.5");
+      expect(shown).toContain("System ios 18.1");
+      expect(shown).toMatch(/Protocol \d+\.\d+/);
+      expect(shown).toContain(`Server ${active?.server}`);
+      expect(shown).toContain(`Device ${active?.device}`);
+      expect(shown).toMatch(/Z {2}sign-in signedIn/);
+      expect(shown).toMatch(/Z {2}computer host-work online/);
+      expect(shown).toMatch(/Z {2}computer host-work offline \(hostOffline:4004\)/);
+    });
+
+    test("hold no name, title or branch, and share exactly what is shown", async () => {
+      const share = jest
+        .spyOn(Share, "share")
+        .mockResolvedValue({ action: "sharedAction", activityType: undefined });
+      await readThem(new Diagnostics());
+      const shown = (await screen.findByText(/^Yardsort phone diagnostics/)).props
+        .children as string;
+      for (const content of [
+        "Workstation",
+        "Ana’s phone",
+        "The login page times out",
+        "fix-login",
+        "Example Remote",
+      ]) {
+        expect(shown).not.toContain(content);
+      }
+      await fireEvent.press(screen.getByRole("button", { name: "Share" }));
+      expect(share).toHaveBeenCalledWith({ message: shown });
     });
   });
 

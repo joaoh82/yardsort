@@ -3,6 +3,20 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Diagnostics on the phone.** Settings → Diagnostics shows the phone app's version, the server's
+  id, and each change to the sign-in, each computer and the network since the app started, with its
+  time and error code, and shares that same text from the share sheet. It holds no names, titles or
+  paths. See [Diagnostics on the phone](docs/guide/remote.md#diagnostics-on-the-phone).
+- **The phone says when a computer was last seen on every screen.** Inside a computer that is
+  offline, each screen now says when it was last seen, and what was read from it before is marked
+  with when. A terminal no longer says its program keeps running while the computer is offline,
+  which an asleep computer does not. See
+  [When a computer cannot be reached](docs/guide/remote.md#when-a-computer-cannot-be-reached).
+- **The server's log no longer quotes a database row.** An error from PostgreSQL is logged by its
+  code and the table, column or constraint, not its message, which could include a device's name.
+
 ## 0.27.0
 
 - **The phone can be told about activity on this computer.** When Remote is on, a task that

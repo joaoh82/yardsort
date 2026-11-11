@@ -24,6 +24,7 @@ import {
 } from "@yardsort/remote-client";
 
 import type { Parted, Refusal } from "./accounts";
+import { asCode, type Diagnostics } from "./diagnostics";
 
 export type Reach =
   | { kind: "connecting" }
@@ -46,6 +47,8 @@ export interface PresenceOptions {
   maxRetryMs?: number;
   /** How long an open channel has to answer once the network changed. */
   networkCheckMs?: number;
+  /** Where each change is recorded, with what the last channel ended with. */
+  diagnostics?: Diagnostics;
 }
 
 interface Watch {
@@ -137,6 +140,7 @@ export class Presence {
     this.#set(host, { kind: "connecting" });
     while (watch.live) {
       let outcome: Outcome;
+      let cause: string | undefined;
       try {
         const channel = await this.options.open(host);
         if (!watch.live) {
@@ -150,32 +154,35 @@ export class Presence {
         watch.channel = null;
         if (!watch.live) return;
         outcome = fromEnd(end);
+        cause = causeOfEnd(end);
       } catch (error) {
         if (!watch.live) return;
         outcome = fromError(error);
+        cause = causeOfError(error);
       }
       if (outcome === "signedOut") {
         // The profile is deleted by now, and the screen holding this goes with it.
+        this.options.diagnostics?.record({ what: "reach", host, reach: "gone", code: cause });
         return;
       }
       if (outcome === "refused") {
-        this.#set(host, { kind: "reconnecting" });
+        this.#set(host, { kind: "reconnecting" }, cause);
         const refusal = await this.options.explain(host);
         if (!watch.live || refusal === "signedOut") return;
         if (refusal !== "undetermined") {
           this.#gone.add(host);
           this.#watches.delete(host);
-          this.#set(host, { kind: "gone", why: refusal });
+          this.#set(host, { kind: "gone", why: refusal }, cause);
           return;
         }
-        this.#set(host, { kind: "unreachable" });
+        this.#set(host, { kind: "unreachable" }, cause);
         await this.#sleep(watch, waitMs);
         waitMs = Math.min(waitMs * 2, most);
       } else if (outcome === "offline") {
-        this.#set(host, { kind: "offline" });
+        this.#set(host, { kind: "offline" }, cause);
         await this.#sleep(watch, this.options.offlineRetryMs ?? 15_000);
       } else {
-        this.#set(host, { kind: "reconnecting" });
+        this.#set(host, { kind: "reconnecting" }, cause);
         await this.#sleep(watch, waitMs);
         waitMs = Math.min(waitMs * 2, most);
       }
@@ -198,7 +205,8 @@ export class Presence {
     });
   }
 
-  #set(host: HostId, reach: Reach): void {
+  #set(host: HostId, reach: Reach, cause?: string): void {
+    this.options.diagnostics?.record({ what: "reach", host, reach: reach.kind, code: cause });
     this.#reach = new Map(this.#reach).set(host, reach);
     this.#changed();
   }
@@ -211,6 +219,19 @@ export class Presence {
 function fromEnd(end: ChannelEnd): Outcome {
   if (end.reason === "revoked" || end.reason === "refused") return "refused";
   return end.reason === "hostOffline" ? "offline" : "dropped";
+}
+
+/** How a channel ended, as a code: never its words, which a server chose. */
+function causeOfEnd(end: ChannelEnd): string | undefined {
+  return asCode(end.code === null ? end.reason : `${end.reason}:${end.code}`);
+}
+
+/** What opening a channel failed with, as a code. */
+function causeOfError(error: unknown): string | undefined {
+  if (error instanceof ChannelClosed) return causeOfEnd(error.end);
+  if (error instanceof ClientError)
+    return asCode(error.code ? `${error.kind}:${error.code}` : error.kind);
+  return "error";
 }
 
 function fromError(error: unknown): Outcome {
