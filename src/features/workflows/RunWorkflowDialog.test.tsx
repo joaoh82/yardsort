@@ -479,6 +479,56 @@ describe("RunWorkflowDialog on a pull request elsewhere", () => {
     );
   });
 
+  it("goes back to the list to pick another, keeping what was answered", async () => {
+    core.workflowPreview.mockImplementation((_id: string, _ws: string, trackedId: string | null) =>
+      Promise.resolve(trackedId ? withPr : noneOfItsOwn),
+    );
+    trackedHere([
+      trackedOf(fixLogin.id, pullRequest(226, { title: "Usage totals" })),
+      trackedOf(fixLogin.id, pullRequest(61, { title: "Model spend" })),
+    ]);
+    const user = userEvent.setup();
+    render(<RunWorkflowDialog workflowId="code-review" workspace={fixLogin} onClose={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: "demo/lib#226 Usage totals" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Who reviews" }), "codex");
+    await user.click(screen.getByRole("button", { name: "Choose another pull request" }));
+
+    expect(screen.getByRole("heading", { name: "Run “Request code review”" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "demo/lib#61 Model spend" }));
+    expect(core.workflowPreview).toHaveBeenLastCalledWith(
+      "code-review-elsewhere",
+      fixLogin.id,
+      "t-61",
+    );
+    expect(screen.getByRole("combobox", { name: "Who reviews" })).toHaveValue("codex");
+  });
+
+  it("lets a picked pull request go when the workspace changes", async () => {
+    const other = worktree("app", "other");
+    useProjectsStore.setState({
+      projects: [
+        { ...project("app"), workspaces: [...project("app").workspaces, fixLogin, other] },
+      ],
+    });
+    core.workflowPreview.mockImplementation((_id: string, _ws: string, trackedId: string | null) =>
+      Promise.resolve(trackedId ? withPr : noneOfItsOwn),
+    );
+    trackedHere([
+      trackedOf(fixLogin.id, pullRequest(226, { title: "Usage totals" })),
+      trackedOf(other.id, pullRequest(61, { title: "Model spend" }), { id: "t-other-61" }),
+    ]);
+    const user = userEvent.setup();
+    render(<RunWorkflowDialog workflowId="code-review" onClose={() => {}} />);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Workspace" }), fixLogin.id);
+    await user.click(await screen.findByRole("button", { name: "demo/lib#226 Usage totals" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Workspace" }), other.id);
+
+    expect(core.workflowPreview).toHaveBeenLastCalledWith("code-review", other.id, null);
+    expect(screen.getByRole("heading", { name: "Run “Request code review”" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "demo/lib#61 Model spend" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /#226/ })).toBeNull();
+  });
+
   it("names them, without offering a run, when the workflow has no twin about one", async () => {
     core.workflowPreview.mockResolvedValue(noneOfItsOwn);
     useWorkflowStore.setState({ items: [review], loaded: true });

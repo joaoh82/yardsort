@@ -61,6 +61,8 @@ export function RunWorkflowDialog({
   // The pull request elsewhere the run is about: the one it was opened from, or one the person
   // picked when the workspace had no open pull request of its own.
   const [tracked, setTracked] = useState(trackedGiven);
+  // When the person picked one, the workflow they had chosen first, to go back to.
+  const [switchedFrom, setSwitchedFrom] = useState<string | null>(null);
   // What the person chose, per workflow; an input they have not touched shows its default.
   const [chosen, setChosen] = useState<Record<string, Record<string, string>>>({});
   // What the core said a run would find, and for which workflow and workspace it said it.
@@ -177,8 +179,17 @@ export function RunWorkflowDialog({
     if (!twin) return;
     // What was answered carries over: the twin asks the same things.
     setChosen((all) => ({ ...all, [twin.id]: { ...answers, ...all[twin.id] } }));
+    setSwitchedFrom(chosenWorkflow);
     setTracked(pick);
     setChosenWorkflow(twin.id);
+  };
+  // Undo a pick: back to the workflow chosen first, and its list of pull requests elsewhere.
+  const unpick = () => {
+    if (switchedFrom === null) return;
+    setChosen((all) => ({ ...all, [switchedFrom]: { ...all[switchedFrom], ...answers } }));
+    setTracked(undefined);
+    setChosenWorkflow(switchedFrom);
+    setSwitchedFrom(null);
   };
   const ready =
     !!workflow &&
@@ -252,7 +263,11 @@ export function RunWorkflowDialog({
                 aria-label="Workspace"
                 className={control}
                 value={chosenWorkspace}
-                onChange={(event) => setChosenWorkspace(event.target.value)}
+                onChange={(event) => {
+                  // A pull request picked elsewhere is the old workspace's: let it go.
+                  unpick();
+                  setChosenWorkspace(event.target.value);
+                }}
               >
                 <option value="">Choose…</option>
                 {workspaces.map((w) => (
@@ -322,6 +337,15 @@ export function RunWorkflowDialog({
                   ))}
               </div>
             ))}
+          {switchedFrom !== null && (
+            <button
+              type="button"
+              className="self-start text-accent hover:underline"
+              onClick={unpick}
+            >
+              Choose another pull request
+            </button>
+          )}
           {preview && preview.empty.length > 0 && (
             <ul aria-label="Will be empty" className="flex flex-col gap-1 text-amber-300">
               {preview.empty.map((line) => (
