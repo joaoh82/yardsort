@@ -71,8 +71,8 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// - 6: `session.resume`, and `resumable` in a session's summary.
 /// - 7: `workflow.run.list`, `workflow.run.get`, `workflow.challenge` and `workflow.decide`.
 pub const PROTOCOL_MINOR: u16 = 7;
-/// `workflow:read` and `workflow:decide` arrived in this minor. A host that has not
-/// stated it, or a newer minor of this major, cannot be shown those scope names.
+/// `workflow:read` and `workflow:decide` arrived in this minor. A host is shown
+/// those scope names when it stated this minor or a newer minor of this major.
 pub const WORKFLOW_SCOPES_MINOR: u16 = 7;
 
 /// The largest JSON message either side reads, requests and responses alike. Checked before
