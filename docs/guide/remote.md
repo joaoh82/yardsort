@@ -107,8 +107,10 @@ take control of it, and starts work there.
 2. On the other computer, show a code: **Pair a device** in its **Settings → Remote**, or
    `yardsort-host pair` on one with no screen.
 3. Type the code under **Pairing code** here and press **Pair**. This computer asks to watch and to
-   type, as a phone does. The other computer's person is asked there, and lets it watch, watch and
-   type, or refuses. Until then the pairing says _waiting for its answer_.
+   type, as a phone does. Watching includes reading workflow runs when this computer asked to see
+   them. The other computer's person is asked there, and lets it watch, watch and type, or refuses.
+   When this computer asked to approve or answer workflows, they can allow that separately. Until
+   then the pairing says _waiting for its answer_.
 
 Once let in, the other computer is listed under **Other computers** in the sidebar, below your projects,
 by its name: _online_, _connecting_, or _offline_ since when. Click it to open its page in the middle of
@@ -191,11 +193,23 @@ With Remote on, this computer can tell your phone when something needs a look.
 - A workflow run failed.
 - A newer desktop version is available. The same version can be mentioned again after a week.
   Installing it stays on this computer.
-- A workflow is waiting for a question or an approval. You answer and approve on this computer.
+- A workflow is waiting for a question or an approval. Open it on the phone to answer or
+  approve, while this computer is online. The action is not sent, and is not sent later, when
+  this computer is offline.
 
-The notification opens that item in the phone app. The phone does not answer, approve, or install.
-A one-time code stays on this computer. It can still appear in a notification here when
-Settings → General includes it. It is never in the one the phone receives.
+The notification opens that item in the phone app. A workflow question or approval opens the
+decision. Installing a desktop update stays on this computer. A one-time code can still appear
+in a notification here when Settings → General includes it. It is never in the one the phone
+receives. The phone asks this computer for the code when you decide, over the connection you
+signed in on, and it does not show the code.
+
+A phone paired before this needs to be unpaired and paired again. Letting it watch includes
+reading workflow runs when the phone asked to see them. Approving or answering is the checkbox
+**and approve or answer workflows**, shown only when the phone asked for that, or a separate yes
+on a computer with no screen, asked only then. Being allowed to type in a terminal does not
+include it. If the step changed after the phone showed it, the phone says to refresh and reads
+the run again. That tap does not use up a wrong code. An older desktop is not offered those
+workflow permissions until it states that it speaks them.
 
 On the phone, Settings → Notifications asks once for permission to send notifications. After
 that, the token is registered for every account this phone is signed in to, when the app starts

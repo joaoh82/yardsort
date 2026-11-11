@@ -99,6 +99,9 @@ pub struct Context<'a> {
     /// What starts agents and keeps uploads. Without it, or without `interactive`, those
     /// operations are not answered.
     pub starting: Option<Arc<dyn Starting>>,
+    /// What issues a one-time code and wakes the workflow driver. Without it, workflow
+    /// operations are not answered. A headless host leaves this empty.
+    pub workflow: Option<Arc<dyn super::workflow::WorkflowGate>>,
 }
 
 impl Context<'_> {
@@ -113,6 +116,7 @@ impl Context<'_> {
             starting: self.starting.as_deref().filter(|_| self.interactive),
             // A channel's daemon that does not share control is one from before leases.
             terminals_later: (!self.interactive).then(super::earlier_daemon),
+            workflow: self.workflow.is_some(),
         }
     }
 }
@@ -132,6 +136,9 @@ pub struct Visitor {
     subscriptions: Mutex<HashMap<SubscriptionId, Following>>,
     next_upload: AtomicU32,
     uploads: Mutex<HashMap<UploadId, start::Uploading>>,
+    /// The signed-in device. Missing on an old relay, which is [`DeviceKind::Other`] and
+    /// cannot decide a workflow.
+    kind: remote_proto::account::DeviceKind,
 }
 
 /// One activity subscription: what it follows, and the sequence number of the last event its
@@ -200,10 +207,34 @@ impl Visitor {
                 subscriptions: Mutex::new(HashMap::new()),
                 next_upload: AtomicU32::new(1),
                 uploads: Mutex::new(HashMap::new()),
+                kind: remote_proto::account::DeviceKind::Other,
             }),
             Ok(None) => Err(CloseReason::Refused),
             Err(_) => Err(CloseReason::Gone),
         }
+    }
+
+    /// The kind of device on this channel.
+    ///
+    /// The host's own device is always a host. A kind stored when the person approved this
+    /// device wins: a relay kind that differs cannot decide. A pairing with no stored kind
+    /// trusts the relay. A missing relay kind arrives as [`DeviceKind::Other`] and cannot decide.
+    pub fn set_kind(&mut self, store: &Store, reported: remote_proto::account::DeviceKind) {
+        use remote_proto::account::DeviceKind;
+        if store
+            .remote_host()
+            .ok()
+            .flatten()
+            .is_some_and(|host| host.device_id == self.device.as_str())
+        {
+            self.kind = DeviceKind::Host;
+            return;
+        }
+        self.kind = match super::host::recorded_kind(store, &self.device) {
+            Ok(Some(recorded)) if recorded != reported => DeviceKind::Other,
+            Ok(Some(recorded)) => recorded,
+            _ => reported,
+        };
     }
 
     pub fn device(&self) -> &DeviceId {
@@ -280,6 +311,21 @@ impl Visitor {
             Operation::ActivitySubscribe(params) => facade
                 .check(&grant, &request)
                 .and_then(|()| self.subscribe(context, &facade, &grant, params, &request)),
+            operation if super::workflow::is_workflow(operation) && context.workflow.is_some() => {
+                facade.check(&grant, &request).and_then(|()| {
+                    super::workflow::answer(
+                        context.store,
+                        context.workflow.as_deref(),
+                        &super::workflow::WorkflowCaller {
+                            kind: self.kind,
+                            device: self.device.as_str().to_owned(),
+                        },
+                        &grant,
+                        &request,
+                    )
+                    .map(Some)
+                })
+            }
             Operation::ActivityUnsubscribe(ActivityUnsubscribeParams { subscription }) => {
                 facade.check(&grant, &request).and_then(|()| {
                     lock(&self.subscriptions)

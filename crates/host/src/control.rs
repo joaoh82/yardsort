@@ -30,6 +30,9 @@ pub enum Ask {
         grant: String,
         allow: bool,
         control: bool,
+        /// Approving or answering workflows. Absent on an older control client, which does not grant it.
+        #[serde(default)]
+        workflows: bool,
         /// Only these projects, by id; all of them when absent.
         projects: Option<Vec<String>>,
     },
@@ -57,6 +60,9 @@ pub enum Reply {
         grant: String,
         device: String,
         wants_control: bool,
+        /// It asked to read or decide a workflow. Absent from an older host, which did not say.
+        #[serde(default)]
+        wants_workflows: bool,
         /// The projects to choose among, when there is more than one.
         projects: Vec<Project>,
     },

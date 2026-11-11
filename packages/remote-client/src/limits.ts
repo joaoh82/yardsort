@@ -8,8 +8,8 @@
 
 /** The major this client speaks. */
 export const PROTOCOL_MAJOR = 1;
-/** The minor this client speaks: 6, resuming a conversation. */
-export const PROTOCOL_MINOR = 6;
+/** The minor this client speaks: 7, a phone deciding a workflow the computer is running. */
+export const PROTOCOL_MINOR = 7;
 
 /** The largest JSON message either side reads, in bytes. */
 export const MAX_CONTROL_FRAME = 64 * 1024;
@@ -36,6 +36,10 @@ export const MAX_ID_LEN = 128;
 export const MAX_CURSOR_LEN = 256;
 /** Longest name or title, in characters. */
 export const MAX_TEXT = 256;
+/** Longest one-time code a workflow decision may carry, in characters. */
+export const MAX_CODE_LEN = 64;
+/** Longest artifact body a workflow run detail includes, in characters. */
+export const MAX_ARTIFACT_PREVIEW = 2_000;
 /** Longest label (a harness, a model, a program, an author, a task's source), in characters. */
 export const MAX_LABEL = 64;
 /** Longest memory note, in characters. */

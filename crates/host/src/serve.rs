@@ -358,6 +358,7 @@ async fn pair(home: &Arc<HostHome>, line: &mut Line) {
             grant: request.grant_id.clone(),
             device: request.device_name.clone(),
             wants_control: request.wants_control,
+            wants_workflows: request.wants_workflows,
             projects: if projects.len() > 1 {
                 projects.clone()
             } else {
@@ -372,10 +373,15 @@ async fn pair(home: &Arc<HostHome>, line: &mut Line) {
                 grant,
                 allow,
                 control,
+                workflows,
                 projects,
             })) if grant == request.grant_id => {
                 let answer = if allow {
-                    Answer::Allow { control, projects }
+                    Answer::Allow {
+                        control,
+                        workflows,
+                        projects,
+                    }
                 } else {
                     Answer::Deny
                 };

@@ -125,6 +125,7 @@ impl Instances {
     async fn host_link(&self, pair: &Pair) -> RelayLink {
         let request = TicketRequest::Host {
             host: pair.host_id.clone(),
+            protocol: None,
         };
         self.client()
             .open_relay(&pair.host.access, &request)

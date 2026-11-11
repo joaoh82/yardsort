@@ -154,7 +154,7 @@ describe("enums", () => {
     }
   });
 
-  test("a platform or a purpose from the future is other; a scope from the future is refused", () => {
+  test("a platform or a purpose from the future is other; a scope from the future is dropped", () => {
     const host = decode(reply, {
       kind: "host",
       host: "h",
@@ -165,7 +165,7 @@ describe("enums", () => {
       capabilities: [],
     });
     expect(host.kind === "host" && host.platform).toBe("other");
-    expect(() => decode(scopes, ["workspace:read", "files:write"])).toThrow();
+    expect(decode(scopes, ["workspace:read", "files:write"])).toEqual(["workspace:read"]);
   });
 
   test("scopes read as a set, in the order Rust writes one", () => {

@@ -46,6 +46,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0034_workflow_approval_history.sql"),
     include_str!("../migrations/0035_workflow_clarifications.sql"),
     include_str!("../migrations/0036_mobile_notices.sql"),
+    include_str!("../migrations/0037_workflow_remote_decisions.sql"),
+    include_str!("../migrations/0038_remote_grant_kind.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -97,6 +99,8 @@ pub struct RemoteGrantRow {
     pub scopes: String,
     pub projects: String,
     pub approved_at: i64,
+    /// `phone`, `computer`, `host`, or `other`, when this pairing recorded one.
+    pub device_kind: Option<String>,
 }
 
 /// A pull request in another repository that a workspace follows. See
@@ -510,6 +514,11 @@ pub enum ApprovalWrite {
     CodeLocked,
     /// The stored round count is not one this build will run. The row is left as it is.
     CodeUnusable,
+    /// This decision id was already used for a different action, step or note.
+    Conflict,
+    /// The attempt or the clarification round is no longer the one the phone was showing.
+    /// A wrong-code try is not counted.
+    Stale,
 }
 
 /// A decision stored for one approval step, before the engine has applied it.
@@ -919,8 +928,9 @@ fn archive_approval(
 ) -> rusqlite::Result<()> {
     tx.execute(
         "INSERT INTO workflow_approval_history
-         (run_id, step_id, attempt, decision, feedback, actor, decided_at, archived_at)
-         SELECT d.run_id, d.step_id, s.attempts, d.decision, d.feedback, d.actor, d.decided_at, ?3
+         (run_id, step_id, attempt, decision, feedback, actor, device_id, decided_at, archived_at)
+         SELECT d.run_id, d.step_id, s.attempts, d.decision, d.feedback, d.actor, d.device_id,
+                d.decided_at, ?3
          FROM workflow_approval_decisions d
          JOIN workflow_step_runs s ON s.run_id = d.run_id AND s.step_id = d.step_id
          WHERE d.run_id = ?1 AND d.step_id = ?2 AND d.decision IS NOT NULL
@@ -928,6 +938,7 @@ fn archive_approval(
            decision = excluded.decision,
            feedback = excluded.feedback,
            actor = excluded.actor,
+           device_id = excluded.device_id,
            decided_at = excluded.decided_at,
            archived_at = excluded.archived_at",
         params![run_id, step_id, now],
@@ -945,10 +956,10 @@ fn archive_clarification(
 ) -> rusqlite::Result<()> {
     tx.execute(
         "INSERT INTO workflow_clarification_history
-         (run_id, step_id, attempt, round, questions, answer, actor, asked_at, answered_at,
-          applied_at, typed_at, archived_at)
+         (run_id, step_id, attempt, round, questions, answer, actor, device_id, asked_at,
+          answered_at, applied_at, typed_at, archived_at)
          SELECT r.run_id, r.step_id, s.attempts, r.round, r.questions, r.answer, r.actor,
-                r.asked_at, r.answered_at, r.applied_at, r.typed_at, ?3
+                r.device_id, r.asked_at, r.answered_at, r.applied_at, r.typed_at, ?3
          FROM workflow_clarification_rounds r
          JOIN workflow_step_runs s ON s.run_id = r.run_id AND s.step_id = r.step_id
          WHERE r.run_id = ?1 AND r.step_id = ?2
@@ -956,6 +967,7 @@ fn archive_clarification(
            questions = excluded.questions,
            answer = excluded.answer,
            actor = excluded.actor,
+           device_id = excluded.device_id,
            asked_at = excluded.asked_at,
            answered_at = excluded.answered_at,
            applied_at = excluded.applied_at,
@@ -1098,6 +1110,254 @@ fn approval_challenge(
             },
         )
         .optional()?)
+}
+
+/// What storing one remote action did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RemoteTaken {
+    /// This id was new. `outcome` is what was stored.
+    Fresh(String),
+    /// This id was already stored, with the same fingerprint.
+    Same(String),
+    /// This id was already stored for a different action, step or note.
+    Conflict,
+}
+
+/// A phone's decision. A retry of (`device_id`, `key`) returns the stored outcome and does
+/// not apply again. `fingerprint` hashes the run, the device, the action, the step and the
+/// note, not the one-time code. `attempt` and `round` are what the phone was showing.
+#[derive(Debug, Clone)]
+pub(crate) struct PhoneStamp {
+    pub key: String,
+    pub device_id: String,
+    pub fingerprint: String,
+    pub attempt: u32,
+    pub round: u32,
+}
+
+/// How long a stored remote decision is kept. A lost reply is retried at once. Seven days
+/// covers a phone that comes back after the weekend, and then the row is removed.
+const REMOTE_ACTION_RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+fn remote_prior(
+    conn: &Connection,
+    stamp: &PhoneStamp,
+) -> rusqlite::Result<Option<(String, String)>> {
+    conn.query_row(
+        "SELECT outcome, fingerprint FROM workflow_remote_actions
+         WHERE device_id = ?1 AND decision_id = ?2",
+        params![stamp.device_id, stamp.key],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+}
+
+/// The step attempt and the open clarification round. Round 0 means this step is not asking.
+/// None when that step is not on the run: a missing step is not attempt 0.
+fn generation_of(
+    conn: &Connection,
+    run_id: &str,
+    step_id: &str,
+) -> rusqlite::Result<Option<(u32, u32)>> {
+    let attempt: Option<i64> = conn
+        .query_row(
+            "SELECT attempts FROM workflow_step_runs WHERE run_id = ?1 AND step_id = ?2",
+            params![run_id, step_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(attempt) = attempt else {
+        return Ok(None);
+    };
+    let round: Option<i64> = conn.query_row(
+        "SELECT MAX(round) FROM workflow_clarification_rounds
+         WHERE run_id = ?1 AND step_id = ?2 AND answer IS NULL AND applied_at IS NULL",
+        params![run_id, step_id],
+        |row| row.get(0),
+    )?;
+    Ok(Some((
+        u32::try_from(attempt).unwrap_or(0),
+        u32::try_from(round.unwrap_or(0)).unwrap_or(0),
+    )))
+}
+
+fn generation_matches(
+    conn: &Connection,
+    stamp: &PhoneStamp,
+    run_id: &str,
+    step_id: &str,
+) -> rusqlite::Result<bool> {
+    Ok(generation_of(conn, run_id, step_id)?
+        .is_some_and(|(attempt, round)| attempt == stamp.attempt && round == stamp.round))
+}
+
+fn remember_action(
+    conn: &Connection,
+    stamp: &PhoneStamp,
+    run_id: &str,
+    step_id: &str,
+    outcome: &str,
+) -> rusqlite::Result<()> {
+    let now = now_ms();
+    conn.execute(
+        "DELETE FROM workflow_remote_actions WHERE created_at < ?1",
+        [now.saturating_sub(REMOTE_ACTION_RETENTION_MS)],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO workflow_remote_actions
+         (device_id, decision_id, run_id, step_id, outcome, fingerprint, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            stamp.device_id,
+            stamp.key,
+            run_id,
+            step_id,
+            outcome,
+            stamp.fingerprint,
+            now
+        ],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn approval_stored(result: &ApprovalWrite) -> String {
+    match result {
+        ApprovalWrite::Recorded => "recorded".to_owned(),
+        ApprovalWrite::MissingRun => "missing_run".to_owned(),
+        ApprovalWrite::MissingStep => "missing_step".to_owned(),
+        ApprovalWrite::RunEnded { status } => format!("run_ended:{status}"),
+        ApprovalWrite::NotAnApproval => "not_an_approval".to_owned(),
+        ApprovalWrite::NotWaiting => "not_waiting".to_owned(),
+        ApprovalWrite::AlreadyDecided => "already_decided".to_owned(),
+        ApprovalWrite::FeedbackRequired => "feedback_required".to_owned(),
+        ApprovalWrite::NotADecision => "not_a_decision".to_owned(),
+        ApprovalWrite::NoCode => "no_code".to_owned(),
+        ApprovalWrite::WrongCode => "wrong_code".to_owned(),
+        ApprovalWrite::CodeLocked => "code_locked".to_owned(),
+        ApprovalWrite::CodeUnusable => "code_unusable".to_owned(),
+        ApprovalWrite::Conflict => "conflict".to_owned(),
+        ApprovalWrite::Stale => "stale".to_owned(),
+    }
+}
+
+fn approval_from_stored(outcome: &str) -> ApprovalWrite {
+    match outcome {
+        "recorded" => ApprovalWrite::Recorded,
+        "missing_run" => ApprovalWrite::MissingRun,
+        "missing_step" => ApprovalWrite::MissingStep,
+        "not_an_approval" => ApprovalWrite::NotAnApproval,
+        "not_waiting" => ApprovalWrite::NotWaiting,
+        "already_decided" => ApprovalWrite::AlreadyDecided,
+        "feedback_required" => ApprovalWrite::FeedbackRequired,
+        "not_a_decision" => ApprovalWrite::NotADecision,
+        "no_code" => ApprovalWrite::NoCode,
+        "wrong_code" => ApprovalWrite::WrongCode,
+        "code_locked" => ApprovalWrite::CodeLocked,
+        "code_unusable" => ApprovalWrite::CodeUnusable,
+        "conflict" => ApprovalWrite::Conflict,
+        "stale" => ApprovalWrite::Stale,
+        other => ApprovalWrite::RunEnded {
+            status: other
+                .strip_prefix("run_ended:")
+                .unwrap_or("unknown")
+                .to_owned(),
+        },
+    }
+}
+
+/// Store a phone outcome that did not need the decision write, or return the one already
+/// stored for this id. A window decision (`stamp` none) is unchanged.
+fn close_approval(
+    tx: rusqlite::Transaction<'_>,
+    stamp: Option<&PhoneStamp>,
+    run_id: &str,
+    step_id: &str,
+    outcome: ApprovalWrite,
+    keep: bool,
+) -> StoreResult<ApprovalWrite> {
+    if let Some(stamp) = stamp {
+        if let Some((prior, fingerprint)) = remote_prior(&tx, stamp)? {
+            return Ok(if fingerprint == stamp.fingerprint {
+                approval_from_stored(&prior)
+            } else {
+                ApprovalWrite::Conflict
+            });
+        }
+        remember_action(&tx, stamp, run_id, step_id, &approval_stored(&outcome))?;
+        tx.commit()?;
+        return Ok(outcome);
+    }
+    if keep {
+        tx.commit()?;
+    }
+    Ok(outcome)
+}
+
+pub(crate) fn answer_stored(result: &crate::workflow::waits::AnswerWrite) -> String {
+    use crate::workflow::waits::AnswerWrite;
+    match result {
+        AnswerWrite::Recorded => "recorded".to_owned(),
+        AnswerWrite::Missing => "missing".to_owned(),
+        AnswerWrite::NotAQuestion => "not_a_question".to_owned(),
+        AnswerWrite::AlreadyAnswered => "already_answered".to_owned(),
+        AnswerWrite::NotWaiting => "not_waiting".to_owned(),
+        AnswerWrite::RunEnded { status } => format!("run_ended:{status}"),
+        AnswerWrite::WrongCode => "wrong_code".to_owned(),
+        AnswerWrite::CodeLocked => "code_locked".to_owned(),
+        AnswerWrite::NoCode => "no_code".to_owned(),
+        AnswerWrite::CodeUnusable => "code_unusable".to_owned(),
+        AnswerWrite::Conflict => "conflict".to_owned(),
+        AnswerWrite::Stale => "stale".to_owned(),
+    }
+}
+
+fn answer_from_stored(outcome: &str) -> crate::workflow::waits::AnswerWrite {
+    use crate::workflow::waits::AnswerWrite;
+    match outcome {
+        "recorded" => AnswerWrite::Recorded,
+        "missing" => AnswerWrite::Missing,
+        "not_a_question" => AnswerWrite::NotAQuestion,
+        "already_answered" => AnswerWrite::AlreadyAnswered,
+        "not_waiting" => AnswerWrite::NotWaiting,
+        "wrong_code" => AnswerWrite::WrongCode,
+        "code_locked" => AnswerWrite::CodeLocked,
+        "no_code" => AnswerWrite::NoCode,
+        "code_unusable" => AnswerWrite::CodeUnusable,
+        "conflict" => AnswerWrite::Conflict,
+        "stale" => AnswerWrite::Stale,
+        other => AnswerWrite::RunEnded {
+            status: other
+                .strip_prefix("run_ended:")
+                .unwrap_or("unknown")
+                .to_owned(),
+        },
+    }
+}
+
+fn close_answer(
+    tx: rusqlite::Transaction<'_>,
+    stamp: Option<&PhoneStamp>,
+    run_id: &str,
+    step_id: &str,
+    outcome: crate::workflow::waits::AnswerWrite,
+    keep: bool,
+) -> StoreResult<crate::workflow::waits::AnswerWrite> {
+    if let Some(stamp) = stamp {
+        if let Some((prior, fingerprint)) = remote_prior(&tx, stamp)? {
+            return Ok(if fingerprint == stamp.fingerprint {
+                answer_from_stored(&prior)
+            } else {
+                crate::workflow::waits::AnswerWrite::Conflict
+            });
+        }
+        remember_action(&tx, stamp, run_id, step_id, &answer_stored(&outcome))?;
+        tx.commit()?;
+        return Ok(outcome);
+    }
+    if keep {
+        tx.commit()?;
+    }
+    Ok(outcome)
 }
 
 impl Store {
@@ -2945,8 +3205,50 @@ impl Store {
         actor: &str,
         code: Option<&str>,
     ) -> StoreResult<ApprovalWrite> {
+        self.record_approval(run_id, step_id, decision, feedback, actor, code, None)
+    }
+
+    /// The same write as [`Self::record_workflow_approval`], from a signed-in phone.
+    /// `stamp` is stored in the same transaction as the decision, so a retry of that id
+    /// returns this outcome and does not apply again.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn record_phone_approval(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        decision: &str,
+        feedback: Option<&str>,
+        actor: &str,
+        code: &str,
+        stamp: &PhoneStamp,
+    ) -> StoreResult<ApprovalWrite> {
+        self.record_approval(
+            run_id,
+            step_id,
+            decision,
+            feedback,
+            actor,
+            Some(code),
+            Some(stamp),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_approval(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        decision: &str,
+        feedback: Option<&str>,
+        actor: &str,
+        code: Option<&str>,
+        stamp: Option<&PhoneStamp>,
+    ) -> StoreResult<ApprovalWrite> {
+        if let Some(prior) = self.phone_outcome(stamp)? {
+            return Ok(prior);
+        }
         if !matches!(decision, "approved" | "rejected" | "changes_requested") {
-            return Ok(ApprovalWrite::NotADecision);
+            return self.note_phone(stamp, run_id, step_id, ApprovalWrite::NotADecision);
         }
         let (body, _) = crate::workflow::artifact::cap(feedback.unwrap_or(""));
         let feedback = {
@@ -2958,14 +3260,25 @@ impl Store {
             }
         };
         if decision == "changes_requested" && feedback.is_none() {
-            return Ok(ApprovalWrite::FeedbackRequired);
+            return self.note_phone(stamp, run_id, step_id, ApprovalWrite::FeedbackRequired);
         }
         let actor = crate::workflow::artifact::actor_name(actor);
+        if let Some(stamp) = stamp {
+            let matches = {
+                let conn = self.conn();
+                generation_matches(&conn, stamp, run_id, step_id)?
+            };
+            if !matches {
+                return self.note_phone(Some(stamp), run_id, step_id, ApprovalWrite::Stale);
+            }
+        }
         // Hash outside the write. A wrong code is counted in its own short transaction.
         let expected = if let Some(code) = code {
-            match self.check_presented_code(run_id, step_id, code)? {
+            match self.check_presented_code(run_id, step_id, code, stamp)? {
                 Ok(checked) => Some(checked),
-                Err(refusal) => return Ok(refusal),
+                Err(refusal) => {
+                    return self.note_phone(stamp, run_id, step_id, refusal);
+                }
             }
         } else {
             None
@@ -2976,6 +3289,25 @@ impl Store {
         run_code_check_hook();
         let mut conn = self.conn();
         let tx = conn.transaction()?;
+        if let Some(stamp) = stamp {
+            if let Some((prior, fingerprint)) = remote_prior(&tx, stamp)? {
+                return Ok(if fingerprint == stamp.fingerprint {
+                    approval_from_stored(&prior)
+                } else {
+                    ApprovalWrite::Conflict
+                });
+            }
+            if !generation_matches(&tx, stamp, run_id, step_id)? {
+                return close_approval(
+                    tx,
+                    Some(stamp),
+                    run_id,
+                    step_id,
+                    ApprovalWrite::Stale,
+                    false,
+                );
+            }
+        }
         let run: Option<(String,)> = tx
             .query_row(
                 "SELECT status FROM workflow_runs WHERE id = ?1",
@@ -2984,10 +3316,17 @@ impl Store {
             )
             .optional()?;
         let Some((status,)) = run else {
-            return Ok(ApprovalWrite::MissingRun);
+            return close_approval(tx, stamp, run_id, step_id, ApprovalWrite::MissingRun, false);
         };
         if status != "running" {
-            return Ok(ApprovalWrite::RunEnded { status });
+            return close_approval(
+                tx,
+                stamp,
+                run_id,
+                step_id,
+                ApprovalWrite::RunEnded { status },
+                false,
+            );
         }
         let step: Option<(String, String)> = tx
             .query_row(
@@ -2997,35 +3336,60 @@ impl Store {
             )
             .optional()?;
         let Some((action, step_status)) = step else {
-            return Ok(ApprovalWrite::MissingStep);
+            return close_approval(
+                tx,
+                stamp,
+                run_id,
+                step_id,
+                ApprovalWrite::MissingStep,
+                false,
+            );
         };
         if action != "approve" {
-            return Ok(ApprovalWrite::NotAnApproval);
+            return close_approval(
+                tx,
+                stamp,
+                run_id,
+                step_id,
+                ApprovalWrite::NotAnApproval,
+                false,
+            );
         }
         if step_status != "waiting" {
-            return Ok(ApprovalWrite::NotWaiting);
+            return close_approval(tx, stamp, run_id, step_id, ApprovalWrite::NotWaiting, false);
         }
         let existing = approval_challenge(&tx, run_id, step_id)?;
         if existing.as_ref().is_some_and(|row| row.decision.is_some()) {
-            return Ok(ApprovalWrite::AlreadyDecided);
+            return close_approval(
+                tx,
+                stamp,
+                run_id,
+                step_id,
+                ApprovalWrite::AlreadyDecided,
+                false,
+            );
         }
         if let Some(expected) = expected.as_ref() {
             let Some(row) = existing.as_ref() else {
-                return Ok(ApprovalWrite::NoCode);
+                return close_approval(tx, stamp, run_id, step_id, ApprovalWrite::NoCode, false);
             };
             if row.attempts != expected.attempts {
-                return Ok(if row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
+                let outcome = if row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
                     ApprovalWrite::CodeLocked
                 } else {
                     ApprovalWrite::WrongCode
-                });
+                };
+                return close_approval(tx, stamp, run_id, step_id, outcome, false);
             }
         }
         let now = now_ms();
+        let device_id = stamp.map(|item| item.device_id.as_str());
+        let remote_key = stamp.map(|item| item.key.as_str());
         let written = if let Some(expected) = expected.as_ref() {
             tx.execute(
                 "UPDATE workflow_approval_decisions
-                 SET decision = ?3, feedback = ?4, actor = ?5, decided_at = ?6
+                 SET decision = ?3, feedback = ?4, actor = ?5, decided_at = ?6,
+                     device_id = ?9, remote_key = ?10
                  WHERE run_id = ?1 AND step_id = ?2 AND decision IS NULL
                    AND attempts = ?7 AND code_hash = ?8",
                 params![
@@ -3036,7 +3400,9 @@ impl Store {
                     actor,
                     now,
                     expected.attempts,
-                    expected.hash
+                    expected.hash,
+                    device_id,
+                    remote_key,
                 ],
             )?
         } else if existing.is_some() {
@@ -3056,23 +3422,22 @@ impl Store {
         };
         if written == 0 {
             let again = approval_challenge(&tx, run_id, step_id)?;
-            if again.as_ref().is_some_and(|row| row.decision.is_some()) {
-                return Ok(ApprovalWrite::AlreadyDecided);
-            }
-            if again
+            let outcome = if again.as_ref().is_some_and(|row| row.decision.is_some()) {
+                ApprovalWrite::AlreadyDecided
+            } else if again
                 .as_ref()
                 .is_some_and(|row| row.attempts >= crate::workflow::code::ATTEMPT_LIMIT)
             {
-                return Ok(ApprovalWrite::CodeLocked);
-            }
-            // The code was replaced, or the attempt count moved, after the check.
-            if expected.is_some() {
-                return Ok(ApprovalWrite::WrongCode);
-            }
-            return Ok(ApprovalWrite::AlreadyDecided);
+                ApprovalWrite::CodeLocked
+            } else if expected.is_some() {
+                // The code was replaced, or the attempt count moved, after the check.
+                ApprovalWrite::WrongCode
+            } else {
+                ApprovalWrite::AlreadyDecided
+            };
+            return close_approval(tx, stamp, run_id, step_id, outcome, false);
         }
-        tx.commit()?;
-        Ok(ApprovalWrite::Recorded)
+        close_approval(tx, stamp, run_id, step_id, ApprovalWrite::Recorded, true)
     }
 
     /// Record a decision from a terminal or a remote caller. The code is required.
@@ -3098,6 +3463,7 @@ impl Store {
         run_id: &str,
         step_id: &str,
         code: &str,
+        stamp: Option<&PhoneStamp>,
     ) -> StoreResult<Result<CheckedCode, ApprovalWrite>> {
         let Some(row) = approval_challenge(&self.conn(), run_id, step_id)? else {
             return Ok(Err(ApprovalWrite::NoCode));
@@ -3115,7 +3481,12 @@ impl Store {
             return Ok(Err(ApprovalWrite::CodeUnusable));
         };
         if !crate::workflow::code::matches(code, &row.salt, &row.hash, rounds) {
-            return Ok(Err(self.note_wrong_code(run_id, step_id, row.attempts)?));
+            return Ok(Err(self.note_wrong_code(
+                run_id,
+                step_id,
+                row.attempts,
+                stamp,
+            )?));
         }
         Ok(Ok(CheckedCode {
             attempts: row.attempts,
@@ -3129,21 +3500,49 @@ impl Store {
         run_id: &str,
         step_id: &str,
         seen: i64,
+        stamp: Option<&PhoneStamp>,
     ) -> StoreResult<ApprovalWrite> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
+        if let Some(stamp) = stamp {
+            if let Some((prior, fingerprint)) = remote_prior(&tx, stamp)? {
+                return Ok(if fingerprint == stamp.fingerprint {
+                    approval_from_stored(&prior)
+                } else {
+                    ApprovalWrite::Conflict
+                });
+            }
+            if !generation_matches(&tx, stamp, run_id, step_id)? {
+                return close_approval(
+                    tx,
+                    Some(stamp),
+                    run_id,
+                    step_id,
+                    ApprovalWrite::Stale,
+                    false,
+                );
+            }
+        }
         let Some(row) = approval_challenge(&tx, run_id, step_id)? else {
-            return Ok(ApprovalWrite::NoCode);
+            return close_approval(tx, stamp, run_id, step_id, ApprovalWrite::NoCode, false);
         };
         if row.decision.is_some() {
-            return Ok(ApprovalWrite::AlreadyDecided);
+            return close_approval(
+                tx,
+                stamp,
+                run_id,
+                step_id,
+                ApprovalWrite::AlreadyDecided,
+                false,
+            );
         }
         if row.attempts != seen || row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
-            return Ok(if row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
+            let outcome = if row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
                 ApprovalWrite::CodeLocked
             } else {
                 ApprovalWrite::WrongCode
-            });
+            };
+            return close_approval(tx, stamp, run_id, step_id, outcome, false);
         }
         let updated = tx.execute(
             "UPDATE workflow_approval_decisions SET attempts = attempts + 1
@@ -3151,14 +3550,53 @@ impl Store {
             params![run_id, step_id, seen],
         )?;
         if updated == 0 {
-            return Ok(ApprovalWrite::AlreadyDecided);
+            return close_approval(
+                tx,
+                stamp,
+                run_id,
+                step_id,
+                ApprovalWrite::AlreadyDecided,
+                false,
+            );
         }
-        tx.commit()?;
-        Ok(if seen + 1 >= crate::workflow::code::ATTEMPT_LIMIT {
+        let outcome = if seen + 1 >= crate::workflow::code::ATTEMPT_LIMIT {
             ApprovalWrite::CodeLocked
         } else {
             ApprovalWrite::WrongCode
-        })
+        };
+        close_approval(tx, stamp, run_id, step_id, outcome, true)
+    }
+
+    /// The outcome already stored for a phone decision id, when this is a retry.
+    fn phone_outcome(&self, stamp: Option<&PhoneStamp>) -> StoreResult<Option<ApprovalWrite>> {
+        let Some(stamp) = stamp else {
+            return Ok(None);
+        };
+        let Some((outcome, fingerprint)) = remote_prior(&self.conn(), stamp)? else {
+            return Ok(None);
+        };
+        Ok(Some(if fingerprint == stamp.fingerprint {
+            approval_from_stored(&outcome)
+        } else {
+            ApprovalWrite::Conflict
+        }))
+    }
+
+    /// Remember a refusal that happened before the decision transaction. A retry of the same
+    /// id returns it. A window decision does not come through here with a stamp.
+    fn note_phone(
+        &self,
+        stamp: Option<&PhoneStamp>,
+        run_id: &str,
+        step_id: &str,
+        outcome: ApprovalWrite,
+    ) -> StoreResult<ApprovalWrite> {
+        let Some(stamp) = stamp else {
+            return Ok(outcome);
+        };
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        close_approval(tx, Some(stamp), run_id, step_id, outcome, false)
     }
 
     /// Issue the one-time code for an approval that has not been decided. The plain code is
@@ -3221,6 +3659,169 @@ impl Store {
             )
             .optional()?;
         Ok(attempts.is_some_and(|n| n >= crate::workflow::code::ATTEMPT_LIMIT))
+    }
+
+    /// The approval is still waiting for a person.
+    pub fn approval_is_open(&self, run_id: &str, step_id: &str) -> StoreResult<bool> {
+        let row: Option<Option<String>> = self
+            .conn()
+            .query_row(
+                "SELECT decision FROM workflow_approval_decisions
+                 WHERE run_id = ?1 AND step_id = ?2",
+                params![run_id, step_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(row.is_some_and(|decision| decision.is_none()))
+    }
+
+    /// The question is still waiting for a person.
+    pub fn question_is_open(&self, run_id: &str, step_id: &str) -> StoreResult<bool> {
+        let found: Option<i64> = self
+            .conn()
+            .query_row(
+                "SELECT 1 FROM workflow_waits
+                 WHERE run_id = ?1 AND step_id = ?2 AND kind = 'question'
+                   AND answer IS NULL AND applied_at IS NULL",
+                params![run_id, step_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(found.is_some())
+    }
+
+    /// Whether `code` matches the hash on the open approval or question. A miss does not
+    /// count as a wrong try. The hash and the salt are not returned.
+    pub fn presented_code_matches(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        code: &str,
+    ) -> StoreResult<bool> {
+        let conn = self.conn();
+        for row in [
+            approval_challenge(&conn, run_id, step_id)?,
+            answer_challenge(&conn, run_id, step_id)?,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if row.decision.is_some() {
+                continue;
+            }
+            let Some(rounds) = u32::try_from(row.rounds)
+                .ok()
+                .filter(|&count| crate::workflow::code::known_rounds(count))
+            else {
+                continue;
+            };
+            if crate::workflow::code::matches(code, &row.salt, &row.hash, rounds) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// The waiting step's attempt and the open clarification round. Round 0 is not a question.
+    /// None when the step is not on the run.
+    pub fn workflow_generation(
+        &self,
+        run_id: &str,
+        step_id: &str,
+    ) -> StoreResult<Option<(u32, u32)>> {
+        Ok(generation_of(&self.conn(), run_id, step_id)?)
+    }
+
+    pub fn workflow_code_attempts(&self, run_id: &str, step_id: &str) -> StoreResult<(u32, bool)> {
+        let approval: Option<i64> = self
+            .conn()
+            .query_row(
+                "SELECT attempts FROM workflow_approval_decisions
+                 WHERE run_id = ?1 AND step_id = ?2 AND decision IS NULL",
+                params![run_id, step_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let attempts = if let Some(count) = approval {
+            count
+        } else {
+            self.conn()
+                .query_row(
+                    "SELECT attempts FROM workflow_waits
+                     WHERE run_id = ?1 AND step_id = ?2 AND kind = 'question' AND answer IS NULL",
+                    params![run_id, step_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .unwrap_or(0)
+        };
+        let locked = attempts >= crate::workflow::code::ATTEMPT_LIMIT;
+        let attempts = u32::try_from(attempts).unwrap_or(u32::MAX);
+        Ok((attempts, locked))
+    }
+
+    /// A queued run, or a running run whose person has already decided or answered and the
+    /// engine has not applied it. Not a way to skip a gate that is still waiting for them.
+    /// `None` when the run does not exist.
+    pub fn workflow_resume_eligible(&self, run_id: &str) -> StoreResult<Option<bool>> {
+        let status: Option<String> = self
+            .conn()
+            .query_row(
+                "SELECT status FROM workflow_runs WHERE id = ?1",
+                [run_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(status) = status else {
+            return Ok(None);
+        };
+        if status == "queued" {
+            return Ok(Some(true));
+        }
+        if status != "running" {
+            return Ok(Some(false));
+        }
+        let found: Option<i64> = self
+            .conn()
+            .query_row(
+                "SELECT 1
+                 FROM workflow_step_runs s
+                 JOIN workflow_waits w ON w.run_id = s.run_id AND w.step_id = s.step_id
+                 LEFT JOIN workflow_approval_decisions d
+                   ON d.run_id = s.run_id AND d.step_id = s.step_id
+                 WHERE s.run_id = ?1 AND s.status = 'waiting' AND w.applied_at IS NULL
+                   AND (
+                     (w.kind = 'approval' AND d.decision IS NOT NULL)
+                     OR (w.kind = 'question' AND w.answer IS NOT NULL)
+                   )
+                 LIMIT 1",
+                [run_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(Some(found.is_some()))
+    }
+
+    /// Store `outcome` for this decision id, or return the one already stored.
+    pub(crate) fn take_remote_action(
+        &self,
+        stamp: &PhoneStamp,
+        run_id: &str,
+        step_id: &str,
+        outcome: &str,
+    ) -> StoreResult<RemoteTaken> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        if let Some((prior, fingerprint)) = remote_prior(&tx, stamp)? {
+            return Ok(if fingerprint == stamp.fingerprint {
+                RemoteTaken::Same(prior)
+            } else {
+                RemoteTaken::Conflict
+            });
+        }
+        remember_action(&tx, stamp, run_id, step_id, outcome)?;
+        tx.commit()?;
+        Ok(RemoteTaken::Fresh(outcome.to_owned()))
     }
 
     /// A code row exists, decided or not. The app uses this to tell a restart from a step
@@ -3386,21 +3987,58 @@ impl Store {
         actor: &str,
         code: Option<&str>,
     ) -> StoreResult<crate::workflow::waits::AnswerWrite> {
+        self.answer_wait(run_id, step_id, text, actor, code, None)
+    }
+
+    /// The same write as [`Self::answer_workflow_wait`], from a signed-in phone.
+    pub(crate) fn answer_phone_wait(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        text: &str,
+        actor: &str,
+        code: &str,
+        stamp: &PhoneStamp,
+    ) -> StoreResult<crate::workflow::waits::AnswerWrite> {
+        self.answer_wait(run_id, step_id, text, actor, Some(code), Some(stamp))
+    }
+
+    fn answer_wait(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        text: &str,
+        actor: &str,
+        code: Option<&str>,
+        stamp: Option<&PhoneStamp>,
+    ) -> StoreResult<crate::workflow::waits::AnswerWrite> {
         use crate::workflow::waits::AnswerWrite;
+        if let Some(prior) = self.phone_answer(stamp)? {
+            return Ok(prior);
+        }
         let (body, _) = crate::workflow::artifact::cap(text);
         let answer = body.trim().to_owned();
         if answer.is_empty() {
-            return Ok(AnswerWrite::Missing);
+            return self.note_answer(stamp, run_id, step_id, AnswerWrite::Missing);
         }
         let actor = crate::workflow::artifact::actor_name(actor);
+        if let Some(stamp) = stamp {
+            let matches = {
+                let conn = self.conn();
+                generation_matches(&conn, stamp, run_id, step_id)?
+            };
+            if !matches {
+                return self.note_answer(Some(stamp), run_id, step_id, AnswerWrite::Stale);
+            }
+        }
         // A dead step is refused before a guess is spent, so a timeout does not lock the code.
         if let Some(refusal) = self.answer_blocked(run_id, step_id)? {
-            return Ok(refusal);
+            return self.note_answer(stamp, run_id, step_id, refusal);
         }
         let expected = if let Some(code) = code {
-            match self.check_answer_code(run_id, step_id, code)? {
+            match self.check_answer_code(run_id, step_id, code, stamp)? {
                 Ok(checked) => Some(checked),
-                Err(refusal) => return Ok(refusal),
+                Err(refusal) => return self.note_answer(stamp, run_id, step_id, refusal),
             }
         } else {
             None
@@ -3411,10 +4049,25 @@ impl Store {
         run_code_check_hook();
         let mut conn = self.conn();
         let tx = conn.transaction()?;
+        if let Some(stamp) = stamp {
+            if let Some((prior, fingerprint)) = remote_prior(&tx, stamp)? {
+                return Ok(if fingerprint == stamp.fingerprint {
+                    answer_from_stored(&prior)
+                } else {
+                    AnswerWrite::Conflict
+                });
+            }
+            if !generation_matches(&tx, stamp, run_id, step_id)? {
+                return close_answer(tx, Some(stamp), run_id, step_id, AnswerWrite::Stale, false);
+            }
+        }
         let now = now_ms();
+        let device_id = stamp.map(|item| item.device_id.as_str());
+        let remote_key = stamp.map(|item| item.key.as_str());
         let written = if let Some(expected) = expected.as_ref() {
             tx.execute(
-                "UPDATE workflow_waits SET answer = ?3, actor = ?4, answered_at = ?5
+                "UPDATE workflow_waits
+                 SET answer = ?3, actor = ?4, answered_at = ?5, device_id = ?8, remote_key = ?9
                  WHERE run_id = ?1 AND step_id = ?2 AND kind = 'question'
                    AND answer IS NULL AND applied_at IS NULL
                    AND attempts = ?6 AND code_hash = ?7
@@ -3430,7 +4083,9 @@ impl Store {
                     actor,
                     now,
                     expected.attempts,
-                    expected.hash
+                    expected.hash,
+                    device_id,
+                    remote_key,
                 ],
             )?
         } else {
@@ -3451,20 +4106,52 @@ impl Store {
             // stored on its own, with no round, is still answered.
             tx.execute(
                 "UPDATE workflow_clarification_rounds
-                 SET answer = ?3, actor = ?4, answered_at = ?5
+                 SET answer = ?3, actor = ?4, answered_at = ?5, device_id = ?6
                  WHERE run_id = ?1 AND step_id = ?2 AND answer IS NULL AND applied_at IS NULL
                    AND round = (
                      SELECT MAX(round) FROM workflow_clarification_rounds
                      WHERE run_id = ?1 AND step_id = ?2 AND answer IS NULL AND applied_at IS NULL
                    )",
-                params![run_id, step_id, answer, actor, now],
+                params![run_id, step_id, answer, actor, now, device_id],
             )?;
-            tx.commit()?;
-            return Ok(AnswerWrite::Recorded);
+            return close_answer(tx, stamp, run_id, step_id, AnswerWrite::Recorded, true);
         }
         // Same connection: a second `conn()` would wait on the guard this transaction holds.
-        Ok(answer_refused(&tx, run_id, step_id, expected.is_some())?
-            .unwrap_or(crate::workflow::waits::AnswerWrite::AlreadyAnswered))
+        let outcome = answer_refused(&tx, run_id, step_id, expected.is_some())?
+            .unwrap_or(AnswerWrite::AlreadyAnswered);
+        close_answer(tx, stamp, run_id, step_id, outcome, false)
+    }
+
+    fn phone_answer(
+        &self,
+        stamp: Option<&PhoneStamp>,
+    ) -> StoreResult<Option<crate::workflow::waits::AnswerWrite>> {
+        let Some(stamp) = stamp else {
+            return Ok(None);
+        };
+        let Some((outcome, fingerprint)) = remote_prior(&self.conn(), stamp)? else {
+            return Ok(None);
+        };
+        Ok(Some(if fingerprint == stamp.fingerprint {
+            answer_from_stored(&outcome)
+        } else {
+            crate::workflow::waits::AnswerWrite::Conflict
+        }))
+    }
+
+    fn note_answer(
+        &self,
+        stamp: Option<&PhoneStamp>,
+        run_id: &str,
+        step_id: &str,
+        outcome: crate::workflow::waits::AnswerWrite,
+    ) -> StoreResult<crate::workflow::waits::AnswerWrite> {
+        let Some(stamp) = stamp else {
+            return Ok(outcome);
+        };
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        close_answer(tx, Some(stamp), run_id, step_id, outcome, false)
     }
 
     /// Why this question cannot be answered, before a code is checked. `None` when it can.
@@ -3482,6 +4169,7 @@ impl Store {
         run_id: &str,
         step_id: &str,
         code: &str,
+        stamp: Option<&PhoneStamp>,
     ) -> StoreResult<Result<CheckedCode, crate::workflow::waits::AnswerWrite>> {
         use crate::workflow::waits::AnswerWrite;
         let Some(row) = answer_challenge(&self.conn(), run_id, step_id)? else {
@@ -3501,6 +4189,7 @@ impl Store {
                 run_id,
                 step_id,
                 row.attempts,
+                stamp,
             )?));
         }
         Ok(Ok(CheckedCode {
@@ -3515,19 +4204,33 @@ impl Store {
         run_id: &str,
         step_id: &str,
         seen: i64,
+        stamp: Option<&PhoneStamp>,
     ) -> StoreResult<crate::workflow::waits::AnswerWrite> {
         use crate::workflow::waits::AnswerWrite;
         let mut conn = self.conn();
         let tx = conn.transaction()?;
+        if let Some(stamp) = stamp {
+            if let Some((prior, fingerprint)) = remote_prior(&tx, stamp)? {
+                return Ok(if fingerprint == stamp.fingerprint {
+                    answer_from_stored(&prior)
+                } else {
+                    AnswerWrite::Conflict
+                });
+            }
+            if !generation_matches(&tx, stamp, run_id, step_id)? {
+                return close_answer(tx, Some(stamp), run_id, step_id, AnswerWrite::Stale, false);
+            }
+        }
         let Some(row) = answer_challenge(&tx, run_id, step_id)? else {
-            return Ok(AnswerWrite::NoCode);
+            return close_answer(tx, stamp, run_id, step_id, AnswerWrite::NoCode, false);
         };
         if row.attempts != seen || row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
-            return Ok(if row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
+            let outcome = if row.attempts >= crate::workflow::code::ATTEMPT_LIMIT {
                 AnswerWrite::CodeLocked
             } else {
                 AnswerWrite::WrongCode
-            });
+            };
+            return close_answer(tx, stamp, run_id, step_id, outcome, false);
         }
         let updated = tx.execute(
             "UPDATE workflow_waits SET attempts = attempts + 1
@@ -3536,14 +4239,21 @@ impl Store {
             params![run_id, step_id, seen],
         )?;
         if updated == 0 {
-            return Ok(AnswerWrite::AlreadyAnswered);
+            return close_answer(
+                tx,
+                stamp,
+                run_id,
+                step_id,
+                AnswerWrite::AlreadyAnswered,
+                false,
+            );
         }
-        tx.commit()?;
-        Ok(if seen + 1 >= crate::workflow::code::ATTEMPT_LIMIT {
+        let outcome = if seen + 1 >= crate::workflow::code::ATTEMPT_LIMIT {
             AnswerWrite::CodeLocked
         } else {
             AnswerWrite::WrongCode
-        })
+        };
+        close_answer(tx, stamp, run_id, step_id, outcome, true)
     }
 
     /// Issue a new answer code and reset the wrong-try count. The plain code is returned once.
@@ -4669,7 +5379,7 @@ impl Store {
     pub fn remote_grants(&self) -> StoreResult<Vec<RemoteGrantRow>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, device_id, device_name, scopes, projects, approved_at
+            "SELECT id, device_id, device_name, scopes, projects, approved_at, device_kind
              FROM remote_grants ORDER BY approved_at, id",
         )?;
         let rows = stmt
@@ -4681,6 +5391,7 @@ impl Store {
                     scopes: r.get(3)?,
                     projects: r.get(4)?,
                     approved_at: r.get(5)?,
+                    device_kind: r.get(6)?,
                 })
             })?
             .collect::<Result<_, _>>()?;
@@ -4697,15 +5408,16 @@ impl Store {
         )?;
         tx.execute(
             "INSERT INTO remote_grants
-                 (id, device_id, device_name, scopes, projects, approved_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
+                 (id, device_id, device_name, scopes, projects, approved_at, device_kind)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
             params![
                 grant.id,
                 grant.device_id,
                 grant.device_name,
                 grant.scopes,
                 grant.projects,
-                grant.approved_at
+                grant.approved_at,
+                grant.device_kind
             ],
         )?;
         tx.commit()?;
@@ -5663,7 +6375,8 @@ steps:
         {
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[30].contains("CREATE TABLE workflow_approval_decisions"));
-            assert_eq!(MIGRATIONS.len(), 36);
+            // 0037 adds nullable device columns and an empty actions table.
+            assert_eq!(MIGRATIONS.len(), 38);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -5730,7 +6443,8 @@ steps:
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[31].contains("CREATE TABLE workflow_waits"));
             assert!(MIGRATIONS[31].contains("code_rounds"));
-            assert_eq!(MIGRATIONS.len(), 36);
+            // 0037 adds nullable device columns and an empty actions table.
+            assert_eq!(MIGRATIONS.len(), 38);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -7193,5 +7907,375 @@ steps:
         assert!(!store.conversations_shared(&project.id).unwrap());
         store.set_conversations_shared(&project.id, true).unwrap();
         assert!(store.conversations_shared(&project.id).unwrap());
+    }
+
+    #[test]
+    fn a_window_and_a_phone_cannot_both_decide() {
+        use std::sync::{Arc, Barrier};
+        let store = Store::in_memory();
+        waiting_approval(&store, "run-1");
+        let code = store
+            .begin_approval_code("run-1", "sign-off")
+            .unwrap()
+            .unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let phone_barrier = Arc::clone(&barrier);
+        // The pointer is shared with the phone thread for this scope only. The hook and
+        // the write both finish before the scope ends, so the store is still alive.
+        struct Share(*const Store);
+        impl Share {
+            fn get(&self) -> &Store {
+                // SAFETY: the caller keeps this pointer inside the thread scope that
+                // borrowed `store`, and does not use it after that scope ends.
+                unsafe { &*self.0 }
+            }
+        }
+        // SAFETY: the pointer is used only inside this thread scope, and every use
+        // finishes before `store` is dropped.
+        unsafe impl Send for Share {}
+        let share = Share(&raw const store);
+        let code_phone = code.clone();
+        let (window, phone) = std::thread::scope(|scope| {
+            let phone = scope.spawn(move || {
+                CODE_CHECK_HOOK.with(|hook| {
+                    *hook.borrow_mut() = Some(Box::new(move || {
+                        phone_barrier.wait();
+                    }));
+                });
+                let store = share.get();
+                let stamp = PhoneStamp {
+                    key: "decision-1".into(),
+                    device_id: "phone-1".into(),
+                    fingerprint: "same".into(),
+                    attempt: 0,
+                    round: 0,
+                };
+                let result = store.record_phone_approval(
+                    "run-1",
+                    "sign-off",
+                    "approved",
+                    None,
+                    "phone",
+                    &code_phone,
+                    &stamp,
+                );
+                CODE_CHECK_HOOK.with(|hook| *hook.borrow_mut() = None);
+                result.unwrap()
+            });
+            let window = scope.spawn(|| {
+                barrier.wait();
+                store
+                    .record_workflow_approval("run-1", "sign-off", "approved", None, "ada", None)
+                    .unwrap()
+            });
+            (window.join().unwrap(), phone.join().unwrap())
+        });
+        let recorded = [&window, &phone]
+            .into_iter()
+            .filter(|result| **result == ApprovalWrite::Recorded)
+            .count();
+        assert_eq!(recorded, 1, "window {window:?} phone {phone:?}");
+        assert_eq!(
+            store
+                .workflow_approval("run-1", "sign-off")
+                .unwrap()
+                .unwrap()
+                .decision,
+            "approved"
+        );
+    }
+
+    #[test]
+    fn a_window_and_a_phone_cannot_both_answer() {
+        use crate::workflow::waits::AnswerWrite;
+        use std::sync::{Arc, Barrier};
+        let store = Store::in_memory();
+        waiting_approval(&store, "run-1");
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_step_runs
+                 (run_id, step_id, position, action, status)
+                 VALUES ('run-1', 'ask', 1, 'wait_session', 'waiting')",
+                [],
+            )
+            .unwrap();
+        store
+            .open_workflow_wait(
+                "run-1",
+                "ask",
+                "question",
+                "your answer",
+                "Answer the question.",
+                Some("Which name?"),
+                "[]",
+                "{}",
+            )
+            .unwrap();
+        let code = store.begin_answer_code("run-1", "ask").unwrap().unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let phone_barrier = Arc::clone(&barrier);
+        struct Share(*const Store);
+        impl Share {
+            fn get(&self) -> &Store {
+                // SAFETY: the caller keeps this pointer inside the thread scope that
+                // borrowed `store`, and does not use it after that scope ends.
+                unsafe { &*self.0 }
+            }
+        }
+        // SAFETY: the pointer is used only inside this thread scope, and every use
+        // finishes before `store` is dropped.
+        unsafe impl Send for Share {}
+        let share = Share(&raw const store);
+        let code_phone = code.clone();
+        let (window, phone) = std::thread::scope(|scope| {
+            let phone = scope.spawn(move || {
+                CODE_CHECK_HOOK.with(|hook| {
+                    *hook.borrow_mut() = Some(Box::new(move || {
+                        phone_barrier.wait();
+                    }));
+                });
+                let store = share.get();
+                let stamp = PhoneStamp {
+                    key: "decision-ask".into(),
+                    device_id: "phone-1".into(),
+                    fingerprint: "answer".into(),
+                    attempt: 0,
+                    round: 0,
+                };
+                let result =
+                    store.answer_phone_wait("run-1", "ask", "Ship", "phone", &code_phone, &stamp);
+                CODE_CHECK_HOOK.with(|hook| *hook.borrow_mut() = None);
+                result.unwrap()
+            });
+            let window = scope.spawn(|| {
+                barrier.wait();
+                store
+                    .answer_workflow_wait("run-1", "ask", "Hold", "ada", None)
+                    .unwrap()
+            });
+            (window.join().unwrap(), phone.join().unwrap())
+        });
+        let recorded = [&window, &phone]
+            .into_iter()
+            .filter(|result| **result == AnswerWrite::Recorded)
+            .count();
+        assert_eq!(recorded, 1, "window {window:?} phone {phone:?}");
+    }
+
+    #[test]
+    fn a_phone_retry_applies_once_and_a_different_body_conflicts() {
+        let store = Store::in_memory();
+        waiting_approval(&store, "run-1");
+        let code = store
+            .begin_approval_code("run-1", "sign-off")
+            .unwrap()
+            .unwrap();
+        let stamp = PhoneStamp {
+            key: "decision-1".into(),
+            device_id: "phone-1".into(),
+            fingerprint: "approve".into(),
+            attempt: 0,
+            round: 0,
+        };
+        assert_eq!(
+            store
+                .record_phone_approval(
+                    "run-1", "sign-off", "approved", None, "phone", &code, &stamp,
+                )
+                .unwrap(),
+            ApprovalWrite::Recorded
+        );
+        assert_eq!(
+            store
+                .record_phone_approval(
+                    "run-1", "sign-off", "approved", None, "phone", "WRONG123", &stamp,
+                )
+                .unwrap(),
+            ApprovalWrite::Recorded
+        );
+        let other = PhoneStamp {
+            fingerprint: "reject".into(),
+            ..stamp.clone()
+        };
+        assert_eq!(
+            store
+                .record_phone_approval(
+                    "run-1", "sign-off", "rejected", None, "phone", &code, &other,
+                )
+                .unwrap(),
+            ApprovalWrite::Conflict
+        );
+        let again = PhoneStamp {
+            key: "decision-2".into(),
+            ..stamp
+        };
+        assert_eq!(
+            store
+                .record_phone_approval(
+                    "run-1",
+                    "sign-off",
+                    "rejected",
+                    Some("no"),
+                    "phone",
+                    &code,
+                    &again,
+                )
+                .unwrap(),
+            ApprovalWrite::AlreadyDecided
+        );
+    }
+
+    #[test]
+    fn a_phone_decision_after_rewind_cancel_or_a_new_code_does_not_apply() {
+        let store = Store::in_memory();
+        waiting_approval(&store, "run-1");
+        let code = store
+            .begin_approval_code("run-1", "sign-off")
+            .unwrap()
+            .unwrap();
+        let stamp = PhoneStamp {
+            key: "decision-1".into(),
+            device_id: "phone-1".into(),
+            fingerprint: "approve".into(),
+            attempt: 0,
+            round: 0,
+        };
+        assert_eq!(
+            store
+                .record_phone_approval(
+                    "run-1", "sign-off", "approved", None, "phone", &code, &stamp,
+                )
+                .unwrap(),
+            ApprovalWrite::Recorded
+        );
+        let device: String = store
+            .conn()
+            .query_row(
+                "SELECT device_id FROM workflow_approval_decisions
+                 WHERE run_id = 'run-1' AND step_id = 'sign-off'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(device, "phone-1");
+        assert!(store
+            .rewind_workflow(
+                "run-1",
+                "sign-off",
+                &[StepStatus::Waiting],
+                0,
+                &["sign-off".to_owned()],
+                &[],
+            )
+            .unwrap());
+        let archived: String = store
+            .conn()
+            .query_row(
+                "SELECT device_id FROM workflow_approval_history
+                 WHERE run_id = 'run-1' AND step_id = 'sign-off'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(archived, "phone-1");
+        store
+            .conn()
+            .execute(
+                "UPDATE workflow_step_runs SET status = 'waiting'
+                 WHERE run_id = 'run-1' AND step_id = 'sign-off'",
+                [],
+            )
+            .unwrap();
+        let fresh = store
+            .begin_approval_code("run-1", "sign-off")
+            .unwrap()
+            .unwrap();
+        assert_ne!(fresh, code);
+        assert_eq!(
+            store
+                .record_phone_approval(
+                    "run-1", "sign-off", "approved", None, "phone", &code, &stamp,
+                )
+                .unwrap(),
+            ApprovalWrite::Recorded
+        );
+        assert!(store
+            .workflow_approval("run-1", "sign-off")
+            .unwrap()
+            .is_none());
+        let second = PhoneStamp {
+            key: "decision-2".into(),
+            ..stamp.clone()
+        };
+        assert_eq!(
+            store
+                .record_phone_approval(
+                    "run-1", "sign-off", "approved", None, "phone", &code, &second,
+                )
+                .unwrap(),
+            ApprovalWrite::WrongCode
+        );
+        assert_eq!(
+            store
+                .record_phone_approval(
+                    "run-1", "sign-off", "approved", None, "phone", &code, &second,
+                )
+                .unwrap(),
+            ApprovalWrite::WrongCode
+        );
+        let attempts: i64 = store
+            .conn()
+            .query_row(
+                "SELECT attempts FROM workflow_approval_decisions WHERE run_id = 'run-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(attempts, 1);
+        assert_eq!(
+            store
+                .record_phone_approval(
+                    "run-1",
+                    "sign-off",
+                    "approved",
+                    None,
+                    "phone",
+                    &fresh,
+                    &PhoneStamp {
+                        key: "decision-3".into(),
+                        ..stamp
+                    },
+                )
+                .unwrap(),
+            ApprovalWrite::Recorded
+        );
+        store.cancel_workflow_run("run-2", "stopped").ok();
+        waiting_approval(&store, "run-2");
+        let code = store
+            .begin_approval_code("run-2", "sign-off")
+            .unwrap()
+            .unwrap();
+        store.cancel_workflow_run("run-2", "stopped").unwrap();
+        assert!(matches!(
+            store
+                .record_phone_approval(
+                    "run-2",
+                    "sign-off",
+                    "approved",
+                    None,
+                    "phone",
+                    &code,
+                    &PhoneStamp {
+                        key: "decision-4".into(),
+                        device_id: "phone-1".into(),
+                        fingerprint: "approve".into(),
+                        attempt: 0,
+                        round: 0,
+                    },
+                )
+                .unwrap(),
+            ApprovalWrite::RunEnded { .. }
+        ));
     }
 }

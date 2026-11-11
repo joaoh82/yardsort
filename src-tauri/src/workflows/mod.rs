@@ -89,6 +89,16 @@ impl Driver {
         self.driver.issue_answer_code(store, run_id, step_id, true)
     }
 
+    /// The one-time code a signed-in phone may submit. Not logged, and not written.
+    pub fn code_for_phone(
+        &self,
+        store: &yardsort_core::store::Store,
+        run_id: &str,
+        step_id: &str,
+    ) -> yardsort_core::store::StoreResult<Option<String>> {
+        self.driver.code_for_phone(store, run_id, step_id)
+    }
+
     /// Look at the runs now rather than at the next tick: one was just queued, say.
     pub fn wake(&self) {
         let _ = self

@@ -661,6 +661,7 @@ fn new_host(account: &AccountId, device: &Device, name: &str, now: i64) -> Host 
         name: name.into(),
         created_at: now,
         last_seen_at: None,
+        protocol_minor: None,
     }
 }
 

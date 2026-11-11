@@ -162,6 +162,7 @@ async fn host_link(s: &Served, pair: &Pair) -> RelayLink {
         &pair.host,
         TicketRequest::Host {
             host: pair.host_id.clone(),
+            protocol: None,
         },
     )
     .await
@@ -181,7 +182,7 @@ async fn phone_link(s: &Served, pair: &Pair) -> RelayLink {
 /// The next link frame a host receives, as owned parts.
 #[derive(Debug, PartialEq, Eq)]
 enum Heard {
-    Open(u32, String, String),
+    Open(u32, String, String, remote_proto::account::DeviceKind),
     Close(u32, CloseReason),
     Text(u32, String),
     Binary(u32, Vec<u8>),
@@ -196,7 +197,12 @@ async fn heard(host: &mut LinkReader) -> Heard {
         panic!("a host's link carries only link frames: {message:?}");
     };
     match LinkFrame::decode(&bytes).unwrap() {
-        LinkFrame::Open(c, open) => Heard::Open(c, open.device.to_string(), open.grant.to_string()),
+        LinkFrame::Open(c, open) => Heard::Open(
+            c,
+            open.device.to_string(),
+            open.grant.to_string(),
+            open.kind,
+        ),
         LinkFrame::Close(c, reason) => Heard::Close(c, reason),
         LinkFrame::Text(c, text) => Heard::Text(c, String::from_utf8(text.to_vec()).unwrap()),
         LinkFrame::Binary(c, bytes) => Heard::Binary(c, bytes.to_vec()),
@@ -231,11 +237,12 @@ async fn a_phone_reaches_its_host_and_nothing_else_does(records: impl Records + 
     assert_eq!(phone.host, p.host_id);
 
     // The host is told who connected, under which grant, and they talk.
-    let Heard::Open(channel, device, grant) = heard(&mut host.reader).await else {
+    let Heard::Open(channel, device, grant, kind) = heard(&mut host.reader).await else {
         panic!("no channel opened");
     };
     assert_eq!(device, p.phone.device.to_string());
     assert_eq!(grant, p.grant.to_string());
+    assert_eq!(kind, remote_proto::account::DeviceKind::Phone);
     phone.writer.text(r#"{"hello":1}"#.into()).await.unwrap();
     assert_eq!(
         heard(&mut host.reader).await,
@@ -278,6 +285,7 @@ async fn a_phone_reaches_its_host_and_nothing_else_does(records: impl Records + 
     for asking in [&stranger_host, &p.phone] {
         let as_host = TicketRequest::Host {
             host: p.host_id.clone(),
+            protocol: None,
         };
         assert_eq!(
             refused(c.open_relay(&asking.access, &as_host).await),
@@ -493,6 +501,7 @@ async fn rule_breakers(records: impl Records + Clone + 'static) {
                 remote_proto::relay::ChannelOpen {
                     device: p.phone.device.clone(),
                     grant: p.grant.clone(),
+                    kind: remote_proto::account::DeviceKind::Phone,
                 },
             )
             .encode(),
@@ -538,6 +547,7 @@ async fn a_host_hears_of_each_device_asking_to_pair_once(records: impl Records +
     let earlier = ask_to_pair(&s, &host, &host_id, "Tablet").await;
     let request = TicketRequest::Host {
         host: host_id.clone(),
+        protocol: None,
     };
     let mut link = link(&s, &host, request).await;
     assert_eq!(heard(&mut link.reader).await, pairing(&earlier));

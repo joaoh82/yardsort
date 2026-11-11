@@ -90,6 +90,14 @@ pub const TERMINAL_OPERATIONS: &[&str] = &[
 /// device's channel.
 pub const SUBSCRIPTION_OPERATIONS: &[&str] = &["activity.subscribe", "activity.unsubscribe"];
 
+/// Workflow runs, answered when the desktop is driving them.
+pub const WORKFLOW_OPERATIONS: &[&str] = &[
+    "workflow.run.list",
+    "workflow.run.get",
+    "workflow.challenge",
+    "workflow.decide",
+];
+
 /// Starting agents and uploading files, answered by [`serve::Visitor`] and advertised when the
 /// facade serves a device's channel with something to start them ([`start::Starting`]).
 pub const START_OPERATIONS: &[&str] = &[
@@ -128,6 +136,9 @@ pub struct HostFacade<'a> {
     /// Why the terminal operations are not answered, when a device should hear it: they would
     /// be, but for something that passes. Said in `host.describe`, and as their refusal.
     pub terminals_later: Option<TerminalsLater>,
+    /// Workflow runs are answered. The desktop sets this. A headless host does not drive
+    /// workflows, so it leaves this false and the operations are unsupported.
+    pub workflow: bool,
 }
 
 /// What a device is told of terminals in a daemon from before leases, which the app keeps for the
@@ -237,6 +248,13 @@ impl HostFacade<'_> {
                     "Following activity is not available on this host yet.",
                 ))
             }
+            Operation::WorkflowRunList(_)
+            | Operation::WorkflowRunGet(_)
+            | Operation::WorkflowChallenge(_)
+            | Operation::WorkflowDecide(_) => Err(RemoteError::new(
+                ErrorCode::Unsupported,
+                "Workflows are not available from this computer yet.",
+            )),
             Operation::HarnessList
             | Operation::WorkspaceStart(_)
             | Operation::SessionStart(_)
@@ -273,6 +291,11 @@ impl HostFacade<'_> {
                 })
                 .chain(if self.starting.is_some() {
                     START_OPERATIONS
+                } else {
+                    &[]
+                })
+                .chain(if self.workflow {
+                    WORKFLOW_OPERATIONS
                 } else {
                     &[]
                 })
@@ -826,7 +849,7 @@ impl HostFacade<'_> {
 }
 
 /// The store would not answer. Its error text stays on the host: it can name files.
-fn unreadable() -> RemoteError {
+pub(crate) fn unreadable() -> RemoteError {
     RemoteError::new(
         ErrorCode::Internal,
         "The host could not read its own records. Try again in a moment.",
@@ -1005,7 +1028,7 @@ const CURSOR_PREFIX: &str = "k1.";
 /// An item that has gone since the cursor was issued leaves no way to know where the next page
 /// starts, so that is `cursor_expired`: the client starts the list again rather than silently
 /// missing or repeating items.
-fn page<T>(
+pub(crate) fn page<T>(
     items: Vec<T>,
     key: impl Fn(&T) -> &str,
     cursor: Option<&Cursor>,
@@ -1103,3 +1126,4 @@ pub mod serve;
 pub mod start;
 #[cfg(test)]
 mod tests;
+pub mod workflow;

@@ -18,6 +18,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use axum::body::Bytes;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::WebSocketUpgrade;
@@ -454,12 +455,32 @@ async fn offer<R: Records>(
     State(service): State<Service<R>>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    body: Bytes,
 ) -> Response {
     let (caller, host) = match host_call(&service, &headers, id).await {
         Ok(call) => call,
         Err(error) => return failure(error),
     };
-    answer(service.offer(&caller, &host, now_ms()).await)
+    let stated = match stated_minor(&body) {
+        Ok(stated) => stated,
+        Err(error) => return failure(error),
+    };
+    answer(service.offer(&caller, &host, stated, now_ms()).await)
+}
+
+/// An empty body is a host that has not stated a protocol. A body is an [`OfferRequest`].
+fn stated_minor(body: &[u8]) -> Result<Option<u16>, RemoteError> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(None);
+    }
+    let request: remote_proto::pairing::OfferRequest =
+        serde_json::from_slice(body).map_err(|_| {
+            RemoteError::new(
+                ErrorCode::InvalidRequest,
+                "The request is not a pairing offer.",
+            )
+        })?;
+    Ok(crate::pairing::stated_minor(request.protocol))
 }
 
 async fn host_grants<R: Records>(
@@ -830,9 +851,10 @@ fn status(code: ErrorCode) -> StatusCode {
         ErrorCode::InvalidRequest | ErrorCode::ProtocolIncompatible => StatusCode::BAD_REQUEST,
         ErrorCode::Unsupported => StatusCode::NOT_IMPLEMENTED,
         ErrorCode::HostOffline => StatusCode::SERVICE_UNAVAILABLE,
-        ErrorCode::ControlConflict | ErrorCode::LeaseLost | ErrorCode::SessionEnded => {
-            StatusCode::CONFLICT
-        }
+        ErrorCode::ControlConflict
+        | ErrorCode::LeaseLost
+        | ErrorCode::SessionEnded
+        | ErrorCode::Stale => StatusCode::CONFLICT,
         ErrorCode::ResnapshotRequired | ErrorCode::CursorExpired => StatusCode::GONE,
         ErrorCode::Internal | ErrorCode::Unknown => StatusCode::INTERNAL_SERVER_ERROR,
     }

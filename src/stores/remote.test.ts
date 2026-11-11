@@ -9,9 +9,16 @@ const phone = {
   grantId: "g-1",
   deviceName: "Ana's phone",
   wantsControl: true,
+  wantsWorkflows: false,
   expiresInMs: 60_000,
 };
-const tablet = { grantId: "g-2", deviceName: "Tablet", wantsControl: false, expiresInMs: 60_000 };
+const tablet = {
+  grantId: "g-2",
+  deviceName: "Tablet",
+  wantsControl: false,
+  wantsWorkflows: false,
+  expiresInMs: 60_000,
+};
 
 beforeEach(() => {
   vi.useFakeTimers();

@@ -179,6 +179,31 @@ pub fn keep_approved(
     projects: &ProjectGrant,
     approved_at: i64,
 ) -> StoreResult<()> {
+    keep_approved_with_kind(
+        store,
+        id,
+        device,
+        device_name,
+        scopes,
+        projects,
+        approved_at,
+        None,
+    )
+}
+
+/// As [`keep_approved`], and the kind the server reported for this device when the person
+/// approved it. None is a pairing that did not say.
+#[allow(clippy::too_many_arguments)]
+pub fn keep_approved_with_kind(
+    store: &Store,
+    id: &GrantId,
+    device: &DeviceId,
+    device_name: &str,
+    scopes: &BTreeSet<Scope>,
+    projects: &ProjectGrant,
+    approved_at: i64,
+    kind: Option<remote_proto::account::DeviceKind>,
+) -> StoreResult<()> {
     store.keep_remote_grant(&RemoteGrantRow {
         id: id.to_string(),
         device_id: device.to_string(),
@@ -186,7 +211,33 @@ pub fn keep_approved(
         scopes: serde_json::to_string(scopes).unwrap_or_else(|_| "[]".into()),
         projects: serde_json::to_string(projects).unwrap_or_default(),
         approved_at,
+        device_kind: kind.and_then(kind_label),
     })
+}
+
+fn kind_label(kind: remote_proto::account::DeviceKind) -> Option<String> {
+    serde_json::to_value(kind)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+}
+
+/// The kind stored when this device was approved, if this pairing recorded one.
+pub fn recorded_kind(
+    store: &Store,
+    device: &DeviceId,
+) -> StoreResult<Option<remote_proto::account::DeviceKind>> {
+    let Some(label) = store
+        .remote_grants()?
+        .into_iter()
+        .filter(|row| row.device_id == device.as_str())
+        .max_by_key(|row| (row.approved_at, row.id.clone()))
+        .and_then(|row| row.device_kind)
+    else {
+        return Ok(None);
+    };
+    let parsed = serde_json::from_str(&format!("\"{label}\""))
+        .unwrap_or(remote_proto::account::DeviceKind::Other);
+    Ok(Some(parsed))
 }
 
 /// The devices let in here. A row that no longer reads (written by a newer build, say) is left
@@ -198,7 +249,11 @@ pub fn local_grants(store: &Store) -> StoreResult<Vec<LocalGrant>> {
         .filter_map(|row| {
             let id = GrantId::new(row.id).ok()?;
             let device = DeviceId::new(row.device_id).ok()?;
-            let scopes: BTreeSet<Scope> = serde_json::from_str(&row.scopes).ok()?;
+            let mut scopes: BTreeSet<Scope> = serde_json::from_str(&row.scopes).ok()?;
+            scopes.retain(|scope| *scope != Scope::Unknown);
+            if scopes.is_empty() {
+                return None;
+            }
             let projects: ProjectGrant = serde_json::from_str(&row.projects).ok()?;
             Some(LocalGrant {
                 id,
@@ -360,12 +415,63 @@ mod tests {
                 scopes: r#"["workspace:read","teleport:anywhere"]"#.into(),
                 projects: r#"{"kind":"all"}"#.into(),
                 approved_at: 1,
+                device_kind: None,
             })
             .unwrap();
-        assert!(local_grants(&store).unwrap().is_empty());
+        let grants = local_grants(&store).unwrap();
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].grant.scopes, [Scope::WorkspaceRead].into());
+        store
+            .keep_remote_grant(&RemoteGrantRow {
+                id: "g2".into(),
+                device_id: "other".into(),
+                device_name: "Other".into(),
+                scopes: "not-json".into(),
+                projects: r#"{"kind":"all"}"#.into(),
+                approved_at: 2,
+                device_kind: None,
+            })
+            .unwrap();
+        assert_eq!(local_grants(&store).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn recorded_kind_is_the_newest_grant_for_that_device() {
+        let (_dir, store) = store();
+        // The shipped table keeps one row per device. This drops that so two rows can
+        // exist, and the lookup has to choose.
+        store
+            .conn()
+            .execute_batch(
+                "CREATE TABLE remote_grants_kept AS SELECT * FROM remote_grants;
+                 DROP TABLE remote_grants;
+                 CREATE TABLE remote_grants (
+                    id TEXT PRIMARY KEY,
+                    device_id TEXT NOT NULL,
+                    device_name TEXT NOT NULL,
+                    scopes TEXT NOT NULL,
+                    projects TEXT NOT NULL,
+                    approved_at INTEGER NOT NULL,
+                    device_kind TEXT
+                 );
+                 INSERT INTO remote_grants SELECT * FROM remote_grants_kept;
+                 DROP TABLE remote_grants_kept;",
+            )
+            .unwrap();
+        for (id, at, kind) in [("old", 10, "phone"), ("new", 30, "computer")] {
+            store
+                .conn()
+                .execute(
+                    "INSERT INTO remote_grants
+                        (id, device_id, device_name, scopes, projects, approved_at, device_kind)
+                     VALUES (?1, 'phone', 'Phone', '[]', '{\"kind\":\"all\"}', ?2, ?3)",
+                    rusqlite::params![id, at, kind],
+                )
+                .unwrap();
+        }
         assert_eq!(
-            grant_for(&store, &device("phone"), &id("g1")).unwrap(),
-            None
+            recorded_kind(&store, &device("phone")).unwrap(),
+            Some(remote_proto::account::DeviceKind::Computer)
         );
     }
 

@@ -1,0 +1,8 @@
+{
+  "requestId": "r-21",
+  "result": {
+    "kind": "workflowDecision",
+    "outcome": "recorded",
+    "message": "Recorded."
+  }
+}

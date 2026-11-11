@@ -211,7 +211,10 @@ async fn keep(
 
 async fn open(host: &HostId, access: &dyn Access) -> Result<RelayLink, AccessError> {
     let (client, secret) = access.access().await?;
-    let request = TicketRequest::Host { host: host.clone() };
+    let request = TicketRequest::Host {
+        host: host.clone(),
+        protocol: Some(remote_proto::ProtocolVersion::CURRENT),
+    };
     client
         .open_relay(&secret, &request)
         .await
@@ -419,16 +422,22 @@ fn visit(
     };
     let mut opened = None;
     serving.with(&mut |context| {
-        opened = Some(Visitor::open(
-            context.store,
-            open.device.clone(),
-            open.grant.clone(),
-            Arc::new(ChannelOut {
-                channel: out.channel,
-                link: out.link.clone(),
-                queued: Arc::clone(&out.queued),
+        opened = Some(
+            Visitor::open(
+                context.store,
+                open.device.clone(),
+                open.grant.clone(),
+                Arc::new(ChannelOut {
+                    channel: out.channel,
+                    link: out.link.clone(),
+                    queued: Arc::clone(&out.queued),
+                }),
+            )
+            .map(|mut visitor| {
+                visitor.set_kind(context.store, open.kind);
+                visitor
             }),
-        ));
+        );
     });
     let visitor = match opened {
         Some(Ok(visitor)) => visitor,

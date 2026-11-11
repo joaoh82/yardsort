@@ -192,7 +192,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   phone, and start new ones there, through a Yardsort server you sign in to. It stays off, and connects to nothing, until you
   turn it on, and a device gets in only if you say yes at this computer. The phone can be told
   about a task, a review, a failure, a desktop update, or a workflow question or approval. The
-  notification opens that item. Answering, approving, and installing stay on the computer.
+  notification opens that item. You can answer or approve a workflow on the phone while this
+  computer is online. Installing a desktop update stays on the computer.
   Whoever runs the server
   can see what passes through it, and the phone app is not in the app stores yet. Expect it to
   change until the whole plan is finished. See [Remote](docs/guide/remote.md). A Linux computer with

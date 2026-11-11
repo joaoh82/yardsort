@@ -36,6 +36,7 @@ use tauri_specta::Event;
 use yardsort_core::remote::host::{self, CredentialStore, FileCredentials, LocalGrant};
 use yardsort_core::remote::serve::Context;
 use yardsort_core::remote::start::{Starter, Starting};
+use yardsort_core::remote::workflow::WorkflowGate;
 use yardsort_core::remote::HostIdentity;
 use yardsort_core::settings::SettingsFile;
 use yardsort_core::store::Store;
@@ -114,6 +115,7 @@ impl Home for AppHome {
             host: &HostIdentity { id, name: row.name },
             interactive: state.host.shares_control(),
             starting: Some(Arc::clone(&self.starting) as Arc<dyn Starting>),
+            workflow: Some(Arc::new(AppWorkflows(self.app.clone())) as Arc<dyn WorkflowGate>),
         });
     }
 
@@ -122,6 +124,30 @@ impl Home for AppHome {
             request: request.into(),
         }
         .emit(&self.app);
+    }
+}
+
+/// The desktop workflow driver, as a phone's channel reaches it. The code stays in the
+/// driver. This only hands it to the phone that asked, over the relay.
+struct AppWorkflows(AppHandle);
+
+impl WorkflowGate for AppWorkflows {
+    fn challenge(
+        &self,
+        store: &Store,
+        run_id: &str,
+        step_id: &str,
+    ) -> yardsort_core::store::StoreResult<Option<String>> {
+        match self.0.try_state::<crate::workflows::Driver>() {
+            Some(driver) => driver.code_for_phone(store, run_id, step_id),
+            None => Ok(None),
+        }
+    }
+
+    fn wake(&self) {
+        if let Some(driver) = self.0.try_state::<crate::workflows::Driver>() {
+            driver.wake();
+        }
     }
 }
 
@@ -330,6 +356,8 @@ pub struct RemoteRequest {
     pub device_name: String,
     /// It asked to type into terminals, not only watch.
     pub wants_control: bool,
+    /// It asked to read or decide a workflow.
+    pub wants_workflows: bool,
     pub expires_in_ms: u32,
 }
 
@@ -349,6 +377,9 @@ pub enum RemoteAnswer {
     Allow {
         /// Typing into terminals too, if the device asked for it.
         control: bool,
+        /// Approving or answering workflows, if the device asked for it.
+        #[serde(default)]
+        workflows: bool,
         /// Only these projects; all of them when absent.
         projects: Option<Vec<String>>,
     },
@@ -493,6 +524,7 @@ impl From<Request> for RemoteRequest {
             grant_id: request.grant_id,
             device_name: request.device_name,
             wants_control: request.wants_control,
+            wants_workflows: request.wants_workflows,
             expires_in_ms: request.expires_in_ms,
         }
     }
@@ -636,7 +668,15 @@ pub async fn remote_answer(
 ) -> IpcResult<RemoteStatus> {
     let answer = match answer {
         RemoteAnswer::Deny => Answer::Deny,
-        RemoteAnswer::Allow { control, projects } => Answer::Allow { control, projects },
+        RemoteAnswer::Allow {
+            control,
+            workflows,
+            projects,
+        } => Answer::Allow {
+            control,
+            workflows,
+            projects,
+        },
     };
     account::answer(&AppHome::new(&app), grant_id, answer)
         .await

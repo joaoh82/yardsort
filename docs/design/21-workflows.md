@@ -788,10 +788,11 @@ boundary a phone or a remote crate calls. They read and write this database. A
 remote caller must use `decide_with_code` or `answer_with_code`, which always take
 the one-time code. The window calls `decide_in_window` or `answer_in_window` with a
 `DesktopWindow` token. Only the app enables the
-`desktop-window` feature, so a remote crate cannot construct that token. This
-build adds no remote route, no protocol message and no phone screen. A decision
-recorded while the app was closed is not in `list_open`: the person has done
-their part, and the engine applies it.
+`desktop-window` feature, so a remote crate cannot construct that token. The phone
+uses the same guarded update, with the one-time code, and does not use the window
+token. That route is [Mobile workflow controls](41-mobile-workflow-controls.md).
+A decision recorded while the app was closed is not in `list_open`: the person has
+done their part, and the engine applies it.
 
 The step move, `applied_at`, and the decision's artifacts are one change. The
 driver can stop after that change, or after the next step is claimed and before

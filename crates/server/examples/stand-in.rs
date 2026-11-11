@@ -507,6 +507,7 @@ impl Serving for Here {
             // Its workspace is no repository, and nothing here is an agent: starting is the
             // core's to test (`remote::serve::tests::start`).
             starting: None,
+            workflow: None,
         });
     }
 }

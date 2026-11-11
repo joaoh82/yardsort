@@ -47,6 +47,7 @@ const phone = {
   grantId: "g-1",
   deviceName: "Ana's phone",
   wantsControl: true,
+  wantsWorkflows: true,
   expiresInMs: 240_000,
 };
 
@@ -250,6 +251,7 @@ it("lets a waiting device watch, on all projects", async () => {
   expect(core.remoteAnswer).toHaveBeenCalledWith("g-1", {
     kind: "allow",
     control: false,
+    workflows: false,
     projects: null,
   });
   const devices = await screen.findByRole("region", { name: "Devices let in" });
@@ -270,8 +272,43 @@ it("lets a device watch and type on the projects chosen, and only once one is", 
   expect(core.remoteAnswer).toHaveBeenCalledWith("g-1", {
     kind: "allow",
     control: true,
+    workflows: false,
     projects: ["p-2"],
   });
+});
+
+it("lets a device approve or answer workflows only when that box is checked", async () => {
+  core.remoteStatus.mockResolvedValue(on);
+  core.remoteRequests.mockResolvedValue({ requests: [phone], status: on });
+  core.remoteAnswer.mockResolvedValue(on);
+  render(<RemoteSettings />);
+  const asking = await screen.findByRole("group", { name: "Ana's phone asks to be let in" });
+  expect(asking).toHaveTextContent(/workflow runs/);
+  await userEvent.click(
+    within(asking).getByRole("checkbox", { name: "and approve or answer workflows" }),
+  );
+  await userEvent.click(within(asking).getByRole("button", { name: "Let it watch" }));
+  expect(core.remoteAnswer).toHaveBeenCalledWith("g-1", {
+    kind: "allow",
+    control: false,
+    workflows: true,
+    projects: null,
+  });
+});
+
+it("does not offer workflow approval when the device did not ask for it", async () => {
+  core.remoteStatus.mockResolvedValue(on);
+  core.remoteRequests.mockResolvedValue({
+    requests: [{ ...phone, wantsWorkflows: false }],
+    status: on,
+  });
+  render(<RemoteSettings />);
+  const asking = await screen.findByRole("group", { name: "Ana's phone asks to be let in" });
+  expect(asking).not.toHaveTextContent(/workflow runs/);
+  expect(
+    within(asking).queryByRole("checkbox", { name: "and approve or answer workflows" }),
+  ).toBeNull();
+  expect(asking).toHaveTextContent(/workspaces and activity/);
 });
 
 it("offers no typing to a device that asked only to watch, and can refuse", async () => {

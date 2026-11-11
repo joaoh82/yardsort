@@ -322,7 +322,10 @@ The code is about eight characters. Yardsort shows it on the run. The notificati
 includes it unless Settings → General leaves it out, which is the default on Linux.
 The notice then says to open Yardsort for the code. That is the notification on this computer.
 A phone signed in through [Remote](remote.md#notifications) gets a separate notice that an
-approval is waiting. It opens the item and does not include the code. You approve on the computer.
+approval is waiting. It opens the decision and does not include the code. You can approve on
+this computer, or on that phone while this computer is online. The phone sends the attempt it
+was showing. A later pass is refused, and that tap does not use up a wrong code. Refresh the
+run and decide again.
 `ys workflow runs` does not print
 the code, and neither does `--json`. A wrong code is refused. After five wrong codes,
 `ys` stops until you press **Show a new code** in the window. Opening Yardsort again
@@ -403,9 +406,9 @@ ends first, with no summary, the step fails and says the session ended without a
 summary. The same happens when a question is still waiting for an answer. An answer
 that was given and not yet typed fails because it could not be sent back.
 
-You answer in the run view, which does not ask for a code, or from a terminal Yardsort
-did not start. The terminal needs the one-time code the window and the notification
-show, the same way an approval does:
+You answer in the run view, which does not ask for a code, from a terminal Yardsort
+did not start, or on a phone signed in to the same account while this computer is online.
+The terminal and the phone need the one-time code the window shows, the same way an approval does:
 
 ```sh
 ys workflow answer 3f2a9c1e discover --text "30 seconds"
@@ -431,8 +434,10 @@ A session Yardsort started can ask and can record the summary. It cannot answer.
 stays with you. This is not an approval. The one-time code works the same way as one:
 the window shows it, the notification on this computer includes it unless Settings → General
 leaves it out, and `ys workflow runs` does not print it. A phone notice opens the question and
-does not include the code. You answer on the computer. After five wrong codes the terminal
-stops until you press **Show a new code**.
+does not include the code. You can answer on this computer, or on the phone, as
+[Remote](remote.md#notifications) describes. The phone sends the round it was showing. A later
+round is refused, and that tap does not use up a wrong code. After five wrong codes the terminal
+stops until you press **Show a new code**. The phone cannot be given a code until you do.
 
 `timeout` still fails the step when you have not answered in time, or when a summary
 never arrives. A schedule or a trigger whose notify is not `never` tells you a

@@ -252,7 +252,7 @@ pub fn conversation_text(
 }
 
 /// A file name, or a directory on the way to it, that holds secrets rather than a document.
-fn is_secret(path: &Path) -> bool {
+pub(crate) fn is_secret(path: &Path) -> bool {
     let parts: Vec<String> = path
         .components()
         .filter_map(|component| match component {

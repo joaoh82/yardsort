@@ -127,14 +127,23 @@ export interface ComputerList {
   onAccount: ReadonlySet<HostId>;
 }
 
-/** What every pairing asks for: all a phone uses. The computer's person chooses (27 §7). */
-export const ASKED_SCOPES: Scope[] = [
-  "workspace:read",
-  "activity:read",
-  "memory:read",
-  "terminal:read",
-  "terminal:control",
-];
+/** What a pairing asks for. Workflow scopes need a server that speaks protocol minor 7. */
+export function askedScopes(protocol: { major: number; minor: number }): Scope[] {
+  const scopes: Scope[] = [
+    "workspace:read",
+    "activity:read",
+    "memory:read",
+    "terminal:read",
+    "terminal:control",
+  ];
+  if (protocol.major === 1 && protocol.minor >= 7) {
+    scopes.push("workflow:read", "workflow:decide");
+  }
+  return scopes;
+}
+
+/** What a current server is asked for: all a phone uses. The computer's person chooses. */
+export const ASKED_SCOPES: Scope[] = askedScopes({ major: 1, minor: 7 });
 
 /** A server looked up, before signing in to it. */
 export interface Found {
@@ -300,6 +309,11 @@ export class Accounts {
   }
 
   // --- the active profile ----------------------------------------------------------------------
+
+  /** The profile on screen, when one is. */
+  activeId(): string | null {
+    return this.#profiles?.active?.id ?? null;
+  }
 
   /** Switch to another profile, and open it. */
   async activate(id: string): Promise<void> {
@@ -529,7 +543,9 @@ export class Accounts {
    * phone is signed in to, so each is asked, the one in use first. A miss on one account is not
    * a miss on the next.
    */
-  async notice(id: string): Promise<import("@yardsort/remote-client").NoticeView> {
+  async notice(
+    id: string,
+  ): Promise<{ notice: import("@yardsort/remote-client").NoticeView; profile: string }> {
     const index = this.#need();
     const ordered = [
       ...(index.active ? [index.active] : []),
@@ -539,9 +555,12 @@ export class Accounts {
     let last: unknown = new ClientError("invalid", "Not signed in.");
     for (const profile of ordered) {
       try {
-        return await this.#withAccessOf(profile, this.#sessionOf(profile), (session, access) =>
-          session.client.notice(access, id),
+        const notice = await this.#withAccessOf(
+          profile,
+          this.#sessionOf(profile),
+          (session, access) => session.client.notice(access, id),
         );
+        return { notice, profile: profile.id };
       } catch (error) {
         last = error;
         if (
@@ -627,9 +646,10 @@ export class Accounts {
 
   /** Redeem a computer's offer, and ask it to let this phone in. An offer goes once. */
   pair(offer: OfferKey): Promise<GrantSummary> {
-    return this.#withAccess((session, access) =>
-      session.client.pair(access, { offer, scopes: ASKED_SCOPES }),
-    );
+    return this.#withAccess(async (session, access) => {
+      const description = await session.client.describe();
+      return session.client.pair(access, { offer, scopes: askedScopes(description.protocol) });
+    });
   }
 
   /** Where a request or a pairing stands now. */

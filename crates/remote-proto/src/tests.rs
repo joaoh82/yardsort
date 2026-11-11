@@ -45,6 +45,17 @@ fn requests_match_their_fixtures() {
     let request: Request = pinned("request-upload-chunk.json");
     assert_eq!(request.operation.scope(), Some(Scope::TerminalControl));
     assert!(request.operation.validate().is_ok());
+    let request: Request = pinned("request-workflow-run-list.json");
+    assert_eq!(request.operation.name(), "workflow.run.list");
+    assert_eq!(request.operation.scope(), Some(Scope::WorkflowRead));
+    assert!(request.operation.validate().is_ok());
+    let request: Request = pinned("request-workflow-decide.json");
+    assert_eq!(request.operation.name(), "workflow.decide");
+    assert_eq!(request.operation.scope(), Some(Scope::WorkflowDecide));
+    assert!(request.operation.validate().is_ok());
+    let request: Request = pinned("request-workflow-challenge.json");
+    assert_eq!(request.operation.scope(), Some(Scope::WorkflowDecide));
+    assert!(request.operation.validate().is_ok());
     let hello: Hello = pinned("hello.json");
     assert_eq!(negotiate(&hello), Ok(ProtocolVersion::CURRENT));
 }
@@ -64,6 +75,10 @@ fn responses_match_their_fixtures() {
         "response-harnesses.json",
         "response-started.json",
         "response-uploaded.json",
+        "response-workflow-runs.json",
+        "response-workflow-run.json",
+        "response-workflow-decision.json",
+        "response-workflow-challenge.json",
     ] {
         let _: Response = pinned(name);
     }
@@ -290,6 +305,29 @@ fn every_operation_has_the_name_it_is_sent_under() {
         Operation::SessionResume(SessionResumeParams {
             session: SessionRecordId::new("s").unwrap(),
             prompt: None,
+        }),
+        Operation::WorkflowRunList(workflow::WorkflowRunListParams {
+            cursor: None,
+            limit: None,
+        }),
+        Operation::WorkflowRunGet(workflow::WorkflowRunRef {
+            run_id: "run-1".into(),
+        }),
+        Operation::WorkflowChallenge(workflow::WorkflowStepRef {
+            run_id: "run-1".into(),
+            step_id: "sign-off".into(),
+            attempt: 1,
+            round: 0,
+        }),
+        Operation::WorkflowDecide(workflow::WorkflowDecideParams {
+            run_id: "run-1".into(),
+            step_id: Some("sign-off".into()),
+            action: workflow::WorkflowAction::Approve,
+            note: None,
+            code: Some("ABCD2345".into()),
+            decision_id: "d-1".into(),
+            attempt: 1,
+            round: 0,
         }),
     ];
     assert_eq!(all.len(), OPERATIONS.len());

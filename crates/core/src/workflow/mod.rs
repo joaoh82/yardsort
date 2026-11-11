@@ -71,6 +71,10 @@ pub fn approval_refusal(
         ApprovalWrite::CodeUnusable => {
             "That code cannot be checked. Open Yardsort to be shown a new one.".to_owned()
         }
+        ApprovalWrite::Conflict => {
+            "That decision was already sent with different contents.".to_owned()
+        }
+        ApprovalWrite::Stale => remote_proto::workflow::STALE_MESSAGE.to_owned(),
     };
     Some(message)
 }

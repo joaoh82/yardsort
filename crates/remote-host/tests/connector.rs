@@ -162,6 +162,7 @@ impl Serving for Here {
             host: &self.identity,
             interactive: true,
             starting: None,
+            workflow: None,
         });
     }
 
@@ -236,6 +237,7 @@ fn open(channel: u32, grant: &str) -> LinkFrame<'static> {
         ChannelOpen {
             device: DeviceId::new("device-phone").unwrap(),
             grant: GrantId::new(grant).unwrap(),
+            kind: remote_proto::account::DeviceKind::Phone,
         },
     )
 }

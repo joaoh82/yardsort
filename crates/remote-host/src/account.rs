@@ -29,11 +29,12 @@ use yardsort_core::store::{RemoteHostRow, Store};
 use crate::{Access, AccessError, AccessFuture, Connector, Serving, Status};
 
 /// What viewing gives: everything a device can read, nothing it can type.
-pub const VIEW: [Scope; 4] = [
+pub const VIEW: [Scope; 5] = [
     Scope::WorkspaceRead,
     Scope::ActivityRead,
     Scope::MemoryRead,
     Scope::TerminalRead,
+    Scope::WorkflowRead,
 ];
 
 /// Where a host keeps what it is: its records, its settings and its credential, and what a
@@ -118,6 +119,8 @@ pub struct Request {
     pub device_name: String,
     /// It asked to type into terminals, not only watch.
     pub wants_control: bool,
+    /// It asked to read or decide a workflow.
+    pub wants_workflows: bool,
     pub expires_in_ms: u32,
 }
 
@@ -128,9 +131,24 @@ pub enum Answer {
     Allow {
         /// Typing into terminals too, if the device asked for it.
         control: bool,
+        /// Approving or answering workflows, if the device asked for it.
+        workflows: bool,
         /// Only these projects; all of them when absent.
         projects: Option<Vec<String>>,
     },
+}
+
+/// What an allow gives: viewing, typing when chosen, and workflow decisions when chosen.
+/// Never more than the device asked for. Viewing includes reading workflow runs.
+pub fn scopes_for(asked: &BTreeSet<Scope>, control: bool, workflows: bool) -> BTreeSet<Scope> {
+    let mut offered: BTreeSet<Scope> = VIEW.into();
+    if control {
+        offered.insert(Scope::TerminalControl);
+    }
+    if workflows {
+        offered.insert(Scope::WorkflowDecide);
+    }
+    asked.intersection(&offered).copied().collect()
 }
 
 /// A pairing offer: the code to type, and the link a QR code holds, good once until it lapses.
@@ -274,10 +292,38 @@ async fn flush_notices(home: &impl Home) {
             event_key: notice.event_key.clone(),
             category,
             kind: notice.kind,
+            run_id: notice.run_id.clone(),
+            step_id: notice.step_id.clone(),
         };
         match client.submit_notice(&access, &submission).await {
             Ok(_) => {
                 let _ = yardsort_core::notify::settle(home.store(), &notice.event_key, true);
+            }
+            Err(ClientError::Remote(error))
+                if error.code == ErrorCode::InvalidRequest && submission.run_id.is_some() =>
+            {
+                // An older server refuses the subject fields. Send the notice without them.
+                let bare = remote_proto::notify::NoticeSubmission {
+                    run_id: None,
+                    step_id: None,
+                    ..submission
+                };
+                match client.submit_notice(&access, &bare).await {
+                    Ok(_) => {
+                        let _ =
+                            yardsort_core::notify::settle(home.store(), &notice.event_key, true);
+                    }
+                    Err(ClientError::Remote(error))
+                        if matches!(
+                            error.code,
+                            ErrorCode::InvalidRequest | ErrorCode::Forbidden | ErrorCode::NotFound
+                        ) =>
+                    {
+                        let _ =
+                            yardsort_core::notify::settle(home.store(), &notice.event_key, false);
+                    }
+                    Err(_) => break,
+                }
             }
             Err(ClientError::Remote(error))
                 if matches!(
@@ -396,6 +442,8 @@ async fn asked(home: &impl Home, grant: &GrantId) -> Result<()> {
 fn request(grant: GrantSummary) -> Request {
     Request {
         wants_control: grant.requested.contains(&Scope::TerminalControl),
+        wants_workflows: grant.requested.contains(&Scope::WorkflowRead)
+            || grant.requested.contains(&Scope::WorkflowDecide),
         grant_id: grant.id.to_string(),
         device_name: grant.device_name,
         expires_in_ms: grant
@@ -613,12 +661,12 @@ pub async fn answer(home: &impl Home, grant_id: String, answer: Answer) -> Resul
         })?;
     let decision = match answer {
         Answer::Deny => None,
-        Answer::Allow { control, projects } => {
-            let mut offered: BTreeSet<Scope> = VIEW.into();
-            if control {
-                offered.insert(Scope::TerminalControl);
-            }
-            let scopes: BTreeSet<Scope> = asked.requested.intersection(&offered).copied().collect();
+        Answer::Allow {
+            control,
+            workflows,
+            projects,
+        } => {
+            let scopes = scopes_for(&asked.requested, control, workflows);
             if scopes.is_empty() {
                 return Err(Failure::new(
                     "remote_refused",
@@ -650,7 +698,7 @@ pub async fn answer(home: &impl Home, grant_id: String, answer: Answer) -> Resul
     if let (Some(decision), GrantState::Approved) = (&decision, decided.state) {
         // What this host's person chose, as they chose it: the server's copy is not trusted for
         // what it says was given.
-        host::keep_approved(
+        host::keep_approved_with_kind(
             home.store(),
             &decided.id,
             &decided.device,
@@ -658,6 +706,7 @@ pub async fn answer(home: &impl Home, grant_id: String, answer: Answer) -> Resul
             &decision.scopes,
             &decision.projects,
             now_ms(),
+            asked.device_kind,
         )
         .map_err(store_failed)?;
     }
@@ -848,5 +897,24 @@ mod tests {
         let theirs = failed(refused(ErrorCode::Unauthenticated));
         assert!(theirs.is_signed_out());
         assert!(!theirs.needs_where_to_sign_in());
+    }
+
+    #[test]
+    fn watching_does_not_grant_a_decision_unless_the_person_says_so() {
+        let asked: BTreeSet<Scope> = [
+            Scope::WorkspaceRead,
+            Scope::WorkflowRead,
+            Scope::WorkflowDecide,
+            Scope::TerminalControl,
+        ]
+        .into();
+        let watch = scopes_for(&asked, false, false);
+        assert!(watch.contains(&Scope::WorkflowRead));
+        assert!(!watch.contains(&Scope::WorkflowDecide));
+        assert!(!watch.contains(&Scope::TerminalControl));
+        let deciding = scopes_for(&asked, false, true);
+        assert!(deciding.contains(&Scope::WorkflowDecide));
+        let silent: BTreeSet<Scope> = [Scope::WorkspaceRead].into();
+        assert!(!scopes_for(&silent, true, true).contains(&Scope::WorkflowDecide));
     }
 }

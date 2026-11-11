@@ -38,7 +38,9 @@ import {
   variant,
 } from "./decode.ts";
 import {
+  MAX_ARTIFACT_PREVIEW,
   MAX_CLIENT_NAME,
+  MAX_CODE_LEN,
   MAX_CURSOR_LEN,
   MAX_ID_LEN,
   MAX_INPUT_BYTES,
@@ -142,6 +144,7 @@ export const ERROR_CODES = [
   "rate_limited",
   "protocol_incompatible",
   "invalid_request",
+  "stale",
   "unsupported",
   "internal",
   "unknown",
@@ -809,6 +812,150 @@ export interface LeaseRef {
   generation: number;
 }
 
+/** What a phone can ask a workflow to do. Minor 7. */
+export type WorkflowAction = "approve" | "reject" | "changes" | "answer" | "resume";
+
+const workflowAction: Decoder<WorkflowAction> = (value, path) => {
+  const name = text(16)(value, path);
+  if (
+    name === "approve" ||
+    name === "reject" ||
+    name === "changes" ||
+    name === "answer" ||
+    name === "resume"
+  ) {
+    return name;
+  }
+  throw new DecodeError(path, "is not a workflow action");
+};
+
+export interface WorkflowRunListParams {
+  cursor: Cursor | null;
+  limit: number | null;
+}
+
+export interface WorkflowDecideParams {
+  runId: RunId;
+  stepId: RunId | null;
+  action: WorkflowAction;
+  note: string | null;
+  code: string | null;
+  decisionId: RunId;
+  /** The waiting step's attempt, as the run detail showed it. */
+  attempt: number;
+  /** The open clarification round, or 0. */
+  round: number;
+}
+
+export interface WorkflowRunSummary {
+  runId: RunId;
+  name: string;
+  status: string;
+  workspace: string;
+  waitingOn: string | null;
+  blocking: string | null;
+  createdAt: number;
+}
+
+export interface WorkflowRunPage {
+  runs: WorkflowRunSummary[];
+  next: Cursor | null;
+}
+
+export interface WorkflowStepView {
+  stepId: string;
+  action: string;
+  status: string;
+  attempts: number;
+  note: string | null;
+}
+
+export interface WorkflowArtifactView {
+  name: string;
+  source: string;
+  truncated: boolean;
+  body?: string;
+}
+
+export interface WorkflowRunDetail {
+  runId: RunId;
+  name: string;
+  status: string;
+  workspace: string;
+  error: string | null;
+  waitingOn: string | null;
+  blocking: string | null;
+  waitingKind?: string;
+  attempts: number;
+  locked: boolean;
+  /** The waiting step's attempt. 0 when none is waiting. */
+  attempt: number;
+  /** The open clarification round, or 0. */
+  round: number;
+  resumeEligible: boolean;
+  steps: WorkflowStepView[];
+  artifacts: WorkflowArtifactView[];
+}
+
+export interface WorkflowChallenge {
+  code: string;
+  attempt: number;
+  round: number;
+}
+
+export interface WorkflowDecision {
+  outcome: string;
+  message: string;
+}
+
+const workflowRunSummaryFields = {
+  runId: id<RunId>(),
+  name: text(MAX_TEXT),
+  status: text(32),
+  workspace: text(MAX_TEXT),
+  waitingOn: nullable(text(MAX_TEXT)),
+  blocking: nullable(text(MAX_TEXT)),
+  createdAt: i64,
+};
+
+const workflowRunPageFields = {
+  runs: array(object(workflowRunSummaryFields)),
+  next: nullable(cursor),
+};
+
+const workflowStepFields = {
+  stepId: text(MAX_TEXT),
+  action: text(MAX_TEXT),
+  status: text(32),
+  attempts: u32,
+  note: nullable(text(MAX_NOTE)),
+};
+
+const workflowArtifactFields = {
+  name: text(MAX_TEXT),
+  source: text(32),
+  truncated: bool,
+  body: optional(text(MAX_ARTIFACT_PREVIEW)),
+};
+
+const workflowRunDetailFields = {
+  runId: id<RunId>(),
+  name: text(MAX_TEXT),
+  status: text(32),
+  workspace: text(MAX_TEXT),
+  error: nullable(text(MAX_TEXT)),
+  waitingOn: nullable(text(MAX_TEXT)),
+  blocking: nullable(text(MAX_TEXT)),
+  waitingKind: optional(text(32)),
+  attempts: u32,
+  locked: bool,
+  attempt: u32,
+  round: u32,
+  resumeEligible: bool,
+  steps: array(object(workflowStepFields)),
+  artifacts: array(object(workflowArtifactFields)),
+};
+
 /** Everything a client can ask a host: `op` names it, `params` carries its parameters. */
 export type Operation =
   | { op: "host.describe" }
@@ -837,7 +984,14 @@ export type Operation =
   | { op: "session.start"; params: SessionStartParams }
   | { op: "upload.begin"; params: { workspace: WorkspaceId; name: string; size: number } }
   | { op: "upload.chunk"; params: { upload: UploadId; offset: number; data: string } }
-  | { op: "session.resume"; params: SessionResumeParams };
+  | { op: "session.resume"; params: SessionResumeParams }
+  | { op: "workflow.run.list"; params: WorkflowRunListParams }
+  | { op: "workflow.run.get"; params: { runId: RunId } }
+  | {
+      op: "workflow.challenge";
+      params: { runId: RunId; stepId: RunId; attempt: number; round: number };
+    }
+  | { op: "workflow.decide"; params: WorkflowDecideParams };
 
 export type OperationName = Operation["op"];
 
@@ -864,6 +1018,10 @@ export const OPERATIONS: readonly OperationName[] = [
   "upload.begin",
   "upload.chunk",
   "session.resume",
+  "workflow.run.list",
+  "workflow.run.get",
+  "workflow.challenge",
+  "workflow.decide",
 ];
 
 const leaseRefFields = { terminal: id<TerminalId>(), lease: id<LeaseId>(), generation: u64 };
@@ -923,6 +1081,24 @@ const params: Record<string, Decoder<unknown>> = {
   "upload.begin": object({ workspace: id<WorkspaceId>(), name: text(), size: u64 }),
   "upload.chunk": object({ upload: u32, offset: u64, data: text() }),
   "session.resume": object({ session: id<SessionRecordId>(), prompt: optional(text()) }),
+  "workflow.run.list": object({ cursor: nullable(cursor), limit }),
+  "workflow.run.get": object({ runId: id<RunId>() }),
+  "workflow.challenge": object({
+    runId: id<RunId>(),
+    stepId: id<RunId>(),
+    attempt: u32,
+    round: u32,
+  }),
+  "workflow.decide": object({
+    runId: id<RunId>(),
+    stepId: nullable(id<RunId>()),
+    action: workflowAction,
+    note: nullable(text(MAX_NOTE)),
+    code: nullable(text(MAX_CODE_LEN)),
+    decisionId: id<RunId>(),
+    attempt: u32,
+    round: u32,
+  }),
 };
 
 /** The scope a caller needs for an operation. `null` for `host.describe`, which any grant may ask. */
@@ -939,6 +1115,8 @@ export function scopeOf(op: OperationName): Scope | null {
   if (op.startsWith("activity.")) return "activity:read";
   if (op === "memory.list") return "memory:read";
   if (op === "terminal.attach" || op === "terminal.detach") return "terminal:read";
+  if (op === "workflow.run.list" || op === "workflow.run.get") return "workflow:read";
+  if (op === "workflow.challenge" || op === "workflow.decide") return "workflow:decide";
   return "terminal:control";
 }
 
@@ -1009,9 +1187,28 @@ export function validate(operation: Operation): string | null {
       return chunkInvalid(operation.params.data);
     case "session.resume":
       return operation.params.prompt === undefined ? null : promptTooLong(operation.params.prompt);
+    case "workflow.decide":
+      return decideInvalid(operation.params);
     default:
       return null;
   }
+}
+
+const CODE = /^[A-Za-z0-9]+$/;
+
+function decideInvalid(params: WorkflowDecideParams): string | null {
+  if (params.action === "resume") return null;
+  if (params.stepId === null) return "Name the step this decision is for.";
+  if (params.code === null || !CODE.test(params.code) || params.code.length > MAX_CODE_LEN) {
+    return "A decision needs the one-time code.";
+  }
+  if (
+    (params.action === "changes" || params.action === "answer") &&
+    (params.note === null || params.note.trim() === "")
+  ) {
+    return "Say what should change, or give the answer.";
+  }
+  return null;
 }
 
 function promptTooLong(prompt: string): string | null {
@@ -1080,6 +1277,10 @@ export type Reply =
   | ({ kind: "started" } & Started)
   | { kind: "upload"; upload: UploadId }
   | { kind: "uploaded"; upload: UploadId; path: string }
+  | ({ kind: "workflowRuns" } & WorkflowRunPage)
+  | ({ kind: "workflowRun" } & WorkflowRunDetail)
+  | ({ kind: "workflowChallenge" } & WorkflowChallenge)
+  | ({ kind: "workflowDecision" } & WorkflowDecision)
   | { kind: "done" };
 
 export const reply: Decoder<Reply> = tagged<Reply>("kind", {
@@ -1096,6 +1297,17 @@ export const reply: Decoder<Reply> = tagged<Reply>("kind", {
   started: variant("kind", "started", startedFields),
   upload: variant("kind", "upload", { upload: u32 }),
   uploaded: variant("kind", "uploaded", { upload: u32, path: text() }),
+  workflowRuns: variant("kind", "workflowRuns", workflowRunPageFields),
+  workflowRun: variant("kind", "workflowRun", workflowRunDetailFields),
+  workflowChallenge: variant("kind", "workflowChallenge", {
+    code: text(MAX_CODE_LEN),
+    attempt: u32,
+    round: u32,
+  }),
+  workflowDecision: variant("kind", "workflowDecision", {
+    outcome: text(64),
+    message: text(MAX_TEXT),
+  }),
   done: variant("kind", "done", {}),
 });
 
@@ -1122,14 +1334,21 @@ export const SCOPES = [
   "terminal:read",
   "terminal:control",
   "device:manage",
+  "workflow:read",
+  "workflow:decide",
 ] as const;
 export type Scope = (typeof SCOPES)[number];
 
-/** Scopes as a set, in the order Rust writes one. */
-export const scopes: Decoder<Scope[]> = set(
-  oneOf(SCOPES),
-  (a, b) => SCOPES.indexOf(a) - SCOPES.indexOf(b),
-);
+/** Scopes as a set, in the order Rust writes one. A name this build does not know is dropped. */
+export const scopes: Decoder<Scope[]> = (value, path) => {
+  if (!Array.isArray(value)) throw new DecodeError(path, "is not a list");
+  const known = new Set<Scope>();
+  for (const item of value) {
+    if (typeof item !== "string") throw new DecodeError(path, "is not a string");
+    if ((SCOPES as readonly string[]).includes(item)) known.add(item as Scope);
+  }
+  return SCOPES.filter((scope) => known.has(scope));
+};
 
 /** Which projects a grant reaches. */
 export type ProjectGrant = { kind: "all" } | { kind: "only"; projects: ProjectId[] };

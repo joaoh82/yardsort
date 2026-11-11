@@ -10,7 +10,7 @@
 //!
 //! ```text
 //! host    POST /v1/hosts                          {host?, name}       → HostSummary
-//! host    POST /v1/hosts/{host}/offers                                → Offer
+//! host    POST /v1/hosts/{host}/offers            {protocol?}         → Offer
 //! device  POST /v1/pairings                       {offer, scopes}     → GrantSummary (pending)
 //! host    GET  /v1/hosts/{host}/grants                                → GrantPage
 //! host    POST /v1/grants/{grant}/approve         {scopes, projects}  → GrantSummary
@@ -87,6 +87,17 @@ pub struct HostPage {
     pub hosts: Vec<HostSummary>,
 }
 
+/// Optional body of `POST /v1/hosts/{host}/offers`. An empty body is a host that has
+/// not stated which protocol it speaks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfferRequest {
+    /// The protocol this host speaks. The server records the minor when the major is
+    /// the one it speaks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<crate::ProtocolVersion>,
+}
+
 /// What a host shows to let one device in: as a QR code, and as a code to type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,6 +116,8 @@ pub struct Offer {
 pub struct PairingRequest {
     pub offer: OfferKey,
     /// What the device asks for. The host's person may give less, never more.
+    /// A scope this build does not know is accepted and dropped.
+    #[serde(with = "crate::grant::scope_set")]
     pub scopes: BTreeSet<Scope>,
 }
 
@@ -148,6 +161,8 @@ pub enum OfferKey {
 #[serde(rename_all = "camelCase")]
 pub struct GrantDecision {
     /// Some or all of what was asked for.
+    /// A scope this build does not know is accepted and dropped.
+    #[serde(with = "crate::grant::scope_set")]
     pub scopes: BTreeSet<Scope>,
     pub projects: ProjectGrant,
 }
@@ -201,10 +216,15 @@ pub struct GrantSummary {
     pub device: DeviceId,
     pub device_name: String,
     pub state: GrantState,
-    /// What the device asked for.
+    /// What the device asked for. A scope this build does not know is dropped.
+    #[serde(with = "crate::grant::scope_set")]
     pub requested: BTreeSet<Scope>,
     /// What it was given: empty unless approved.
+    #[serde(with = "crate::grant::scope_set")]
     pub scopes: BTreeSet<Scope>,
+    /// The kind of device that asked, when the server says. Absent from an older server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_kind: Option<crate::account::DeviceKind>,
     /// Which projects: absent unless approved.
     #[serde(default)]
     pub projects: Option<ProjectGrant>,

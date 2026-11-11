@@ -6,7 +6,7 @@
  * and this client has no way to answer or approve from the notice itself.
  */
 
-import { bool, DecodeError, integer, object, text, type Decoder } from "./decode.ts";
+import { bool, DecodeError, integer, object, optional, text, type Decoder } from "./decode.ts";
 
 export type NoticeCategory = "task" | "review" | "failure" | "desktopUpdate" | "workflow";
 
@@ -31,6 +31,10 @@ export interface NoticeView {
   title: string;
   body: string;
   deepLink: string;
+  /** A workflow notice's run and step, and the computer that submitted it. */
+  runId?: string;
+  stepId?: string;
+  hostId?: string;
 }
 
 export interface ReachableReceipt {
@@ -67,6 +71,9 @@ export const noticeView: Decoder<NoticeView> = object({
   title: text(200),
   body: text(500),
   deepLink: text(300),
+  runId: optional(text(128)),
+  stepId: optional(text(128)),
+  hostId: optional(text(128)),
 });
 
 export const reachableReceipt: Decoder<ReachableReceipt> = object({

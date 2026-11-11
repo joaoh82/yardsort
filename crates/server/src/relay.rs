@@ -154,6 +154,7 @@ enum Role {
         host: HostId,
         device: DeviceId,
         grant: GrantId,
+        kind: DeviceKind,
     },
 }
 
@@ -515,10 +516,18 @@ impl<R: Records> ControlService<R> {
             .map_err(unreadable)?
             .ok_or_else(RemoteError::not_found)?;
         let role = match request {
-            TicketRequest::Host { .. } => {
+            TicketRequest::Host { protocol, .. } => {
                 if caller.kind != DeviceKind::Host || host.device != caller.device {
                     return Err(RemoteError::not_found());
                 }
+                self.records
+                    .note_host_protocol(
+                        &caller.account,
+                        &host.id,
+                        crate::pairing::stated_minor(*protocol),
+                    )
+                    .await
+                    .map_err(unreadable)?;
                 Role::Host {
                     account: caller.account.clone(),
                     host: host.id,
@@ -526,6 +535,12 @@ impl<R: Records> ControlService<R> {
                 }
             }
             TicketRequest::Device { .. } => {
+                if caller.kind == DeviceKind::Host {
+                    return Err(RemoteError::new(
+                        ErrorCode::Forbidden,
+                        "A host token cannot open a device channel.",
+                    ));
+                }
                 let grant = self
                     .records
                     .grants(
@@ -554,6 +569,7 @@ impl<R: Records> ControlService<R> {
                     host: host.id,
                     device: caller.device.clone(),
                     grant: grant.grant.id,
+                    kind: caller.kind,
                 }
             }
         };
@@ -665,6 +681,7 @@ impl<R: Records> ControlService<R> {
                 host,
                 device,
                 grant,
+                kind,
             } => {
                 let Some(link) = lock(&self.relay.hub.hosts).get(&host).cloned() else {
                     return refuse(
@@ -709,6 +726,7 @@ impl<R: Records> ControlService<R> {
                 let open = ChannelOpen {
                     device: device.clone(),
                     grant,
+                    kind,
                 };
                 if !link.out.push(link_message(&LinkFrame::Open(channel, open))) {
                     joined.out.close(CloseReason::Overloaded);

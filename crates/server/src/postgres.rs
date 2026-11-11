@@ -72,6 +72,16 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         "push_routes",
         include_str!("../migrations/0006_push_routes.sql"),
     ),
+    (
+        7,
+        "notice_subjects",
+        include_str!("../migrations/0007_notice_subjects.sql"),
+    ),
+    (
+        8,
+        "host_protocol",
+        include_str!("../migrations/0008_host_protocol.sql"),
+    ),
 ];
 
 /// Held while migrating, so instances starting together take turns. Any constant will do, as
@@ -86,12 +96,13 @@ const DEVICE: &str = "d.id, d.account, d.name, d.kind, d.platform, d.created_at,
                       d.last_seen_at, d.revoked_at, d.revoked_reason";
 
 /// A host row, joined to its device for when that was last seen.
-const HOST: &str = "h.id, h.account, h.device, h.name, h.created_at, hd.last_seen_at";
+const HOST: &str =
+    "h.id, h.account, h.device, h.name, h.created_at, hd.last_seen_at, h.protocol_minor";
 
 /// A grant row and its names, as [`GrantView`] holds them.
 const GRANT: &str = "g.id, g.account, g.host, g.device, g.requested, g.scopes, g.projects, \
                      g.status, g.created_at, g.expires_at, g.decided_at, \
-                     h.name, d.name, d.revoked_at IS NOT NULL";
+                     h.name, d.name, d.revoked_at IS NOT NULL, d.kind, h.protocol_minor";
 
 /// The notification channel signals travel on.
 pub const SIGNAL_CHANNEL: &str = "yardsort_relay";
@@ -785,7 +796,7 @@ impl Records for PgRecords {
             .query_opt(
                 &format!(
                     "WITH h AS (
-                         UPDATE hosts SET device = $3, name = $4
+                         UPDATE hosts SET device = $3, name = $4, protocol_minor = NULL
                          WHERE id = $1 AND account = $2 AND removed_at IS NULL
                          RETURNING *
                      )
@@ -812,6 +823,24 @@ impl Records for PgRecords {
             .await
             .map_err(failed)?;
         row.map(|row| host(&row)).transpose()
+    }
+
+    async fn note_host_protocol(
+        &self,
+        account: &AccountId,
+        id: &HostId,
+        minor: Option<u16>,
+    ) -> Result<()> {
+        self.client()
+            .await?
+            .execute(
+                "UPDATE hosts SET protocol_minor = $3
+                 WHERE id = $1 AND account = $2 AND removed_at IS NULL",
+                &[&id.as_str(), &account.0, &minor.map(i32::from)],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(())
     }
 
     async fn hosts(&self, account: &AccountId) -> Result<Vec<Host>> {
@@ -1347,8 +1376,9 @@ impl Records for PgRecords {
         let inserted = tx
             .query_opt(
                 "INSERT INTO mobile_notices
-                     (id, account, event_key, category, kind, title, body, created_at, expires_at, suppressed)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                     (id, account, event_key, category, kind, title, body, created_at, expires_at, suppressed,
+                      run_id, step_id, host_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                  ON CONFLICT (account, event_key) DO NOTHING
                  RETURNING id, suppressed",
                 &[
@@ -1362,6 +1392,9 @@ impl Records for PgRecords {
                     &now,
                     &notice.expires_at,
                     &suppressed,
+                    &notice.run_id,
+                    &notice.step_id,
+                    &notice.host_id,
                 ],
             )
             .await
@@ -1582,7 +1615,7 @@ impl Records for PgRecords {
             .client()
             .await?
             .query_opt(
-                "SELECT id, category, kind, title, body FROM mobile_notices
+                "SELECT id, category, kind, title, body, run_id, step_id, host_id FROM mobile_notices
                  WHERE id = $1 AND account = $2",
                 &[&id, &account.0],
             )
@@ -1594,6 +1627,9 @@ impl Records for PgRecords {
             kind: row.get(2),
             title: row.get(3),
             body: row.get(4),
+            run_id: row.get(5),
+            step_id: row.get(6),
+            host_id: row.get(7),
         }))
     }
 }
@@ -1615,6 +1651,9 @@ fn host(row: &Row) -> Result<Host> {
         name: row.get(3),
         created_at: row.get(4),
         last_seen_at: row.get(5),
+        protocol_minor: row
+            .get::<_, Option<i32>>(6)
+            .and_then(|minor| u16::try_from(minor).ok()),
     })
 }
 
@@ -1623,7 +1662,11 @@ fn grant_view(row: &Row) -> Result<GrantView> {
         row.get::<_, Vec<String>>(at)
             .into_iter()
             .map(unspelled::<Scope>)
-            .collect()
+            .filter_map(|scope| match scope {
+                Ok(Scope::Unknown) => None,
+                other => Some(other),
+            })
+            .collect::<std::result::Result<_, _>>()
     };
     let projects: Option<String> = row.get(6);
     let status: String = row.get(7);
@@ -1652,6 +1695,10 @@ fn grant_view(row: &Row) -> Result<GrantView> {
         host_name: row.get(11),
         device_name: row.get(12),
         device_revoked: row.get(13),
+        device_kind: unspelled(row.get(14))?,
+        host_protocol_minor: row
+            .get::<_, Option<i32>>(15)
+            .and_then(|minor| u16::try_from(minor).ok()),
     })
 }
 

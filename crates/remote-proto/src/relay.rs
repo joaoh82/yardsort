@@ -45,7 +45,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::account::Secret;
+use crate::account::{DeviceKind, Secret};
 use crate::ids::{DeviceId, GrantId, HostId};
 use crate::RemoteError;
 
@@ -81,7 +81,13 @@ pub const MAX_MESSAGE: usize = LINK_HEADER_LEN
 #[serde(tag = "role", rename_all = "camelCase")]
 pub enum TicketRequest {
     /// The host's own link. Only the device the host is signed in as may ask.
-    Host { host: HostId },
+    /// `protocol` is the minor this host speaks. Absent from a host that has not said,
+    /// which is how a desktop from before workflow scopes opens its link.
+    Host {
+        host: HostId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        protocol: Option<crate::ProtocolVersion>,
+    },
     /// A device's way to a host. Only with a grant on that host the server has in force.
     Device { host: HostId },
 }
@@ -89,7 +95,7 @@ pub enum TicketRequest {
 impl TicketRequest {
     pub fn host(&self) -> &HostId {
         match self {
-            Self::Host { host } | Self::Device { host } => host,
+            Self::Host { host, .. } | Self::Device { host } => host,
         }
     }
 }
@@ -140,11 +146,20 @@ pub enum Greeting {
 
 /// Sent to a host when a device connects: which device, and the grant the server has in force
 /// for it. The host lets it in only if its own record agrees.
+///
+/// `kind` is the signed-in device that asked for the ticket. A missing kind is [`DeviceKind::Other`],
+/// which cannot decide a workflow. An old relay that does not send it fails closed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelOpen {
     pub device: DeviceId,
     pub grant: GrantId,
+    #[serde(default = "unknown_kind")]
+    pub kind: DeviceKind,
+}
+
+fn unknown_kind() -> DeviceKind {
+    DeviceKind::Other
 }
 
 /// Why a socket or a channel was closed. On a socket, the WebSocket close code is
@@ -354,10 +369,17 @@ mod tests {
     }
 
     #[test]
+    fn a_channel_open_without_a_kind_cannot_decide() {
+        let open: ChannelOpen = serde_json::from_str(r#"{"device":"phone","grant":"g1"}"#).unwrap();
+        assert_eq!(open.kind, DeviceKind::Other);
+    }
+
+    #[test]
     fn link_frames_round_trip() {
         let open = ChannelOpen {
             device: DeviceId::new("phone").unwrap(),
             grant: GrantId::new("g1").unwrap(),
+            kind: DeviceKind::Phone,
         };
         let output = [1u8, 1, 0, 0, 0xff];
         for frame in [

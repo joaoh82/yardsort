@@ -117,6 +117,9 @@ export default function Layout() {
               <Stack.Screen name="servers" options={{ title: "Servers" }} />
               <Stack.Screen name="settings" options={{ title: "Settings" }} />
               <Stack.Screen name="computer" options={{ title: "Computer" }} />
+              <Stack.Screen name="workflows" options={{ title: "Workflows" }} />
+              <Stack.Screen name="workflow" options={{ title: "Workflow" }} />
+              <Stack.Screen name="decision" options={{ title: "Decision" }} />
               <Stack.Screen name="workspace" options={{ title: "Workspace" }} />
               <Stack.Screen name="memory" options={{ title: "Approved memory" }} />
               <Stack.Screen name="terminal" options={{ title: "Terminal" }} />

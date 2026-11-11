@@ -101,6 +101,7 @@ impl Serving for Here {
             host: &self.identity,
             interactive: true,
             starting: None,
+            workflow: None,
         });
     }
 }
