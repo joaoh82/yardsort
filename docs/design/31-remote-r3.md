@@ -1361,7 +1361,9 @@ To be filled in from the run, with the iPhone's model and iOS version, `claude -
 - **For R4, moved from the device run on 2026-11-04 (§7):** input to echo at p95 under 300 ms at 100 ms of round trip, a usable screen within 5 seconds
   of coming back to the foreground, and an external keyboard. The first two have their tools since
   R4's slice 8 ([35 §17](35-remote-r4-r5.md#17--what-the-eighth-slice-adds)): the echo measured
-  locally through 100 ms at p95 105 ms; on the iPhone, none has been tried.
+  locally through 100 ms at p95 105 ms. The keyboard came with slice 9
+  ([35 §18](35-remote-r4-r5.md#18--what-the-ninth-slice-adds)), tried on the Android emulator. On
+  the iPhone, none of the three has been tried.
 - **A physical Android phone** for the smoke tests and the device run (§7). The owner's to
   provide; R3 cannot close without one.
 

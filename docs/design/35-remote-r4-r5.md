@@ -2,7 +2,7 @@
 
 **Status:** planned on 2026-11-06. The first slice, the host's account moved out of the app, was
 built the same day (§10); its local smoke tests and the owner's phone check against staging passed.
-The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. The sixth, resume and fork in the core and the host after its restarts, was built the same day (§15); its local smoke test, and the owner's run on the box, R5's gate check 3, passed. The seventh, starting and resuming from a client, was built the same day (§16), under `terminal:control` rather than a scope of its own, as the owner chose; its local smoke test and the owner's run on the box passed. The eighth, R4's first, the phone reconnecting on a network change and the time budgets measured, was built on 2026-11-10 (§17); its local smoke test passed, at p95 105 ms through 100 ms of round trip. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
+The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. The sixth, resume and fork in the core and the host after its restarts, was built the same day (§15); its local smoke test, and the owner's run on the box, R5's gate check 3, passed. The seventh, starting and resuming from a client, was built the same day (§16), under `terminal:control` rather than a scope of its own, as the owner chose; its local smoke test and the owner's run on the box passed. The eighth, R4's first, the phone reconnecting on a network change and the time budgets measured, was built on 2026-11-10 (§17); its local smoke test passed, at p95 105 ms through 100 ms of round trip. The ninth, a keyboard paired with the phone, was built on 2026-11-11 (§18); its tests and its run on the Android emulator passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
 2026-11-08 against where Remote is going, several machines an account owns and the desktop choosing
 where a task runs (§3, "Where agents run"); what comes after R5 is in §9. This is the plan for the last two
 phases before sync: what each has to show, what it starts from, the decisions taken before any
@@ -990,3 +990,67 @@ computer and from the box; on the iPhone, with a TestFlight build of this slice,
 (Wi-Fi to cellular and back) and W (away past the credential's 15 minutes); and the two budgets with the Network Link Conditioner at
 100 ms, read from the readout, which needs the development app (`just mobile-ios` on the Mac), since
 a TestFlight build has none.
+
+## 18 · What the ninth slice adds
+
+Built on 2026-11-11, on Linux. Nothing changed on the server, so staging needs no deploy, and there is
+no protocol change. The phone gains a native module of its own, so it reaches the iPhone only with a
+new TestFlight build.
+
+**Letters stay in the field.** The plan said what the keyboard sends, not where letters go. A
+hardware keyboard already typed into the composer's field, Return sending it, and that is kept: a
+draft can be written and read before it goes, as with the screen's keyboard, and dictation and
+composed input stay the system's. What the field has no use for goes to the terminal at once:
+
+- **Esc**, always, and **Shift-Tab**.
+- **Ctrl** with a letter or `[ \ ]` or space, as its control character; with Alt too, after Esc.
+- **Alt** (Option) with a letter, a digit or a symbol, or with Shift and a letter, after Esc, as a
+  terminal treating Alt as Meta sends it: Alt-B and Alt-F move by word in a shell.
+- **The arrows** with Shift, Alt or Ctrl, as xterm sends them (`ESC [1;<1 + shift + 2·alt + 4·ctrl>`),
+  and **Backspace** with Alt or Ctrl.
+- **The arrows, Tab and Backspace on their own** only while the field is empty. Then they move
+  through Claude's menu or a shell's history; with a draft, they edit it.
+- **Cmd** is never taken, nor Ctrl-Tab or Alt-Tab: they are the system's.
+
+**Where.** `modules/hardware-keys`, a local Expo module: a view around the composer, `enabled`
+while this phone holds control and `plain` while the field is empty, telling `onKey` which key
+with which modifiers; `src/lib/hardware.ts` decides what it sends, from the same lists the native
+code keeps. A key sent is a key the person pressed, as with the row of keys: nothing is sent
+again, and one that may not have arrived is named as it was pressed, such as **Ctrl-C**.
+
+- **iOS.** `UIKeyCommand`s with `wantsPriorityOverSystemBehavior`, so they come before the field
+  moves its cursor or takes Ctrl-A as the start of the line. UIKit asks the responders from the
+  first one up, and the view is around the field, so they are heard while it is being typed into;
+  while no field is, the view makes itself the first responder, so Esc and Ctrl-C work without a
+  tap. It is no text input, so no keyboard comes up on the screen.
+- **Android.** A wrapper around the window's callback, which hears a key before any view, takes
+  them ahead of the focused field, and whether or not it is focused. The screen's own keyboard is
+  left alone: its keys say they are soft.
+
+**What the emulator found.** A hardware Return sent the field twice, before this slice too: Android's
+text view tells its listener of a keyboard's Return as it goes down and again as it comes up, and
+React Native's submits each time. The wrapper lets the field hear only the press. It needs a
+keyboard to happen, so no screen test can show it; the run below did, before and after.
+
+**Tests that fail without it.** Which keys are taken, with the field empty and not, and what each
+sends, by the program's cursor keys; that only a key the view takes sends anything. On the phone's
+screens, through the real control path: the view takes keys only while the phone holds control;
+Esc, Ctrl-C, Alt-B, Shift-Tab and Ctrl-Left go to the terminal with the draft left alone; the arrows,
+Tab and Backspace on their own go only while the field is empty, by the program's cursor keys; a
+key that may not have arrived is named as pressed.
+
+**Its run on the Android emulator**, on 2026-11-11, on Linux, against a `yardsort-host` on the stand-in
+server running `cat -vt` in a raw terminal, so each byte shows as it arrived. The development build
+was signed in, paired at the host's `pair`, took control, and `adb` pressed the keys with the field not
+focused. Esc, Ctrl-C, Alt-B, Shift-Tab, Up, Tab, Backspace and Ctrl-Left arrived as `^[ ^C ^[b ^[[Z
+^[[A ^I ^? ^[[1;5D`, twice in a row, and Alt-X and Ctrl-D as `^[x ^D`. The very first Ctrl-C of the
+run did not arrive and was not seen again in four more; it is one to watch on a phone. With `abc` in
+the field, two Lefts moved its cursor and nothing reached the terminal, and Esc still did. Return sent
+the field once, and once more with it empty sent Enter alone. `adb` is not a keyboard: its keys say
+which modifiers are down, as a keyboard's do, but they come from no keyboard device.
+
+**Still to try, by the owner**, on the iPhone with a Bluetooth keyboard and a TestFlight build of this
+slice: in `vim`, Esc leaves insert mode and the arrows move; `sleep 100` and Ctrl-C stops it; the
+arrows and Return move through and choose in Claude's menu; Alt-B in a shell moves back a word; and
+Return sends the field once. None of the iOS code has been built here: the TestFlight workflow,
+on macOS, is the first to compile it.

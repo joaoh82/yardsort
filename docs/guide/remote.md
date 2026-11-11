@@ -47,6 +47,22 @@ your own.
 Any number of devices can watch a terminal, but only one can type into it at a time. The phone asks for
 control, and the person at the computer can take it back at any moment just by typing.
 
+## A keyboard with the phone
+
+A Bluetooth keyboard paired with the phone, or one plugged into it, works once the phone has control.
+What you type goes into the field, and Return sends it, as with the phone's own keyboard. These keys
+go straight to the terminal instead, wherever the field is:
+
+- **Esc**, and **Shift-Tab**.
+- **Ctrl** with a letter, such as Ctrl-C to interrupt, and with `[`, `\`, `]` or space.
+- **Alt** (Option on an Apple keyboard) with a letter, a digit or a symbol, as Alt-B and Alt-F move by
+  word in a shell.
+- **The arrows** with Shift, Alt or Ctrl, and **Backspace** with Alt or Ctrl.
+
+**The arrows, Tab and Backspace on their own** go to the terminal while the field is empty, so they
+move through an agent's menu or a shell's history. While something is in the field, they edit it.
+Shortcuts with **Cmd** are left to the phone.
+
 ## Starting work from the phone
 
 A device you let type can start work here too. It is no more than it could do by typing into a terminal,

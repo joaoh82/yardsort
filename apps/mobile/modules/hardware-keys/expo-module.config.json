@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["HardwareKeysModule"]
+  },
+  "android": {
+    "modules": ["dev.yardsort.hardwarekeys.HardwareKeysModule"]
+  }
+}

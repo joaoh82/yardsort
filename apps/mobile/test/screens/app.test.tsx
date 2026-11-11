@@ -1247,6 +1247,73 @@ describe("A computer", () => {
         expect(typed(server)).toEqual(["\x1b[1;5D", "\x1b[D"]);
       });
 
+      describe("a keyboard paired with the phone", () => {
+        const keyboard = () => screen.getByTestId("hardware-keys");
+        const hardware = async (
+          key: string,
+          mods: { ctrl?: boolean; alt?: boolean; shift?: boolean } = {},
+        ) => {
+          await act(async () => {
+            keyboard().props.onKey({
+              nativeEvent: { key, ctrl: false, alt: false, shift: false, ...mods },
+            });
+          });
+          await sent();
+        };
+
+        test("is heard only while this phone has control", async () => {
+          const { server } = await inControl();
+          await type("kept for later");
+          expect(keyboard().props.enabled).toBe(true);
+          await fireEvent.press(await button("Hand back"));
+          // The draft keeps the composer, but no key is taken from it.
+          await waitFor(() => expect(keyboard().props.enabled).toBe(false));
+          expect(typed(server)).toEqual([]);
+        });
+
+        test("sends Esc, Ctrl-C, Alt-B and Shift-Tab to the terminal, with the field left alone", async () => {
+          const { server } = await inControl();
+          await type("half a thought");
+          await hardware("escape");
+          await hardware("c", { ctrl: true });
+          await hardware("b", { alt: true });
+          await hardware("tab", { shift: true });
+          await hardware("left", { ctrl: true });
+          expect(typed(server)).toEqual(["\x1b", "\x03", "\x1bb", "\x1b[Z", "\x1b[1;5D"]);
+          expect(screen.getByTestId("composer").props.value).toBe("half a thought");
+        });
+
+        test("takes the arrows, Tab and Backspace on their own only while the field is empty", async () => {
+          const { server } = await inControl();
+          expect(keyboard().props.plain).toBe(true);
+          await hardware("down");
+          await pageSays({ t: "cursorKeys", application: true });
+          await hardware("up");
+          await hardware("tab");
+          await hardware("backspace");
+          expect(typed(server)).toEqual(["\x1b[B", "\x1bOA", "\t", "\x7f"]);
+
+          await type("a draft");
+          expect(keyboard().props.plain).toBe(false);
+        });
+
+        test("a key that may not have arrived is named as it was pressed", async () => {
+          const { server } = await inControl();
+          server.unanswered.add("terminal.input");
+          await act(async () => {
+            keyboard().props.onKey({
+              nativeEvent: { key: "c", ctrl: true, alt: false, shift: false },
+            });
+            await jest.advanceTimersByTimeAsync(10);
+          });
+          await act(async () => {
+            for (const socket of [...server.relaySockets]) socket.close(1006);
+            await jest.advanceTimersByTimeAsync(10);
+          });
+          await screen.findByText(/may not have reached the computer.*Ctrl-C/);
+        });
+      });
+
       test("once in control it fits the room, and watching never asks", async () => {
         const { server } = await watching();
         await act(async () =>

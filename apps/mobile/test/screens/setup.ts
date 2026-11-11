@@ -35,6 +35,15 @@ jest.mock("expo-camera", () => {
   };
 });
 
+// The native view that hears a hardware keyboard: a test presses a key with its `onKey`.
+jest.mock("../../modules/hardware-keys", () => {
+  const { createElement } = jest.requireActual<typeof import("react")>("react");
+  const { View } = jest.requireActual<typeof import("react-native")>("react-native");
+  return {
+    HardwareKeys: (props: object) => createElement(View, { testID: "hardware-keys", ...props }),
+  };
+});
+
 // The network, as the platform tells of it: a test says what it now is with `networkIs`.
 const mockNetworkListeners = new Set<(state: object) => void>();
 jest.mock("expo-network", () => ({
