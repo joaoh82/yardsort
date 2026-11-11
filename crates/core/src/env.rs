@@ -142,7 +142,31 @@ pub fn without_appimage(mut vars: BTreeMap<String, String>) -> BTreeMap<String, 
 
 /// What every environment we hand out goes through.
 fn cleaned(vars: BTreeMap<String, String>) -> BTreeMap<String, String> {
-    without_foreign_sessions(without_appimage(vars))
+    without_coordinator(without_foreign_sessions(without_appimage(vars)))
+}
+
+/// The Floor Manager's marker, the test-only wait that rides with it, and the settings
+/// directory.
+///
+/// Every environment handed to an agent goes through here, not only one the Floor Manager
+/// starts. Leaving the marker in the environment `ys` hands to a harness gates that agent's own
+/// `ys` (workspace done, memory propose, a test). Leaving `YARDSORT_CONFIG_DIR` does the other
+/// half: an agent keeps the real settings file after someone points `YARDSORT_DATA_DIR` at a
+/// throwaway database. On Windows the daemon copies the environment it was spawned with into
+/// later terminals, so the same names are removed there too.
+fn without_coordinator(mut vars: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let markers = [
+        crate::coordinator::ENV,
+        crate::coordinator::CONFIRM_WAIT_ENV,
+        crate::paths::CONFIG_DIR_ENV[0],
+        crate::paths::CONFIG_DIR_ENV[1],
+    ];
+    vars.retain(|name, _| {
+        !markers
+            .iter()
+            .any(|marker| name.eq_ignore_ascii_case(marker))
+    });
+    vars
 }
 
 impl ShellEnv {
@@ -620,6 +644,27 @@ mod tests {
             kept,
             ["ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "PATH"]
         );
+    }
+
+    /// `cleaned` drops the marker, the test wait, and both settings-directory names, whatever
+    /// their case. What remains is the rest of the environment an agent is given.
+    #[test]
+    fn the_floor_managers_marker_does_not_reach_a_child() {
+        let vars: BTreeMap<String, String> = [
+            (crate::coordinator::ENV, "1"),
+            (crate::coordinator::CONFIRM_WAIT_ENV, "2000"),
+            ("yardsort_coordinator", "1"),
+            ("YARDSORT_CONFIG_DIR", "/tmp/ys-config"),
+            ("SWITCHYARD_CONFIG_DIR", "/tmp/old-config"),
+            ("yardsort_config_dir", "/tmp/ys-config"),
+            ("PATH", "/bin"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+        let kept = cleaned(vars);
+        assert_eq!(kept.get("PATH").map(String::as_str), Some("/bin"));
+        assert_eq!(kept.len(), 1, "{kept:?}");
     }
 
     fn vars(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {

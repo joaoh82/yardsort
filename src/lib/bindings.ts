@@ -58,9 +58,14 @@ export const commands = {
 	 *  whether it comes up. The caller shows the session and closes it.
 	 */
 	harnessTest: (def: HarnessDef, size: TermSize) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("harness_test", { def, size })),
-	settingsGet: () => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_get")),
-	settingsSaveWorkspaces: (workspaces: WorkspaceSettingsDto) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_workspaces", { workspaces })),
-	settingsSaveGeneral: (editorCommand: string | null, notifyWhenQuiet: boolean, checkForUpdates: boolean) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_general", { editorCommand, notifyWhenQuiet, checkForUpdates })),
+	settingsGet: () => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_get")),
+	settingsSaveWorkspaces: (workspaces: WorkspaceSettingsDto) => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_save_workspaces", { workspaces })),
+	settingsSaveGeneral: (editorCommand: string | null, notifyWhenQuiet: boolean, checkForUpdates: boolean, approvalCodeInNotification: boolean) => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_save_general", { editorCommand, notifyWhenQuiet, checkForUpdates, approvalCodeInNotification })),
+	/**
+	 *  The Floor Manager's permission. The next `ys` command it runs follows this. Its instructions
+	 *  are rewritten now when its folder exists; a running one reads them the next time it starts.
+	 */
+	settingsSaveFloorManager: (level: FloorManagerLevel_Deserialize) => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_save_floor_manager", { level })),
 	projectBranches: (projectId: string) => typedError<BranchList, IpcError>(__TAURI_INVOKE("project_branches", { projectId })),
 	/**
 	 *  The core loop: make a worktree — on a new branch, or for an existing one — and start a harness in it with the user's
@@ -466,7 +471,7 @@ export const commands = {
 	outcomeLabel: (id: string, label: string | null) => typedError<ProjectOutcomes, IpcError>(__TAURI_INVOKE("outcome_label", { id, label })),
 	/**  Per-agent history across every project, for the composer: counted from outcomes only. */
 	outcomesAgents: () => typedError<AgentOutcomes[], IpcError>(__TAURI_INVOKE("outcomes_agents")),
-	settingsSaveActivity: (activity: ActivitySettingsDto) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { activity })),
+	settingsSaveActivity: (activity: ActivitySettingsDto) => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_save_activity", { activity })),
 	sessionsList: (workspaceId: string) => typedError<SessionRecord[], IpcError>(__TAURI_INVOKE("sessions_list", { workspaceId })),
 	/**
 	 *  How full a conversation's context is, as the agent last reported it, and what to type to
@@ -544,6 +549,16 @@ export const commands = {
 	coordinatorStart: (harness: string, size: TermSize) => typedError<CoordinatorStatus, IpcError>(__TAURI_INVOKE("coordinator_start", { harness, size })),
 	/**  End the running Floor Manager. Its last screen stays until it is started again. */
 	coordinatorStop: () => typedError<CoordinatorStatus, IpcError>(__TAURI_INVOKE("coordinator_stop")),
+	/**
+	 *  Commands the Floor Manager has asked to run and is waiting on. Oldest first. Empty when
+	 *  nothing is waiting, which is the usual answer: the window polls this.
+	 */
+	coordinatorConfirmations: () => typedError<CoordinatorConfirmation[], IpcError>(__TAURI_INVOKE("coordinator_confirmations")),
+	/**
+	 *  The user pressed Allow or Don't allow. This writes the answer the waiting `ys` reads. It
+	 *  does not run the command: that process already has it, and runs it only after a yes.
+	 */
+	coordinatorAnswer: (id: string, allow: boolean) => typedError<boolean, IpcError>(__TAURI_INVOKE("coordinator_answer", { id, allow })),
 	ptySpawn: (request: SpawnRequest) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("pty_spawn", { request })),
 	/**  Stream a session into `output`: first a snapshot that repaints the terminal, then live bytes. */
 	ptyAttach: (id: SessionId, output: Channel<RawBytes>) => typedError<number, IpcError>(__TAURI_INVOKE("pty_attach", { id, output })),
@@ -580,6 +595,27 @@ export const commands = {
 	workflowStart: (workflowId: string, workspaceId: string, inputs: { [key in string]: string }, trackedId: string | null) => typedError<string, IpcError>(__TAURI_INVOKE("workflow_start", { workflowId, workspaceId, inputs, trackedId })),
 	/**  Cancel a run. Agents it started keep running. */
 	workflowCancel: (runId: string) => typedError<boolean, IpcError>(__TAURI_INVOKE("workflow_cancel", { runId })),
+	/**
+	 *  Record an approval. The driver applies it on its next tick. Only the person at this
+	 *  window calls this. The Floor Manager's `ys` is refused before it can.
+	 */
+	workflowDecide: (runId: string, stepId: string, decision: ApprovalDecision, feedback: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("workflow_decide", { runId, stepId, decision, feedback })),
+	/**
+	 *  Record an answer to a clarifying step. The driver types it into the same session on
+	 *  its next tick. Only the person at this window calls this.
+	 */
+	workflowAnswer: (runId: string, stepId: string, text: string) => typedError<null, IpcError>(__TAURI_INVOKE("workflow_answer", { runId, stepId, text })),
+	/**
+	 *  Runs waiting on a person, across every workflow. The sidebar's list. A later phone
+	 *  reads the same rows through the core. This command does not decide anything.
+	 */
+	workflowOpenWaits: () => typedError<WorkflowWait[], IpcError>(__TAURI_INVOKE("workflow_open_waits")),
+	/**
+	 *  Issue a new one-time code for a waiting approval, and say so. Listing the run does not
+	 *  do this. A restart does, because the plain code was only in memory. The code is returned
+	 *  for this window and is not written down.
+	 */
+	workflowShowApprovalCode: (runId: string, stepId: string) => typedError<string, IpcError>(__TAURI_INVOKE("workflow_show_approval_code", { runId, stepId })),
 	/**
 	 *  Have a model write a workflow from `description`, through Drafting: the agent the user has
 	 *  in its non-interactive mode, or their Anthropic key. The answer is checked as a typed file
@@ -685,7 +721,7 @@ export const commands = {
 	 */
 	usageTokens: (days: number, utcOffsetMinutes: number) => typedError<UsageReport, IpcError>(__TAURI_INVOKE("usage_tokens", { days, utcOffsetMinutes })),
 	/**  Whether Usage is offered at the foot of the sidebar. */
-	settingsSaveUsage: (showInSidebar: boolean) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_usage", { showInSidebar })),
+	settingsSaveUsage: (showInSidebar: boolean) => typedError<SettingsInfo_Serialize, IpcError>(__TAURI_INVOKE("settings_save_usage", { showInSidebar })),
 	/**  Every schedule of every project, by name. */
 	scheduleList: () => typedError<Schedule[], IpcError>(__TAURI_INVOKE("schedule_list")),
 	/**  A schedule's history, newest first. */
@@ -766,23 +802,43 @@ export const events = {
 export type Action = 
 /**  Start a harness in the run's workspace, with a first message. */
 { action: "start_session"; harness: string; prompt: string | null; model: string | null; effort: string | null; skipMemory: boolean } | 
-/**  Wait for a session to settle or to end. */
-{ action: "wait_session"; session: SessionRef; until: Until; timeoutSecs: number | null } | 
+/**
+ *  Wait for a session to settle or to end. With `clarify`, the agent may ask the person
+ *  questions first. The session going quiet is still not a question.
+ */
+{ action: "wait_session"; session: SessionRef; until: Until; timeoutSecs?: number | null; 
+/**
+ *  The agent may call `ys workflow ask`. The step waits for each answer, then
+ *  finishes only once no question is open.
+ */
+clarify?: boolean; 
+/**
+ *  How many rounds of questions this step allows. `0` when `clarify` is false.
+ *  The file's default, when clarify is on and this is left out, is 3.
+ */
+maxRounds?: number } | 
 /**  Paste a message into a live session once it is quiet. A busy agent is never written to. */
 { action: "send_to_session"; session: SessionRef; prompt: string; timeoutSecs: number | null } | 
 /**  Wait for a review or a comment on the workspace's pull request, newer than the run. */
 { action: "wait_pr_activity"; kind: PrActivity; timeoutSecs: number | null } | 
 /**
  *  Run a smoke test in the run's workspace and wait for its verdict. The step succeeds once
- *  the test passed or failed — a later step reads `verdict` and acts on either — and fails
- *  only when the run reaches no verdict (cancelled, errored) or does not end in time. Leaves
- *  `run`, `verdict` and `summary` (the text `ys test wait` prints) for later steps.
+ *  the test passed or failed, so a later step can read `verdict` and act on either, and
+ *  fails only when the run reaches no verdict (cancelled, errored) or does not end in time.
+ *  With `gate` on the step, a failed verdict fails the step instead and the run stops,
+ *  skipping every step still going. Leaves `run`, `verdict` and `summary` (the text
+ *  `ys test wait` prints) for later steps.
  */
 { action: "run_test"; test: string; 
 /**  Values for the test's inputs, by input id; may hold `{{ variables }}`. */
 inputs: { [key in string]: string }; timeoutSecs: number | null } | 
 /**  Tell the person who started the run. */
-{ action: "notify"; title: string; body: string | null };
+{ action: "notify"; title: string; body: string | null } | 
+/**
+ *  Wait until a person approves, rejects, or requests changes. Always a gate. Waiting for
+ *  a GitHub review is [`Action::WaitPrActivity`], not this. Leaves `decision` and `feedback`.
+ */
+{ action: "approve"; prompt: string | null; timeoutSecs: number | null };
 
 /**  New events were recorded for these workspaces; a timeline showing one should ask again. */
 export type ActivityChanged = {
@@ -928,6 +984,40 @@ export type AppPart = {
 	part: string,
 	load: Load,
 };
+
+/**
+ *  What a person decided on an approval step.
+ * 
+ *  `changes_requested` is its own decision, not a rejection. With no `on` routes, both a
+ *  rejection and a request for changes stop the run. A route can send either somewhere else.
+ */
+export type ApprovalDecision = "approved" | "rejected" | "changes_requested";
+
+/**  A named document a step hands to later steps of the same run. */
+export type ArtifactDecl = {
+	name: string,
+	/**  Where the text comes from when the step succeeds. */
+	source: ArtifactSource,
+};
+
+/**  Where an artifact's text comes from. A conversation is copied only when the file asks. */
+export type ArtifactSource = 
+/**  A file in the workspace, read when the step succeeds. */
+{ from: "file"; path: string } | 
+/**  Text from the workflow file, with its variables filled in. */
+{ from: "text"; text: string } | 
+/**  One field this step already leaves, such as `summary`. */
+{ from: "output"; field: string } | 
+/**
+ *  One session's conversation. Without `raw`, the budgeted digest. With `raw`, each turn's
+ *  own text. Tool output is not part of either: a turn does not keep it.
+ */
+{ from: "transcript"; session: SessionRef; raw: boolean } | 
+/**
+ *  The questions, the answers, and the agent's summary for a clarifying `wait_session`.
+ *  Compiled when the step finishes. Nothing is read from the terminal.
+ */
+{ from: "brief" };
 
 export type AssistStatus = {
 	keySource: KeySource,
@@ -1079,6 +1169,20 @@ export type ConversationContext = {
 	note: string,
 	/**  What `ys workspace context` gives now. */
 	digest: string,
+};
+
+/**  One command waiting for a yes in the window. */
+export type CoordinatorConfirmation = {
+	id: string,
+	/**  The command line, for the dialog. Display only: answering does not run it. */
+	command: string,
+	/**
+	 *  When the request was written, in milliseconds, so the oldest is asked first.
+	 * 
+	 *  A float rather than an integer: the binding generator refuses a 64-bit integer, and a
+	 *  millisecond count is exact in a float for centuries.
+	 */
+	createdUnixMs: number | null,
 };
 
 /**  What the panel needs to draw itself. */
@@ -1449,6 +1553,49 @@ export type Filters_Serialize = {
 	 */
 	elsewhere?: boolean,
 };
+
+/**
+ *  How much the Floor Manager may do through `ys` on its own.
+ * 
+ *  Destructive commands are refused at every level. See [`crate::coordinator::Action`].
+ */
+export type FloorManagerLevel = FloorManagerLevel_Serialize | FloorManagerLevel_Deserialize;
+
+/**
+ *  How much the Floor Manager may do through `ys` on its own.
+ * 
+ *  Destructive commands are refused at every level. See [`crate::coordinator::Action`].
+ */
+export type FloorManagerLevel_Deserialize = 
+/**  Look. Every command that starts something or writes is refused. */
+"read-only" | 
+/**  Look. Every command that starts something or writes is refused. */
+"read_only" | 
+/**  Look. Every command that starts something or writes is refused. */
+"readonly" | 
+/**  Starts and writes wait for a yes in the app. The default. */
+"ask" | 
+/**
+ *  May start agents, workspaces, workflows, tests and checkouts, and other writes that
+ *  are not destructive, without asking.
+ */
+"trusted";
+
+/**
+ *  How much the Floor Manager may do through `ys` on its own.
+ * 
+ *  Destructive commands are refused at every level. See [`crate::coordinator::Action`].
+ */
+export type FloorManagerLevel_Serialize = 
+/**  Look. Every command that starts something or writes is refused. */
+"read-only" | 
+/**  Starts and writes wait for a yes in the app. The default. */
+"ask" | 
+/**
+ *  May start agents, workspaces, workflows, tests and checkouts, and other writes that
+ *  are not destructive, without asking.
+ */
+"trusted";
 
 /**  Which forge a host is, as far as the shape of its URLs goes. */
 export type ForgeKind = "github" | "gitlab" | "bitbucket" | 
@@ -2050,6 +2197,9 @@ export type OtherWorkspace = {
 export type OutcomeFilter = "any" | "succeeded" | 
 /**  Failed or cancelled. */
 "failed";
+
+/**  The only outcomes a branch may name. Free text is not one of these. */
+export type OutcomeName = "passed" | "failed" | "approved" | "rejected" | "changes_requested";
 
 /**  A piece of a step's output, from where the last piece ended. */
 export type OutputChunk = {
@@ -2730,6 +2880,12 @@ export type ReviewState = "approved" | "changesRequested" | "commented" | "dismi
 /**  What a review concluded. */
 export type ReviewStateFilter = "approved" | "changes_requested" | "commented";
 
+/**  One structured outcome and where the run goes next. `to` is a step id, or `stop`. */
+export type Route = {
+	when: OutcomeName,
+	to: string,
+};
+
 /**
  *  What a run is about. A workspace run knows the workspace, its branch and its pull request.
  *  A tracked pull request's run is about one the workspace follows in another repository
@@ -3029,7 +3185,9 @@ export type SessionStarted = {
 
 export type SessionState = { status: "running" } | { status: "exited"; exit: ExitInfo };
 
-export type SettingsInfo = {
+export type SettingsInfo = SettingsInfo_Serialize | SettingsInfo_Deserialize;
+
+export type SettingsInfo_Deserialize = {
 	/**  The "Open in editor" command; `None` tries the common editors in turn. */
 	editorCommand: string | null,
 	notifyWhenQuiet: boolean,
@@ -3044,6 +3202,37 @@ export type SettingsInfo = {
 	activity: ActivitySettingsDto,
 	/**  Offer Usage at the foot of the sidebar. */
 	showUsageInSidebar: boolean,
+	/**  How much the Floor Manager may do through `ys`. */
+	floorManager: FloorManagerLevel_Deserialize,
+	/**
+	 *  Whether a waiting approval's notification includes the one-time code. The platform
+	 *  default is included on macOS and Windows, and left out on Linux.
+	 */
+	approvalCodeInNotification: boolean,
+};
+
+export type SettingsInfo_Serialize = {
+	/**  The "Open in editor" command; `None` tries the common editors in turn. */
+	editorCommand: string | null,
+	notifyWhenQuiet: boolean,
+	checkForUpdates: boolean,
+	workspaces: WorkspaceSettingsDto,
+	defaultWorktreeRoot: string,
+	/**  Set while `YARDSORT_WORKTREE_ROOT` overrides the setting. */
+	worktreeRootOverride: string | null,
+	filePath: string,
+	/**  Why the settings file was ignored, if it was (it is kept, never overwritten). */
+	problem: string | null,
+	activity: ActivitySettingsDto,
+	/**  Offer Usage at the foot of the sidebar. */
+	showUsageInSidebar: boolean,
+	/**  How much the Floor Manager may do through `ys`. */
+	floorManager: FloorManagerLevel_Serialize,
+	/**
+	 *  Whether a waiting approval's notification includes the one-time code. The platform
+	 *  default is included on macOS and Windows, and left out on Linux.
+	 */
+	approvalCodeInNotification: boolean,
 };
 
 /**  Where a workflow came from. */
@@ -3082,7 +3271,62 @@ export type Step = {
 	 *  run together.
 	 */
 	needs: string[],
+	/**
+	 *  Whether a failed verdict fails this step and stops the run.
+	 * 
+	 *  `run_test` accepts the flag. Absent means that step is not a gate, so a failed verdict
+	 *  still succeeds it. An `approve` step is always a gate. With no `on` routes, a rejection
+	 *  or a request for changes stops the run. `is_gate` is what the engine reads when the
+	 *  step has no routes.
+	 */
+	gate?: boolean,
+	/**  Named documents this step leaves when it succeeds. A later step reads one by name. */
+	produces?: ArtifactDecl[],
+	/**  Named documents from earlier steps that this step is given. */
+	consumes?: string[],
+	/**
+	 *  Where each structured outcome goes. Empty means a failed gate stops the run and a
+	 *  success lets every step that needs this one start.
+	 */
+	routes?: Route[],
+	/**
+	 *  How many times this step may run, including the first. Required when a route comes
+	 *  back to it. From 2 to 10.
+	 */
+	maxAttempts?: number | null,
 } & Action;
+
+/**
+ *  What a step concluded, apart from whether its row succeeded or failed.
+ * 
+ *  A step that judges something produces one: a smoke test's verdict, or an approval.
+ *  A branch reads this, not free text. With no routes, [`react`] is the one place the
+ *  run takes that verdict. It is stored on the step row, not in `outputs`. `outputs` stay the strings
+ *  a later step reads as `{{ steps.<id>.<field> }}`, and this is not `wait_session`'s
+ *  `outcome` field.
+ */
+export type StepOutcome = {
+	verdict: StepVerdict,
+	/**
+	 *  Why, when the verdict is failed. Null when it passed. A row saved before this
+	 *  field omits it, and that reads the same as null.
+	 */
+	reason?: string | null,
+	/**
+	 *  Set when a person decided an approval. Absent on a smoke-test verdict, and on a row
+	 *  saved before approvals existed.
+	 */
+	decision?: ApprovalDecision | null,
+	/**  What they wrote with the decision. Null when they wrote nothing. */
+	feedback?: string | null,
+	/**  Who decided: `app` from the window, or the name of the account `ys` ran as. */
+	actor?: string | null,
+	/**  When they decided, in milliseconds since the epoch. */
+	decidedAt?: number | null,
+};
+
+/**  Passed or failed. The words match a smoke test's verdict. */
+export type StepVerdict = "passed" | "failed";
 
 /**  One step, as the card lists it. */
 export type StepWords = {
@@ -3819,6 +4063,18 @@ export type Workflow = {
 	steps: Step[],
 };
 
+/**  A named document stored on a run, as the run view shows it. */
+export type WorkflowArtifact = {
+	name: string,
+	/**  `file`, `text`, `output` or `transcript`. */
+	source: string,
+	/**  The path, the field, or `digest` / `raw`. Absent for text written in the file. */
+	detail: string | null,
+	body: string,
+	/**  The body was cut at the size cap. */
+	truncated: boolean,
+};
+
 /**  What checking a file's text found. */
 export type WorkflowCheck = {
 	/**  Step id to its current YAML source line, for chart navigation. */
@@ -3855,6 +4111,8 @@ export type WorkflowRun_Deserialize = {
 	createdAt: number | null,
 	startedAt: number | null,
 	endedAt: number | null,
+	/**  Why this run is blocked on a person, as in `your approval`. Absent when it is not. */
+	blockedOn: string | null,
 };
 
 /**  One run, as the view lists it. */
@@ -3874,6 +4132,8 @@ export type WorkflowRun_Serialize = {
 	createdAt: number | null,
 	startedAt: number | null,
 	endedAt: number | null,
+	/**  Why this run is blocked on a person, as in `your approval`. Absent when it is not. */
+	blockedOn: string | null,
 };
 
 /**
@@ -3892,7 +4152,40 @@ export type WorkflowStepRun = {
 	endedAt: number | null,
 	outputs: { [key in string]: string },
 	note: string | null,
+	/**  A verdict the step recorded, when it judged something. Absent otherwise. */
+	outcome: StepOutcome | null,
+	/**  Named documents this step handed on. Empty when it left none. */
+	artifacts: WorkflowArtifact[],
+	/**  Named documents this step reads, from earlier steps. An approval shows these. */
+	consumed: WorkflowArtifact[],
+	/**
+	 *  The one-time code for a waiting approval or a clarifying answer. Shown only in this
+	 *  window. Absent when this process does not hold one. Listing a run does not issue a code.
+	 */
+	approvalCode: string | null,
+	/**  A terminal has tried too many wrong codes. A new code comes from Show a new code. */
+	approvalLocked: boolean,
+	/**  The questions a clarifying step is waiting on. Absent when it is not. */
+	clarificationPrompt: string | null,
 };
+
+/**  A run waiting on a person, as the sidebar lists it. The same rows a later phone reads. */
+export type WorkflowWait = {
+	runId: string,
+	stepId: string,
+	workflowId: string,
+	workflowName: string,
+	workspaceName: string,
+	kind: WorkflowWaitKind,
+	blockedOn: string,
+	actionNeeded: string,
+	prompt: string | null,
+	/**  `Blocked: waiting for your approval.` */
+	blockedLine: string,
+};
+
+/**  `approval` or `question`. A clarification uses the same wait row. */
+export type WorkflowWaitKind = "approval" | "question";
 
 /**  Workflow writing has its own harness preference; commit and PR writers stay workspace-based. */
 export type WorkflowWriterStatus = {

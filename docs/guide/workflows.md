@@ -209,7 +209,10 @@ quiet or ends. To follow it:
 
 ```sh
 ys workflow runs                  # every run, newest first
-ys workflow runs --run 3f2a9c1e   # one run, step by step, with why a step failed or was skipped
+ys workflow runs --run 3f2a9c1e   # one run, its steps, artifacts, and any approval
+ys workflow approve 3f2a9c1e sign-off --code <code> --feedback "ship it"
+ys workflow reject 3f2a9c1e sign-off --code <code>
+ys workflow request-changes 3f2a9c1e sign-off --code <code> --feedback "split the migration"
 ys workflow cancel 3f2a9c1e       # stop it
 ```
 
@@ -234,22 +237,281 @@ What each step does while it runs:
 - **`run_test`** queues one of the workspace's [smoke tests](smoke-tests.md) and waits for its
   verdict. The run shows as a tab in the workspace, like any other. A test whose file you have
   not approved waits for you in Yardsort, and the step waits with it until its timeout. The step
-  succeeds once the test reaches a verdict — whether it passed or failed — so a later step can
-  read that verdict and act on either outcome; it fails only when the run reaches no verdict
-  (cancelled or errored) or does not end in time. It leaves the run's verdict and the summary
+  succeeds once the test reaches a verdict, whether it passed or failed, so a later step can
+  read that verdict and act on either. It fails only when the run reaches no verdict
+  (cancelled or errored) or does not end in time. With `gate: true`, a failed verdict fails
+  the step, skips every other step that has not finished, and stops the run. It leaves the run's verdict and the summary
   `ys test wait` prints for later steps to use.
 - **`notify`** shows a system notification.
+- **`approve`** waits for you to approve, reject, or request changes. It is always a gate.
+  Waiting for a GitHub review is not this. See [An approval](#an-approval).
 
-A step runs only when every step in its `needs` succeeded. When one fails, the steps after it are
-skipped, and the run fails with that step's reason.
+A step runs only when every step in its `needs` succeeded. When one fails, the steps that need it
+are skipped, and the run fails with that step's reason. A gate that fails also skips the steps
+that do not need it. See [A test that must pass](#a-test-that-must-pass).
+
+### A test that must pass
+
+A `run_test` step with `gate: true` stops the whole run when the smoke test's verdict is a
+failure. Every step that has not finished is skipped, including one that does not list the
+gate in `needs` and one that is still waiting, so a long wait does not keep the run open.
+A step that lists the gate in `needs` says the gate did not succeed. One that does not says
+the gate failed. A smoke test another step was waiting on is cancelled, so it does not keep
+running or keep asking to be approved.
+
+The run's error is a short line. It names the step and then the first line of the report,
+such as failed login (2 of 6 steps passed). The step's note is the full report `ys test wait`
+prints. You see both on the run in the app and in `ys workflow runs --run <id>`.
+`ys workflow runs --run <id> --json` includes the report on the step and its outcome. A
+schedule or a trigger that tells you when a run fails sends that short line. When the reason
+is more than one line, or was cut short, it also says to open Yardsort for the report. A
+`notify` step that needs the test does not run, because its message was written for a pass.
+
+A run you start by hand, with no schedule and no trigger, does not send a system notification
+on its own. The failure is on the run, and in `ys workflow runs --run <id>`.
+
+Without `gate`, a failed test still lets the workflow continue, which is how **Smoke test,
+then tell the agent** reports a failure for the agent to repair.
+
+```yaml
+id: check
+name: Check
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: smoke
+    action: run_test
+    test: login
+    gate: true
+    timeout: 30m
+  - id: tell
+    action: notify
+    needs: [smoke]
+    title: Tests passed
+```
+
+A file written before `gate` existed still loads. Leaving it out, or writing `gate: false`,
+keeps the old behaviour.
+
+### An approval
+
+An `approve` step waits for you. Put it after a brief, a plan or a review, or before a
+release. It is a gate: the steps that need it do not start until you approve. A rejection
+stops the run, the same way a failed test gate does, and it is not an approval. Waiting
+for a GitHub review (`wait_pr_activity`) is not this. That is a comment on a pull request,
+not a decision you make here.
+
+The run shows the artifacts the step consumes, so you can read the plan or the review
+before you decide. You approve, reject, or request changes, and you can leave a note.
+Requesting changes needs a note. With no `on` routes, a request for changes stops the
+run. The note is kept as an artifact named `changes-<step id>`, source `decision`, for
+a later revision to read. [Conditional paths](#conditional-paths) can send that note
+back to an earlier step. The step also
+leaves `decision` and `feedback` for a later step to read as
+`{{ steps.<id>.decision }}` and `{{ steps.<id>.feedback }}`.
+
+You decide in the app, which needs no code, or from a terminal Yardsort did not start.
+Leave `--code` out and `ys` asks at the terminal without echoing the code. That prompt
+needs a real console. On Windows that is cmd, PowerShell, or Windows Terminal. Git Bash
+and mintty have no console for it: pass `--code -` and pipe the code in. With no
+terminal at all, `ys` fails at once and says to do that, instead of waiting. `--code -`
+reads one line from standard input. Passing the code as `--code <code>` still works,
+and `ys` warns, because that form stays in your shell history and in the process list.
+The code is about eight characters. Yardsort shows it on the run. The notification
+includes it unless Settings → General leaves it out, which is the default on Linux.
+The notice then says to open Yardsort for the code. `ys workflow runs` does not print
+the code, and neither does `--json`. A wrong code is refused. After five wrong codes,
+`ys` stops until you press **Show a new code** in the window. Opening Yardsort again
+does not clear those wrong tries. Listing the run does not issue a code. Opening
+Yardsort replaces a code that was only in memory, and sends
+a new notification, unless the schedule or trigger says `never`. Yardsort does not
+have to be open for a correct code to be recorded. The run applies it once the next
+time it is open, and does not apply it again.
+
+```sh
+ys workflow approve 3f2a9c1e sign-off --feedback "ship it"
+ys workflow reject 3f2a9c1e sign-off
+ys workflow request-changes 3f2a9c1e sign-off --feedback "split the migration"
+```
+
+Each of those asks for the code. To pass it without a prompt:
+
+```sh
+ys workflow approve 3f2a9c1e sign-off --code - --feedback "ship it"
+```
+
+and type the code on standard input. The code is the one Yardsort showed you. It is
+not printed by `ys workflow runs`.
+
+A session Yardsort started cannot decide, even if it drops `YARDSORT_COORDINATOR`.
+`ys` refuses when any of `YARDSORT_COORDINATOR`, `YARDSORT_RUN_ID`,
+`YARDSORT_WORKSPACE_ID` or `YARDSORT_SESSION_RECORD_ID` is set. The Floor Manager is
+refused at every permission as well. This is not a sandbox. A process running as you
+that writes the database directly is not stopped.
+
+A decision is recorded once. A second one is refused, and so is one on a run that has
+already ended. The run says `Blocked: waiting for your approval.` and what to do.
+The sidebar lists every run waiting on you. `ys workflow runs` has a WAITING ON
+column. `ys workflow runs --run <id>` shows a step that is still waiting and the
+artifacts it reads. It does not print a command that includes the code. It also
+shows a decision once it is recorded: who, when, and the note. `--json` includes
+`waitingOn`, `pendingApprovals` and `decisions`.
+
+An artifact name that starts with `changes-` is reserved. The request writes
+`changes-<step id>` itself.
+
+A schedule or a trigger whose notify is not `never` tells you when a run starts waiting
+for approval. So does a run you started yourself, and a schedule you started by hand.
+`notify: never` does not.
+
+`prompt` is optional, and can use variables. `timeout` is optional. Left out, the step
+waits until you decide. A timeout fails that step, records no decision, and does not
+stop a step that does not need it. `gate: false` is refused, because an approval is a
+gate. Leaving `gate` out is the same as writing `gate: true`.
+
+### Asking a question
+
+An approval judges something the agent has already written. A clarification is earlier
+than that: the agent does not know enough yet, so it asks, and the same session continues
+with the answer.
+
+```yaml
+- id: discover
+  needs: [draft]
+  action: wait_session
+  session: "{{ steps.draft.session }}"
+  until: settled
+  clarify: true
+  max_rounds: 3
+  produces:
+    - name: brief
+      from: brief
+```
+
+`clarify: true` is what makes the step able to wait for you. The agent asks with
+`ys workflow ask --question "..."`, one `--question` for each question in the round.
+Yardsort stores that round and the run waits. A question the agent only prints is not
+asked. The step does not finish because the session went quiet. It finishes when the
+agent records a summary, or when `until: exited` and the session has ended with no
+question still open. With `until: settled`, a quiet session that is still running and
+has no summary keeps waiting until `timeout`, and then the step fails. If that session
+ends first, with no summary, the step fails and says the session ended without a
+summary. The same happens when a question is still waiting for an answer. An answer
+that was given and not yet typed fails because it could not be sent back.
+
+You answer in the run view, which does not ask for a code, or from a terminal Yardsort
+did not start. The terminal needs the one-time code the window and the notification
+show, the same way an approval does:
+
+```sh
+ys workflow answer 3f2a9c1e discover --text "30 seconds"
+```
+
+Leave `--code` out and type the code when asked, or pass `--code -` and the code on
+standard input. The answer is typed back into the same session. If that session is busy,
+nothing is typed and the next pass tries again. If Yardsort stops after it has claimed
+the answer and before the typing is confirmed, the step fails and says the answer may
+not have reached the session. It is not typed a second time. The agent can ask again, up
+to `max_rounds` (3 when left out, 10 at most). One more than that fails the step. The run
+says `Blocked: waiting for your answer.` and `ys workflow runs` shows `your answer` in
+WAITING ON.
+
+When the agent is finished it records the outcome with `ys workflow summary --text`.
+That is refused while a question is still waiting for an answer. That text, with every
+question and answer, is the `brief` artifact. A later step
+`consumes` it like any other named artifact. The brief is not read out of the terminal.
+A summary is what finishes the step when `until` is `settled`. If the agent records no
+summary and the session ends because `until` is `exited`, the brief says so.
+
+A session Yardsort started can ask and can record the summary. It cannot answer. That
+stays with you. This is not an approval. The one-time code works the same way as one:
+the window shows it, the notification includes it unless Settings → General leaves it
+out, and `ys workflow runs` does not print it. After five wrong codes the terminal
+stops until you press **Show a new code**.
+
+`timeout` still fails the step when you have not answered in time, or when a summary
+never arrives. A schedule or a trigger whose notify is not `never` tells you a
+question is waiting. `notify: never` stays quiet, and the code is still issued, so a
+terminal can answer.
+
+### Conditional paths
+
+`on` sends a step to a different place depending on its outcome. It is only for `approve`
+and `run_test`. The keys are the outcomes that step can produce, and each value is a
+step id or `stop`. Yardsort does not branch on the text of a note or a report.
+
+```yaml
+- id: sign-off
+  needs: [plan]
+  action: approve
+  prompt: Look at the plan.
+  on:
+    approved: implement
+    changes_requested: plan
+    rejected: stop
+  max_attempts: 3
+- id: verify
+  needs: [implement]
+  action: run_test
+  test: "{{ inputs.check }}"
+  gate: true
+  on:
+    passed: ship
+    failed: implement
+  max_attempts: 3
+```
+
+`approved` goes on to `implement`. `changes_requested` runs `plan` again and gives it the
+note as `changes-sign-off`. `rejected` stops the run. A failed `verify` runs `implement`
+again and gives it `failure-verify`, the report. A failed route that goes forward leaves
+`failure-<step>` for the step it goes to. A pass goes on to `ship`. A pass that goes to
+`stop` still ends the run when that step also `produces` an artifact: the run stops once
+the artifact is saved.
+
+Leave `on` out and the step behaves as before: a failed gate stops the run, and a success
+lets every step that needs this one start.
+
+An `approve` step must say where `approved`, `rejected` and `changes_requested` go. A
+`run_test` step must say where `passed` and `failed` go. A target has to be a later step
+that needs this one, or an earlier step this one needs, or `stop`. A step that no path
+can reach is refused when the file is checked, and so is a loop with no `max_attempts`.
+
+`max_attempts` counts every entry, including the first. It is at least 2 and at most 10.
+The count is stored on the step. An inner loop's `max_attempts` counts entries across
+outer loops, because the count is never reset. Quitting and opening Yardsort again does
+not add one and does not start the count over. When the limit is reached the run stops, names the
+outcome and the limit, and says to start a new run. You see that on the run in the app
+and in `ys workflow runs`.
+
+Sending the work back does not reuse an approval. Each pass waits again, shows a new
+one-time code, and needs a new decision. A session Yardsort started still cannot decide,
+and neither can the Floor Manager. The note or the failed report is an artifact the
+step being run again can `consumes`. Each attempt is kept. A later attempt does not
+overwrite an earlier one. The step reads the latest.
+
+`stop` on a failure stops the run. `stop` on a pass ends the run successfully and skips
+steps that have not finished.
+
+A file written before `on` existed still loads.
+
+A file written before approvals existed still loads. A run that was queued before this
+change has no approval step, and it keeps running as it did.
 
 **Cancelling** stops the run. Agents it started keep running as ordinary sessions: close them as
 you would any other.
 
 **If Yardsort quits during a run,** the run carries on when you open it again. A step that was
-waiting keeps waiting. A step Yardsort was in the middle of, such as starting an agent, fails
-saying so rather than being done twice. An agent that settled while Yardsort was closed is only
-noticed if its harness reported the finished turn.
+waiting keeps waiting, and a gate is not approved or skipped. A decision you recorded while it
+was closed is applied once. A step Yardsort was in the middle of, such as starting an agent,
+fails saying so rather than being done twice. A notification already sent is not sent again,
+and an artifact already written is not written again. A request for changes writes its
+artifact in the same change as the decision, or in the same change as sending the work
+back, so a restart does not write it later. A loop's attempt count is kept, and a
+rewind that already happened is not applied again. The
+one-time approval code is replaced, because it was only in memory, and you are told. Wrong
+tries are kept: five of them stay locked until **Show a new code**. An agent that settled while Yardsort was
+closed is only noticed if its harness reported the finished turn.
 
 ## Requesting a code review
 
@@ -346,14 +608,15 @@ Every step has an `id`, named the same way as an input, and an `action`. `needs`
 steps that must finish first. A step cannot need itself. Steps that wait for each other in a
 circle are reported, because none of them could ever start.
 
-| Action             | Keys                                                             | What it does                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `start_session`    | `harness` (required), `prompt`, `model`, `effort`, `skip_memory` | Starts an agent in the workspace, like the composer does, with `prompt` as its first message. It opens as a tab there. `harness` is an agent's id, like `claude`, or exactly `{{ inputs.<id> }}` for an input of kind `harness`.                                                                                                                             |
-| `wait_session`     | `session` (required), `until`, `timeout`                         | Waits for a session. `until: settled`, the default, means it has gone quiet after at least 8 seconds of output, or its harness reported a finished turn. `until: exited` means the program has ended.                                                                                                                                                        |
-| `send_to_session`  | `session` (required), `prompt` (required), `timeout`             | Types `prompt` into a running session. It waits until that session is quiet: a busy agent is never interrupted. If the session is gone, the step is skipped.                                                                                                                                                                                                 |
-| `wait_pr_activity` | `kind`, `timeout`                                                | Waits for a new review or comment on the workspace's pull request, since the run started. `kind` is `review`, `comment` or `any`, the default.                                                                                                                                                                                                               |
-| `run_test`         | `test` (required), `inputs`, `timeout`                           | Runs a smoke test in the workspace and waits for its verdict. The step succeeds whether the test passed or failed, so a later step can read `verdict` and act on either; it fails only on no verdict or a timeout. `test` is a test id, or exactly `{{ inputs.<id> }}` for an input of kind `test`. `inputs` is a map of the test's own input ids to values. |
-| `notify`           | `title` (required), `body`                                       | Tells you, with a system notification.                                                                                                                                                                                                                                                                                                                       |
+| Action             | Keys                                                              | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `start_session`    | `harness` (required), `prompt`, `model`, `effort`, `skip_memory`  | Starts an agent in the workspace, like the composer does, with `prompt` as its first message. It opens as a tab there. `harness` is an agent's id, like `claude`, or exactly `{{ inputs.<id> }}` for an input of kind `harness`.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `wait_session`     | `session` (required), `until`, `timeout`, `clarify`, `max_rounds` | Waits for a session. `until: settled`, the default, means it has gone quiet after at least 8 seconds of output, or its harness reported a finished turn. `until: exited` means the program has ended. `clarify: true` lets the agent ask you questions. That step finishes when the agent records `ys workflow summary`, or when `until` is `exited` and the session has ended with no question still open. Going quiet does not finish it. A session that ends with no summary fails the step. A session that is still running and has no summary waits until `timeout` and then fails. `max_rounds` is how many rounds, from 1 to 10, and 3 when left out. |
+| `send_to_session`  | `session` (required), `prompt` (required), `timeout`              | Types `prompt` into a running session. It waits until that session is quiet: a busy agent is never interrupted. If the session is gone, the step is skipped.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `wait_pr_activity` | `kind`, `timeout`                                                 | Waits for a new review or comment on the workspace's pull request, since the run started. `kind` is `review`, `comment` or `any`, the default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `run_test`         | `test` (required), `inputs`, `timeout`, `gate`                    | Runs a smoke test in the workspace and waits for its verdict. The step succeeds whether the test passed or failed, so a later step can read `verdict` and act on either; it fails only on no verdict or a timeout. `gate: true` makes a failed verdict fail the step, skip the steps still going, and stop the run. `test` is a test id, or exactly `{{ inputs.<id> }}` for an input of kind `test`. `inputs` is a map of the test's own input ids to values.                                                                                                                                                                                                |
+| `notify`           | `title` (required), `body`                                        | Tells you, with a system notification.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `approve`          | `prompt`, `timeout`, `gate`                                       | Waits for you to approve, reject, or request changes. Always a gate: a rejection or a request for changes stops the run. `prompt` is the question, and can use variables. `timeout`, when set, fails the step with no decision and does not stop a step that does not need it. `gate: false` is refused. Waiting for a GitHub review is `wait_pr_activity`, not this.                                                                                                                                                                                                                                                                                        |
 
 A key that belongs to another action is reported as misplaced. `title` on a `start_session` step
 is an example.
@@ -376,12 +639,61 @@ nothing else: no filters, no expressions. Anything else is reported where it is 
 | `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task`                                                                    | The workspace the run is about. `task` is the first message it was started with. In the project's own checkout, `branch` is whatever git has checked out, and `base_branch` the repository's default branch, unless that is the branch itself.                                                                                                                    |
 | `pr.number`, `pr.url`, `pr.title`, `pr.repo`, `pr.clone`                                                                                                             | The open pull request for the workspace's branch, found when the run is queued. For a `tracked_pull_request` workflow, the one it is about, read by its link, with `pr.repo` its repository (`owner/name`) and `pr.clone` the project's nested clone of it; both are empty for a workspace's own.                                                                 |
 | `inputs.<id>`                                                                                                                                                        | What was given for that input.                                                                                                                                                                                                                                                                                                                                    |
-| `steps.<id>.<field>`                                                                                                                                                 | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`. The step must be among this step's `needs`.                                                                                                                 |
+| `steps.<id>.<field>`                                                                                                                                                 | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`, `decision` and `feedback` from `approve`. The step must be among this step's `needs`.                                                                       |
 | `memory`                                                                                                                                                             | The project's [memory](memory.md): its approved entries, cited, when the project shares it and has any. Empty otherwise. It never carries the request to propose new entries that an agent you start yourself gets. An agent's first message gets the memory after it anyway; put `{{ memory }}` in a `start_session` prompt to have it there instead, not twice. |
 | `handoff`                                                                                                                                                            | The workspace's [handoff](terminals-and-sessions.md#handing-work-to-another-agent) packet: what happened there so far.                                                                                                                                                                                                                                            |
+| `artifacts.<name>`                                                                                                                                                   | Text of an artifact this step consumes. See [Artifacts](#artifacts).                                                                                                                                                                                                                                                                                              |
 | `event.kind`, `event.count`, `event.note`, `event.head`, `event.summary`, `event.verdict`, `event.url`, `event.number`, `event.title`, `event.authors`, `event.name` | What set off a run a [trigger](triggers.md#what-the-workflow-is-told) started. Empty in a run you started yourself.                                                                                                                                                                                                                                               |
 
 To write `{{` literally, for example in a prompt about a template language, write `\{{`.
+
+### Artifacts
+
+A step can hand a named document to a later step, so the next agent does not start from nothing.
+`produces` lists what this step leaves when it succeeds. `consumes` lists what a later step is
+given. The step that produces a name must be among its needs, directly or through other steps.
+
+| Key       | What it is                                                                                                                                          |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`    | A lowercase name, like a step id: `spec`, `plan`, `report`.                                                                                         |
+| `path`    | A file inside the workspace, read when the step succeeds.                                                                                           |
+| `text`    | Text written here, with variables filled in.                                                                                                        |
+| `field`   | One field this step already leaves, such as `summary`.                                                                                              |
+| `from`    | `file`, `text`, `output`, `transcript` or `brief`. A transcript needs `from: transcript`. `brief` is only on a `wait_session` with `clarify: true`. |
+| `session` | For a transcript. `origin`, or a session this workflow started.                                                                                     |
+| `raw`     | For a transcript only. Keeps each turn's text. Otherwise the digest.                                                                                |
+
+A `start_session` or `send_to_session` that consumes an artifact, and does not write
+`{{ artifacts.<name> }}` in its own prompt, is given the text under a heading. A notification is
+not. Put the variable in the title or the body if you want a short piece of it there.
+
+Read a file on the step that finishes the work, usually the `wait_session`. A `start_session`
+or `send_to_session` cannot hand on a file or a transcript: it succeeds before the agent has
+written or replied. Text written in the step, and a field the step leaves, can still be handed
+on. A `notify` step can hand on a file or a transcript that is already there when the notice
+is sent. It does not wait for an agent to write one. A missing file fails the step.
+
+Nothing secret is copied. A path that leaves the workspace is refused, and so is a link that
+resolves outside it or onto a secret. A name that looks like a secret is refused too: `.env`
+and `.envrc`, a key or a credential file, `.ssh`, `.git`, `.kube`, `.docker`, `secrets.*`,
+and a `.tfvars` file. A name with a colon, or one that ends in a dot or a space, is refused.
+Control characters in a body are dropped, except newlines and tabs, and so are
+bidirectional controls, U+200B, U+2060 and U+FEFF. U+200C and U+200D stay, because
+they are part of words in some languages. The text is cut at 32000
+characters, and the stored copy says so. A transcript is copied only when the step says
+`from: transcript`. It is the same digest Yardsort uses elsewhere, not the terminal
+scrollback, and not tool output. `raw: true` keeps each turn's own text in full, still
+without tool output, and it is still cut at 32000 characters.
+
+The run keeps what was handed on. Open the run to read it, or use `ys workflow runs --run <id>`.
+`--json` includes each artifact's name, step, source, body and which attempt wrote it.
+A step that succeeds again replaces the latest copy. Each attempt is also kept, so a
+revision does not overwrite the previous one. A failed attempt leaves the previous text,
+and a later step reads the latest copy stored when it starts. A name starting with
+`changes-` or `failure-` is reserved for the note a revision hands back. See
+[Conditional paths](#conditional-paths).
+
+A file written before this, and a run saved before it, still load. They simply have no artifacts.
 
 ## Checking a file
 

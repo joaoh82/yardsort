@@ -13,6 +13,7 @@ const core = vi.hoisted(() => ({
   settingsGet: vi.fn(),
   settingsSaveWorkspaces: vi.fn(),
   settingsSaveGeneral: vi.fn(),
+  settingsSaveFloorManager: vi.fn(),
   settingsSaveActivity: vi.fn(),
   activityDiagnostics: vi.fn(),
   activityClear: vi.fn(),
@@ -84,6 +85,7 @@ const settings: SettingsInfo = {
   editorCommand: null,
   notifyWhenQuiet: true,
   checkForUpdates: true,
+  approvalCodeInNotification: true,
   workspaces: { worktreeRoot: null, branchPrefix: "ys" },
   defaultWorktreeRoot: "/home/me/yardsort",
   worktreeRootOverride: null,
@@ -101,6 +103,7 @@ const settings: SettingsInfo = {
     captureCursor: false,
   },
   showUsageInSidebar: true,
+  floorManager: "ask",
 };
 
 const assistStatus = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
@@ -461,6 +464,7 @@ describe("Settings", () => {
       editorCommand: "zed",
       notifyWhenQuiet: true,
       checkForUpdates: true,
+      approvalCodeInNotification: true,
     });
 
     await user.clear(editor);
@@ -483,6 +487,25 @@ describe("Settings", () => {
       expect.objectContaining({ notifyWhenQuiet: false, checkForUpdates: true }),
     );
     expect(useAppStore.getState().notifyWhenQuiet).toBe(false);
+  });
+
+  it("saves the Floor Manager permission as soon as it is chosen", async () => {
+    core.settingsSaveFloorManager.mockImplementation(
+      async (level: SettingsInfo["floorManager"]) => ({
+        ...settings,
+        floorManager: level,
+      }),
+    );
+    const { user } = await openSettings();
+    await user.click(screen.getByRole("tab", { name: "General" }));
+    expect(await screen.findByRole("radio", { name: /Ask first/ })).toBeChecked();
+    expect(screen.getByText(/The next ys command follows this/)).toBeInTheDocument();
+
+    const trusted = screen.getByRole("radio", { name: /Trusted/ });
+    await user.click(trusted);
+    expect(core.settingsSaveFloorManager).toHaveBeenCalledWith("trusted");
+    await waitFor(() => expect(trusted).toBeChecked());
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("installs the ys command from General", async () => {

@@ -88,6 +88,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             workspaces::commands::settings_get,
             workspaces::commands::settings_save_workspaces,
             workspaces::commands::settings_save_general,
+            workspaces::commands::settings_save_floor_manager,
             workspaces::commands::project_branches,
             workspaces::commands::workspace_create,
             workspaces::commands::workspace_delete,
@@ -222,6 +223,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             coordinator::coordinator_status,
             coordinator::coordinator_start,
             coordinator::coordinator_stop,
+            coordinator::coordinator_confirmations,
+            coordinator::coordinator_answer,
             terminal::pty_spawn,
             terminal::pty_attach,
             terminal::pty_detach,
@@ -240,6 +243,10 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             workflows::commands::workflow_preview,
             workflows::commands::workflow_start,
             workflows::commands::workflow_cancel,
+            workflows::commands::workflow_decide,
+            workflows::commands::workflow_answer,
+            workflows::commands::workflow_open_waits,
+            workflows::commands::workflow_show_approval_code,
             workflows::commands::workflow_describe,
             smoke::commands::test_list,
             smoke::commands::test_catalog,
@@ -424,6 +431,10 @@ fn use_a_development_profile() {
         dir.display()
     );
     std::env::set_var("YARDSORT_DATA_DIR", dir);
+    // Settings for this profile sit beside its database. A config directory inherited
+    // from the shell (a Floor Manager workspace, or a parent that set one) would make
+    // `ys` read the release settings while this database is the development one.
+    yardsort_core::paths::clear_config_dir_env();
 }
 
 /// Everything the app needs before its window can be used. An error here is shown to the user by
@@ -432,13 +443,23 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
     // `YARDSORT_DATA_DIR` keeps experiments and tests away from the real database (and
     // settings, which then sit next to it instead of in the OS config directory).
     let profile = legacy::env_var_os("DATA_DIR").map(std::path::PathBuf::from);
+    // A named data directory is that whole profile. Drop a config directory from
+    // another launch before anything reads `paths`, so the window and `ys` open the
+    // same settings file. With no data directory, a config directory the user set is
+    // the one to use: that is the case the comparison below is checking.
+    if profile.is_some() {
+        yardsort_core::paths::clear_config_dir_env();
+    }
     let data_dir = match &profile {
         Some(dir) => dir.clone(),
         None => app.path().app_data_dir()?,
     };
     let config_dir = match &profile {
         Some(dir) => dir.clone(),
-        None => app.path().app_config_dir()?,
+        None => match legacy::env_var_os("CONFIG_DIR") {
+            Some(dir) => std::path::PathBuf::from(dir),
+            None => app.path().app_config_dir()?,
+        },
     };
     // First launch after the rename from Switchyard: bring the user's data along.
     if profile.is_none() {

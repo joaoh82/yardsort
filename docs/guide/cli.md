@@ -72,6 +72,17 @@ xattr -d com.apple.quarantine ys
 
 A copy installed this way does not update itself.
 
+## When the Floor Manager runs it
+
+The [Floor Manager](floor-manager.md) is started with `YARDSORT_COORDINATOR` set. While that
+variable is set, `ys` enforces **Floor Manager permission** from Settings: read only refuses a
+start or a write, ask first (the default) waits until the window records Allow, and trusted runs
+the ones that are not destructive. `ys workspace delete` (with or without `--force`),
+`ys task close` and `ys attach` are refused at every level. Your own `ys`, without that
+variable, is not gated. A shell command that is not `ys` is outside the gate. So is editing
+`settings.toml` so the level is `trusted`, and `ys --data-dir` pointed at a profile you made
+up. See [What it may do](floor-manager.md#what-it-may-do).
+
 ## Commands
 
 Run `ys --help`, or `ys <command> --help`, for the full list. Every command takes `--json`, which
@@ -572,9 +583,27 @@ ys workflow copy code-review     # your own copy to edit, used instead of the bu
 ys workflow validate fix-ci.yaml # each problem as file:line:column: message; exit 1 if any
 ys workflow validate -           # the same, reading the file from standard input
 ys workflow run ping --workspace fix-login --input note=hi   # queue a run; Yardsort must be open
-ys workflow runs                 # runs, newest first; --run <id> shows one step by step
+ys workflow runs                 # runs, newest first, with a WAITING ON column
+ys workflow approve 3f2a9c1e sign-off --feedback "ship it"
+ys workflow reject 3f2a9c1e sign-off
+ys workflow request-changes 3f2a9c1e sign-off --feedback "split the migration"
+ys workflow ask --question "What should the timeout be?"   # from the workflow's agent
+ys workflow summary --text "The timeout should be 30 seconds."
+ys workflow answer 3f2a9c1e discover --text "30 seconds"    # you, not the agent; asks for the code
 ys workflow cancel 3f2a9c1e      # stop a run; agents it started keep running
 ```
+
+`ask` and `summary` are how an agent in a clarifying step talks to you. They find the
+step from the session Yardsort started, or you name `--run` and `--step`. A question
+only printed in the terminal is not asked. `answer` is yours: a session Yardsort started
+cannot use it, and neither can the Floor Manager. It asks for the one-time code shown in
+the window and in the notification, the same way `approve` does. Leave `--code` out to
+type it with echo off, or pass `--code -` and the code on standard input. The window does
+not ask for the code. The same session receives the answer. `summary` is refused while a question is still waiting for an answer. A clarifying step finishes
+when the agent records `summary`, or when `until: exited` and the session has ended
+with no question still open. Going quiet does not finish it. A session that ends
+with no summary fails the step.
+See [Asking a question](workflows.md#asking-a-question).
 
 `copy` writes into the `workflows` folder and never overwrites; `--as <new-id>` makes a second
 workflow instead of a replacement. `validate` needs no profile, so it works on any machine, in CI, or on a file an agent has just
@@ -587,7 +616,25 @@ profile and carries no runs out yet; so do `ys test run` and `ys schedule run`. 
 or in an agent's terminal there, `--workspace` can be left out. It prints the run's id and
 returns at once. A workflow that uses the pull request needs the GitHub CLI (`gh`), logged in,
 and an open pull request for the workspace's branch. A run id can be shortened to its first
-characters, as `runs` prints it. `--json` works as everywhere. See
+characters, as `runs` prints it. `--json` works as everywhere.
+
+`approve`, `reject` and `request-changes` record your decision on a step that is waiting
+for approval. Leave `--code` out and `ys` asks at the terminal without echoing, when both
+standard input and standard error are terminals. Otherwise it fails at once: pass
+`--code -` and pipe the code in. On Windows the prompt needs cmd, PowerShell, or Windows
+Terminal. Git Bash and mintty use `--code -`. `--code -` reads one line from standard
+input. `--code <code>` warns, because the code stays in your shell history and in the
+process list. `runs` does not print that code. Yardsort does not have to be open: a
+correct code is stored, and the app applies it once on its next tick. Five wrong codes
+stop `ys` until the app shows a new one, and a restart does not clear that. `--feedback` is a note. It is
+required for `request-changes`. A decision is recorded once, and one on a run that has
+already ended is refused. A session Yardsort started cannot use these, and neither can the
+Floor Manager. This is not a sandbox: a process running as you that writes the database
+directly is not stopped. The plain list has a WAITING ON column. `runs --run <id>` says
+`Blocked: waiting for your approval.` when it is, shows a step that is still waiting, the
+artifacts it reads, and the decision once it is recorded. `--json` includes `waitingOn`,
+`pendingApprovals` and `decisions`, and not the code. See
+[An approval](workflows.md#an-approval). See
 [Running a workflow](workflows.md#running-a-workflow) and
 [Requesting a code review](workflows.md#requesting-a-code-review).
 

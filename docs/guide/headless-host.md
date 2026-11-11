@@ -285,14 +285,14 @@ paired device loses it. Works whether `serve` is running or not.
 
 ## Where things are
 
-| What                     | Where                                                                                                                                                                               |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The profile              | `--data-dir`, else `YARDSORT_DATA_DIR`, else `~/.local/share/dev.yardsort.app`: the database, the daemon's log, the activity inbox and spool                                        |
-| `settings.toml`          | In the profile when `--data-dir` or `YARDSORT_DATA_DIR` is set. Otherwise, on Linux, `$XDG_CONFIG_HOME/dev.yardsort.app`, else `~/.config/dev.yardsort.app`; elsewhere, the profile |
-| The sign-in              | `YARDSORT_CREDENTIALS_DIR`, else `credentials` in the profile                                                                                                                       |
-| Worktrees                | `~/yardsort`, or `YARDSORT_WORKTREE_ROOT`, or the setting in `settings.toml`, as for the app                                                                                        |
-| `serve`'s control socket | `$XDG_RUNTIME_DIR/yardsort/<tag>.host.sock`, else `host.sock` in the profile; only its user can reach it                                                                            |
-| The terminal daemon's    | `$XDG_RUNTIME_DIR/yardsort/<tag>.sock`, else `daemon.sock` in the profile                                                                                                           |
+| What                     | Where                                                                                                                                                                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The profile              | `--data-dir`, else `YARDSORT_DATA_DIR`, else `~/.local/share/dev.yardsort.app`: the database, the daemon's log, the activity inbox and spool                                                                                                                 |
+| `settings.toml`          | `YARDSORT_CONFIG_DIR` when that is set, unless `--data-dir` named the profile. Otherwise in the profile when `YARDSORT_DATA_DIR` is set. Otherwise, on Linux, `$XDG_CONFIG_HOME/dev.yardsort.app`, else `~/.config/dev.yardsort.app`; elsewhere, the profile |
+| The sign-in              | `YARDSORT_CREDENTIALS_DIR`, else `credentials` in the profile                                                                                                                                                                                                |
+| Worktrees                | `~/yardsort`, or `YARDSORT_WORKTREE_ROOT`, or the setting in `settings.toml`, as for the app                                                                                                                                                                 |
+| `serve`'s control socket | `$XDG_RUNTIME_DIR/yardsort/<tag>.host.sock`, else `host.sock` in the profile; only its user can reach it                                                                                                                                                     |
+| The terminal daemon's    | `$XDG_RUNTIME_DIR/yardsort/<tag>.sock`, else `daemon.sock` in the profile                                                                                                                                                                                    |
 
 Where `XDG_RUNTIME_DIR` is not set, as in a shell from `sudo -iu` or `su`, the sockets are looked for in
 `/run/user/<uid>`, the folder logind keeps for that user, so that such a shell and the systemd service

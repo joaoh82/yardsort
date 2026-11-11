@@ -13,6 +13,120 @@ has the downloads and the full commit lists.
   had none, even with its agent's new pull requests in the clones tracked beside it. See
   [A pull request in another repository](docs/guide/workflows.md#a-pull-request-in-another-repository).
 
+- **An agent in a workflow can ask you a question and continue in the same session.**
+  On a `wait_session` with `clarify: true`, the agent asks with `ys workflow ask`
+  (one `--question` each) and the run waits. You answer in the run view, or with
+  `ys workflow answer` from a terminal Yardsort did not start. The terminal needs the
+  one-time code shown in the window and, unless the run is set not to notify, in the
+  notification. The code is issued either way. The window does not ask for it.
+  The answer is typed back into that same session. A question only printed in the
+  terminal is not asked. The step finishes when the agent records `ys workflow summary`.
+  A summary is refused while a question is still waiting for an answer. The step also
+  finishes when `until: exited` and the session has ended with no question still open.
+  Going quiet does not finish it. Without a summary, a session that is still running
+  waits until the step's timeout and then fails. If the session ends first, the step
+  fails and says the session ended without a summary. Rounds are
+  limited by `max_rounds` (3 when left out, 10 at most). One more than that fails the
+  step. `from: brief` hands the questions, the answers and that summary to the next
+  phase. This is not an approval. The run says `Blocked: waiting for your answer.`
+  and `ys workflow runs` shows `your answer`. An answer that has not been claimed yet
+  is typed once when Yardsort opens again. If the process stopped after the claim and
+  before the typing was confirmed, the step fails and says the answer may not have
+  reached the session, and it is not typed again. A busy session does not keep the
+  claim, so the next pass tries again. See
+  [Asking a question](docs/guide/workflows.md#asking-a-question).
+- **Two workflow steps that loop back over the same steps in one pass both keep their notes.**
+  A failed check and a request for changes that send the same earlier steps back are
+  stored together, so neither `failure-<step>` nor `changes-<step>` is dropped. Each
+  note is stored at that step's own attempt count.
+- **A workflow can branch on a step's outcome, and send work back a limited number of times.**
+  An `approve` or `run_test` step may set `on`. `approved` can go on to implementation,
+  `changes_requested` can return the note to planning, a failed test can return to
+  implementation, and `rejected` can stop the run or follow a path you name. The branch
+  reads the outcome, not the text of a note. A route back needs `max_attempts`, from 2 to
+  10, including the first try. At the limit the run stops, says why, and says to start a
+  new run. You see that in `ys workflow runs` and on the run in the app. Each pass through
+  an approval waits again and needs a new code and a new decision. The note or the failed
+  report is an artifact the step being run again can read, and each attempt is kept. A
+  failed route that goes forward leaves that report for the step it goes to as well. An
+  earlier loop's note is not handed out again when a later loop runs those steps. A step
+  cannot be named `stop`. A pass that goes to `stop` still ends the run after the step
+  saves what it `produces`. A rewind is not applied when the run is already stopping, even
+  when the looping step comes first in the file, and a smoke test still running on a step
+  that is sent back is cancelled with that rewind. The count survives a
+  restart and is not increased twice. A file with no `on` still loads.
+  See [Conditional paths](docs/guide/workflows.md#conditional-paths).
+- **A workflow that is waiting on you stays waiting across a restart.** The run view
+  says `Blocked: waiting for your approval.` and what to do. The sidebar lists every
+  run waiting on you. `ys workflow runs` has a WAITING ON column, and `--run` and
+  `--json` say the same. A decision recorded while Yardsort was closed is applied
+  once when it opens again. A restart does not approve a gate, start a step twice,
+  send the waiting notification again, or write an artifact twice. The one-time code
+  lives only in memory, so opening the app replaces it and sends a new notification.
+  Listing a run does not. **Show a new code** in the window does, and sends one too.
+  Leave `--code` out and `ys` asks at the terminal without echoing, when you have a
+  real console. On Windows that is cmd, PowerShell, or Windows Terminal. Git Bash
+  and mintty use `--code -`. With no terminal, `ys` fails at once and tells you to
+  pass `--code -` and pipe the code in. `--code -` reads one line from standard
+  input. Passing the code on the command line warns, because it stays in shell
+  history and in the process list. Five wrong codes stay locked across a restart
+  until **Show a new code**. Settings → General can leave the code out of the
+  notification. That is the default on Linux, where other programs can read a
+  notification; the notice then says to open Yardsort for the code. A file written
+  before this still loads.
+- **A workflow can wait for your approval.** An `approve` step shows the artifacts it
+  reads and waits for you to approve, reject, or request changes. The steps that need
+  it do not start until you approve. A rejection stops the run, and it is not an
+  approval. Requesting changes needs a note, stops the run for now, and keeps that
+  note as an artifact named `changes-<step>` for a later revision. You decide in the
+  app, or from a terminal Yardsort did not start, with `ys workflow approve`,
+  `reject` and `request-changes`. Those need the one-time code shown on the run and
+  in the notification. `ys workflow runs` does not print it. Five wrong codes stop
+  `ys` until the app shows a new one. A session Yardsort started cannot decide. The
+  Floor Manager cannot either. This is not a sandbox: a process running as you that
+  writes the database directly is not stopped. A decision is recorded once, with who,
+  when and the note, and one on a finished run is refused. Yardsort tells you when a
+  run starts waiting, unless the schedule or trigger says `never`. A run that is
+  waiting when you quit is still waiting when you open it again.
+  Waiting for a GitHub review is not this. A file written before this still loads.
+  See [An approval](docs/guide/workflows.md#an-approval).
+- **A workflow step can hand a named document to the next step.** `produces` names what a step
+  leaves when it succeeds, and a later step `consumes` it by name. The next agent receives that
+  text, and the run keeps it so you can read what was passed on, in the app and in
+  `ys workflow runs --run <id>`. A file, a short text, or a field the step already leaves is
+  copied. A conversation is copied only when the step asks, and then as a digest unless it asks
+  for the turns themselves. Secret-looking paths are refused, including a link that points at
+  one, and a long document is cut short. A `start_session` or `send_to_session` cannot hand on
+  a file or a transcript. A step that succeeds again replaces what it left. A file written
+  before this still loads. See [Artifacts](docs/guide/workflows.md#artifacts).
+- **Floor Manager permission is a setting, and `ys` enforces it.** Settings → General chooses
+  read only, ask first (the default) or trusted. The next `ys` command the Floor Manager runs
+  follows it. Ask first waits for **Allow** in the window, even when the panel is closed, and
+  auto mode does not skip that. Read only refuses a start or a write. Trusted may start agents,
+  workspaces, workflows, tests and checkouts without asking. Deleting a workspace, closing a
+  task and attaching stay refused at every level. This is not a sandbox: a shell command that
+  is not `ys` is outside the gate. On Linux the Floor Manager reads the settings file in the
+  config directory, the same one Settings writes. A settings file that cannot be read is
+  treated as read only, and the refusal says why. Ask first shows the text a task comment
+  would post, and posts that same text. A confirmation nobody is still waiting on says so,
+  and does not cover the next command. A `YARDSORT_CONFIG_DIR` set for Yardsort is not
+  passed on to the agents it launches, or to the terminal daemon. See
+  [What it may do](docs/guide/floor-manager.md#what-it-may-do).
+- **A smoke test step can stop the workflow when it fails.** A `run_test` step with `gate: true`
+  fails the run when the test's verdict is a failure, and skips every step that has not
+  finished, so a long wait does not keep the run open. A smoke test another step was waiting
+  on is cancelled. The run names the step and the first line of the report. The step keeps
+  the full report. You see both in the app and in `ys workflow runs --run <id>`. A schedule
+  or trigger that tells you when a run fails sends that line. When there is more to read, it
+  says to open Yardsort for the report. Without `gate`, a failed test still lets the workflow
+  continue, as it does today. A file written before this still loads. See
+  [Workflows](docs/guide/workflows.md#a-test-that-must-pass).
+- **The phone notices a network change.** Moving between Wi-Fi and cellular could leave a computer's
+  connection dead until the phone noticed by itself. Now a change of network has each open connection
+  asked whether it still answers, and opened again within a few seconds if not; one already waiting to
+  be reached again is tried at once. See
+  [When the phone changes network](docs/guide/remote.md#when-the-phone-changes-network).
+
 ## 0.25.0
 
 - **Triggers on pull requests in other repositories.** A trigger whose workflow is about a pull

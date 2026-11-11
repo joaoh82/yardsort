@@ -484,6 +484,8 @@ fn an_agent_a_workflow_started_is_that_workflows_and_sets_nothing_off() {
             StepStatus::Succeeded,
             Some(r#"{"session":"pty-r","run":"run-reviewer"}"#),
             None,
+            None,
+            false,
         )
         .unwrap());
     assert_eq!(

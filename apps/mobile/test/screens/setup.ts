@@ -34,3 +34,15 @@ jest.mock("expo-camera", () => {
     CameraView: (props: object) => createElement(View, { testID: "camera", ...props }),
   };
 });
+
+// The network, as the platform tells of it: a test says what it now is with `networkIs`.
+const mockNetworkListeners = new Set<(state: object) => void>();
+jest.mock("expo-network", () => ({
+  addNetworkStateListener: (listener: (state: object) => void) => {
+    mockNetworkListeners.add(listener);
+    return { remove: () => mockNetworkListeners.delete(listener) };
+  },
+}));
+(globalThis as { networkIs?: (state: object) => void }).networkIs = (state) => {
+  for (const listener of mockNetworkListeners) listener(state);
+};

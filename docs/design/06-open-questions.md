@@ -386,10 +386,22 @@ From the design pass in [36-triggers](36-triggers.md), 2026-11-06.
 
 From the first slice in [37-floor-manager](37-floor-manager.md), 2026-11-09.
 
-53. **Are told boundaries enough?** The Floor Manager is told what to ask before and what never
-    to do. Nothing stops an agent in auto mode from doing it anyway. The lean is to keep it
-    told, because every agent in Yardsort is trusted the same way. If it is not enough, `ys`
-    could refuse its destructive commands when `YARDSORT_COORDINATOR` is set.
+53. ~~**Are told boundaries enough?**~~ **Settled 2026-11-10: no, and `ys` enforces a setting.**
+    Floor Manager permission, in Settings → General, is read only, ask first (the default) or
+    trusted. The launch sets `YARDSORT_COORDINATOR`. The value is ignored; `ys` reads the level
+    from settings on every command, so a change applies to the next one. Read only refuses a
+    start or a write. Ask first writes the command into the profile and waits until the window
+    records Allow or Don't allow. The dialog does not run it, and a yes typed at the agent
+    would be the agent answering itself. Trusted may start agents, workspaces, workflows, tests
+    and checkouts without asking. `ys workspace delete` (with or without `--force`),
+    `ys task close` and `ys attach` are refused at every level, not merely asked about. There
+    is no `ys` command for archive, branch delete, merge, close, approve or editing project
+    files, so those stay instructions. A shell command that is not `ys`, unsetting the
+    variable, writing the answer file, editing `settings.toml` so the level is `trusted`, or
+    pointing `ys --data-dir` at a profile that was made up, gets around the gate. The guide
+    says so. It is not a sandbox, and the harness's own prompts are a second line, not the
+    only one. The owner
+    called trusted "god mode"; the setting is named Trusted.
 54. **How should a fork's pull request be reviewed?** `ys pr checkout` makes `pr/<number>`, and
     the built-in review finds a pull request by its branch name. The review could take a pull
     request number as an input instead.

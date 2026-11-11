@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { errorMessage, ipc, type SettingsInfo } from "@/lib/ipc";
+import { errorMessage, ipc, type FloorManagerLevel, type SettingsInfo } from "@/lib/ipc";
 import { YsCommand } from "@/features/ys/YsCommand";
 import { useAppStore } from "@/stores/app";
 import { usePreflightStore } from "@/stores/preflight";
@@ -41,6 +41,66 @@ function UpdateNow() {
   );
 }
 
+const PERMISSIONS: { level: FloorManagerLevel; label: string; hint: string }[] = [
+  {
+    level: "read-only",
+    label: "Read only",
+    hint: "It can look. ys refuses every command that starts something or writes.",
+  },
+  {
+    level: "ask",
+    label: "Ask first",
+    hint: "Starts and writes wait until you press Allow in this window.",
+  },
+  {
+    level: "trusted",
+    label: "Trusted",
+    hint: "It may start agents, workspaces, workflows, tests and checkouts without asking.",
+  },
+];
+
+/**
+ * How much the Floor Manager may do on its own. Saved on its own, the moment it changes:
+ * the next `ys` command follows it, and the instructions file is rewritten now.
+ */
+function FloorManagerPermission({
+  level,
+  disabled,
+  onChange,
+}: {
+  level: FloorManagerLevel;
+  disabled: boolean;
+  onChange: (level: FloorManagerLevel) => void;
+}) {
+  return (
+    <fieldset disabled={disabled} className="grid gap-2 rounded border border-line px-3 py-2">
+      <legend className="px-1 text-ink-muted">Floor Manager permission</legend>
+      {PERMISSIONS.map((choice) => (
+        <label key={choice.level} className="flex items-start gap-2">
+          <input
+            type="radio"
+            name="floor-manager-level"
+            value={choice.level}
+            checked={level === choice.level}
+            onChange={() => onChange(choice.level)}
+            className="mt-0.5 accent-(--color-accent)"
+          />
+          <span>
+            {choice.label}
+            <span className="block text-ink-faint">{choice.hint}</span>
+          </span>
+        </label>
+      ))}
+      <p className="text-ink-faint">
+        The next ys command follows this. The instructions file is updated now; a Floor Manager that
+        is already running reads the new wording the next time it starts. Deleting a workspace,
+        closing a task and attaching stay refused at every level. This is not a sandbox: a shell
+        command that is not ys is outside this.
+      </p>
+    </fieldset>
+  );
+}
+
 /** The `ys` command: where it is, and a button to install or update it. */
 function CommandLine() {
   const ys = usePreflightStore((s) => s.report?.ys);
@@ -58,7 +118,10 @@ export function GeneralSettings() {
   const [editor, setEditor] = useState("");
   const [notify, setNotify] = useState(true);
   const [autoCheck, setAutoCheck] = useState(true);
+  const [codeInNotice, setCodeInNotice] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [levelError, setLevelError] = useState<string | null>(null);
+  const [savingLevel, setSavingLevel] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const adopt = (next: SettingsInfo) => {
@@ -66,6 +129,7 @@ export function GeneralSettings() {
     setEditor(next.editorCommand ?? "");
     setNotify(next.notifyWhenQuiet);
     setAutoCheck(next.checkForUpdates);
+    setCodeInNotice(next.approvalCodeInNotification);
     useAppStore.setState({
       notifyWhenQuiet: next.notifyWhenQuiet,
       checkForUpdates: next.checkForUpdates,
@@ -79,7 +143,8 @@ export function GeneralSettings() {
   const dirty =
     editor.trim() !== (info.editorCommand ?? "") ||
     notify !== info.notifyWhenQuiet ||
-    autoCheck !== info.checkForUpdates;
+    autoCheck !== info.checkForUpdates ||
+    codeInNotice !== info.approvalCodeInNotification;
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -90,11 +155,27 @@ export function GeneralSettings() {
           editorCommand: editor.trim() || null,
           notifyWhenQuiet: notify,
           checkForUpdates: autoCheck,
+          approvalCodeInNotification: codeInNotice,
         }),
       );
       setSaved(true);
     } catch (reason) {
       setError(errorMessage(reason));
+    }
+  };
+
+  const setLevel = async (level: FloorManagerLevel) => {
+    if (savingLevel) return;
+    setSavingLevel(true);
+    setLevelError(null);
+    try {
+      // The saved settings, not the copy this render closed over: two clicks otherwise
+      // put the first one's editor and notify fields back.
+      setInfo(await ipc.settingsSaveFloorManager(level));
+    } catch (reason) {
+      setLevelError(errorMessage(reason));
+    } finally {
+      setSavingLevel(false);
     }
   };
 
@@ -142,6 +223,25 @@ export function GeneralSettings() {
       <label className="flex items-start gap-2">
         <input
           type="checkbox"
+          checked={codeInNotice}
+          onChange={(e) => {
+            setCodeInNotice(e.target.checked);
+            setSaved(false);
+          }}
+          className="mt-0.5 accent-(--color-accent)"
+        />
+        <span>
+          Include the approval code in notifications
+          <span className="block text-ink-faint">
+            On by default on macOS and Windows. Off by default on Linux, because other programs can
+            read a notification. When this is off, the notification says to open Yardsort for the
+            code.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
           checked={autoCheck}
           onChange={(e) => {
             setAutoCheck(e.target.checked);
@@ -158,6 +258,16 @@ export function GeneralSettings() {
         </span>
       </label>
       <UpdateNow />
+      <FloorManagerPermission
+        level={info.floorManager}
+        disabled={savingLevel}
+        onChange={(level) => void setLevel(level)}
+      />
+      {levelError && (
+        <p role="alert" className="text-red-400 select-text">
+          {levelError}
+        </p>
+      )}
       <CommandLine />
       {error && (
         <p role="alert" className="text-red-400 select-text">

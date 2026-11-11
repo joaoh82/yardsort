@@ -20,6 +20,9 @@ pub struct Yardsort {
     pub data_dir: PathBuf,
     pub store: Store,
     pub settings: Settings,
+    /// Why `settings.toml` was not used. A missing file is not a problem: that is the defaults.
+    /// An unreadable one is, and the Floor Manager's gate treats it as read only.
+    pub settings_problem: Option<String>,
     env: std::cell::OnceCell<Arc<ShellEnv>>,
 }
 
@@ -54,11 +57,14 @@ impl Yardsort {
         };
         let store = Store::open(&database)
             .map_err(|e| Failure::new(format!("Cannot open {}: {e}", database.display())))?;
-        let settings = SettingsFile::load(config_dir.join("settings.toml")).get();
+        let file = SettingsFile::load(config_dir.join("settings.toml"));
+        let settings_problem = file.problem();
+        let settings = file.get();
         Ok(Self {
             data_dir,
             store,
             settings,
+            settings_problem,
             env: std::cell::OnceCell::new(),
         })
     }

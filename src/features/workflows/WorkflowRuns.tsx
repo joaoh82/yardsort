@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { timeAgo } from "@/features/terminal/sessionText";
-import { errorMessage, ipc, type WorkflowRun } from "@/lib/ipc";
+import { errorMessage, ipc, type WorkflowRun, type WorkflowStepRun } from "@/lib/ipc";
 import { scheduleOf, useSchedulesStore } from "@/stores/schedules";
 import { triggerOf, useTriggersStore } from "@/stores/triggers";
 import { statusColour, useWorkflowStore } from "@/stores/workflows";
@@ -77,6 +77,19 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                     {run.status}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{run.workspaceName}</span>
+                  {run.blockedOn && (
+                    <span className="shrink-0 text-[11px] text-amber-300">
+                      Blocked: waiting for {run.blockedOn}.
+                    </span>
+                  )}
+                  {!open && run.status === "failed" && run.error && (
+                    <span
+                      title={run.error}
+                      className="max-w-[40%] shrink truncate text-[11px] text-red-400"
+                    >
+                      {run.error}
+                    </span>
+                  )}
                   {scheduled && (
                     <span
                       title={`Started by the schedule “${scheduled.scheduleName}”`}
@@ -110,7 +123,14 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                         Pull request #{run.pullRequest.number} {run.pullRequest.title}
                       </p>
                     )}
-                    {run.error && <p className="mb-1.5 text-red-400 select-text">{run.error}</p>}
+                    {run.blockedOn && (
+                      <p className="mb-1.5 text-amber-300">Blocked: waiting for {run.blockedOn}.</p>
+                    )}
+                    {run.error && (
+                      <p className="mb-1.5 whitespace-pre-wrap text-red-400 select-text">
+                        {run.error}
+                      </p>
+                    )}
                     <ol className="flex flex-col gap-1">
                       {(steps ?? []).map((step) => (
                         <li key={step.stepId} className="flex flex-col">
@@ -129,10 +149,47 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                             </span>
                           </span>
                           {step.note && (
-                            <span className="pl-1 text-[11px] text-ink-muted select-text">
+                            <span className="pl-1 whitespace-pre-wrap text-[11px] text-ink-muted select-text">
                               {step.note}
                             </span>
                           )}
+                          {step.action === "approve" && step.status === "waiting" && active && (
+                            <ApprovalBox
+                              runId={run.id}
+                              step={step}
+                              onError={setError}
+                              onDone={() => useWorkflowStore.getState().refresh()}
+                            />
+                          )}
+                          {step.clarificationPrompt && step.status === "waiting" && active && (
+                            <AnswerBox
+                              runId={run.id}
+                              step={step}
+                              onError={setError}
+                              onDone={() => useWorkflowStore.getState().refresh()}
+                            />
+                          )}
+                          {step.outcome?.decision && (
+                            <span className="pl-1 text-[11px] text-ink-muted select-text">
+                              {decisionWord(step.outcome.decision)}
+                              {step.outcome.feedback ? `: ${step.outcome.feedback}` : ""}
+                            </span>
+                          )}
+                          {step.artifacts.map((artifact) => (
+                            <span key={artifact.name} className="mt-1 flex flex-col gap-0.5 pl-1">
+                              <span className="text-[11px] text-ink-muted">
+                                Artifact {artifact.name}
+                                {artifact.truncated ? " (cut short)" : ""}
+                              </span>
+                              <span className="font-mono text-[10px] text-ink-faint">
+                                {artifact.source}
+                                {artifact.detail ? ` ${artifact.detail}` : ""}
+                              </span>
+                              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-[11px] text-ink select-text">
+                                {artifact.body}
+                              </pre>
+                            </span>
+                          ))}
                         </li>
                       ))}
                     </ol>
@@ -153,5 +210,222 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
         </ul>
       )}
     </section>
+  );
+}
+
+function decisionWord(decision: string): string {
+  if (decision === "approved") return "Approved";
+  if (decision === "rejected") return "Rejected";
+  if (decision === "changes_requested") return "Changes requested";
+  return decision;
+}
+
+/** A clarifying step: the questions, and one answer for the round. */
+function AnswerBox({
+  runId,
+  step,
+  onError,
+  onDone,
+}: {
+  runId: string;
+  step: WorkflowStepRun;
+  onError: (message: string | null) => void;
+  onDone: () => Promise<void>;
+}) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function showCode() {
+    onError(null);
+    setBusy(true);
+    try {
+      await ipc.workflowShowApprovalCode(runId, step.stepId);
+      await onDone();
+    } catch (failed) {
+      onError(errorMessage(failed));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function send() {
+    onError(null);
+    setBusy(true);
+    try {
+      await ipc.workflowAnswer(runId, step.stepId, text.trim());
+      setText("");
+      await onDone();
+    } catch (failed) {
+      onError(errorMessage(failed));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-1 flex flex-col gap-1 pl-1">
+      <span className="text-[11px] text-amber-300">Blocked: waiting for your answer.</span>
+      {step.approvalCode ? (
+        <span className="text-[11px] text-ink select-text">
+          Code {step.approvalCode}. A terminal needs this. This window does not.
+        </span>
+      ) : (
+        <span className="text-[11px] text-ink-muted">
+          The code is not in this window yet. Show a new code to use a terminal.
+        </span>
+      )}
+      {step.approvalLocked ? (
+        <span className="text-[11px] text-ink-muted">
+          Too many wrong codes. Show a new code to use a terminal again.
+        </span>
+      ) : null}
+      <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-[11px] text-ink select-text">
+        {step.clarificationPrompt}
+      </pre>
+      <textarea
+        aria-label={`Answer for ${step.stepId}`}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        rows={2}
+        className="rounded border border-line bg-canvas px-1.5 py-1 text-[11px] text-ink"
+        placeholder="Your answer"
+      />
+      <span>
+        <button
+          type="button"
+          disabled={busy || text.trim() === ""}
+          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          onClick={() => void send()}
+        >
+          Answer
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          className="ml-1 rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          onClick={() => void showCode()}
+        >
+          Show a new code
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/** The pending approval: the documents it reads, and the three decisions. */
+function ApprovalBox({
+  runId,
+  step,
+  onError,
+  onDone,
+}: {
+  runId: string;
+  step: WorkflowStepRun;
+  onError: (message: string | null) => void;
+  onDone: () => Promise<void>;
+}) {
+  const [feedback, setFeedback] = useState("");
+  const [busy, setBusy] = useState(false);
+  const consumed = step.consumed ?? [];
+
+  async function decide(decision: "approved" | "rejected" | "changes_requested") {
+    onError(null);
+    setBusy(true);
+    try {
+      await ipc.workflowDecide(runId, step.stepId, decision, feedback.trim() || null);
+      setFeedback("");
+      await onDone();
+    } catch (failed) {
+      onError(errorMessage(failed));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function showCode() {
+    onError(null);
+    setBusy(true);
+    try {
+      await ipc.workflowShowApprovalCode(runId, step.stepId);
+      await onDone();
+    } catch (failed) {
+      onError(errorMessage(failed));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-1 flex flex-col gap-1 pl-1">
+      <span className="text-[11px] text-amber-300">Blocked: waiting for your approval.</span>
+      <span className="text-[11px] text-ink-muted">Approve, reject, or request changes.</span>
+      {step.approvalCode ? (
+        <span className="text-[11px] text-ink select-text">
+          Code {step.approvalCode}. A terminal needs this. This window does not.
+        </span>
+      ) : (
+        <span className="text-[11px] text-ink-muted">
+          The code is not in this window yet. Show a new code to use a terminal.
+        </span>
+      )}
+      {step.approvalLocked ? (
+        <span className="text-[11px] text-ink-muted">
+          Too many wrong codes. Show a new code to use a terminal again.
+        </span>
+      ) : null}
+      {consumed.map((artifact) => (
+        <span key={artifact.name} className="flex flex-col gap-0.5">
+          <span className="text-[11px] text-ink-muted">
+            To review {artifact.name}
+            {artifact.truncated ? " (cut short)" : ""}
+          </span>
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-[11px] text-ink select-text">
+            {artifact.body}
+          </pre>
+        </span>
+      ))}
+      <textarea
+        aria-label={`Feedback for ${step.stepId}`}
+        value={feedback}
+        onChange={(event) => setFeedback(event.target.value)}
+        rows={2}
+        className="rounded border border-line bg-canvas px-1.5 py-1 text-[11px] text-ink"
+        placeholder="A note, if you have one. Required when you request changes."
+      />
+      <span className="flex gap-1">
+        <button
+          type="button"
+          disabled={busy}
+          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          onClick={() => void decide("approved")}
+        >
+          Approve
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          onClick={() => void decide("rejected")}
+        >
+          Reject
+        </button>
+        <button
+          type="button"
+          disabled={busy || feedback.trim() === ""}
+          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          onClick={() => void decide("changes_requested")}
+        >
+          Request changes
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          onClick={() => void showCode()}
+        >
+          Show a new code
+        </button>
+      </span>
+    </div>
   );
 }

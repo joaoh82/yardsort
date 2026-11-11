@@ -11,21 +11,25 @@
 
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use pty_host::{HostError, HostEvent, SessionId, SessionInfo, SessionState, TerminalHost};
 
 use super::engine::{
-    self, Effect, Finish, Inputs, Move, Outputs, PrSeen, SessionFacts, TestRun, World,
+    self, ApprovalDecision, Effect, Finish, Inputs, Move, Outputs, Plan, PrSeen, RecordedApproval,
+    SessionFacts, StepOutcome, TestRun, World,
 };
 use super::runs::{self, Facts, Place};
-use super::PrActivity;
+use super::{artifact, ArtifactSource, PrActivity, SessionRef};
 use crate::error::IpcResult;
 use crate::forge::{PrPost, PrPostKind};
 use crate::git::Git;
 use crate::launch::{HarnessRequest, HARNESS_LABEL, RECORD_LABEL, RUN_LABEL, WORKSPACE_LABEL};
-use crate::store::{now_ms, StepStatus, Store, WorkflowRunRow};
+use crate::store::{
+    now_ms, NewWorkflowArtifact, StepStatus, Store, WorkflowRunRow, WorkflowStepRow,
+};
 
 /// A quiet after at least this much output counts as an agent having settled. The same bar the
 /// window uses to tell finished work from the echo of a keystroke, or of a paste.
@@ -49,6 +53,63 @@ pub trait Hands {
     /// once: the job it returns is what does the asking, on a thread of its own, and must give
     /// up by itself — the app's stops `gh` after [`FORGE_LIMIT`].
     fn pr_posts(&self, workspace_id: &str, pr: &super::runs::PrFacts) -> PrAsk;
+
+    /// One session's conversation, for a step that asked for a transcript. `raw` asks for each
+    /// turn's own text. Without it, the budgeted digest. [`Conversation::Ready`]`(None)` when
+    /// that session has no conversation to copy. [`Conversation::Later`] when the read has not
+    /// finished: the driver asks again on the next tick and does not fail the step. The default
+    /// is none, so a driver test that never asks is unchanged. `run_id` and `step_id` keep one
+    /// read from being reused by a later step.
+    fn conversation(
+        &self,
+        _workspace_id: &str,
+        _pty_id: &str,
+        _raw: bool,
+        _run_id: &str,
+        _step_id: &str,
+    ) -> Result<Conversation, String> {
+        Ok(Conversation::Ready(None))
+    }
+
+    /// Remember the one-time code so the window can show it. The default forgets it. Do not
+    /// write the code to a log, a note, or a step's outputs.
+    fn approval_code(&self, _run_id: &str, _step_id: &str, _code: &str) {}
+
+    /// Whether the waiting notification may contain the one-time code. The default follows
+    /// the platform: included on macOS and Windows, left out on Linux, where other programs
+    /// can read a notification on D-Bus. The app reads the setting and overrides this.
+    fn include_approval_code(&self) -> bool {
+        crate::settings::default_show_approval_code()
+    }
+}
+
+/// Where a test stops a tick, as if the process died after that commit. Production leaves
+/// this at [`StopAfter::Never`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopAfter {
+    Never,
+    /// The decision is on the step, the wait is applied, and the decision's artifacts are
+    /// written. Those are one change. The next step has not started.
+    AfterDecisionApplied,
+    /// The next step has been claimed (`running`) and its effect has not been carried out.
+    AfterNextClaim,
+    /// The engine has planned a rewind and the store has not applied it.
+    BeforeRewindApplied,
+    /// An answer is about to be marked sent. It has not been, and it has not been typed.
+    BeforeAnswerApplied,
+    /// The answer is claimed, and it has not been typed. A restart fails the step and does
+    /// not type it: the keystrokes may already have landed.
+    AfterAnswerApplied,
+}
+
+/// How far a transcript read got. A slow read must not fail the step, and must not be started
+/// again from scratch on the next tick.
+#[derive(Debug)]
+pub enum Conversation {
+    /// The read finished. `None` means that session has no conversation to copy.
+    Ready(Option<String>),
+    /// Still reading. Ask again later. The same read should be reused.
+    Later,
 }
 
 /// Asking the forge, as a job for a thread of its own.
@@ -83,6 +144,12 @@ pub struct Driver {
     /// The runs that were active at the last tick. One that is gone since was ended from
     /// outside — `ys workflow cancel` — which is a change too.
     active: Mutex<HashSet<String>>,
+    /// One-time codes this process has issued. A restart has none, which is how a lost code
+    /// is replaced once. Listing a run does not write here.
+    codes: Mutex<HashMap<(String, String), String>>,
+    /// A test asks the tick to die after one commit. Production stays at [`StopAfter::Never`].
+    stop: Mutex<StopAfter>,
+    halt: std::sync::atomic::AtomicBool,
 }
 
 impl Default for Driver {
@@ -102,7 +169,118 @@ impl Driver {
             forge_every_ms: i64::try_from(forge_every.as_millis()).unwrap_or(i64::MAX),
             touched: std::sync::atomic::AtomicBool::new(false),
             active: Mutex::new(HashSet::new()),
+            codes: Mutex::new(HashMap::new()),
+            stop: Mutex::new(StopAfter::Never),
+            halt: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Remember a code the window just showed, so this process does not replace it on the
+    /// next look. The plain code stays in memory only.
+    pub fn note_approval_code(&self, run_id: &str, step_id: &str, code: &str) {
+        self.codes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert((run_id.to_owned(), step_id.to_owned()), code.to_owned());
+    }
+
+    /// Issue a code and remember it. `force` replaces a code this process already holds.
+    /// Nothing when the step is already decided, or when `force` is false and this process
+    /// already holds the code. The bool is whether a code row existed before this issue.
+    ///
+    /// The slow hash runs before the code lock is taken again, so the lock is not held
+    /// while the hash runs. `force` is Show a new code, which resets the wrong-try count. A
+    /// restart reissue (`force` false) keeps that count, so a lockout survives the restart.
+    pub fn issue_approval_code(
+        &self,
+        store: &Store,
+        run_id: &str,
+        step_id: &str,
+        force: bool,
+    ) -> crate::store::StoreResult<Option<(String, bool)>> {
+        let key = (run_id.to_owned(), step_id.to_owned());
+        {
+            let codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
+            if !force && codes.contains_key(&key) {
+                return Ok(None);
+            }
+        }
+        let (code, salt, hash) = crate::workflow::code::issue();
+        let mut codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
+        if !force && codes.contains_key(&key) {
+            return Ok(None);
+        }
+        let had = store.approval_code_row(run_id, step_id)?;
+        let Some(code) = store.save_approval_code(run_id, step_id, &code, &salt, &hash, force)?
+        else {
+            return Ok(None);
+        };
+        codes.insert(key, code.clone());
+        Ok(Some((code, had)))
+    }
+
+    /// Issue the one-time code for an open question. `force` is Show a new code, which
+    /// resets the wrong-try count. A restart (`force` false) keeps that count. A round that
+    /// cleared the hash is issued again even when this process still holds the previous code.
+    pub fn issue_answer_code(
+        &self,
+        store: &Store,
+        run_id: &str,
+        step_id: &str,
+        force: bool,
+    ) -> crate::store::StoreResult<Option<(String, bool)>> {
+        let key = (run_id.to_owned(), step_id.to_owned());
+        let present = store.answer_code_present(run_id, step_id)?;
+        {
+            let codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
+            if !force && present && codes.contains_key(&key) {
+                return Ok(None);
+            }
+        }
+        let (code, salt, hash) = crate::workflow::code::issue();
+        let mut codes = self.codes.lock().unwrap_or_else(PoisonError::into_inner);
+        if !force && present && codes.contains_key(&key) {
+            return Ok(None);
+        }
+        let Some(code) = store.save_answer_code(run_id, step_id, &code, &salt, &hash, force)?
+        else {
+            return Ok(None);
+        };
+        codes.insert(key, code.clone());
+        Ok(Some((code, present)))
+    }
+
+    fn holds_code(&self, run_id: &str, step_id: &str) -> bool {
+        self.codes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(&(run_id.to_owned(), step_id.to_owned()))
+    }
+
+    fn forget_code(&self, run_id: &str, step_id: &str) {
+        self.codes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&(run_id.to_owned(), step_id.to_owned()));
+    }
+
+    /// Die after `when`. Tests use this to leave the database as a crash would.
+    #[cfg(test)]
+    fn testing_stop_after(&self, when: StopAfter) {
+        *self.stop.lock().unwrap_or_else(PoisonError::into_inner) = when;
+        self.halt.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn halt_now(&self) -> bool {
+        self.halt.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn arm_halt(&self, when: StopAfter) -> bool {
+        let armed = *self.stop.lock().unwrap_or_else(PoisonError::into_inner) == when;
+        if armed {
+            self.halt.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        armed
     }
 
     /// Take in a host event. True when it could move a run on — a quiet or an exit — so the
@@ -298,9 +476,16 @@ fn move_on(
         .insert(run.id.clone())
     {
         for change in engine::recover(&store.workflow_steps(&run.id)?) {
-            apply(driver, store, &run.id, &change)?;
+            apply(driver, store, host, &run.id, &change)?;
+            if driver.halt_now() {
+                return Ok(());
+            }
         }
+        // A code this process does not hold is replaced once, here, and the person is told.
+        // A decision already recorded is left for the engine to apply, and is not replaced.
+        resume_human_waits(driver, store, hands, &workflow, run)?;
     }
+    tell_open_questions(driver, store, hands, run)?;
     let inputs: Inputs = serde_json::from_str(&run.inputs).unwrap_or_default();
 
     // Sessions typed to during this tick. The host marks a session busy only once output comes
@@ -334,22 +519,72 @@ fn move_on(
             if change.to == StepStatus::Running && acting.contains(change.step.as_str()) {
                 claims.insert(change.step.clone(), change.clone());
             } else {
-                apply(driver, store, &run.id, change)?;
+                // Drop a previous decision before the step is waiting again, while it is still
+                // pending, so a decision recorded for this attempt cannot be deleted by the clear.
+                if change.clear_outcome && change.from.contains(&StepStatus::Pending) {
+                    store.clear_workflow_approval(&run.id, &change.step)?;
+                    store.clear_workflow_wait(&run.id, &change.step)?;
+                    driver.forget_code(&run.id, &change.step);
+                }
+                if change.rewind.is_some() && driver.arm_halt(StopAfter::BeforeRewindApplied) {
+                    return Ok(());
+                }
+                if apply(driver, store, host, &run.id, change)? {
+                    if driver.halt_now() {
+                        return Ok(());
+                    }
+                    follow_approval(driver, store, hands, &workflow, run, change)?;
+                }
             }
         }
+        if plan.moves.iter().any(|change| change.halt) {
+            // Best effort. A failure here must not skip finishing the run on this tick.
+            cancel_tests_a_halt_skipped(store, &workflow, &steps, &plan);
+        }
         let mut delivered = false;
+        let finishing = Finishing {
+            store,
+            hands,
+            place: &place,
+            facts: &facts,
+            inputs: &inputs,
+            steps: &steps,
+            workflow: &workflow,
+            run_id: &run.id,
+        };
         for effect in plan.effects {
             let step = step_of(&effect).to_owned();
             let Some(claim) = claims.remove(&step) else {
                 continue;
             };
-            if !apply(driver, store, &run.id, &claim)? {
+            if !apply(driver, store, host, &run.id, &claim)? {
                 if !still_running(store, &run.id)? {
                     return Ok(()); // Cancelled: nothing more of this run happens.
                 }
                 continue; // The step moved on without us.
             }
-            let change = match carry_out(
+            // The claim is committed and the effect has not run. A crash here leaves the step
+            // running, and the next start fails it rather than doing the effect twice.
+            if driver.arm_halt(StopAfter::AfterNextClaim) {
+                return Ok(());
+            }
+            if let Effect::Capture {
+                outputs,
+                note,
+                outcome,
+                ..
+            } = &effect
+            {
+                delivered |= deliver(
+                    driver,
+                    store,
+                    host,
+                    &run.id,
+                    finishing.finish(&step, outputs, note.clone(), outcome.clone()),
+                )?;
+                continue;
+            }
+            let outcome = carry_out(
                 store,
                 host,
                 hands,
@@ -357,15 +592,25 @@ fn move_on(
                 effect,
                 facts.unattended,
                 &mut typed_to,
-            ) {
-                Outcome::Done(outputs) => engine::done(&step, &outputs),
+            );
+            let change = match outcome {
+                Outcome::Done(outputs) => {
+                    delivered |= deliver(
+                        driver,
+                        store,
+                        host,
+                        &run.id,
+                        finishing.finish(&step, &outputs, None, None),
+                    )?;
+                    continue;
+                }
                 Outcome::Queued(outputs) => engine::queued(&step, &outputs),
                 Outcome::Failed(why) => engine::failed(&step, &why),
                 Outcome::Skipped(why) => engine::skipped(&step, &why),
                 Outcome::NotYet => engine::not_yet(&step),
             };
             delivered |= change.to != StepStatus::Waiting;
-            apply(driver, store, &run.id, &change)?;
+            apply(driver, store, host, &run.id, &change)?;
         }
         if let Some(finish) = plan.finish {
             let (status, error) = match finish {
@@ -385,6 +630,59 @@ fn move_on(
     Ok(())
 }
 
+/// Apply `change`, unless the artifacts and the success were already written together.
+/// True when the step moved on, so a later step in this run may be able to start.
+fn deliver(
+    driver: &Driver,
+    store: &Store,
+    host: &dyn TerminalHost,
+    run_id: &str,
+    (change, committed): (Move, bool),
+) -> IpcResult<bool> {
+    let moved = change.to != StepStatus::Waiting;
+    if committed {
+        driver.touch();
+        return Ok(moved);
+    }
+    apply(driver, store, host, run_id, &change)?;
+    Ok(moved)
+}
+
+/// A halted plan skipped these steps after they had already queued a smoke test. Cancel
+/// that test, so it does not keep running or keep asking for approval. A test that has
+/// already ended is left as it is.
+fn cancel_tests_a_halt_skipped(
+    store: &Store,
+    workflow: &super::Workflow,
+    steps: &[WorkflowStepRow],
+    plan: &Plan,
+) {
+    for change in &plan.moves {
+        if change.to != StepStatus::Skipped {
+            continue;
+        }
+        let Some(step) = workflow.steps.iter().find(|step| step.id == change.step) else {
+            continue;
+        };
+        if step.action.name() != "run_test" {
+            continue;
+        }
+        let Some(row) = steps.iter().find(|row| row.step_id == change.step) else {
+            continue;
+        };
+        let Some(test_run) = engine::parse_outputs(&row.outputs).get("run").cloned() else {
+            continue;
+        };
+        if let Err(error) =
+            store.cancel_test_run(&test_run, "The workflow stopped because a gate failed.")
+        {
+            eprintln!(
+                "workflows: could not cancel smoke test {test_run} after a gate failed: {error}"
+            );
+        }
+    }
+}
+
 fn still_running(store: &Store, run_id: &str) -> IpcResult<bool> {
     Ok(store
         .workflow_run(run_id)?
@@ -394,6 +692,71 @@ fn still_running(store: &Store, run_id: &str) -> IpcResult<bool> {
 /// Type `text` into a session and submit it, as the first-prompt delivery does. Nobody here
 /// typed it, so it takes no control; while someone controls the session from elsewhere it
 /// waits rather than type over them.
+///
+/// The claim (`applied_at`) is taken before the keystrokes. `typed_at` is set only when
+/// typing returns done. A session that is held rolls the claim back, and the next tick
+/// tries again. A crash after the claim and before `typed_at` is not retried: the engine
+/// fails the step, because the keystrokes may already have landed.
+fn deliver_answer(
+    driver: &Driver,
+    store: &Store,
+    host: &dyn TerminalHost,
+    run_id: &str,
+    step_id: &str,
+    delivery: &engine::AnswerDelivery,
+) -> IpcResult<bool> {
+    if driver.arm_halt(StopAfter::BeforeAnswerApplied) {
+        return Ok(true);
+    }
+    let id = SessionId(delivery.pty_id.clone());
+    let info = match host.info(&id) {
+        Ok(info) => info,
+        Err(_) => return Ok(false),
+    };
+    if !matches!(info.state, SessionState::Running) || info.busy {
+        return Ok(false);
+    }
+    let (note, _) = crate::workflow::artifact::cap(&format!("Answered.\n{}", delivery.text));
+    let claimed = store.claim_clarification_answer(run_id, step_id, delivery.round, &note)?;
+    if !claimed {
+        return Ok(false);
+    }
+    driver.touch();
+    if driver.arm_halt(StopAfter::AfterAnswerApplied) {
+        return Ok(true);
+    }
+    match type_into(host, &id, &delivery.text) {
+        Outcome::Done(_) => {
+            store.mark_clarification_typed(run_id, step_id, delivery.round)?;
+            Ok(true)
+        }
+        Outcome::Failed(why) => {
+            store.move_workflow_step(
+                run_id,
+                step_id,
+                &[StepStatus::Waiting],
+                StepStatus::Failed,
+                None,
+                Some(&format!(
+                    "The answer was recorded and could not be typed into the session: {why}"
+                )),
+                None,
+                false,
+            )?;
+            Ok(true)
+        }
+        Outcome::NotYet => {
+            // Nothing was typed. The next tick claims it again.
+            store.release_clarification_claim(run_id, step_id, delivery.round)?;
+            Ok(false)
+        }
+        Outcome::Skipped(_) | Outcome::Queued(_) => {
+            store.release_clarification_claim(run_id, step_id, delivery.round)?;
+            Ok(false)
+        }
+    }
+}
+
 fn type_into(host: &dyn TerminalHost, id: &SessionId, text: &str) -> Outcome {
     let failed =
         |error: HostError| Outcome::Failed(format!("Could not type into the session: {error}"));
@@ -423,15 +786,117 @@ enum Outcome {
     NotYet,
 }
 
-fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResult<bool> {
-    let moved = store.move_workflow_step(
-        run_id,
-        &change.step,
-        &change.from,
-        change.to,
-        change.outputs.as_deref(),
-        change.note.as_deref(),
-    )?;
+fn apply(
+    driver: &Driver,
+    store: &Store,
+    host: &dyn TerminalHost,
+    run_id: &str,
+    change: &Move,
+) -> IpcResult<bool> {
+    if let Some(delivery) = &change.apply_answer {
+        return deliver_answer(driver, store, host, run_id, &change.step, delivery);
+    }
+    // A loop is one change: the steps go back to pending, the old decision is removed, and
+    // the feedback is kept. It is not the path that records a decision. Checked first, so a
+    // request for changes that routes back is not also applied as a finished decision.
+    if let Some(rewind) = &change.rewind {
+        let feedback: Vec<NewWorkflowArtifact> = rewind
+            .feedback
+            .iter()
+            .map(|copy| NewWorkflowArtifact {
+                name: copy.name.clone(),
+                source: copy.source.clone(),
+                detail: None,
+                body: copy.body.clone(),
+                truncated: false,
+            })
+            .collect();
+        // The rewind cancels a smoke test it sends back, in the same transaction, so a
+        // crash after the commit still leaves that test cancelled.
+        let moved = store.rewind_workflow(
+            run_id,
+            &change.step,
+            &change.from,
+            rewind.seen,
+            &rewind.steps,
+            &feedback,
+        )?;
+        if !moved {
+            return Ok(false);
+        }
+        for step in &rewind.steps {
+            driver.forget_code(run_id, step);
+        }
+        driver.touch();
+        return Ok(true);
+    }
+    // A person's decision, the wait's applied mark, and the decision's artifacts are one
+    // change. The step is no longer waiting, so the decision is not applied a second time,
+    // and the artifact is not written again on the next start.
+    if is_applied_decision(change) {
+        let artifacts = changes_artifacts(store, run_id, change)?.unwrap_or_default();
+        let moved = store.move_workflow_step_applying_wait(
+            run_id,
+            &change.step,
+            &change.from,
+            change.to,
+            change.outputs.as_deref(),
+            change.note.as_deref(),
+            change.outcome.as_deref(),
+            change.clear_outcome,
+            &artifacts,
+        )?;
+        if !moved {
+            return Ok(false);
+        }
+        driver.touch();
+        if driver.arm_halt(StopAfter::AfterDecisionApplied) {
+            return Ok(true);
+        }
+        return Ok(true);
+    }
+    let moved = if change.keep_decision {
+        store.move_workflow_step_unless_decided(
+            run_id,
+            &change.step,
+            &change.from,
+            change.to,
+            change.outputs.as_deref(),
+            change.note.as_deref(),
+            change.outcome.as_deref(),
+            change.clear_outcome,
+        )?
+    } else if let Some(copy) = &change.feedback {
+        let artifact = NewWorkflowArtifact {
+            name: copy.name.clone(),
+            source: copy.source.clone(),
+            detail: None,
+            body: copy.body.clone(),
+            truncated: false,
+        };
+        store.move_workflow_step_leaving(
+            run_id,
+            &change.step,
+            &change.from,
+            change.to,
+            change.outputs.as_deref(),
+            change.note.as_deref(),
+            change.outcome.as_deref(),
+            change.clear_outcome,
+            &[artifact],
+        )?
+    } else {
+        store.move_workflow_step(
+            run_id,
+            &change.step,
+            &change.from,
+            change.to,
+            change.outputs.as_deref(),
+            change.note.as_deref(),
+            change.outcome.as_deref(),
+            change.clear_outcome,
+        )?
+    };
     if moved {
         driver.touch();
     }
@@ -443,7 +908,8 @@ fn step_of(effect: &Effect) -> &str {
         Effect::Start { step, .. }
         | Effect::Paste { step, .. }
         | Effect::Notify { step, .. }
-        | Effect::RunTest { step, .. } => step,
+        | Effect::RunTest { step, .. }
+        | Effect::Capture { step, .. } => step,
     }
 }
 
@@ -538,6 +1004,270 @@ fn carry_out(
                 Err(error) => Outcome::Failed(error.message),
             }
         }
+        // Recorded before `carry_out`, from the effect loop.
+        Effect::Capture { .. } => {
+            Outcome::Failed("An artifact was recorded in the wrong place.".into())
+        }
+    }
+}
+
+/// What a step needs in order to store the artifacts it leaves and then finish.
+struct Finishing<'a> {
+    store: &'a Store,
+    hands: &'a dyn Hands,
+    place: &'a Place,
+    facts: &'a Facts,
+    inputs: &'a Inputs,
+    steps: &'a [WorkflowStepRow],
+    workflow: &'a super::Workflow,
+    run_id: &'a str,
+}
+
+impl Finishing<'_> {
+    /// Mark a step succeeded once any artifact it leaves has been stored. A step that leaves
+    /// none just finishes. A capture that fails fails the step and leaves the previous bodies
+    /// in place, so a retry that does not succeed does not wipe the last good handoff.
+    fn finish(
+        &self,
+        step_id: &str,
+        outputs: &Outputs,
+        note: Option<String>,
+        outcome: Option<String>,
+    ) -> (Move, bool) {
+        let Some(step) = self.workflow.steps.iter().find(|step| step.id == step_id) else {
+            return (engine::done(step_id, outputs), false);
+        };
+        if step.produces.is_empty() {
+            let change = if note.is_none() && outcome.is_none() {
+                engine::done(step_id, outputs)
+            } else {
+                engine::recorded(step_id, outputs, note, outcome)
+            };
+            return (change, false);
+        }
+        let capture = Capture {
+            store: self.store,
+            hands: self.hands,
+            place: self.place,
+            facts: self.facts,
+            inputs: self.inputs,
+            steps: self.steps,
+            run_id: self.run_id,
+            step,
+            outputs,
+        };
+        match capture.record() {
+            Ok(saved) => {
+                let change = engine::recorded(step_id, outputs, note, outcome);
+                match self.store.finish_step_with_artifacts(
+                    self.run_id,
+                    step_id,
+                    &[StepStatus::Running],
+                    change.to,
+                    &saved,
+                    change.outputs.as_deref(),
+                    change.note.as_deref(),
+                    change.outcome.as_deref(),
+                    change.clear_outcome,
+                ) {
+                    Ok(true) => (change, true),
+                    // The run stopped, or the step moved. The artifacts were not kept. Putting
+                    // the step back to wait, when it is still running, lets the next tick try
+                    // the capture again. A success applied on its own would finish with no body.
+                    Ok(false) => (engine::not_yet(step_id), false),
+                    Err(error) => (capture_failed(step_id, outputs, &error.to_string()), false),
+                }
+            }
+            Err(CaptureMiss::Later) => (
+                engine::still_reading(step_id, outputs, note, outcome),
+                false,
+            ),
+            Err(CaptureMiss::Failed(why)) => (capture_failed(step_id, outputs, &why), false),
+        }
+    }
+}
+
+/// A capture that failed must not leave the pending marker in the step's outputs. The outputs
+/// argument is the unmarked set the capture was given.
+fn capture_failed(step_id: &str, outputs: &Outputs, why: &str) -> Move {
+    let mut change = engine::failed(step_id, why);
+    change.clear_outcome = true;
+    change.outputs = Some(serde_json::to_string(outputs).unwrap_or_else(|_| "{}".into()));
+    change
+}
+
+/// Why a capture did not store anything.
+enum CaptureMiss {
+    Failed(String),
+    /// The transcript is still being read. The step waits and the next tick asks again.
+    Later,
+}
+
+/// What reading one step's artifacts needs. The engine stays free of files and transcripts.
+struct Capture<'a> {
+    store: &'a Store,
+    hands: &'a dyn Hands,
+    place: &'a Place,
+    facts: &'a Facts,
+    inputs: &'a Inputs,
+    steps: &'a [WorkflowStepRow],
+    run_id: &'a str,
+    step: &'a super::Step,
+    outputs: &'a Outputs,
+}
+
+impl Capture<'_> {
+    /// Read every artifact first. One failure returns none, so nothing is written.
+    fn record(&self) -> Result<Vec<NewWorkflowArtifact>, CaptureMiss> {
+        let memory = OnceCell::new();
+        let handoff = OnceCell::new();
+        let mut saved = Vec::with_capacity(self.step.produces.len());
+        for decl in &self.step.produces {
+            // An approval may leave `feedback` empty. That must not fail the step after the
+            // person has already approved. Other actions still refuse an empty field.
+            if let ArtifactSource::Output { field } = &decl.source {
+                if matches!(self.step.action, super::Action::Approve { .. }) {
+                    let text = self.outputs.get(field).map(String::as_str).unwrap_or("");
+                    if text.trim().is_empty() {
+                        continue;
+                    }
+                }
+            }
+            let (source, detail, text) = self.read(&decl.source, &memory, &handoff)?;
+            let (body, truncated) =
+                artifact::require_text(&decl.name, text).map_err(CaptureMiss::Failed)?;
+            saved.push(NewWorkflowArtifact {
+                name: decl.name.clone(),
+                source,
+                detail,
+                body,
+                truncated,
+            });
+        }
+        Ok(saved)
+    }
+
+    fn read(
+        &self,
+        source: &ArtifactSource,
+        memory: &OnceCell<Option<String>>,
+        handoff: &OnceCell<Option<String>>,
+    ) -> Result<(String, Option<String>, String), CaptureMiss> {
+        let lookup = |path: &[String]| self.lookup(path, memory, handoff);
+        let failed = CaptureMiss::Failed;
+        match source {
+            ArtifactSource::File { path } => {
+                let path = super::template::render(path, lookup);
+                let text = artifact::read_file(Path::new(&self.place.workspace.path), &path)
+                    .map_err(failed)?;
+                Ok(("file".into(), Some(path), text))
+            }
+            ArtifactSource::Text { text } => {
+                Ok(("text".into(), None, super::template::render(text, lookup)))
+            }
+            ArtifactSource::Output { field } => {
+                let text = self
+                    .outputs
+                    .get(field)
+                    .cloned()
+                    .ok_or_else(|| failed(format!("The step left no `{field}` to hand on.")))?;
+                Ok(("output".into(), Some(field.clone()), text))
+            }
+            ArtifactSource::Brief => {
+                let rounds = self
+                    .store
+                    .clarification_rounds(self.run_id, &self.step.id)
+                    .map_err(|error| failed(error.to_string()))?;
+                let summary = self
+                    .store
+                    .clarification_summary(self.run_id, &self.step.id)
+                    .map_err(|error| failed(error.to_string()))?;
+                let text = super::clarify::render_brief(&rounds, summary.as_deref());
+                Ok(("brief".into(), None, text))
+            }
+            ArtifactSource::Transcript { session, raw } => {
+                let pty = self.session_pty(session).ok_or_else(|| {
+                    failed("There is no session to copy a conversation from.".to_owned())
+                })?;
+                let text = match self
+                    .hands
+                    .conversation(
+                        &self.place.workspace.id,
+                        &pty,
+                        *raw,
+                        self.run_id,
+                        &self.step.id,
+                    )
+                    .map_err(failed)?
+                {
+                    Conversation::Later => return Err(CaptureMiss::Later),
+                    Conversation::Ready(Some(text)) => text,
+                    Conversation::Ready(None) => {
+                        return Err(failed(
+                            "There is no conversation to copy for that session.".to_owned(),
+                        ));
+                    }
+                };
+                Ok((
+                    "transcript".into(),
+                    Some(if *raw { "raw" } else { "digest" }.into()),
+                    text,
+                ))
+            }
+        }
+    }
+
+    fn session_pty(&self, reference: &SessionRef) -> Option<String> {
+        match reference {
+            SessionRef::Origin => self.facts.origin.clone(),
+            SessionRef::Step(id) if id == &self.step.id => self.outputs.get("session").cloned(),
+            SessionRef::Step(id) => self
+                .steps
+                .iter()
+                .find(|row| &row.step_id == id)
+                .and_then(|row| engine::parse_outputs(&row.outputs).get("session").cloned()),
+        }
+    }
+
+    fn lookup(
+        &self,
+        path: &[String],
+        memory: &OnceCell<Option<String>>,
+        handoff: &OnceCell<Option<String>>,
+    ) -> Option<String> {
+        match path {
+            [namespace, id] if namespace == "inputs" => self.inputs.get(id).cloned(),
+            [namespace, id, field] if namespace == "steps" => {
+                if id == &self.step.id {
+                    self.outputs.get(field).cloned()
+                } else {
+                    self.steps
+                        .iter()
+                        .find(|row| &row.step_id == id)
+                        .and_then(|row| engine::parse_outputs(&row.outputs).get(field).cloned())
+                }
+            }
+            [namespace, name] if namespace == "artifacts" => self
+                .store
+                .workflow_artifacts(self.run_id)
+                .ok()
+                .and_then(|rows| {
+                    rows.into_iter()
+                        .find(|row| row.name == *name)
+                        .map(|row| row.body)
+                }),
+            [whole] if whole == "memory" => memory
+                .get_or_init(|| {
+                    crate::memory::notes_section(self.store, &self.place.project.id)
+                        .ok()
+                        .flatten()
+                })
+                .clone(),
+            [whole] if whole == "handoff" => handoff
+                .get_or_init(|| self.hands.handoff(&self.place.workspace.id))
+                .clone(),
+            other => self.place.var(other).or_else(|| self.facts.var(other)),
+        }
     }
 }
 
@@ -592,6 +1322,15 @@ impl World for Seen<'_> {
                 .get_or_init(|| self.hands.handoff(&self.place.workspace.id))
                 .clone(),
             [namespace, _] if namespace == "pr" || namespace == "event" => self.facts.var(path),
+            [namespace, name] if namespace == "artifacts" => self
+                .store
+                .workflow_artifacts(self.run_id)
+                .ok()
+                .and_then(|rows| {
+                    rows.into_iter()
+                        .find(|row| row.name == *name)
+                        .map(|row| row.body)
+                }),
             _ => self.place.var(path),
         }
     }
@@ -631,6 +1370,343 @@ impl World for Seen<'_> {
             summary,
         })
     }
+
+    fn clarification(&self, step_id: &str) -> super::clarify::ClarificationState {
+        let rounds = self
+            .store
+            .clarification_rounds(self.run_id, step_id)
+            .unwrap_or_default();
+        let mut state = super::clarify::state_from(&rounds);
+        state.summary = self
+            .store
+            .clarification_summary(self.run_id, step_id)
+            .ok()
+            .flatten()
+            .is_some_and(|text| !text.trim().is_empty());
+        state
+    }
+
+    fn approval(&self, step_id: &str) -> Option<RecordedApproval> {
+        let row = self
+            .store
+            .workflow_approval(self.run_id, step_id)
+            .ok()
+            .flatten()?;
+        let decision = ApprovalDecision::parse(&row.decision)?;
+        Some(RecordedApproval {
+            decision,
+            feedback: row.feedback,
+            actor: row.actor,
+            decided_at: row.decided_at,
+        })
+    }
+}
+
+fn is_applied_decision(change: &Move) -> bool {
+    change.outcome.as_deref().is_some_and(|raw| {
+        serde_json::from_str::<StepOutcome>(raw)
+            .ok()
+            .is_some_and(|outcome| outcome.decision.is_some())
+    })
+}
+
+/// Open the wait and issue the first code when an approval starts waiting. A notification
+/// that cannot be shown does not fail the step. The code is not written into the step.
+/// A question opened since the last tick, or reopened for another round. The one-time code
+/// is issued the same way as an approval, including when `notify` is `never`: a terminal
+/// still has to present it. The notification is what stays quiet.
+fn tell_open_questions(
+    driver: &Driver,
+    store: &Store,
+    hands: &dyn Hands,
+    run: &WorkflowRunRow,
+) -> IpcResult<()> {
+    // A lookup error is told anyway: missing a notice is worse than an extra one.
+    // The code is issued either way, so `ys workflow answer` is not left with no code.
+    let tell = store.tell_workflow_approval(&run.id).unwrap_or(true);
+    for wait in store.workflow_waits_unapplied()? {
+        if wait.run_id != run.id || wait.kind != super::waits::KIND_QUESTION {
+            continue;
+        }
+        if wait.answer.is_some() || wait.applied_at.is_some() {
+            continue;
+        }
+        let present = store
+            .answer_code_present(&run.id, &wait.step_id)
+            .unwrap_or(false);
+        if wait.notified_at.is_some() && present && driver.holds_code(&run.id, &wait.step_id) {
+            continue;
+        }
+        let Some((code, had)) = driver.issue_answer_code(store, &run.id, &wait.step_id, false)?
+        else {
+            continue;
+        };
+        hands.approval_code(&run.id, &wait.step_id, &code);
+        if !tell {
+            continue;
+        }
+        let replaced = had && wait.notified_at.is_some();
+        let title = if replaced {
+            super::waits::TITLE_ANSWER_REPLACED
+        } else {
+            super::waits::TITLE_ANSWER
+        };
+        let _ = hands.notify(
+            title,
+            Some(&approval_body(
+                run,
+                &wait.step_id,
+                wait.prompt.as_deref(),
+                shown_code(hands, Some(&code)),
+                replaced,
+            )),
+        );
+        if wait.notified_at.is_none() {
+            store.mark_workflow_wait_notified(&run.id, &wait.step_id)?;
+        }
+    }
+    Ok(())
+}
+
+fn follow_approval(
+    driver: &Driver,
+    store: &Store,
+    hands: &dyn Hands,
+    workflow: &super::Workflow,
+    run: &WorkflowRunRow,
+    change: &Move,
+) -> IpcResult<()> {
+    let Some(step) = workflow.steps.iter().find(|step| step.id == change.step) else {
+        return Ok(());
+    };
+    let approve = matches!(step.action, super::Action::Approve { .. });
+    if !(approve && change.to == StepStatus::Waiting && change.from.contains(&StepStatus::Pending))
+    {
+        return Ok(());
+    }
+    let prompt = change
+        .outputs
+        .as_deref()
+        .and_then(|raw| engine::parse_outputs(raw).get("prompt").cloned());
+    open_approval_wait(store, run, step, prompt.as_deref())?;
+    let Some((code, _)) = driver.issue_approval_code(store, &run.id, &step.id, false)? else {
+        return Ok(());
+    };
+    hands.approval_code(&run.id, &step.id, &code);
+    let told = store
+        .workflow_wait(&run.id, &step.id)?
+        .and_then(|wait| wait.notified_at)
+        .is_some();
+    // A lookup error is told anyway: missing a notice is worse than an extra one.
+    let tell = store.tell_workflow_approval(&run.id).unwrap_or(true);
+    if tell && !told {
+        let _ = hands.notify(
+            super::waits::TITLE_WAITING,
+            Some(&approval_body(
+                run,
+                &step.id,
+                prompt.as_deref(),
+                shown_code(hands, Some(&code)),
+                false,
+            )),
+        );
+        store.mark_workflow_wait_notified(&run.id, &step.id)?;
+    }
+    Ok(())
+}
+
+/// The first look after this process started. A waiting approval whose code is not in memory
+/// is given a new one, because the old plaintext died with the last process, and the person
+/// is told. A decision already recorded is not given a code and is not told again: the engine
+/// applies that decision once.
+fn resume_human_waits(
+    driver: &Driver,
+    store: &Store,
+    hands: &dyn Hands,
+    workflow: &super::Workflow,
+    run: &WorkflowRunRow,
+) -> IpcResult<()> {
+    let steps = store.workflow_steps(&run.id)?;
+    for step in &workflow.steps {
+        if !matches!(step.action, super::Action::Approve { .. }) {
+            continue;
+        }
+        let Some(row) = steps.iter().find(|row| row.step_id == step.id) else {
+            continue;
+        };
+        if row.status != StepStatus::Waiting.as_str() {
+            continue;
+        }
+        let prompt = engine::parse_outputs(&row.outputs).get("prompt").cloned();
+        open_approval_wait(store, run, step, prompt.as_deref())?;
+        if store.workflow_approval(&run.id, &step.id)?.is_some() {
+            continue;
+        }
+        let Some((code, had)) = driver.issue_approval_code(store, &run.id, &step.id, false)? else {
+            continue;
+        };
+        hands.approval_code(&run.id, &step.id, &code);
+        let tell = store.tell_workflow_approval(&run.id).unwrap_or(true);
+        if !tell {
+            continue;
+        }
+        let told = store
+            .workflow_wait(&run.id, &step.id)?
+            .and_then(|wait| wait.notified_at)
+            .is_some();
+        if had {
+            let _ = hands.notify(
+                super::waits::TITLE_REPLACED,
+                Some(&approval_body(
+                    run,
+                    &step.id,
+                    prompt.as_deref(),
+                    shown_code(hands, Some(&code)),
+                    true,
+                )),
+            );
+        } else if !told {
+            let _ = hands.notify(
+                super::waits::TITLE_WAITING,
+                Some(&approval_body(
+                    run,
+                    &step.id,
+                    prompt.as_deref(),
+                    shown_code(hands, Some(&code)),
+                    false,
+                )),
+            );
+            store.mark_workflow_wait_notified(&run.id, &step.id)?;
+        }
+    }
+    Ok(())
+}
+
+fn open_approval_wait(
+    store: &Store,
+    run: &WorkflowRunRow,
+    step: &super::Step,
+    prompt: Option<&str>,
+) -> IpcResult<()> {
+    let phase = super::waits::Phase {
+        workflow_id: run.workflow_id.clone(),
+        workflow_name: run.workflow_name.clone(),
+        workspace_name: run.workspace_name.clone(),
+        step_id: step.id.clone(),
+        action: "approve".to_owned(),
+    };
+    let refs = serde_json::to_string(&step.consumes).unwrap_or_else(|_| "[]".to_owned());
+    store.open_workflow_wait(
+        &run.id,
+        &step.id,
+        super::waits::KIND_APPROVAL,
+        super::waits::BLOCKED_APPROVAL,
+        super::waits::ACTION_APPROVAL,
+        prompt,
+        &refs,
+        &phase.to_json(),
+    )?;
+    Ok(())
+}
+
+/// The code to put in a notification, or none when the setting leaves it out.
+fn shown_code<'a>(hands: &'a dyn Hands, code: Option<&'a str>) -> Option<&'a str> {
+    code.filter(|_| hands.include_approval_code())
+}
+
+fn approval_body(
+    run: &WorkflowRunRow,
+    step: &str,
+    prompt: Option<&str>,
+    code: Option<&str>,
+    replaced: bool,
+) -> String {
+    super::waits::notice_body(
+        &run.workflow_name,
+        &run.workspace_name,
+        step,
+        prompt,
+        code,
+        replaced,
+    )
+}
+
+/// The feedback on a request for changes, when this move is that decision.
+fn changes_feedback(outcome: Option<&str>) -> Option<String> {
+    let outcome: StepOutcome = serde_json::from_str(outcome?).ok()?;
+    if outcome.decision == Some(ApprovalDecision::ChangesRequested) {
+        Some(outcome.feedback.unwrap_or_default())
+    } else {
+        None
+    }
+}
+
+/// The artifacts a request for changes stores, written in the same change as the step move.
+/// `None` when this move is not that decision. Empty feedback becomes a sentence, so the
+/// artifact is never blank.
+fn changes_artifacts(
+    store: &Store,
+    run_id: &str,
+    change: &Move,
+) -> IpcResult<Option<Vec<NewWorkflowArtifact>>> {
+    let Some(feedback) = changes_feedback(change.outcome.as_deref()) else {
+        return Ok(None);
+    };
+    let definition = store
+        .workflow_run(run_id)?
+        .map(|run| run.definition)
+        .unwrap_or_default();
+    let step = super::parse(&definition).ok().and_then(|workflow| {
+        workflow
+            .steps
+            .into_iter()
+            .find(|step| step.id == change.step)
+    });
+    let outputs = change
+        .outputs
+        .as_deref()
+        .map(engine::parse_outputs)
+        .unwrap_or_default();
+    let changes_name = artifact::changes_artifact_name(&change.step);
+    let mut saved = Vec::new();
+    if let Some(step) = step {
+        for decl in &step.produces {
+            let ArtifactSource::Output { field } = &decl.source else {
+                continue;
+            };
+            if decl.name == changes_name {
+                continue;
+            }
+            let Some(text) = outputs.get(field).filter(|text| !text.trim().is_empty()) else {
+                continue;
+            };
+            let Ok((body, truncated)) = artifact::require_text(&decl.name, text.clone()) else {
+                continue;
+            };
+            saved.push(NewWorkflowArtifact {
+                name: decl.name.clone(),
+                source: "output".into(),
+                detail: Some(field.clone()),
+                body,
+                truncated,
+            });
+        }
+    }
+    let body = if feedback.trim().is_empty() {
+        "Changes requested.".to_owned()
+    } else {
+        feedback
+    };
+    let (body, truncated) = artifact::require_text(&changes_name, body)
+        .unwrap_or(("Changes requested.".to_owned(), false));
+    saved.push(NewWorkflowArtifact {
+        name: changes_name,
+        source: "decision".into(),
+        detail: Some("changes_requested".into()),
+        body,
+        truncated,
+    });
+    Ok(Some(saved))
 }
 
 /// The workspace's newest live harness session: the conversation records newest first, matched

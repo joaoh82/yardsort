@@ -719,6 +719,12 @@ Proposed in [21-workflows](21-workflows.md), after an eight-question design pass
 - [x] Slice 6: docs and pictures. The README's highlight and section, the website's section, the
       quick start, and screenshots of the view and the Run dialog. Recorded in
       [21 § slice 6](21-workflows.md#slice-6-what-shipped).
+- A `run_test` step can be a gate. `gate: true` records a step outcome and stops the run when
+  the smoke test fails, skipping the steps still going and cancelling a smoke test they were
+  waiting on. The run names the first line of the report; the step keeps the rest. Recorded in
+  [21 § test verdict gates](21-workflows.md#test-verdict-gates).
+- A step can hand a named document to a later step. The run keeps it, and the next agent
+  receives it. Recorded in [21 § named artifacts](21-workflows.md#named-artifacts).
 
 _Exit:_ the code-review workflow runs against a real pull request on all three platforms from the
 window and from `ys`; a busy agent is never written to; every validation error has a failing
@@ -1036,6 +1042,11 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       rather than a scope of its own, as the owner chose; **Resume** on the phone; and on another
       computer's page in the desktop app, **New workspace**, **New agent** and **Resume** by that
       computer's ids.
+      Slice 8, R4's first, was built on 2026-11-10 ([35 §17](35-remote-r4-r5.md#17--what-the-eighth-slice-adds)):
+      the phone asks each open computer whether it still answers when its network changes, and
+      tries one it was waiting on at once; a development build's readout of the two budgets; and
+      `echo-time.ts` with a delay proxy to measure them. Its local smoke test passed: through 100 ms
+      of round trip, a keystroke's echo at p95 105 ms against a budget of 300.
       Slice 12 was added on 2026-11-08 at the owner's request: the slim image and a full one, with
       toolchains, `gh` and the harnesses whose licence allows it, published to the GitHub Container
       Registry on each release beside the tarballs; the other harnesses installed by the operator
@@ -1203,13 +1214,19 @@ projects and starts work when the user agrees.
       naming it. `ys pr list` with the view's review filters and `--attention`, and
       `ys pr checkout`, for which `prepare_branch` moved into the core. Recorded in
       [37](37-floor-manager.md).
+- [x] Permission is a setting, and `ys` enforces it. Read only, ask first (the default) and
+      trusted, in Settings → General. The launch sets `YARDSORT_COORDINATOR`; `ys` reads the
+      level from settings on every command. Ask first waits for **Allow** in the window. Delete,
+      close and attach are refused at every level. Question 53 settled. Recorded in
+      [37](37-floor-manager.md).
 - [ ] Resume its conversation after it ends, and start it with a question from elsewhere in the
       window.
-- [ ] Settle the name, and whether the lines it is told are enough (questions 53–55).
+- [ ] Settle the name (questions 54–55).
 
 _Exit:_ on all three platforms, asking the Floor Manager to review the open pull requests nobody
-has reviewed ends with one reviewer per pull request posting on GitHub, every one of them proposed
-first and started only after a yes.
+has reviewed ends with one reviewer per pull request posting on GitHub. At the default, ask
+first, every one of them is started only after **Allow**. At trusted the non-destructive starts
+run without that, and deleting, closing and attaching are still refused.
 
 ## M31 — Pull requests in other repositories
 

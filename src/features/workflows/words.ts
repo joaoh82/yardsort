@@ -10,6 +10,7 @@ export const ACTION_WORDS: Record<Step["action"], string> = {
   wait_pr_activity: "Wait for the pull request",
   run_test: "Run a smoke test",
   notify: "Notify you",
+  approve: "Ask for approval",
 };
 
 /** Where a problem is, as an offset into the document; a problem with no line marks the first. */

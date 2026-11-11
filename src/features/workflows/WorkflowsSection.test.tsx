@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowItem } from "@/lib/ipc";
 
-const core = vi.hoisted(() => ({ workflowList: vi.fn() }));
+const core = vi.hoisted(() => ({ workflowList: vi.fn(), workflowWaits: vi.fn() }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
   hasCore: () => true,
@@ -31,6 +31,7 @@ describe("WorkflowsSection", () => {
     vi.clearAllMocks();
     useWorkflowStore.setState({ items: [], loaded: false, drafts: {} });
     useProjectsStore.setState({ workflowId: null, selectedWorkspaceId: "w-app" });
+    core.workflowWaits.mockResolvedValue([]);
     core.workflowList.mockResolvedValue([
       item("code-review", "Request code review", { activeRuns: 2 }),
       item("broken", "Broken", {
@@ -53,6 +54,32 @@ describe("WorkflowsSection", () => {
     expect(useProjectsStore.getState().workflowId).toBe("code-review");
     expect(review).toHaveAttribute("aria-current", "page");
     expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-app");
+  });
+
+  it("lists a run waiting on you and opens that workflow", async () => {
+    core.workflowWaits.mockResolvedValue([
+      {
+        runId: "run-1",
+        stepId: "sign-off",
+        workflowId: "code-review",
+        workflowName: "Request code review",
+        workspaceName: "fix-login",
+        kind: "approval",
+        blockedOn: "your approval",
+        actionNeeded: "Approve, reject, or request changes.",
+        prompt: null,
+        blockedLine: "Blocked: waiting for your approval.",
+      },
+    ]);
+    const user = userEvent.setup();
+    render(<WorkflowsSection />);
+    const waiting = await screen.findByRole("button", {
+      name: /Blocked: waiting for your approval/,
+    });
+    expect(waiting).toHaveTextContent("Approve, reject, or request changes.");
+    await user.click(waiting);
+    expect(useProjectsStore.getState().workflowId).toBe("code-review");
+    expect(useWorkflowStore.getState().shownRun["code-review"]).toBe("run-1");
   });
 
   it("marks a workflow with unsaved changes, and starts a new one with +", async () => {

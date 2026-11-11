@@ -11,6 +11,10 @@ const core = vi.hoisted(() => ({
   workflowRemove: vi.fn(),
   workflowRuns: vi.fn(),
   workflowRunSteps: vi.fn(),
+  workflowDecide: vi.fn(),
+  workflowAnswer: vi.fn(),
+  workflowShowApprovalCode: vi.fn(),
+  workflowWaits: vi.fn(),
   workflowWriterStatus: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
@@ -95,6 +99,7 @@ function item(id: string, source: WorkflowItem["source"], extra: Partial<Workflo
         {
           id: "tell",
           needs: [],
+          gate: false,
           action: "notify",
           title: "Hi",
           body: null,
@@ -120,6 +125,7 @@ describe("WorkflowView", () => {
     core.workflowCheck.mockImplementation(async (text: string) => valid(text));
     core.workflowRuns.mockResolvedValue([]);
     core.workflowList.mockResolvedValue([]);
+    core.workflowWaits.mockResolvedValue([]);
     core.workflowWriterStatus.mockResolvedValue({
       harnessId: null,
       status: {
@@ -316,6 +322,17 @@ describe("WorkflowView", () => {
         endedAt: null,
         outputs: {},
         note: "no way",
+        outcome: null,
+        artifacts: [
+          {
+            name: "spec",
+            source: "file",
+            detail: "SPEC.md",
+            body: "Be kind.",
+            truncated: false,
+          },
+        ],
+        consumed: [],
       },
     ]);
     // A schedule started this run: the list says so, and the open run says which.
@@ -332,8 +349,11 @@ describe("WorkflowView", () => {
     expect(row).toHaveTextContent("scheduled");
     expect(row).toHaveTextContent("triggered");
     await userEvent.setup().click(row);
-    expect(await within(runs).findByText("no way")).toBeInTheDocument();
+    expect(await within(runs).findByText("no way")).toHaveClass("whitespace-pre-wrap");
+    expect(within(runs).getByText("Step `tell` failed: no way")).toHaveClass("whitespace-pre-wrap");
     expect(within(runs).getByText("Notify you")).toBeInTheDocument();
+    expect(within(runs).getByText("Artifact spec")).toBeInTheDocument();
+    expect(within(runs).getByText("Be kind.")).toBeInTheDocument();
     expect(within(runs).getByText("Scheduled · Nightly")).toBeInTheDocument();
     expect(within(runs).getByText("Triggered · Address reviews")).toBeInTheDocument();
     expect(core.workflowRunSteps).toHaveBeenCalledWith("run-1");
@@ -388,6 +408,9 @@ describe("WorkflowView", () => {
         endedAt: null,
         outputs: {},
         note: "told it",
+        outcome: null,
+        artifacts: [],
+        consumed: [],
       },
     ]);
     // Open run, on a trigger's history.
@@ -398,5 +421,138 @@ describe("WorkflowView", () => {
     expect(core.workflowRunSteps).toHaveBeenCalledWith("run-1");
     // Taken: the view opened from the sidebar next time starts with no run picked.
     expect(useWorkflowStore.getState().shownRun.demo).toBeUndefined();
+  });
+
+  it("shows a pending approval and records the decision", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    core.workflowRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "demo",
+        workflowName: "Demo",
+        workspaceId: "w",
+        workspaceName: "fix-login",
+        status: "running",
+        requestedBy: "app",
+        error: null,
+        inputs: {},
+        pullRequest: null,
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+        blockedOn: "your approval",
+      },
+    ]);
+    core.workflowRunSteps.mockResolvedValue([
+      {
+        stepId: "sign-off",
+        action: "approve",
+        status: "waiting",
+        startedAt: null,
+        endedAt: null,
+        outputs: { prompt: "Ship this plan?" },
+        note: "Waiting for your approval.",
+        outcome: null,
+        artifacts: [],
+        consumed: [
+          {
+            name: "plan",
+            source: "output",
+            detail: "brief",
+            body: "Split the migration.",
+            truncated: false,
+          },
+        ],
+        approvalCode: "ABCD2345",
+        approvalLocked: false,
+      },
+    ]);
+    core.workflowDecide.mockResolvedValue(undefined);
+    core.workflowList.mockResolvedValue([item("demo", { kind: "builtIn" })]);
+    render(<WorkflowView workflowId="demo" />);
+    const runs = await screen.findByRole("region", { name: "Runs" });
+    await userEvent
+      .setup()
+      .click(await within(runs).findByRole("button", { name: "Run in fix-login, running" }));
+    expect(
+      (await within(runs).findAllByText("Blocked: waiting for your approval.")).length,
+    ).toBeGreaterThan(0);
+    expect(within(runs).getByText(/ABCD2345/)).toBeInTheDocument();
+    expect(within(runs).getByText("To review plan")).toBeInTheDocument();
+    expect(within(runs).getByText("Split the migration.")).toBeInTheDocument();
+    expect(within(runs).getByRole("button", { name: "Request changes" })).toBeDisabled();
+    core.workflowShowApprovalCode.mockResolvedValue("ZXCV2345");
+    await userEvent.setup().click(within(runs).getByRole("button", { name: "Show a new code" }));
+    await waitFor(() =>
+      expect(core.workflowShowApprovalCode).toHaveBeenCalledWith("run-1", "sign-off"),
+    );
+    await waitFor(() =>
+      expect(within(runs).getByRole("button", { name: "Approve" })).toBeEnabled(),
+    );
+    await userEvent.setup().click(within(runs).getByRole("button", { name: "Approve" }));
+    expect(core.workflowDecide).toHaveBeenCalledWith("run-1", "sign-off", "approved", null);
+  });
+
+  it("shows a clarification and records the answer", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    core.workflowRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "demo",
+        workflowName: "Demo",
+        workspaceId: "w",
+        workspaceName: "fix-login",
+        status: "running",
+        requestedBy: "app",
+        error: null,
+        inputs: {},
+        pullRequest: null,
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+        blockedOn: "your answer",
+      },
+    ]);
+    core.workflowRunSteps.mockResolvedValue([
+      {
+        stepId: "discover",
+        action: "wait_session",
+        status: "waiting",
+        startedAt: null,
+        endedAt: null,
+        outputs: {},
+        note: null,
+        outcome: null,
+        artifacts: [],
+        consumed: [],
+        approvalCode: null,
+        approvalLocked: false,
+        clarificationPrompt: "1. What should the timeout be?",
+      },
+    ]);
+    core.workflowAnswer.mockResolvedValue(undefined);
+    core.workflowList.mockResolvedValue([item("demo", { kind: "builtIn" })]);
+    render(<WorkflowView workflowId="demo" />);
+    const runs = await screen.findByRole("region", { name: "Runs" });
+    await userEvent
+      .setup()
+      .click(await within(runs).findByRole("button", { name: "Run in fix-login, running" }));
+    expect(within(runs).getAllByText("Blocked: waiting for your answer.").length).toBeGreaterThan(
+      0,
+    );
+    expect(within(runs).getByText("1. What should the timeout be?")).toBeInTheDocument();
+    expect(
+      within(runs).getByText(
+        "The code is not in this window yet. Show a new code to use a terminal.",
+      ),
+    ).toBeInTheDocument();
+    core.workflowShowApprovalCode.mockResolvedValue(undefined);
+    await userEvent.setup().click(within(runs).getByRole("button", { name: "Show a new code" }));
+    expect(core.workflowShowApprovalCode).toHaveBeenCalledWith("run-1", "discover");
+    const answer = within(runs).getByRole("button", { name: "Answer" });
+    expect(answer).toBeDisabled();
+    await userEvent.setup().type(within(runs).getByLabelText("Answer for discover"), "30 seconds");
+    await userEvent.setup().click(answer);
+    expect(core.workflowAnswer).toHaveBeenCalledWith("run-1", "discover", "30 seconds");
   });
 });

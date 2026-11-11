@@ -96,6 +96,8 @@ fn the_built_in_code_review_is_valid_and_ends_in_two_branches() {
             session: SessionRef::Step("review".into()),
             until: Until::Settled,
             timeout_secs: Some(2 * 60 * 60),
+            clarify: false,
+            max_rounds: 0,
         }
     );
 }
@@ -296,6 +298,13 @@ fn step_ids_are_names_and_unique() {
         found.starts_with("12:9: `Start` cannot be a step's id."),
         "{found}"
     );
+    let reserved = problem(&with_steps(
+        "  - id: stop\n    action: notify\n    title: Hi\n",
+    ));
+    assert!(
+        reserved.contains("`stop` cannot be a step's id"),
+        "{reserved}"
+    );
     let found = problem(&with_steps(
         "  - id: start\n    action: notify\n    title: Hi\n",
     ));
@@ -310,6 +319,82 @@ fn an_unknown_action_lists_the_real_ones() {
         "{found}"
     );
     assert!(found.contains("`wait_pr_activity`"), "{found}");
+}
+
+#[test]
+fn a_run_test_file_from_before_gates_still_loads_and_is_not_a_gate() {
+    let workflow = parse(include_str!("builtin/smoke-then-tell.yaml")).unwrap();
+    let Action::RunTest { test, .. } = &workflow.steps[0].action else {
+        panic!("the built-in starts with run_test");
+    };
+    assert!(
+        !workflow.steps[0].is_gate(),
+        "omitting gate keeps today's behaviour"
+    );
+    assert_eq!(test, "{{ inputs.suite }}");
+}
+
+#[test]
+fn a_run_test_step_can_be_marked_as_a_gate() {
+    let workflow = parse(&with_steps(
+        "  - id: check\n    action: run_test\n    test: login\n    gate: true\n",
+    ))
+    .unwrap();
+    let Action::RunTest { .. } = &workflow.steps[1].action else {
+        panic!("run_test");
+    };
+    assert!(workflow.steps[1].gate);
+    assert!(workflow.steps[1].is_gate());
+}
+
+#[test]
+fn an_approval_is_a_gate_and_a_pull_request_wait_is_not() {
+    let workflow = parse(&with_steps(
+        "  - id: sign-off\n    action: approve\n    prompt: \"Look at {{ inputs.note }}.\"\n",
+    ))
+    .unwrap();
+    let step = workflow
+        .steps
+        .iter()
+        .find(|step| step.id == "sign-off")
+        .unwrap();
+    assert!(matches!(step.action, Action::Approve { .. }));
+    assert!(step.is_gate());
+    assert!(step.gate);
+
+    let refused = problem(&with_steps(
+        "  - id: sign-off\n    action: approve\n    gate: false\n",
+    ));
+    assert!(refused.contains("An approval step is a gate"), "{refused}");
+
+    let waiting = parse(&with_steps("  - id: watch\n    action: wait_pr_activity\n")).unwrap();
+    let watch = waiting
+        .steps
+        .iter()
+        .find(|step| step.id == "watch")
+        .unwrap();
+    assert!(matches!(watch.action, Action::WaitPrActivity { .. }));
+    assert!(!watch.is_gate());
+}
+
+#[test]
+fn a_changes_prefix_is_reserved_for_the_request_artifact() {
+    let found = problem(&with_steps(
+        "  - id: sign-off\n    action: approve\n    produces:\n      - name: changes-sign-off\n        text: notes\n",
+    ));
+    assert!(found.contains("is reserved"), "{found}");
+    assert!(found.contains("changes-sign-off"), "{found}");
+}
+
+#[test]
+fn gate_on_another_action_is_named_as_misplaced() {
+    let found = problem(&with_steps(
+        "  - id: go\n    action: notify\n    title: Hi\n    gate: true\n",
+    ));
+    assert!(
+        found.ends_with("`gate` is not something a `notify` step takes."),
+        "{found}"
+    );
 }
 
 #[test]
@@ -956,4 +1041,414 @@ fn chart_source_lines_follow_yaml_ids_not_lookalikes_in_prompts() {
     assert_eq!(super::step_lines(&edited)["same"], 7);
     assert!(super::step_lines("steps: [").is_empty());
     assert!(super::step_lines("steps: [{id: same}, {id: same}]").is_empty());
+}
+
+fn handoff(steps: &str) -> String {
+    format!("id: demo\nname: Demo\nversion: 1\ntrigger:\n  kind: manual\nsteps:\n{steps}")
+}
+
+#[test]
+fn a_step_hands_a_named_artifact_to_one_that_names_it() {
+    let workflow = parse(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n  - id: plan\n    action: notify\n    \
+         needs: [draft]\n    consumes: [spec]\n    title: \"Read {{ artifacts.spec }}\"\n",
+    ))
+    .unwrap();
+    assert!(workflow.steps[0].consumes.is_empty());
+    assert_eq!(workflow.steps[0].produces.len(), 1);
+    assert_eq!(workflow.steps[0].produces[0].name, "spec");
+    assert_eq!(
+        workflow.steps[0].produces[0].source,
+        super::ArtifactSource::File {
+            path: "SPEC.md".into()
+        }
+    );
+    assert_eq!(workflow.steps[1].consumes, ["spec"]);
+    assert!(problems(BASE).is_empty());
+    assert!(workflow
+        .steps
+        .iter()
+        .all(|step| step.produces.is_empty() || step.id == "draft"));
+}
+
+#[test]
+fn an_artifact_name_has_to_be_produced_by_a_step_this_one_needs() {
+    let unknown = problem(&handoff(
+        "  - id: plan\n    action: notify\n    consumes: [plan]\n    title: Next\n",
+    ));
+    assert!(unknown.contains("no artifact `plan`"), "{unknown}");
+
+    let unneeded = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n  - id: plan\n    action: notify\n    \
+         consumes: [spec]\n    title: Next\n",
+    ));
+    assert!(unneeded.contains("not sure to have run"), "{unneeded}");
+
+    let twice = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: A.md\n      - name: spec\n        path: B.md\n",
+    ));
+    assert!(twice.contains("listed twice"), "{twice}");
+
+    let shared = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: A.md\n  - id: other\n    action: notify\n    \
+         title: Other\n    produces:\n      - name: spec\n        path: B.md\n",
+    ));
+    assert!(shared.contains("already produces `spec`"), "{shared}");
+
+    let again = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n  - id: plan\n    action: notify\n    \
+         needs: [draft]\n    consumes: [spec, spec]\n    title: Next\n",
+    ));
+    assert!(again.contains("listed twice"), "{again}");
+
+    let itself = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n    consumes: [spec]\n",
+    ));
+    assert!(itself.contains("produces itself"), "{itself}");
+
+    let bare = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n  - id: plan\n    action: notify\n    \
+         needs: [draft]\n    title: \"{{ artifacts.spec }}\"\n",
+    ));
+    assert!(
+        bare.contains("does not list `spec` under `consumes`"),
+        "{bare}"
+    );
+}
+
+#[test]
+fn an_artifact_source_is_checked_before_the_run() {
+    let secret = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: .env\n",
+    ));
+    assert!(secret.contains("looks like a secret"), "{secret}");
+
+    let outside = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: ../secret.md\n",
+    ));
+    assert!(outside.contains("outside the workspace"), "{outside}");
+
+    let raw = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n        raw: true\n",
+    ));
+    assert!(raw.contains("`raw` is only for a transcript"), "{raw}");
+
+    let field = problem(&handoff(
+        "  - id: draft\n    action: notify\n    title: Drafted\n    produces:\n      \
+         - name: report\n        field: summary\n",
+    ));
+    assert!(field.contains("leaves nothing"), "{field}");
+
+    let bare = problem(&handoff(
+        "  - id: wait\n    action: wait_session\n    session: origin\n    produces:\n      \
+         - name: discussion\n        session: origin\n",
+    ));
+    assert!(
+        bare.contains("only when the step says `from: transcript`"),
+        "{bare}"
+    );
+
+    let raw_only = problem(&handoff(
+        "  - id: wait\n    action: wait_session\n    session: origin\n    produces:\n      \
+         - name: discussion\n        raw: true\n",
+    ));
+    assert!(
+        raw_only.contains("only when the step says `from: transcript`"),
+        "{raw_only}"
+    );
+
+    let early = problem(&handoff(
+        "  - id: start\n    action: start_session\n    harness: claude\n    produces:\n      \
+         - name: spec\n        path: SPEC.md\n",
+    ));
+    assert!(
+        early.contains("cannot hand on a file or a transcript"),
+        "{early}"
+    );
+
+    let sent = problem(&handoff(
+        "  - id: nudge\n    action: send_to_session\n    session: origin\n    prompt: Go\n    \
+         produces:\n      - name: discussion\n        from: transcript\n",
+    ));
+    assert!(
+        sent.contains("cannot hand on a file or a transcript"),
+        "{sent}"
+    );
+
+    let workflow = parse(&handoff(
+        "  - id: wait\n    action: wait_session\n    session: origin\n    produces:\n      \
+         - name: discussion\n        from: transcript\n",
+    ))
+    .unwrap();
+    assert_eq!(
+        workflow.steps[0].produces[0].source,
+        super::ArtifactSource::Transcript {
+            session: super::SessionRef::Origin,
+            raw: false,
+        }
+    );
+}
+
+const BRANCHED: &str = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: plan
+    action: notify
+    title: Plan
+    consumes: [changes-sign-off]
+  - id: sign-off
+    needs: [plan]
+    action: approve
+    prompt: Look at the plan.
+    on:
+      approved: implement
+      rejected: stop
+      changes_requested: plan
+    max_attempts: 3
+  - id: implement
+    needs: [sign-off]
+    action: notify
+    title: Build
+  - id: verify
+    needs: [implement]
+    action: run_test
+    test: login
+    gate: true
+    on:
+      passed: ship
+      failed: implement
+    max_attempts: 3
+  - id: ship
+    needs: [verify]
+    action: notify
+    title: Ship
+"#;
+
+#[test]
+fn routes_name_every_outcome_and_a_loop_names_its_limit() {
+    let workflow = parse(BRANCHED).unwrap();
+    let sign = workflow
+        .steps
+        .iter()
+        .find(|step| step.id == "sign-off")
+        .unwrap();
+    assert_eq!(sign.max_attempts, Some(3));
+    assert_eq!(sign.routes.len(), 3);
+    assert!(sign
+        .routes
+        .iter()
+        .any(|route| route.when == OutcomeName::Approved && route.to == "implement"));
+    assert!(sign
+        .routes
+        .iter()
+        .any(|route| route.stops() && route.when == OutcomeName::Rejected));
+    let verify = workflow
+        .steps
+        .iter()
+        .find(|step| step.id == "verify")
+        .unwrap();
+    assert_eq!(
+        verify
+            .routes
+            .iter()
+            .map(|route| route.when)
+            .collect::<Vec<_>>(),
+        vec![OutcomeName::Failed, OutcomeName::Passed]
+    );
+}
+
+#[test]
+fn a_branch_to_a_missing_step_is_refused() {
+    let found = problem(&BRANCHED.replace("approved: implement", "approved: missing"));
+    assert!(found.contains("There is no step `missing`"), "{found}");
+}
+
+#[test]
+fn a_step_no_branch_can_reach_is_refused() {
+    let found = problem(
+        "id: demo\nname: Demo\nversion: 1\ntrigger:\n  kind: manual\nsteps:\n  - id: sign-off\n    \
+         action: approve\n    prompt: Look\n    on:\n      approved: implement\n      \
+         rejected: stop\n      changes_requested: stop\n  - id: implement\n    needs: [sign-off]\n    \
+         action: notify\n    title: Build\n  - id: leftover\n    needs: [sign-off]\n    \
+         action: notify\n    title: No\n",
+    );
+    assert!(found.contains("Step `leftover` cannot run"), "{found}");
+}
+
+#[test]
+fn a_loop_without_a_limit_is_refused() {
+    let found = problem(&BRANCHED.replacen(
+        "      changes_requested: plan\n    max_attempts: 3\n",
+        "      changes_requested: plan\n",
+        1,
+    ));
+    assert!(
+        found.contains("Routing back needs `max_attempts`"),
+        "{found}"
+    );
+}
+
+#[test]
+fn a_limit_above_the_cap_or_without_a_loop_is_refused() {
+    let high = problem(&BRANCHED.replacen("max_attempts: 3", "max_attempts: 11", 1));
+    assert!(
+        high.contains("`max_attempts` must be from 2 to 10"),
+        "{high}"
+    );
+    let idle = problem(
+        "id: demo\nname: Demo\nversion: 1\ntrigger:\n  kind: manual\nsteps:\n  - id: sign-off\n    \
+         action: approve\n    prompt: Look\n    max_attempts: 3\n",
+    );
+    assert!(
+        idle.contains("`max_attempts` is set, and no route comes back"),
+        "{idle}"
+    );
+}
+
+#[test]
+fn a_branch_must_name_every_outcome_and_only_those() {
+    let missing = problem(&BRANCHED.replace("      rejected: stop\n", ""));
+    assert!(missing.contains("Say where `rejected` goes"), "{missing}");
+    let odd = problems(&BRANCHED.replace("rejected: stop", "nope: stop"));
+    assert!(
+        odd.iter()
+            .any(|line| line.contains("`nope` is not an outcome")),
+        "{odd:?}"
+    );
+    let notify = problem(
+        "id: demo\nname: Demo\nversion: 1\ntrigger:\n  kind: manual\nsteps:\n  - id: ping\n    \
+         action: notify\n    title: Hi\n    on:\n      passed: stop\n",
+    );
+    assert!(
+        notify.contains("`on` is not something a `notify` step takes"),
+        "{notify}"
+    );
+}
+
+#[test]
+fn a_forward_failure_may_be_consumed() {
+    let source = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: verify
+    action: run_test
+    test: login
+    on:
+      passed: stop
+      failed: report
+  - id: report
+    needs: [verify]
+    action: notify
+    title: Report
+    consumes: [failure-verify]
+"#;
+    let workflow = parse(source).unwrap();
+    assert_eq!(
+        workflow.steps[1].consumes,
+        vec!["failure-verify".to_owned()]
+    );
+    let refused = problems(&source.replace("failed: report", "failed: stop"));
+    assert!(
+        refused.iter().any(|line| line.contains(
+            "Step `verify` does not route `failed` back to `report`, so `failure-verify` is never written"
+        )),
+        "{refused:?}"
+    );
+}
+
+#[test]
+fn feedback_is_only_consumed_when_that_outcome_comes_back() {
+    let found = problems(&BRANCHED.replacen(
+        "      changes_requested: plan\n    max_attempts: 3\n",
+        "      changes_requested: stop\n",
+        1,
+    ));
+    assert!(
+        found
+            .iter()
+            .any(|line| line.contains("does not route `changes_requested` back to `plan`")),
+        "{found:?}"
+    );
+    let reserved = problem(&with_steps(
+        "  - id: sign-off\n    action: approve\n    produces:\n      - name: failure-sign-off\n        text: notes\n",
+    ));
+    assert!(
+        reserved.contains("`failure-sign-off` is reserved"),
+        "{reserved}"
+    );
+}
+
+#[test]
+fn a_clarifying_wait_names_its_rounds_and_a_brief_comes_only_from_it() {
+    let source = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: start
+    action: start_session
+    harness: claude
+    prompt: Look
+  - id: discover
+    needs: [start]
+    action: wait_session
+    session: "{{ steps.start.session }}"
+    clarify: true
+    produces:
+      - name: brief
+        from: brief
+"#;
+    let workflow = parse(source).unwrap();
+    match &workflow.steps[1].action {
+        Action::WaitSession {
+            clarify,
+            max_rounds,
+            ..
+        } => {
+            assert!(*clarify);
+            assert_eq!(*max_rounds, 3);
+        }
+        other => panic!("expected a wait, got {other:?}"),
+    }
+    assert!(matches!(
+        workflow.steps[1].produces[0].source,
+        ArtifactSource::Brief
+    ));
+    let limited = source.replace("clarify: true", "clarify: true\n    max_rounds: 2");
+    match &parse(&limited).unwrap().steps[1].action {
+        Action::WaitSession { max_rounds, .. } => assert_eq!(*max_rounds, 2),
+        other => panic!("expected a wait, got {other:?}"),
+    }
+    let bare = problem(&source.replace("    clarify: true\n", ""));
+    assert!(
+        bare.contains("A brief comes from a `wait_session`"),
+        "{bare}"
+    );
+    let extra = problem(&with_steps(
+        "  - id: discover\n    needs: [start]\n    action: wait_session\n    \
+         session: \"{{ steps.start.session }}\"\n    max_rounds: 4\n",
+    ));
+    assert!(
+        extra.contains("`max_rounds` needs `clarify: true`"),
+        "{extra}"
+    );
+    let high = problem(&source.replace("clarify: true", "clarify: true\n    max_rounds: 11"));
+    assert!(high.contains("`max_rounds` must be from 1 to 10"), "{high}");
 }

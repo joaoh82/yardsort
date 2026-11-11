@@ -405,7 +405,9 @@ fn a_cancelled_run_cannot_be_moved_on_by_a_driver_that_had_not_heard() {
             &[StepStatus::Pending],
             StepStatus::Running,
             None,
-            None
+            None,
+            None,
+            false
         )
         .unwrap());
     assert!(fx
@@ -426,7 +428,9 @@ fn a_cancelled_run_cannot_be_moved_on_by_a_driver_that_had_not_heard() {
             &[StepStatus::Running],
             StepStatus::Succeeded,
             None,
-            None
+            None,
+            None,
+            false
         )
         .unwrap());
     assert!(!fx
@@ -447,7 +451,7 @@ fn a_step_move_keeps_its_first_start_time_and_records_what_it_left() {
     fx.store.start_workflow_run(&id, None).unwrap();
     let moved = |from, to, outputs| {
         fx.store
-            .move_workflow_step(&id, "start", &[from], to, outputs, None)
+            .move_workflow_step(&id, "start", &[from], to, outputs, None, None, false)
             .unwrap()
     };
     assert!(moved(StepStatus::Pending, StepStatus::Running, None));
@@ -475,11 +479,56 @@ fn a_step_move_keeps_its_first_start_time_and_records_what_it_left() {
             &[StepStatus::Pending],
             StepStatus::Skipped,
             None,
-            Some("x")
+            Some("x"),
+            None,
+            false
         )
         .unwrap());
     let tell = &fx.store.workflow_steps(&id).unwrap()[1];
     assert_eq!((tell.started_at, tell.note.as_deref()), (None, Some("x")));
+}
+
+#[test]
+fn starting_a_step_again_clears_an_outcome_that_coalesce_would_keep() {
+    let fx = Fixture::new();
+    let id = fx.queue("demo", &[("who", "claude")]).unwrap();
+    fx.store.start_workflow_run(&id, None).unwrap();
+    let move_step = |from, to, outcome, clear| {
+        fx.store
+            .move_workflow_step(&id, "start", &[from], to, None, None, outcome, clear)
+            .unwrap()
+    };
+    assert!(move_step(
+        StepStatus::Pending,
+        StepStatus::Running,
+        None,
+        true
+    ));
+    assert!(move_step(
+        StepStatus::Running,
+        StepStatus::Succeeded,
+        Some(r#"{"verdict":"failed","reason":"old"}"#),
+        false
+    ));
+    assert!(fx.store.workflow_steps(&id).unwrap()[0].outcome.is_some());
+    // A revision puts the step back, then starts it again. The old verdict must go.
+    assert!(move_step(
+        StepStatus::Succeeded,
+        StepStatus::Pending,
+        None,
+        false
+    ));
+    assert!(
+        fx.store.workflow_steps(&id).unwrap()[0].outcome.is_some(),
+        "leaving the outcome out does not clear it"
+    );
+    assert!(move_step(
+        StepStatus::Pending,
+        StepStatus::Running,
+        None,
+        true
+    ));
+    assert!(fx.store.workflow_steps(&id).unwrap()[0].outcome.is_none());
 }
 
 #[test]

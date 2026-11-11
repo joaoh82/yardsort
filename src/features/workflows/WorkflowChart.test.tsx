@@ -5,7 +5,9 @@ import { WorkflowChart } from "./WorkflowChart";
 
 it("selects a chart node by click and keyboard, with a visible selected state", async () => {
   const onSelect = vi.fn();
-  const steps = [{ id: "tell", action: "notify" as const, needs: [], title: "Hi", body: null }];
+  const steps = [
+    { id: "tell", action: "notify" as const, needs: [], gate: false, title: "Hi", body: null },
+  ];
   const view = render(<WorkflowChart steps={steps} selectedStep={null} onSelect={onSelect} />);
   const node = screen.getByLabelText("Select step tell");
   await userEvent.setup().click(node);

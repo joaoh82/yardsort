@@ -136,8 +136,9 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   bottom bar's corner or **Mod+J**, is an agent you pick that has every project in view through
   `ys`. Ask what is running, which pull requests nobody has reviewed or which need attention, or
   to start a task. It suggests a workflow, opens workspaces on other people's pull requests and
-  starts reviewers on them, each only after you say yes. It never deletes, merges or closes
-  anything.
+  starts reviewers on them. How much it may do on its own is a setting: read only, ask first
+  (the default) or trusted. `ys` enforces it. Deleting a workspace, closing a task and
+  attaching stay refused. A shell command that is not `ys` is outside that gate.
 - **Start from a repository or a link.** **Clone a repository** lists the repositories your `gh`
   account owns or collaborates on — type to narrow, pick one, clone — or takes a clone URL from
   GitHub, GitLab, Bitbucket, Gitea, Forgejo or a host of your own. **Start from a link…** takes
@@ -388,7 +389,10 @@ YAML file in your profile: the inputs to ask for, and steps that start an agent,
 settle, type to it once it is quiet, wait for a review on the pull request, and notify you. A
 step names the steps it needs, so the ones that need nothing of each other run side by side.
 Yardsort checks every name and every `{{ variable }}` before it runs anything, and names the line
-and column of each mistake.
+and column of each mistake. A `run_test` step marked `gate: true` stops the run when the smoke
+test fails, skips the steps still going, cancels a smoke test they were waiting on, and says why.
+A step can also hand a named document, such as a spec or a test report, to the step after it.
+The next agent receives that text, and the run keeps it so you can read what was passed on.
 
 ![Workflows: the built-in code review as a chart, with its file and its runs beside it](docs/images/workflows.png)
 

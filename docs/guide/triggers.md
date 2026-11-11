@@ -377,9 +377,11 @@ so.
 ## Being told
 
 A triggered run has nobody watching it, so the trigger can tell you how it ended, with a desktop
-notification: **when a run fails** (the default), **how every run ends**, or **never**. Unless it
-is set to never, a run waiting for your approval is told once, and so is a trigger that is capped,
-could not start its run, or had no agent to tell, once while it lasts.
+notification: **when a run fails** (the default), **how every run ends**, or **never**. A
+workflow that stops because a smoke test gate failed is told with the first line of that
+run's reason. When there is more to read, it also says to open Yardsort for the report.
+Unless it is set to never, a run waiting for your approval is told once, and so is a trigger
+that is capped, could not start its run, or had no agent to tell, once while it lasts.
 
 ## Its history
 

@@ -1,8 +1,9 @@
 //! `ys` end to end: the real binary, a real database, real git repositories.
 //!
-//! No agent is started here. Launching one needs a harness on `PATH`, which a CI runner has no
-//! reason to have — what is tested instead is that everything up to the launch is right, and
-//! that asking for a harness that is not there fails *before* anything is created.
+//! One test starts a stand-in harness, to check the Floor Manager does not hand its marker to
+//! the agent it starts. The rest start no agent: a CI runner has no harness on `PATH`, so what
+//! is tested instead is that everything up to the launch is right, and that asking for a harness
+//! that is not there fails before anything is created.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -68,12 +69,18 @@ impl Fixture {
             yardsort_core::activity::RUN_ENV,
             yardsort_core::activity::WORKSPACE_ENV,
             yardsort_core::activity::RECORD_ENV,
+            // A Floor Manager's gate must not leak into a test that is the user running `ys`.
+            yardsort_core::coordinator::ENV,
+            "YARDSORT_COORDINATOR_CONFIRM_WAIT",
         ] {
             command.env_remove(name);
         }
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
+        // A missing console must fail at once. Inheriting this process's stdin can be a
+        // console on Windows, and `ys` would wait there for a code that never comes.
+        command.stdin(std::process::Stdio::null());
         let output = command.output().expect("ys should run");
         Run {
             code: output.status.code(),
@@ -84,6 +91,81 @@ impl Fixture {
 
     fn git(&self) -> Git {
         git()
+    }
+
+    /// Write the Floor Manager permission. Ask is the default, and it is not stored.
+    fn set_floor(&self, level: &str) {
+        std::fs::write(
+            self.data_dir.join("settings.toml"),
+            format!("[floor_manager]\nlevel = \"{level}\"\n"),
+        )
+        .unwrap();
+    }
+
+    /// Run `ys` as the Floor Manager: the gate is on. `answer` is what the app would press.
+    /// `None` means the app is not open, so ask-first refuses at once.
+    fn ys_floor(&self, args: &[&str], answer: Option<&str>) -> Run {
+        let held = answer.map(|_| {
+            yardsort_core::presence::AppLock::take(&self.data_dir)
+                .unwrap()
+                .expect("the profile's lock is free")
+        });
+        let waiter = answer.map(|word| {
+            let data = self.data_dir.clone();
+            let word = word.to_owned();
+            std::thread::spawn(move || answer_when_asked(&data, &word))
+        });
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+        command
+            .args(["--data-dir", &self.data_dir.to_string_lossy()])
+            .args(args)
+            .env("YARDSORT_WORKTREE_ROOT", &self.worktree_root)
+            .env("YARDSORT_NO_DAEMON", "1")
+            .env(yardsort_core::coordinator::ENV, "1")
+            // A missed answer should fail the test in a second or two, not ten minutes.
+            .env("YARDSORT_COORDINATOR_CONFIRM_WAIT", "2000")
+            .stdin(std::process::Stdio::null());
+        for name in [
+            yardsort_core::activity::RUN_ENV,
+            yardsort_core::activity::WORKSPACE_ENV,
+            yardsort_core::activity::RECORD_ENV,
+        ] {
+            command.env_remove(name);
+        }
+        let output = command.output().expect("ys should run");
+        if let Some(waiter) = waiter {
+            waiter.join().expect("the confirmation waiter");
+        }
+        drop(held);
+        Run {
+            code: output.status.code(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }
+    }
+}
+
+/// Write `word` (`yes` or `no`) against the request `ys` is waiting on.
+fn answer_when_asked(data_dir: &std::path::Path, word: &str) {
+    let dir = data_dir.join("coordinator").join("confirm");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "json") {
+                    let stem = path.file_stem().unwrap().to_string_lossy();
+                    std::fs::write(dir.join(format!("{stem}.answer")), format!("{word}\n"))
+                        .unwrap();
+                    return;
+                }
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the Floor Manager's command never asked for a confirmation"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }
 
@@ -114,6 +196,487 @@ impl Run {
             self.stderr
         );
         self.stderr
+    }
+}
+
+fn worktree_count(fx: &Fixture) -> usize {
+    let json = fx.ys(&["workspace", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    worktrees_in(&listed).len()
+}
+
+/// The gate is the variable the launch sets, not the setting on its own: the user's own `ys`
+/// stays able to delete a workspace after they set the Floor Manager to read only.
+#[test]
+fn the_floor_manager_gate_is_its_own_environment_not_every_ys() {
+    let fx = Fixture::new();
+    fx.set_floor("read-only");
+    fx.ys(&[
+        "workspace",
+        "new",
+        &fx.project_name,
+        "the user, not the floor manager",
+        "--no-agent",
+    ])
+    .ok();
+    assert_eq!(worktree_count(&fx), 1);
+}
+
+#[test]
+fn read_only_refuses_a_start_and_still_lists_and_the_next_command_can_be_trusted() {
+    let fx = Fixture::new();
+    fx.set_floor("read-only");
+    let listed = fx.ys_floor(&["project", "list"], None).ok();
+    assert!(listed.contains("Demo"), "{listed}");
+
+    let refused = fx
+        .ys_floor(
+            &[
+                "workspace",
+                "new",
+                &fx.project_name,
+                "fix the login bug",
+                "--no-agent",
+            ],
+            None,
+        )
+        .failed();
+    assert!(
+        refused.contains("read only") && refused.contains("was not run"),
+        "{refused}"
+    );
+    assert_eq!(
+        worktree_count(&fx),
+        0,
+        "a refused start must not create a worktree"
+    );
+
+    // The level is read from settings on every command, so this does not wait for a restart.
+    fx.set_floor("trusted");
+    fx.ys_floor(
+        &[
+            "workspace",
+            "new",
+            &fx.project_name,
+            "fix the login bug",
+            "--no-agent",
+        ],
+        None,
+    )
+    .ok();
+    assert_eq!(worktree_count(&fx), 1);
+}
+
+#[test]
+fn ask_first_requires_a_confirmation_the_app_records() {
+    let fx = Fixture::new();
+    let start = [
+        "workspace",
+        "new",
+        &fx.project_name,
+        "fix the login bug",
+        "--no-agent",
+    ];
+
+    // The default level is ask first, and with the app closed there is nobody to ask.
+    let closed = fx.ys_floor(&start, None).failed();
+    assert!(
+        closed.contains("ask first") && closed.contains("not open"),
+        "{closed}"
+    );
+    assert_eq!(worktree_count(&fx), 0);
+
+    let refused = fx.ys_floor(&start, Some("no")).failed();
+    assert!(refused.contains("refused"), "{refused}");
+    assert_eq!(worktree_count(&fx), 0, "a no must not create a worktree");
+
+    fx.ys_floor(&start, Some("yes")).ok();
+    assert_eq!(worktree_count(&fx), 1);
+}
+
+#[test]
+fn destructive_commands_are_refused_at_every_permission() {
+    let fx = Fixture::new();
+    fx.ys(&[
+        "workspace",
+        "new",
+        &fx.project_name,
+        "keep this workspace",
+        "--no-agent",
+    ])
+    .ok();
+    let json = fx.ys(&["workspace", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let name = worktrees_in(&listed)[0]["name"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    for level in ["read-only", "ask", "trusted"] {
+        fx.set_floor(level);
+        for args in [
+            vec!["workspace", "delete", name.as_str()],
+            vec!["workspace", "delete", name.as_str(), "--force"],
+            vec!["task", "close", "1", "--yes"],
+            vec!["attach"],
+        ] {
+            let error = fx.ys_floor(&args, None).failed();
+            assert!(
+                error.contains("at any permission"),
+                "{level} {args:?}: {error}"
+            );
+            // Ask first must not turn a delete into a confirmation. There is no app here, and
+            // the message is the refusal, not "Yardsort is not open".
+            assert!(
+                !error.contains("not open"),
+                "{level} asked instead of refusing: {error}"
+            );
+        }
+        assert_eq!(worktree_count(&fx), 1, "{level} deleted the workspace");
+    }
+}
+
+/// Linux keeps settings in the config directory and the database in the data directory. The
+/// Floor Manager sets `YARDSORT_DATA_DIR`, so without `YARDSORT_CONFIG_DIR` `ys` would look
+/// beside the database, find nothing, and ignore read only.
+#[test]
+fn the_floor_manager_reads_settings_from_the_config_directory() {
+    let fx = Fixture::new();
+    // Beside the database, trusted. A lookup that ignores the config directory would allow this.
+    fx.set_floor("trusted");
+    let config = tempfile::tempdir().unwrap();
+    std::fs::write(
+        config.path().join("settings.toml"),
+        "[floor_manager]\nlevel = \"read-only\"\n",
+    )
+    .unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args([
+            "workspace",
+            "new",
+            &fx.project_name,
+            "should be refused",
+            "--no-agent",
+        ])
+        .env("YARDSORT_DATA_DIR", &fx.data_dir)
+        .env("YARDSORT_CONFIG_DIR", config.path())
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env("YARDSORT_NO_DAEMON", "1")
+        .env(yardsort_core::coordinator::ENV, "1")
+        .env_remove("SWITCHYARD_DATA_DIR")
+        .env_remove("SWITCHYARD_CONFIG_DIR")
+        .env_remove(yardsort_core::coordinator::CONFIRM_WAIT_ENV);
+    let output = command.output().expect("ys should run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stdout: {}\nstderr: {stderr}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        stderr.contains("read only") && stderr.contains("was not run"),
+        "the trusted file beside the database must not win: {stderr}"
+    );
+    assert_eq!(worktree_count(&fx), 0);
+}
+
+#[test]
+fn an_unreadable_settings_file_is_read_only_for_the_floor_manager() {
+    let fx = Fixture::new();
+    std::fs::write(fx.data_dir.join("settings.toml"), "level = [\n").unwrap();
+    let refused = fx
+        .ys_floor(
+            &["workspace", "new", &fx.project_name, "nope", "--no-agent"],
+            None,
+        )
+        .failed();
+    assert!(refused.contains("could not be read"), "{refused}");
+    assert!(refused.contains("read only"), "{refused}");
+    assert_eq!(worktree_count(&fx), 0);
+    // The user's own ys is not the Floor Manager. A broken file is still the defaults for them.
+    fx.ys(&[
+        "workspace",
+        "new",
+        &fx.project_name,
+        "the user, not the floor manager",
+        "--no-agent",
+    ])
+    .ok();
+}
+
+#[test]
+fn ask_first_shows_the_comment_and_refuses_a_body_from_stdin() {
+    let fx = Fixture::new();
+    let note = fx.data_dir.join("note.md");
+    std::fs::write(&note, "say \"hi\" \\ there\nplease look\n\u{202e}hidden").unwrap();
+    let shown = fx
+        .ys_floor(
+            &[
+                "task",
+                "comment",
+                "12",
+                "--body-file",
+                &note.to_string_lossy(),
+            ],
+            None,
+        )
+        .failed();
+    assert!(shown.contains("The text that would be posted:"), "{shown}");
+    assert!(shown.contains("please look\n"), "{shown}");
+    assert!(
+        shown.contains("say \"hi\" \\ there\n"),
+        "the preview is the text that would be posted: {shown}"
+    );
+    assert!(
+        !shown.contains("\\\""),
+        "quotes in the comment are not shell-escaped: {shown}"
+    );
+    assert!(!shown.contains('\u{202e}'), "{shown}");
+    assert!(shown.contains("\\u{202e}"), "{shown}");
+    assert!(
+        shown.contains("not open"),
+        "the text is shown, then nobody can allow it: {shown}"
+    );
+
+    let stdin = fx
+        .ys_floor(&["task", "comment", "12", "--body-file", "-"], None)
+        .failed();
+    assert!(stdin.contains("standard input"), "{stdin}");
+    assert!(!stdin.contains("not open"), "{stdin}");
+
+    let sneaky = fx
+        .ys_floor(
+            &[
+                "workspace",
+                "new",
+                &fx.project_name,
+                "one\ntwo\u{202e}three",
+                "--no-agent",
+            ],
+            None,
+        )
+        .failed();
+    assert!(sneaky.contains("\\n"), "{sneaky}");
+    assert!(sneaky.contains("\\u{202e}"), "{sneaky}");
+    assert!(!sneaky.contains('\u{202e}'), "{sneaky}");
+}
+
+/// Ask first reads the comment once. A change to the file while the dialog is up posts the
+/// text that was shown, not whatever the file says afterwards.
+#[cfg(unix)]
+#[test]
+fn ask_first_posts_the_comment_that_was_shown() {
+    let fx = Fixture::new();
+    fx.git()
+        .run(
+            &fx.repo,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:example/widgets.git",
+            ],
+        )
+        .unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let note = fx.data_dir.join("note.md");
+    let original = "say \"hi\" \\ there\nplease look\n";
+    std::fs::write(&note, original).unwrap();
+    yardsort_core::program::testing::executable(
+        bin.path().join("gh"),
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{0}/asked'\ncat > '{0}/stdin'\n",
+            bin.path().display()
+        ),
+    );
+
+    let _held = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .expect("the profile's lock is free");
+    let data = fx.data_dir.clone();
+    let note_for_waiter = note.clone();
+    let waiter = std::thread::spawn(move || {
+        let dir = data.join("coordinator").join("confirm");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let text = std::fs::read_to_string(&path).unwrap_or_default();
+                    if !text.contains("please look") {
+                        continue;
+                    }
+                    let shown: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    let command = shown["command"].as_str().unwrap_or("");
+                    assert!(
+                        command.contains("say \"hi\" \\ there\nplease look\n"),
+                        "the dialog shows the comment as it would be posted: {command}"
+                    );
+                    std::fs::write(&note_for_waiter, "CHANGED behind the dialog\n").unwrap();
+                    let id = path.file_stem().unwrap().to_string_lossy().into_owned();
+                    assert!(
+                        yardsort_core::coordinator::answer(&data, &id, true).unwrap(),
+                        "the command was still waiting"
+                    );
+                    return;
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the confirmation never appeared"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    });
+
+    let mut path_dirs = vec![bin.path().to_path_buf()];
+    path_dirs.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args([
+            "--data-dir",
+            &fx.data_dir.to_string_lossy(),
+            "task",
+            "comment",
+            "12",
+            "--body-file",
+            &note.to_string_lossy(),
+            "--project",
+            "Demo",
+        ])
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env("YARDSORT_NO_DAEMON", "1")
+        .env(yardsort_core::coordinator::ENV, "1")
+        .env("YARDSORT_COORDINATOR_CONFIRM_WAIT", "15000")
+        .env("PATH", std::env::join_paths(&path_dirs).unwrap())
+        .env("SHELL", bin.path().join("no-such-shell"));
+    let output = command.output().expect("ys should run");
+    waiter.join().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    let posted = std::fs::read_to_string(bin.path().join("stdin")).unwrap();
+    assert_eq!(posted, original);
+    assert!(!posted.contains("CHANGED"));
+}
+
+/// A trusted Floor Manager starts an agent. That agent must not see the marker, or its own
+/// `ys` is gated, and it must not see the settings directory either.
+///
+/// Windows is covered by `a_daemon_is_not_handed_the_floor_managers_marker_or_settings_directory`
+/// in the core. Starting the detached daemon from the Windows CI runner is refused, so this
+/// full launch stays here, where a daemon can be started.
+#[cfg(unix)]
+#[test]
+fn a_trusted_floor_manager_does_not_hand_its_marker_to_the_agent_it_starts() {
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    let seen = bin.path().join("seen");
+    let agent = harness_that_prints_the_marker(bin.path(), &seen);
+    let command_path = agent
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    std::fs::write(
+        fx.data_dir.join("settings.toml"),
+        format!(
+            "[floor_manager]\nlevel = \"trusted\"\n\n[[harness]]\nid = \"fake\"\n\
+             builtin = false\ncommand = \"{command_path}\"\n",
+        ),
+    )
+    .unwrap();
+
+    let _stop = DaemonStop(fx.data_dir.clone());
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args([
+            "--data-dir",
+            &fx.data_dir.to_string_lossy(),
+            "workspace",
+            "new",
+            &fx.project_name,
+            "say the marker",
+            "--harness",
+            "fake",
+        ])
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env(yardsort_core::coordinator::ENV, "1")
+        .env(yardsort_core::coordinator::CONFIRM_WAIT_ENV, "2000")
+        .env("YARDSORT_CONFIG_DIR", "leaked-config")
+        .env("SWITCHYARD_CONFIG_DIR", "leaked-old-config")
+        .env_remove("YARDSORT_NO_DAEMON");
+    #[cfg(unix)]
+    command.env("SHELL", "/bin/sh");
+    let output = command.output().expect("ys should run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let text = loop {
+        if let Ok(text) = std::fs::read_to_string(&seen) {
+            if text.contains("ran") {
+                break text;
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the harness never ran.\nstdout: {stdout}\nstderr: {stderr}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    };
+    assert_eq!(
+        text.lines().collect::<Vec<_>>(),
+        ["", "", "", "", "ran"],
+        "the agent must print an empty marker and an empty settings directory: {text:?}"
+    );
+}
+
+/// A harness that writes the Floor Manager's variables, then `ran`, and stays up.
+///
+/// An unset variable is a blank line.
+#[cfg(unix)]
+fn harness_that_prints_the_marker(dir: &std::path::Path, seen: &std::path::Path) -> PathBuf {
+    let agent = dir.join("fake-agent");
+    yardsort_core::program::testing::executable(
+        &agent,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"${{YARDSORT_COORDINATOR-}}\" > '{0}'\n\
+             printf '%s\\n' \"${{YARDSORT_COORDINATOR_CONFIRM_WAIT-}}\" >> '{0}'\n\
+             printf '%s\\n' \"${{YARDSORT_CONFIG_DIR-}}\" >> '{0}'\n\
+             printf '%s\\n' \"${{SWITCHYARD_CONFIG_DIR-}}\" >> '{0}'\n\
+             printf '%s\\n' ran >> '{0}'\nsleep 30\n",
+            seen.display(),
+        ),
+    );
+    agent
+}
+
+/// Stops the daemon this test started, including when an assertion fails first.
+#[cfg(unix)]
+struct DaemonStop(PathBuf);
+
+#[cfg(unix)]
+impl Drop for DaemonStop {
+    fn drop(&mut self) {
+        if let Some(client) =
+            yardsort_core::daemon::connect_existing(&self.0, std::sync::Arc::new(|_| {}))
+        {
+            let _ = client.shutdown(true);
+        }
     }
 }
 
@@ -2077,6 +2640,530 @@ fn a_run_is_queued_followed_and_cancelled_while_the_app_holds_its_lock() {
 }
 
 #[test]
+fn a_run_shows_the_artifacts_it_handed_on() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .expect("nobody else holds it");
+    let json = fx
+        .ys(&["workflow", "run", "ping", "--workspace", name, "--json"])
+        .ok();
+    let queued: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let run = queued["run"].as_str().unwrap();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    store
+        .replace_step_artifacts(
+            run,
+            "tell",
+            &[yardsort_core::store::NewWorkflowArtifact {
+                name: "spec".into(),
+                source: "file".into(),
+                detail: Some("SPEC.md".into()),
+                body: "Be kind.".into(),
+                truncated: false,
+            }],
+        )
+        .unwrap();
+    drop(store);
+
+    let listed = fx.ys(&["workflow", "runs"]).ok();
+    assert!(!listed.contains("Be kind."), "{listed}");
+    let text = fx.ys(&["workflow", "runs", "--run", &run[..8]]).ok();
+    assert!(text.contains("Artifacts"), "{text}");
+    assert!(text.contains("spec from tell"), "{text}");
+    assert!(text.contains("Be kind."), "{text}");
+    let shown: serde_json::Value = serde_json::from_str(
+        &fx.ys(&["workflow", "runs", "--run", &run[..8], "--json"])
+            .ok(),
+    )
+    .unwrap();
+    assert_eq!(shown["artifacts"][0]["name"], "spec");
+    assert_eq!(shown["artifacts"][0]["stepId"], "tell");
+    assert_eq!(shown["artifacts"][0]["source"], "file");
+    assert_eq!(shown["artifacts"][0]["detail"], "SPEC.md");
+    assert_eq!(shown["artifacts"][0]["body"], "Be kind.");
+    assert_eq!(shown["artifacts"][0]["truncated"], false);
+}
+
+const SIGN_OFF: &str = "id: sign-off
+name: Sign off
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: brief
+    action: notify
+    title: Drafted
+    produces:
+      - name: plan
+        text: The plan
+  - id: sign-off
+    action: approve
+    needs: [brief]
+    consumes: [plan]
+    prompt: Ship this?
+";
+
+#[test]
+fn an_approval_is_shown_and_decided_without_the_app_open() {
+    use yardsort_core::store::{NewWorkflowRun, StepStatus};
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let project = store.projects().unwrap().into_iter().next().unwrap();
+    let path = fx.worktree_root.join("fix-login");
+    std::fs::create_dir_all(&path).unwrap();
+    let workspace = store
+        .add_worktree(
+            &project.id,
+            "fix-login",
+            &path.to_string_lossy(),
+            Some("fix"),
+            Some("main"),
+        )
+        .unwrap();
+    let id = "run-approval-1";
+    store
+        .queue_workflow_run(&NewWorkflowRun {
+            id,
+            workflow_id: "sign-off",
+            workflow_name: "Sign off",
+            definition: SIGN_OFF,
+            project_id: &project.id,
+            workspace_id: &workspace.id,
+            workspace_name: &workspace.name,
+            inputs: "{}",
+            context: "{}",
+            requested_by: "cli",
+            steps: &[("sign-off", "approve")],
+        })
+        .unwrap();
+    assert!(store.start_workflow_run(id, None).unwrap());
+    assert!(store
+        .move_workflow_step(
+            id,
+            "sign-off",
+            &[StepStatus::Pending],
+            StepStatus::Waiting,
+            Some(r#"{"prompt":"Ship this?"}"#),
+            Some("Waiting for your approval."),
+            None,
+            false,
+        )
+        .unwrap());
+    let code = store
+        .begin_approval_code(id, "sign-off")
+        .unwrap()
+        .expect("a waiting approval gets a code");
+    drop(store);
+
+    let json = fx.ys(&["workflow", "runs", "--run", id, "--json"]).ok();
+    assert!(
+        !json.contains(&code),
+        "the code must not be in --json: {json}"
+    );
+    let shown: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(shown["pendingApprovals"][0]["step"], "sign-off");
+    assert_eq!(shown["pendingApprovals"][0]["prompt"], "Ship this?");
+    assert_eq!(shown["pendingApprovals"][0]["artifacts"][0], "plan");
+    assert!(shown["decisions"].as_array().unwrap().is_empty());
+    let text = fx.ys(&["workflow", "runs", "--run", id]).ok();
+    assert!(
+        text.contains("Blocked: waiting for your approval."),
+        "{text}"
+    );
+    assert!(
+        text.contains("Approve, reject, or request changes."),
+        "{text}"
+    );
+    assert!(
+        !text.contains(&code),
+        "the code must not be printed: {text}"
+    );
+    assert!(!text.contains("--code"), "{text}");
+    assert_eq!(shown["waitingOn"], "your approval");
+    let listed: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workflow", "runs", "--json"]).ok()).unwrap();
+    let row = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|run| run["id"] == id)
+        .expect("the run is listed");
+    assert_eq!(row["waitingOn"], "your approval");
+    let table = fx.ys(&["workflow", "runs"]).ok();
+    assert!(table.contains("WAITING ON"), "{table}");
+    assert!(table.contains("your approval"), "{table}");
+
+    let no_code = fx
+        .ys(&[
+            "workflow",
+            "approve",
+            id,
+            "sign-off",
+            "--feedback",
+            "ship it",
+        ])
+        .failed();
+    assert!(
+        no_code.contains("No terminal to ask for the code. Pass --code - and pipe it in."),
+        "{no_code}"
+    );
+
+    let missing = fx
+        .ys(&[
+            "workflow",
+            "request-changes",
+            id,
+            "sign-off",
+            "--code",
+            &code,
+        ])
+        .failed();
+    assert!(missing.contains("Say what should change"), "{missing}");
+
+    let decided_run = fx.ys(&[
+        "workflow",
+        "approve",
+        id,
+        "sign-off",
+        "--feedback",
+        "ship it",
+        "--code",
+        &code,
+    ]);
+    assert!(
+        decided_run.stderr.contains("shell history"),
+        "an argv code warns: {}",
+        decided_run.stderr
+    );
+    assert!(
+        !decided_run.stderr.contains(&code),
+        "the warning must not repeat the code"
+    );
+    let decided = decided_run.ok();
+    assert!(decided.contains("Approved"), "{decided}");
+    assert!(!decided.contains(&code), "{decided}");
+    let after: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workflow", "runs", "--run", id, "--json"]).ok()).unwrap();
+    assert!(after["pendingApprovals"].as_array().unwrap().is_empty());
+    assert_eq!(after["decisions"][0]["decision"], "approved");
+    assert_eq!(after["decisions"][0]["feedback"], "ship it");
+    let twice = fx
+        .ys(&["workflow", "reject", id, "sign-off", "--code", &code])
+        .failed();
+    assert!(twice.contains("already has a decision"), "{twice}");
+}
+
+#[test]
+fn an_approval_code_can_come_from_standard_input() {
+    use std::io::Write;
+    use std::process::Stdio;
+    use yardsort_core::store::{NewWorkflowRun, StepStatus};
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let project = store.projects().unwrap().into_iter().next().unwrap();
+    let path = fx.worktree_root.join("fix-login");
+    std::fs::create_dir_all(&path).unwrap();
+    let workspace = store
+        .add_worktree(
+            &project.id,
+            "fix-login",
+            &path.to_string_lossy(),
+            Some("fix"),
+            Some("main"),
+        )
+        .unwrap();
+    let id = "run-approval-stdin";
+    store
+        .queue_workflow_run(&NewWorkflowRun {
+            id,
+            workflow_id: "sign-off",
+            workflow_name: "Sign off",
+            definition: SIGN_OFF,
+            project_id: &project.id,
+            workspace_id: &workspace.id,
+            workspace_name: &workspace.name,
+            inputs: "{}",
+            context: "{}",
+            requested_by: "cli",
+            steps: &[("sign-off", "approve")],
+        })
+        .unwrap();
+    assert!(store.start_workflow_run(id, None).unwrap());
+    assert!(store
+        .move_workflow_step(
+            id,
+            "sign-off",
+            &[StepStatus::Pending],
+            StepStatus::Waiting,
+            Some(r#"{"prompt":"Ship this?"}"#),
+            Some("Waiting for your approval."),
+            None,
+            false,
+        )
+        .unwrap());
+    let code = store.begin_approval_code(id, "sign-off").unwrap().unwrap();
+    drop(store);
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args(["--data-dir", &fx.data_dir.to_string_lossy()])
+        .args([
+            "workflow",
+            "approve",
+            id,
+            "sign-off",
+            "--code",
+            "-",
+            "--feedback",
+            "from stdin",
+        ])
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env("YARDSORT_NO_DAEMON", "1")
+        .env_remove(yardsort_core::coordinator::ENV)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().expect("ys should run");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(format!("{code}\n").as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stdout}\n{stderr}");
+    assert!(stdout.contains("Approved"), "{stdout}");
+    assert!(!stderr.contains("shell history"), "{stderr}");
+    assert!(!stdout.contains(&code), "{stdout}");
+}
+
+#[test]
+fn an_approval_code_on_standard_input_may_start_with_a_byte_order_mark() {
+    use std::io::Write;
+    use std::process::Stdio;
+    use yardsort_core::store::{NewWorkflowRun, StepStatus};
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let project = store.projects().unwrap().into_iter().next().unwrap();
+    let path = fx.worktree_root.join("fix-login");
+    std::fs::create_dir_all(&path).unwrap();
+    let workspace = store
+        .add_worktree(
+            &project.id,
+            "fix-login",
+            &path.to_string_lossy(),
+            Some("fix"),
+            Some("main"),
+        )
+        .unwrap();
+    let id = "run-approval-bom";
+    store
+        .queue_workflow_run(&NewWorkflowRun {
+            id,
+            workflow_id: "sign-off",
+            workflow_name: "Sign off",
+            definition: SIGN_OFF,
+            project_id: &project.id,
+            workspace_id: &workspace.id,
+            workspace_name: &workspace.name,
+            inputs: "{}",
+            context: "{}",
+            requested_by: "cli",
+            steps: &[("sign-off", "approve")],
+        })
+        .unwrap();
+    assert!(store.start_workflow_run(id, None).unwrap());
+    assert!(store
+        .move_workflow_step(
+            id,
+            "sign-off",
+            &[StepStatus::Pending],
+            StepStatus::Waiting,
+            Some(r#"{"prompt":"Ship this?"}"#),
+            Some("Waiting for your approval."),
+            None,
+            false,
+        )
+        .unwrap());
+    let code = store.begin_approval_code(id, "sign-off").unwrap().unwrap();
+    drop(store);
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args(["--data-dir", &fx.data_dir.to_string_lossy()])
+        .args([
+            "workflow",
+            "approve",
+            id,
+            "sign-off",
+            "--code",
+            "-",
+            "--feedback",
+            "from stdin",
+        ])
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env("YARDSORT_NO_DAEMON", "1")
+        .env_remove(yardsort_core::coordinator::ENV)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().expect("ys should run");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(format!("\u{FEFF}{code}\nnot the code\n").as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stdout}\n{stderr}");
+    assert!(stdout.contains("Approved"), "{stdout}");
+    assert!(!stdout.contains(&code), "{stdout}");
+}
+
+/// A Windows runner has a console. Leaving `--code` out must still fail at once, because
+/// the prompt reads that console rather than the closed standard input.
+#[cfg(windows)]
+#[test]
+fn leaving_out_the_code_fails_at_once_without_a_console() {
+    let fx = Fixture::new();
+    let started = std::time::Instant::now();
+    let no_code = fx
+        .ys(&["workflow", "approve", "missing-run", "sign-off"])
+        .failed();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "leaving --code out waited for a console"
+    );
+    assert!(
+        no_code.contains("No terminal to ask for the code. Pass --code - and pipe it in."),
+        "{no_code}"
+    );
+}
+
+#[test]
+fn a_session_yardsort_started_cannot_decide_an_approval() {
+    let fx = Fixture::new();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args(["--data-dir", &fx.data_dir.to_string_lossy()])
+        .args(["workflow", "approve", "run", "step", "--code", "ABCDEFGH"])
+        .env("YARDSORT_WORKTREE_ROOT", &fx.worktree_root)
+        .env("YARDSORT_NO_DAEMON", "1")
+        .env(yardsort_core::activity::RECORD_ENV, "rec-1")
+        .env_remove(yardsort_core::coordinator::ENV);
+    let output = command.output().expect("ys should run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("cannot decide"),
+        "a spawned session must be refused: {stderr}"
+    );
+    assert!(!stderr.contains("not open"), "{stderr}");
+}
+
+#[test]
+fn a_wrong_approval_code_locks_after_five_tries() {
+    use yardsort_core::store::{NewWorkflowRun, StepStatus};
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let project = store.projects().unwrap().into_iter().next().unwrap();
+    let path = fx.worktree_root.join("fix-login");
+    std::fs::create_dir_all(&path).unwrap();
+    let workspace = store
+        .add_worktree(
+            &project.id,
+            "fix-login",
+            &path.to_string_lossy(),
+            Some("fix"),
+            Some("main"),
+        )
+        .unwrap();
+    let id = "run-approval-2";
+    store
+        .queue_workflow_run(&NewWorkflowRun {
+            id,
+            workflow_id: "sign-off",
+            workflow_name: "Sign off",
+            definition: SIGN_OFF,
+            project_id: &project.id,
+            workspace_id: &workspace.id,
+            workspace_name: &workspace.name,
+            inputs: "{}",
+            context: "{}",
+            requested_by: "cli",
+            steps: &[("sign-off", "approve")],
+        })
+        .unwrap();
+    assert!(store.start_workflow_run(id, None).unwrap());
+    assert!(store
+        .move_workflow_step(
+            id,
+            "sign-off",
+            &[StepStatus::Pending],
+            StepStatus::Waiting,
+            None,
+            Some("Waiting for your approval."),
+            None,
+            false,
+        )
+        .unwrap());
+    let code = store.begin_approval_code(id, "sign-off").unwrap().unwrap();
+    drop(store);
+    for _ in 0..4 {
+        let wrong = fx
+            .ys(&["workflow", "approve", id, "sign-off", "--code", "WRONG123"])
+            .failed();
+        assert!(wrong.contains("not the one"), "{wrong}");
+    }
+    let locked = fx
+        .ys(&["workflow", "approve", id, "sign-off", "--code", "WRONG123"])
+        .failed();
+    assert!(locked.contains("Too many wrong codes"), "{locked}");
+    let still = fx
+        .ys(&["workflow", "approve", id, "sign-off", "--code", &code])
+        .failed();
+    assert!(still.contains("Too many wrong codes"), "{still}");
+}
+
+#[test]
+fn the_floor_manager_cannot_decide_an_approval() {
+    let fx = Fixture::new();
+    for level in ["read-only", "ask", "trusted"] {
+        fx.set_floor(level);
+        for args in [
+            vec!["workflow", "approve", "run", "step"],
+            vec!["workflow", "reject", "run", "step", "--feedback", "no"],
+            vec![
+                "workflow",
+                "request-changes",
+                "run",
+                "step",
+                "--feedback",
+                "split it",
+            ],
+        ] {
+            let error = fx.ys_floor(&args, None).failed();
+            assert!(
+                error.contains("at any permission"),
+                "{level} {args:?}: {error}"
+            );
+            assert!(
+                !error.contains("not open"),
+                "{level} asked instead of refusing: {error}"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_run_inside_a_workspace_needs_no_name_and_bad_inputs_are_refused() {
     let fx = Fixture::new();
     write_workflow(&fx, "ping.yaml", PING);
@@ -2213,6 +3300,7 @@ impl Tasks {
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
+        command.stdin(std::process::Stdio::null());
         let output = command.output().expect("ys should run");
         Run {
             code: output.status.code(),

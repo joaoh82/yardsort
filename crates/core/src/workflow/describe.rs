@@ -40,23 +40,36 @@ pub const SYSTEM: &str = concat!(
      `options`), `label`, `required` (default false), `default`.\n\
      - `steps`: a list of at least one. Each has `id` (a lowercase name), `action`, optional \
      `needs` (the step ids that must succeed first; steps whose needs are met run together), \
+     optional `produces` and `consumes` (named documents handed from one step to a later one), \
      and the action's own keys, and no others:\n\
        - `start_session`: `harness` (an agent id like `claude`, or exactly \
      `\"{{ inputs.<id> }}\"` for an input of kind harness), `prompt` (the agent's first \
      message), optional `model`, `effort`, `skip_memory`.\n\
        - `wait_session`: `session`, optional `until` (`settled`, the default, or `exited`), \
-     optional `timeout`.\n\
+     optional `timeout`. Optional `clarify: true` lets the agent ask the person questions \
+     with `ys workflow ask` before the session counts as finished. Optional `max_rounds` \
+     (1 to 10, default 3) bounds how many rounds. A question only printed in the session is \
+     not asked. `clarify` is not an approval. With `clarify: true` the step may \
+     `produces` a `from: brief` artifact: the questions, the answers and the summary the \
+     agent records with `ys workflow summary`.\n\
        - `send_to_session`: `session`, `prompt` (typed into the agent once it is quiet), \
      optional `timeout`.\n\
        - `wait_pr_activity`: waits for a review or comment on the workspace's pull request \
      after the run started. Optional `kind` (`review`, `comment`, `any`), optional `timeout`.\n\
        - `run_test`: runs one of the workspace's smoke tests and waits for its verdict. The \
      step succeeds whether the test passed or failed, leaving `verdict` for a later step to act \
-     on either way; it fails only if the run reached no verdict or did not end in time. `test` \
+     on either way; it fails only if the run reached no verdict or did not end in time. \
+     Optional `gate: true` makes a failed verdict fail the step, skip the steps still going, \
+     and stop the run. `test` \
      (a test id, or exactly `\"{{ inputs.<id> }}\"` for an \
      input of kind test), optional `inputs` (a map of the test's input ids to values), optional \
      `timeout`.\n\
        - `notify`: `title`, optional `body`. A system notification.\n\
+       - `approve`: waits until a person in Yardsort, or `ys` from their own terminal, \
+     approves, rejects, or requests changes. Optional `prompt`, optional `timeout`. It is \
+     always a gate: a rejection or a request for changes stops the run. Do not set \
+     `gate: false`. Waiting for a GitHub review is `wait_pr_activity`, not this. Leaves \
+     `decision` (`approved`, `rejected` or `changes_requested`) and `feedback`.\n\
      `session` is `origin` (the agent already working in the workspace) or exactly \
      `\"{{ steps.<id>.session }}\"` for an earlier `start_session` step that is among this \
      step's needs. `timeout` is a number and a unit: `30s`, `45m`, `2h`; at most a week.\n\n\
@@ -68,9 +81,24 @@ pub const SYSTEM: &str = concat!(
      `steps.<id>.session` and `steps.<id>.run` from a start_session step, \
      `steps.<id>.outcome` from wait_session, `steps.<id>.count` and `steps.<id>.latest_url` \
      from wait_pr_activity, `steps.<id>.run`, `steps.<id>.verdict` and `steps.<id>.summary` \
-     from run_test, `memory` (the project's notes for agents), `handoff` (what \
-     happened in the workspace so far). No filters, no expressions. A prompt that uses the \
-     pull request or `session: origin` needs the workspace to have one when the run starts.\n\n\
+     from run_test, `steps.<id>.decision` and `steps.<id>.feedback` from approve, \
+     `memory` (the project's notes for agents), `handoff` (what \
+     happened in the workspace so far), `artifacts.<name>` (a named document an earlier step \
+     produced; this step must list that name under `consumes`). No filters, no expressions. A \
+     prompt that uses the pull request or `session: origin` needs the workspace to have one \
+     when the run starts.\n\n\
+     `produces` is a list. Each item has `name` and where the text comes from when the step \
+     succeeds: `path` for a file in the workspace, `text` for text written here, `field` for \
+     one field this step leaves (such as `summary`), `from: transcript` with `session` and \
+     optional `raw: true`, or `from: brief` on a `wait_session` with `clarify: true`. \
+     `session` or `raw` alone does not copy a transcript: the step must \
+     say `from: transcript`. The step that produces a name must be among the consumer's \
+     `needs`, directly or through other steps. A `start_session` or `send_to_session` that \
+     consumes an artifact and does not place `{{ artifacts.<name> }}` in its own prompt is \
+     given the text under a heading. Those two steps cannot hand on a file or a transcript, \
+     because they succeed before the agent has written or replied. Put that on the \
+     `wait_session`. A `notify` step may hand on a file or a transcript that is already \
+     there. Use `from: transcript` only when the person asked for the conversation.\n\n\
      Keep it small: the fewest steps that do what was asked, a `wait_session` after each \
      `start_session` whose finish matters, and a `notify` at the end so the person knows. \
      Write prompts to an agent as clear instructions, in the second person, saying what to do \
@@ -175,6 +203,9 @@ mod tests {
             "send_to_session",
             "wait_pr_activity",
             "notify",
+            "gate: true",
+            "artifacts.<name>",
+            "consumes",
             "{{ steps.<id>.session }}",
             "workspace.base_branch",
             "no code fences",

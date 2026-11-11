@@ -137,7 +137,7 @@ branch, in the first built-in.
 | `version`     | The schema version, `1`. A file with a higher version than the app knows is listed, not runnable                                                                                                                                                                                                                       |
 | `trigger`     | `kind: manual` only in v1; `context: workspace`, the default, says what the run is about and which variables exist. `context: tracked_pull_request` (since [38 § slice 5](38-pull-requests-elsewhere.md#slice-5-what-shipped)) is a run about a pull request a workspace tracks in another repository, started from it |
 | `inputs[]`    | `id`, `kind` (`harness`, `text`, `choice` with `options`), `label`, `required` (default `false`), `default`. Collected before the run starts, in the app or as `--input`                                                                                                                                               |
-| `steps[]`     | `id`, `action`, `needs` (step ids), then the action's own keys. A step id is `[a-z0-9_-]+`                                                                                                                                                                                                                             |
+| `steps[]`     | `id`, `action`, `needs` (step ids), then the action's own keys. An `approve` or `run_test` step may set `on` and `max_attempts`. See [Conditional paths](#conditional-paths). A step id is `[a-z0-9_-]+`                                                                                                               |
 
 ### Actions in v1
 
@@ -558,9 +558,10 @@ still to be done, and is the milestone's exit.
   queues a run through the same door, so `kind: manual` is still the only trigger a file has.
   Forge events are proposed in [36](36-triggers.md), the same way: a trigger is a row that
   queues a run, and the file keeps `kind: manual`.
-- Editing the chart by hand; per-repository workflow files; conditionals, loops, `if:`; step
-  retries; a step that runs a program (it would be a shell string by another name — project
-  automation is where commands live, and a `run_automation` step can call it later).
+- Editing the chart by hand; per-repository workflow files; `if:`; unbounded retries of a step.
+  Conditional paths and bounded revision loops are in [Conditional paths](#conditional-paths).
+  A step that runs a program would be a shell string by another name. Project automation is
+  where commands live, and a `run_automation` step can call it later.
 - Reviewing in a fresh worktree; headless reviewers.
 - Jev's judgment of a review, or of a workflow a model wrote.
 
@@ -594,3 +595,332 @@ lookalikes in prompts and omits ambiguous duplicate ids. The editor waits for po
 current text before navigating, marks the selected id line, and scrolls it into view without
 changing the file or taking focus from the chart. Clicking the same step again navigates again;
 clicking the background clears the mark. Built-in read-only files support the same navigation.
+
+## Test verdict gates
+
+A step that judges something records a structured outcome on its row, separate from the strings
+later steps read as `{{ steps.<id>.<field> }}`. The outcome is JSON,
+`{"verdict":"passed","reason":null}` or
+`{"verdict":"failed","reason":"..."}`. `verdict` is `passed` or `failed`. `reason` is the
+text when it failed, and null when it passed. An approval adds `decision`, `feedback`,
+`actor` and `decidedAt`. Those default to null, so an outcome saved before them still
+reads. This is not `wait_session`'s `outcome` output,
+which stays the string `settled` or `exited`.
+
+`engine::react` is the one place a verdict changes the run. A gate whose verdict is `failed`
+fails the step and halts the run: every step that has not finished (pending, waiting, or
+running) is skipped in that same tick. A step that lists the gate in `needs` is skipped
+because the gate did not succeed, and its note says so. Every other step that was still
+going is skipped because the gate failed, and its note says `Skipped: the gate <id> failed.`
+An effect the plan was about to start is dropped. A step already running from an earlier
+tick is skipped too. A smoke test that step was waiting on is cancelled, so it does not
+keep running or keep asking for approval. Other work that effect already started is left
+running. The run then ends failed. Any
+other verdict succeeds the step and keeps the outcome, so a later step can still read what
+happened. Later actions that judge something, an approval or a branch, call `react` instead of
+inventing a stop of their own. A branch reads the outcome, not free text. Only a gate
+with no `on` routes turns a failed verdict into status `failed`. A step that is not a
+gate stays `succeeded` when the verdict is `failed`, with that verdict on its outcome.
+A step with `on` follows [Conditional paths](#conditional-paths) instead.
+
+`run_test` accepts `gate`, and it is a field of the step, next to `needs`, not of
+the action. `allowed` is what decides which actions may set it. Absent, or `gate: false`,
+is not a gate for a test. An `approve` step is always a gate. `gate: false` on one is a
+parse error, and leaving `gate` out is the same as `gate: true`. A failed test verdict on a
+step that is not a gate still succeeds the step, with the note `The test failed.` and outputs
+`run`, `verdict` and `summary`, exactly as before. A passed verdict, gated or not, notes `The test passed.` A run
+that reaches no verdict (cancelled, errored), or that times out, fails that step and records
+no outcome, because there was nothing to react to. It does not halt the other branches.
+
+The reason on a failed gate is the report `ys test wait` prints, under a line that says the
+test failed. That full report is the step's note. The run's error names the step and then
+the first line of that report after the line that says the test failed, such as
+`Step smoke failed: failed login (2 of 6 steps passed).` The workflow run
+view shows the short line on the run and the report on the step. `ys workflow runs` lists
+runs, and after the table it prints a failed run's error, which is the short line. The runs
+list in the app shows that line on a failed row. `ys workflow runs --run <id>` prints the short line, the
+first line of each note in the table, and the full note under the table when it continues.
+`ys workflow runs --run <id> --json` includes the full note and the outcome on the step
+when there is one.
+
+Starting a step again, from pending to running or waiting, clears its outcome. A later
+revision can re-run the step and record a new verdict. Leaving the outcome out of a move does
+not clear it.
+
+A schedule or a trigger whose `notify` is `failure` (the default) or `always` sends the first
+line of the run's error, kept to about 200 characters. When that reason is more than one
+line, or the line was cut short, it adds `Open Yardsort for the report.` A one-line reason
+is sent as it is. The full text stays on the run. `never` sends nothing. A `notify` step that
+needs the gate does not run when the gate fails. Its title was written for a pass, and a step
+runs only when every step it needs succeeded. A run started by hand, with no schedule and no
+trigger, is not sent as a system notification. The failure is still on the run.
+
+Migration `0029_workflow_step_outcome` adds a nullable `outcome` column. Rows from before it,
+and steps that judged nothing, read as none. A workflow file that does not mention `gate`
+still parses. A run that was queued before this change keeps the definition it was queued
+with, which has no gate, so it keeps the old behaviour.
+
+An `approve` step calls the same `react`. It is always a gate. While it waits, the steps
+that need it stay pending. Approving records `decision: approved` and succeeds the step.
+Rejecting records `rejected` and, with no `on` routes, halts the run. Requesting changes records
+`changes_requested`, which is not a rejection, and with no `on` routes halts the run.
+`on` can send either somewhere else. See [Conditional paths](#conditional-paths).
+The outcome also stores `feedback`, `actor` and `decidedAt`. Outputs are
+`decision` and `feedback`, so `{{ steps.<id>.decision }}` works. A timeout fails that
+step with no outcome and does not halt a step that does not need it.
+
+The decision is written to `workflow_approval_decisions` (migration `0031`, index 30)
+before the engine applies it, so it survives a restart and is visible to `ys` at once.
+The row is who, when, the decision and the feedback, plus a salt and a slow hash of
+the one-time code and a count of wrong tries. The code itself is not stored. The row
+is inserted when the step starts waiting, with the decision still null, and filled in
+when someone decides. It is not deleted when the engine applies it. It is deleted
+when a route sends the run back through that step, in the same change as the rewind,
+and again when that step starts from pending, which issues a new code. A decision
+is not reused on the next pass. A second decision
+is refused, and so is one on a run that is not running, or on a step that is
+not an `approve` step waiting. Requesting changes requires feedback. The
+`changes-<step id>` artifact (source `decision`) is written in the same database
+change as the step move and the wait's `applied_at`, when the outcome stops the run.
+A route that sends the work back writes that artifact in the rewind instead.
+An artifact name starting with `changes-` or `failure-` is refused at parse time.
+
+A timeout moves the step to failed only when no decision has been recorded
+(`NOT EXISTS` a row whose decision is set). A code row with no decision yet does not
+block the timeout. If the timeout lands first, `ys` is told the step is not waiting.
+
+You decide in the app, which passes no code, or with `ys workflow approve`, `reject`
+and `request-changes` from a terminal Yardsort did not start. Leave `--code` out and
+`ys` reads it from the terminal with echo off (`rpassword`), and only when both
+standard input and standard error are terminals. Otherwise it fails at once and
+says to pass `--code -` and pipe the code in. On Windows that prompt needs a real
+console: cmd, PowerShell, or Windows Terminal. Git Bash and mintty do not, so
+those use `--code -`. `--code -` reads one line from standard input and strips a
+leading byte-order mark before trimming. A code passed in argv warns on stderr,
+because it lands in shell history and in the process list. The code is shown in
+the window. The waiting notification includes it unless `workflows.approval_code_in_notification`
+is false. Unset, that follows the platform: included on macOS and Windows, omitted
+on Linux, where a notification is readable on D-Bus. The omitted form says to open
+Yardsort for the code. The code is nowhere else: not in `ys workflow runs`,
+`--json`, the step note, outputs or a log. New hashes use 600000 PBKDF2 rounds.
+`code_rounds` on the decision row (default 100000, from before this column) is
+what a check uses, so an older hash still verifies. Any other stored count,
+including 0 or 1, is refused and does not burn a try. The check runs before the
+write transaction, which then writes only if the attempt count, the code hash and the
+decision are still what the check saw. Five wrong codes lock the terminal. That count
+survives a restart: opening the app replaces the code, because the plaintext was
+only in memory, and it does not reset the count. **Show a new code** does reset
+it, and is the only thing that does. Either replacement sends a notification
+when the run would be told. Listing a run does not issue a new code. The
+setting that leaves the code out of the notification is not a lock. A process
+running as the same user can edit `settings.toml` and set
+`[workflows] approval_code_in_notification` back on, and the next notification
+includes the code.
+`ys` also refuses when any of
+`YARDSORT_COORDINATOR`, `YARDSORT_RUN_ID`, `YARDSORT_WORKSPACE_ID` or
+`YARDSORT_SESSION_RECORD_ID` is set. The Floor Manager's `ys` is `Action::Deny` at
+every permission, including trusted and ask. This is not a sandbox. A process running
+as the same user that writes SQLite directly is not stopped. Waiting for a GitHub
+review is `wait_pr_activity`, and it is not a gate.
+
+## Human waits
+
+Migration `0032_workflow_human_waits` is index 31. It adds `workflow_waits` and
+`code_rounds` on `workflow_approval_decisions`. A database from before it still
+opens. Old runs keep working.
+
+`workflow_waits` is why a run is blocked and what the person must do. An approval
+opens a row when the step starts waiting: `kind` `approval`, `blocked_on`
+`your approval`, the prompt, the artifact names it reads, and a phase object
+(workflow, workspace, step, action). `notified_at` is set when the waiting
+notification is sent, so a restart does not send it again. `applied_at` is set
+in the same change as the engine applying the decision. A restart applies a
+decision whose `applied_at` is still null exactly once, and does not approve a
+gate that has no decision.
+
+A clarification uses the same row, `kind` `question`, the questions in `prompt`
+and the reply in `answer`. It is a mode of `wait_session` (`clarify: true`), not
+an approval and not a new action. The agent asks with `ys workflow ask`. The
+person answers in the run view, or with `ys workflow answer` from a terminal
+Yardsort did not start. The terminal must present the one-time code. The window
+does not: `answer_in_window` takes a `DesktopWindow`, the same guard as
+`decide_in_window`. The code lives on the question wait (`code_salt`, `code_hash`,
+`code_rounds`, `attempts`, migration `0035_workflow_clarifications`, index 34). It
+is checked before the write, and the update matches that hash and attempt count.
+Five wrong codes lock the terminal until Show a new code. A new round clears the
+hash, so the next question gets a new code.
+
+`applied_at` on the round and the wait is the claim, taken before the keystrokes.
+`typed_at` on the round is set only after typing returns done. A session that is
+held (`ControlHeld`) rolls both `applied_at` values back, and the next tick claims
+again. A restart that finds `applied_at` set and `typed_at` null does not type
+again. The step fails with "The answer may not have reached the session." The
+keystrokes may already have landed, so a second paste would not be exactly once.
+The claim also requires the run to be `running` and the step to be `waiting`, so
+a cancel or a halt cannot type into a dead run. An answer to a step that has
+already failed or timed out is refused, even when the run is still going.
+
+A summary is refused while a question is still unanswered. A clarifying step finishes
+only when `ys workflow summary` has been recorded, or
+when `until` is `exited` and the session has ended with no question still open. A
+settled session that is still running, with no summary, keeps waiting until the
+step's timeout, then the step fails. A session that has ended, with no summary,
+fails at once, including while an answer is still owed. An answer that was given
+and not yet typed fails because the session ended before it could be sent back.
+The code is issued even when `notify` is `never`; that setting only skips the
+notification. A question only printed in the terminal is not a round, and a
+session going quiet is not a summary.
+
+Each round is also a row in `workflow_clarification_rounds` (migration
+`0035_workflow_clarifications`, index 34), because the wait is one row per step
+and a later round reuses it. The agent's `ys workflow summary` is one row in
+`workflow_clarification_summaries`. When the step finishes, `from: brief` compiles
+those rows into a named artifact. Nothing is read from the terminal.
+Past `max_rounds` the extra round is stored and the step fails. It does not open
+another wait. A rewind archives the rounds and the summary into
+`workflow_clarification_history` and `workflow_clarification_summary_history` at
+that step's attempt, then removes the live rows, the same way an approval decision
+is archived. A merged rewind stores each `failure-<step>` or `changes-<step>` note
+at that step's own attempt count, not at the attempt that gated the rewind.
+
+`workflow::waits::list_open`, `decide_with_code` and `answer_with_code` are the
+boundary a phone or a remote crate calls. They read and write this database. A
+remote caller must use `decide_with_code` or `answer_with_code`, which always take
+the one-time code. The window calls `decide_in_window` or `answer_in_window` with a
+`DesktopWindow` token. Only the app enables the
+`desktop-window` feature, so a remote crate cannot construct that token. This
+build adds no remote route, no protocol message and no phone screen. A decision
+recorded while the app was closed is not in `list_open`: the person has done
+their part, and the engine applies it.
+
+The step move, `applied_at`, and the decision's artifacts are one change. The
+driver can stop after that change, or after the next step is claimed and before
+its effect runs. The next start does not write the artifact again, and it fails
+a step that was claimed and not carried out, so a notification or a session is
+not started twice.
+
+What this leaves for later, and does not do: notifications and controls from a
+phone. Those read this wait, this outcome and the same failed run error. The
+phone does not get a decision route here. Branching on a verdict or on
+`changes_requested` is [Conditional paths](#conditional-paths). Asking mid-run is
+the clarifying `wait_session` above.
+
+## Conditional paths
+
+An `approve` or `run_test` step may set `on`. Each key is a structured outcome, and the
+value is a step id or `stop`. Free text is not an outcome. With no `on`, a failed gate
+still halts the run and a success lets every step that needs this one start.
+
+An `approve` step must name `approved`, `rejected` and `changes_requested`. A `run_test`
+step must name `passed` and `failed`. Any other action refuses `on` and `max_attempts`.
+A target must be a later step that needs this one, or an earlier step this one needs,
+or this step itself, or `stop`. A step cannot be named `stop`, because that word means
+the branch ends. A target that is neither is a parse error, and so is a
+step that no path from the start can reach. A route back needs `max_attempts`, from 2
+to 10, counting the first entry. Above 10 is a parse error. Setting it when nothing
+loops is a parse error too. The engine also stops at 10. An inner loop's `max_attempts`
+counts entries across outer loops, because `attempts` is never reset.
+
+`stop` on a failed verdict halts the run. `stop` on a passed verdict skips steps that
+have not finished and ends the run succeeded. A step that `produces` something stays
+running while those artifacts are stored, and the stored outcome is what stops the run
+once the step has succeeded, including on a later tick. A route to a later step succeeds this
+step even when the verdict failed, so the chosen step can start, and skips the other
+steps that needed this one and were not chosen.
+
+A route back sets the target, and every step that needs it, back to pending. That
+includes the step that branched. Two looping steps in the same tick whose sets
+overlap are one change: the sets are joined and both `failure-<step>` or
+`changes-<step>` notes are stored. A second rewind is not planned for a step the
+first rewind already sends back, because that step would no longer be waiting and
+its note would be dropped. The plan is one database change, taken only while
+that step is still in the status the plan saw and its `attempts` count is still the
+count the plan saw. A second apply, including after a restart, changes nothing.
+`attempts` is not reset and is not increased by the rewind. It increases by one when
+a step leaves pending for running, waiting or succeeded. A skip, a rewind, and a
+restart that fails a step already running do not add one. Migration
+`0033_workflow_attempts` adds the column (default 0) and is index 32.
+
+When `attempts` is already `max_attempts`, the run halts instead of looping. The
+error names the outcome and the limit, and says to start a new run. `ys workflow runs`
+prints that line after the table. The runs list in the app shows it on the failed row.
+
+The feedback goes to the step being run again as a named artifact. A request for
+changes writes `changes-<step>`, source `decision`. A failed verdict writes
+`failure-<step>`, source `verdict`, whether the route goes back or forward to a later
+step. A later step may `consumes` that name only when the producer routes that outcome
+onto a set that includes the consumer. The first pass has no body yet, and the handoff
+skips a missing artifact. Each attempt's body is kept in `workflow_artifact_versions`.
+The row in `workflow_artifacts` is the latest, which is what a consumer reads. A later
+attempt does not replace an older body. The same attempt stored again updates that
+version, so it matches the body that was used. A rewind drops the current `changes-*`
+and `failure-*` rows of the steps it runs again, after copying them into the version
+table, so an earlier loop's note is not handed out on the next pass.
+
+Looping back deletes the approval decision and the wait for every step that runs
+again, after copying the actor, the time and the decision into
+`workflow_approval_history` (migration `0034`, index 33). The next pass through an
+approval waits, issues a new one-time code, and needs a new decision. An old decision
+is not applied again. The checks that refuse a session Yardsort started, and the Floor
+Manager, still apply on that new decision. A rewind is not applied when the same plan
+is already halting or stopping the run, so those steps are skipped rather than sent
+back to pending. Judged steps later in the file still conclude in that same pass, so a
+halt or a stop wins over a rewind even when the looping step comes first. A `run_test`
+step that rewind sends back has its smoke test cancelled in the same transaction, so a
+crash after the rewind still leaves that test cancelled.
+
+A file with no `on` still loads, and a run queued from it keeps today's behaviour.
+
+## Named artifacts
+
+A step may declare `produces`, a list of named documents, and a later step may list those
+names under `consumes`. Parse time refuses an unknown name, a duplicate, a consumer that does
+not have the producer among its needs (directly or through other steps), and a
+`{{ artifacts.<name> }}` that the step does not list under `consumes`. A transcript is copied
+only when the step says `from: transcript`. A `start_session` or `send_to_session` cannot hand
+on a file or a transcript, because that read happens before the agent has written or replied.
+A `notify` step may hand on a file or a transcript that is already there.
+
+The body is stored on the run when the producing step succeeds, in `workflow_artifacts`
+(migration `0030`, index 29). The engine does not read files. A step that would succeed inside
+`advance` stays running until the driver has stored the body, so a consumer in the same plan
+does not start on an empty handoff. The artifacts and that move to succeeded are one database
+change, and only while the run is still running. If Yardsort stops after the step has finished
+and before those artifacts are stored, the step goes back to waiting and the capture runs
+again. The pending marker stays in the step's outputs, so the capture runs again even
+when the action would not succeed a second time, such as a notification. A step that was
+still doing its own work fails instead, so it does not happen twice. A capture that then
+fails drops the marker. A transcript read stays off the driver thread. The same read is
+reused on the next tick, and the step fails only after about 20 seconds. The read is
+keyed by the run and the step, so a finished read is not handed to a later step. A job
+older than that limit is dropped on the next look and is not started again. The text
+is capped inside the read, before it is sent back.
+An effect that finishes in the driver, such as a notification, a started session or a paste,
+stores its artifacts in that same change, before the step is marked succeeded.
+
+Sources are a workspace file, text from the workflow file, one output field the step already
+leaves, or a transcript. The transcript is opt-in. Without `raw`, it is the budgeted
+conversation digest: tool output and reasoning are not part of a turn, and older turns are
+shortened. `raw: true` keeps each turn's own text, still without tool output, and still not
+the terminal scrollback. The driver does not attach to the session to copy it.
+
+A file path must stay inside the workspace after links are resolved. The resolved path is
+checked again, so `notes.md` pointing at `.env` is still a secret. A component containing `:`,
+or ending in a dot or a space, is refused. A secret-looking path is refused when it is written
+literally, and again when a variable in it is filled in. The body is cut at 32000 characters,
+and the stored copy says it was cut. Control characters other than newline and tab are dropped
+before that, and so are bidirectional controls (U+202A through U+202E, U+2066 through
+U+2069, and the bidi marks), U+200B, U+2060 and U+FEFF. U+200C and U+200D stay.
+An empty body fails the step, so the next phase does not start with a blank
+handoff.
+
+A re-run replaces that step's rows only after the new bodies have been read. A failed attempt
+leaves the last good ones. Each attempt's body is also kept in `workflow_artifact_versions`
+(migration `0033`), so a later attempt does not overwrite an older one. A consumer reads
+the row in `workflow_artifacts`, which is the latest body. A `start_session` or `send_to_session` that consumes an artifact and
+does not place `{{ artifacts.<name> }}` itself is given the text under a heading. A later
+approval, a revision loop, or a control on a phone can point at the same name without parsing
+the prompt.
+
+A workflow file from before this has no `produces` or `consumes`, and still parses. A run
+saved before the table still opens, and lists no artifacts. The schema version stays 1.

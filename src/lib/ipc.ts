@@ -15,8 +15,11 @@ import {
   type ActivitySettingsDto,
   type ContextUsage,
   type CoordinatorStatus,
+  type CoordinatorConfirmation,
+  type FloorManagerLevel,
   type ConversationContext,
   type AgentOutcomes,
+  type ApprovalDecision,
   type Attempt,
   type FileReports,
   type MemoryCheck,
@@ -117,6 +120,7 @@ import {
   type WorkflowCheck,
   type WorkflowRun,
   type WorkflowStepRun,
+  type WorkflowWait,
   type RunPreview,
   type Workflow,
   type Step,
@@ -199,6 +203,8 @@ import {
 
 export type {
   CoordinatorStatus,
+  CoordinatorConfirmation,
+  FloorManagerLevel,
   RemoteRepository,
   Repositories,
   ResolvedLink,
@@ -242,6 +248,7 @@ export type {
   WorkflowCheck,
   WorkflowRun,
   WorkflowStepRun,
+  WorkflowWait,
   RunPreview,
   Workflow,
   Step,
@@ -502,16 +509,22 @@ export const ipc = {
   /** Rejects with code `worktree_dirty` unless `force` is set. The branch is always kept. */
   workspaceDelete: (id: string, force = false) => done(commands.workspaceDelete(id, force)),
 
+  /** How much the Floor Manager may do on its own. The next `ys` command follows it. */
+  settingsSaveFloorManager: (level: FloorManagerLevel) =>
+    unwrap(commands.settingsSaveFloorManager(level)),
+
   settingsSaveGeneral: (general: {
     editorCommand: string | null;
     notifyWhenQuiet: boolean;
     checkForUpdates: boolean;
+    approvalCodeInNotification: boolean;
   }) =>
     unwrap(
       commands.settingsSaveGeneral(
         general.editorCommand,
         general.notifyWhenQuiet,
         general.checkForUpdates,
+        general.approvalCodeInNotification,
       ),
     ),
 
@@ -972,6 +985,10 @@ export const ipc = {
     unwrap(commands.coordinatorStart(harness, size)),
   /** End the running one. Its last screen stays until it is started again. */
   coordinatorStop: () => unwrap(commands.coordinatorStop()),
+  /** Commands a Floor Manager's `ys` is waiting for this window to allow. */
+  coordinatorConfirmations: () => unwrap(commands.coordinatorConfirmations()),
+  /** Record the user's yes or no. Resolves to whether a request was waiting. */
+  coordinatorAnswer: (id: string, allow: boolean) => unwrap(commands.coordinatorAnswer(id, allow)),
 
   ptySpawn: (request: SpawnRequest) => unwrap(commands.ptySpawn(request)),
   ptyList: () => unwrap(commands.ptyList()),
@@ -1021,6 +1038,20 @@ export const ipc = {
     trackedId: string | null = null,
   ) => unwrap(commands.workflowStart(workflowId, workspaceId, inputs, trackedId)),
   workflowCancel: (runId: string) => unwrap(commands.workflowCancel(runId)),
+  workflowDecide: (
+    runId: string,
+    stepId: string,
+    decision: ApprovalDecision,
+    feedback: string | null,
+  ) => unwrap(commands.workflowDecide(runId, stepId, decision, feedback)),
+  /** Answer a clarifying step. The same session receives it on the next tick. */
+  workflowAnswer: (runId: string, stepId: string, text: string) =>
+    unwrap(commands.workflowAnswer(runId, stepId, text)),
+  /** Runs waiting on the person, across every workflow. */
+  workflowWaits: () => unwrap(commands.workflowOpenWaits()),
+  /** Issue a new approval code and tell the person. Listing a run does not do this. */
+  workflowShowApprovalCode: (runId: string, stepId: string) =>
+    unwrap(commands.workflowShowApprovalCode(runId, stepId)),
   /** A model writes a workflow from a description, through Drafting; checked, never saved. */
   workflowDescribe: (description: string): Promise<Described> =>
     unwrap(commands.workflowDescribe(description)),
