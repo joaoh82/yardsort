@@ -12,24 +12,31 @@ notice says the thing is waiting. The phone opens it. That is the whole action.
 A computer submits three fields: `eventKey`, `category`, and `kind`. The server chooses the title
 and the body. The computer does not send words, a project name, a prompt, or a one-time code.
 
-| Category        | Kind        | Event key                                    | What the phone reads               |
-| --------------- | ----------- | -------------------------------------------- | ---------------------------------- |
-| `task`          | `progress`  | `task:{owner.name}:{issue}:progress:{stamp}` | A task moved forward               |
-| `task`          | `complete`  | `task:{owner.name}:{issue}:complete`         | A task finished                    |
-| `review`        | `attention` | `review:{owner.name}:{number}:{reason}`      | A review needs attention           |
-| `failure`       | `failed`    | `failure:workflow:{run}`                     | Something failed                   |
-| `desktopUpdate` | `available` | `desktop-update:{version}`                   | A desktop update is available      |
-| `workflow`      | `question`  | `workflow:question:{run}:{step}:{opened}`    | A workflow has a question          |
-| `workflow`      | `approval`  | `workflow:approval:{run}:{step}:{opened}`    | A workflow is waiting for approval |
+| Category        | Kind        | What is hashed                          | What the phone reads               |
+| --------------- | ----------- | --------------------------------------- | ---------------------------------- |
+| `task`          | `progress`  | `{owner.name}:{issue}:progress:{stamp}` | A task moved forward               |
+| `task`          | `complete`  | `{owner.name}:{issue}:complete`         | A task finished                    |
+| `review`        | `attention` | `{owner.name}:{number}:{reason}`        | A review needs attention           |
+| `failure`       | `failed`    | `workflow:{run}`                        | Something failed                   |
+| `desktopUpdate` | `available` | `{version}`                             | A desktop update is available      |
+| `workflow`      | `question`  | `question:{run}:{step}:{opened}`        | A workflow has a question          |
+| `workflow`      | `approval`  | `approval:{run}:{step}:{opened}`        | A workflow is waiting for approval |
+
+The event key the computer submits, and the server stores, is the category prefix plus the
+SHA-256 of that rest, written in hex. Two computers hash the same rest, so they still dedupe.
+The stored key does not contain the repository, the issue or pull request number, or the run id.
 
 `owner.name` is the GitHub repository, lower case, with a dot between owner and name. `reason` is
 `checks`, `conflicts`, `changes`, or `unreviewed`. A task counts as complete only when it was
 closed as completed. A failure is a workflow run whose status is `failed`. The error text stays on
 the computer.
 
-The first time this computer sees a repository's tasks, or its open pull requests, it records what
-is already there and sends nothing. A later change of stamp, or a review reason that was not there,
-is one notice. The same version of a desktop update is one notice on every computer of the account.
+Task and review notices are emitted only when this computer fetches those lists. They are not on
+a timer of their own. An item the computer has not seen before is recorded and sends nothing,
+including a completed task on a later page and a pull request that was not in the last fetch. A
+later change of stamp on an item it has seen, a completion of one it has seen, or a review reason
+that appears on a pull request it has seen, is one notice. The same version of a desktop update
+is one notice on every computer of the account.
 
 An event key is at most 200 characters, starts with the category's prefix, and uses only lower
 case letters, digits, and `:._-`. Upper case is refused, so a one-time code cannot be hidden in
@@ -54,22 +61,32 @@ goes out then. Otherwise the delivery stays queued.
 The phone registers its token with `POST /v1/notifications/token`. The body is `platform` (`apns`
 or `fcm`) and `token`. There is no device id in the body: the token belongs to the phone that is
 signed in. Only a phone may register. `POST /v1/notifications/reachable` asks the server to send
-what is still queued, which the phone does when it opens. `GET /v1/notifications/{id}` is the item
-the tap opens.
+what is still queued. The phone does that when the account screen opens, without asking for
+permission. `GET /v1/notifications/{id}` is the item the tap opens. Those three posts, and
+`POST /v1/notices`, are limited per device. A request with no usable access token is limited by
+address instead.
+
+The computer's post returns as soon as the notice is stored. Sending to APNs or FCM happens
+after that, so the computer is not held open for the provider.
 
 The deep link is `yardsort://notice/{category}/{id}`. `id` is the server's notice id. The category
 in the path is `task`, `review`, `failure`, `desktop-update`, or `workflow`. The phone's screen
-shows the title and the body. Answering, approving, and installing stay on the computer. A link
-with a query string is left alone, so a code cannot ride on it.
+shows the title and the body. It asks every account the phone is signed in to, the one in use
+first, so a notice for another signed-in account still opens. Answering, approving, and
+installing stay on the computer. A link with a query string is left alone, so a code cannot ride
+on it.
+
+Permission is asked once, from Settings → Notifications, not when the app launches. iOS tokens
+are registered as APNs and Android tokens as FCM. A token the system rotates is registered
+again. A tap, including one that launched the app, opens the notice from `deepLink`. The app
+config carries the `aps-environment` entitlement and a placeholder `google-services.json`. A
+real Firebase file replaces the placeholder through `GOOGLE_SERVICES_JSON`. Neither file is a
+credential that can send.
 
 Push is behind a `PushProvider`. Tests record what would have been sent. A server with no APNs or
 FCM credentials still starts. Those notices stay queued until a provider is configured, or until
-they expire.
-
-The phone build does not yet ask the operating system for a push token. `readPushToken` returns
-nothing, and the phone still calls `reachable`, so a queued notice is sent once a token exists.
-Wiring `expo-notifications` means making `readPushToken` return `getDevicePushTokenAsync` with
-platform `apns` or `fcm`.
+they expire. A key that cannot sign is treated as unset and logged at startup. A failed FCM
+token exchange logs its status and leaves the notice queued.
 
 ## Preferences
 
@@ -77,9 +94,10 @@ platform `apns` or `fcm`.
 each for `task`, `review`, `failure`, `desktopUpdate`, and `workflow`. Any device signed in to the
 account may read or replace them. The default is all on, and not muted.
 
-The phone's Settings → Notifications is that screen. Mute covers every category. A category that
-is off, or a mute, stores the notice so the same event is not sent later when the setting is
-turned back on. A new event after that is sent.
+The phone's Settings → Notifications is that screen. The mute and the categories are for the
+account in use, and the section is titled for that account. Mute covers every category. A
+category that is off, or a mute, stores the notice so the same event is not sent later when the
+setting is turned back on. A new event after that is sent.
 
 ## Deduplication
 
@@ -103,9 +121,23 @@ Two queues, both with a one-day expiry.
 - The server cannot reach the phone. The delivery stays `queued` when there is no token, or when
   the provider says it is unreachable. Registering a token, or `reachable`, sends it. A day later
   it is expired and a later flush does not send it. Each phone is handed at most eight queued
-  notices. The rest are dropped. A second flush sends nothing that was already sent.
+  notices. The rest are dropped, and the drop is logged with the account and the count. A second
+  flush sends nothing that was already sent. A flush claims each delivery for about two minutes.
+  Another flush takes it only after that lease, and only the flush that still holds the claim
+  may finish it.
 
-A token the provider says is gone is forgotten. The notice is not sent to that token again.
+An account may have 100 notices still waiting. Notices already sent do not count. Past 100, a
+new one is stored so it is not sent later, and the drop is logged with the account and the count.
+Sent, dropped and expired rows in the computer's outbox, and items it recorded as seen, are
+deleted after a week.
+
+A token the provider says is gone is forgotten. For FCM that is HTTP 404 with
+`error.details[].errorCode` of `UNREGISTERED`. For APNs that is HTTP 410 with a JSON reason of
+`BadDeviceToken` or `Unregistered`. A `NOT_FOUND` that is not `UNREGISTERED` leaves the token in
+place, so a wrong project id does not wipe every phone. An APNs 403 of `ExpiredProviderToken` or
+`InvalidProviderToken` drops the cached provider token and tries again next time. The notice is
+not sent to a token that is gone. Revoking a phone, or the account, deletes its token, and a
+flush does not send to a revoked phone.
 
 ## Security
 
@@ -140,6 +172,7 @@ Android:
 - `YARDSORT_FCM_CREDENTIALS` or `YARDSORT_FCM_CREDENTIALS_FILE`: the service account JSON. Set one.
 - `YARDSORT_FCM_PROJECT_ID` when it should override `project_id` in that file.
 
-A partial set, or a key that cannot be read, is logged as a warning and that provider stays off.
+A partial set, a key that cannot be read, or a key that cannot sign, is logged as a warning and
+that provider stays off.
 The server still starts. The self-host compose file passes these through and leaves them empty
 until they are filled in.

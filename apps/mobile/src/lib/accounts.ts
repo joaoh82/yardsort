@@ -486,6 +486,13 @@ export class Accounts {
     );
   }
 
+  /** Ask for notices still queued. Does not ask the operating system for a token. */
+  refreshQueuedNotifications(): Promise<void> {
+    return this.#withAccess(async (session, access) => {
+      await session.client.markNotificationsReachable(access);
+    });
+  }
+
   /** Register a push token when the phone has one, and ask for anything still queued. */
   async registerForNotifications(
     readToken: () => Promise<{ platform: "apns" | "fcm"; token: string } | null>,
@@ -497,9 +504,36 @@ export class Accounts {
     });
   }
 
-  /** One notification, for the screen a tap opens. */
-  notice(id: string): Promise<import("@yardsort/remote-client").NoticeView> {
-    return this.#withAccess((session, access) => session.client.notice(access, id));
+  /**
+   * One notification, for the screen a tap opens. The notice may belong to any account this
+   * phone is signed in to, so each is asked, the one in use first. A miss on one account is not
+   * a miss on the next.
+   */
+  async notice(id: string): Promise<import("@yardsort/remote-client").NoticeView> {
+    const index = this.#need();
+    const ordered = [
+      ...(index.active ? [index.active] : []),
+      ...index.all.filter((profile) => profile.id !== index.active?.id),
+    ];
+    if (ordered.length === 0) throw new ClientError("invalid", "Not signed in.");
+    let last: unknown = new ClientError("invalid", "Not signed in.");
+    for (const profile of ordered) {
+      try {
+        return await this.#withAccessOf(profile, this.#sessionOf(profile), (session, access) =>
+          session.client.notice(access, id),
+        );
+      } catch (error) {
+        last = error;
+        if (
+          error instanceof ClientError &&
+          (error.code === "not_found" || error.code === "unauthenticated")
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw last;
   }
 
   /**

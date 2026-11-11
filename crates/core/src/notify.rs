@@ -6,6 +6,10 @@
 
 use remote_proto::notify::{NoticeCategory, NoticeSubmission, FLUSH_CAP, NOTICE_TTL_MS};
 use rusqlite::{params, OptionalExtension};
+use sha2::{Digest, Sha256};
+
+/// Sent, dropped and expired outbox rows, and seen items, older than this are deleted.
+const WEEK_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 use crate::forge::{Checks, Mergeable, PullRequest, ReviewState};
 use crate::store::{Store, StoreResult};
@@ -74,6 +78,7 @@ fn category_name(category: NoticeCategory) -> &'static str {
 /// does not hand the server the whole backlog.
 pub fn pending(store: &Store, now: i64) -> StoreResult<Vec<QueuedNotice>> {
     let conn = store.conn();
+    prune(&conn, now)?;
     conn.execute(
         "UPDATE mobile_notice_outbox SET state = 'expired'
          WHERE state = 'queued' AND expires_at <= ?1",
@@ -88,6 +93,10 @@ pub fn pending(store: &Store, now: i64) -> StoreResult<Vec<QueuedNotice>> {
         .collect::<Result<_, _>>()?;
     drop(stmt);
     if keys.len() > FLUSH_CAP {
+        tracing::warn!(
+            count = keys.len() - FLUSH_CAP,
+            "the local notice queue dropped notices past the flush cap"
+        );
         for key in &keys[FLUSH_CAP..] {
             conn.execute(
                 "UPDATE mobile_notice_outbox SET state = 'dropped'
@@ -141,21 +150,35 @@ fn seen(conn: &rusqlite::Connection, key: &str) -> StoreResult<Option<String>> {
         .optional()?)
 }
 
-fn remember(conn: &rusqlite::Connection, key: &str, stamp: &str) -> StoreResult<()> {
+fn remember(conn: &rusqlite::Connection, key: &str, stamp: &str, now: i64) -> StoreResult<()> {
     conn.execute(
-        "INSERT INTO mobile_notice_seen (item_key, stamp) VALUES (?1, ?2)
-         ON CONFLICT(item_key) DO UPDATE SET stamp = excluded.stamp",
-        params![key, stamp],
+        "INSERT INTO mobile_notice_seen (item_key, stamp, seen_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(item_key) DO UPDATE SET stamp = excluded.stamp, seen_at = excluded.seen_at",
+        params![key, stamp, now],
     )?;
     Ok(())
 }
 
-/// The first time this computer sees `slug`, record every task and send nothing.
-/// Later, a changed `updated_at` is progress, and a task closed as completed is completion.
+fn prune(conn: &rusqlite::Connection, now: i64) -> StoreResult<()> {
+    let before = now.saturating_sub(WEEK_MS);
+    conn.execute(
+        "DELETE FROM mobile_notice_outbox
+         WHERE state IN ('sent', 'dropped', 'expired') AND created_at < ?1",
+        [before],
+    )?;
+    conn.execute(
+        "DELETE FROM mobile_notice_seen WHERE seen_at < ?1",
+        [before],
+    )?;
+    Ok(())
+}
+
+/// An item this computer has not seen is recorded and sends nothing. A later change of stamp is
+/// progress, and a task that was already seen and then closed as completed is completion.
 pub fn observe_tasks(store: &Store, tasks: &[Task], now: i64) -> StoreResult<Vec<NoticeDraft>> {
     let mut out = Vec::new();
     let conn = store.conn();
-    let mut by_slug: Vec<(String, Vec<&Task>)> = Vec::new();
+    prune(&conn, now)?;
     for task in tasks {
         let Some((slug, number)) = github_slug(&task.url) else {
             continue;
@@ -163,62 +186,40 @@ pub fn observe_tasks(store: &Store, tasks: &[Task], now: i64) -> StoreResult<Vec
         if number == 0 {
             continue;
         }
-        match by_slug.iter_mut().find(|(s, _)| s == &slug) {
-            Some((_, list)) => list.push(task),
-            None => by_slug.push((slug, vec![task])),
-        }
-    }
-    for (slug, list) in by_slug {
-        let baseline = format!("baseline:task:{slug}");
-        let first = seen(&conn, &baseline)?.is_none();
-        if first {
-            remember(&conn, &baseline, "1")?;
-        }
-        for task in list {
-            let Some((slug, number)) = github_slug(&task.url) else {
-                continue;
-            };
-            let stamp = piece(&task.updated_at, 40);
-            let progress = format!("task:{slug}:{number}:progress");
-            if first {
-                remember(&conn, &progress, &stamp)?;
-            } else if seen(&conn, &progress)?.as_deref() != Some(stamp.as_str()) {
-                if let Some(draft) = task_progress(&slug, number, &stamp) {
-                    if enqueue_on(&conn, &draft, now)? {
-                        out.push(draft);
-                    }
-                }
-                remember(&conn, &progress, &stamp)?;
+        let item = format!("task:{slug}:{number}");
+        let stamp = piece(&task.updated_at, 40);
+        let known = seen(&conn, &item)?;
+        let completed =
+            task.state == TaskState::Closed && task.closed_as == Some(ClosedAs::Completed);
+        if known.is_none() {
+            remember(&conn, &item, &stamp, now)?;
+            if completed {
+                remember(&conn, &format!("{item}:complete"), "1", now)?;
             }
-            if task.state == TaskState::Closed && task.closed_as == Some(ClosedAs::Completed) {
-                let complete = format!("task:{slug}:{number}:complete");
-                if first {
-                    remember(&conn, &complete, "1")?;
-                } else if seen(&conn, &complete)?.is_none() {
-                    if let Some(draft) = task_complete(&slug, number) {
-                        if enqueue_on(&conn, &draft, now)? {
-                            out.push(draft);
-                        }
-                    }
-                    remember(&conn, &complete, "1")?;
+            continue;
+        }
+        if known.as_deref() != Some(stamp.as_str()) {
+            if let Some(draft) = task_progress(&slug, number, &stamp) {
+                if enqueue_on(&conn, &draft, now)? {
+                    out.push(draft);
                 }
             }
+            remember(&conn, &item, &stamp, now)?;
+        }
+        if completed && seen(&conn, &format!("{item}:complete"))?.is_none() {
+            if let Some(draft) = task_complete(&slug, number) {
+                if enqueue_on(&conn, &draft, now)? {
+                    out.push(draft);
+                }
+            }
+            remember(&conn, &format!("{item}:complete"), "1", now)?;
         }
     }
     Ok(out)
 }
 
-struct OpenReview {
-    number: u64,
-    reasons: Vec<&'static str>,
-}
-
-struct ReviewGroup {
-    slug: String,
-    items: Vec<OpenReview>,
-}
-
-/// The first look records the reasons already present. A reason that appears later is one notice.
+/// A pull request this computer has not seen is recorded and sends nothing. A reason that
+/// appears on one it has already seen is one notice.
 pub fn observe_reviews(
     store: &Store,
     requests: &[PullRequest],
@@ -226,7 +227,7 @@ pub fn observe_reviews(
 ) -> StoreResult<Vec<NoticeDraft>> {
     let mut out = Vec::new();
     let conn = store.conn();
-    let mut groups: Vec<ReviewGroup> = Vec::new();
+    prune(&conn, now)?;
     for pr in requests {
         if pr.state != crate::forge::PullRequestState::Open {
             continue;
@@ -234,39 +235,25 @@ pub fn observe_reviews(
         let Some((slug, number)) = github_slug(&pr.url) else {
             continue;
         };
-        let reasons = attention(pr);
-        match groups.iter_mut().find(|group| group.slug == slug) {
-            Some(group) => group.items.push(OpenReview { number, reasons }),
-            None => groups.push(ReviewGroup {
-                slug,
-                items: vec![OpenReview { number, reasons }],
-            }),
+        let marker = format!("review:{slug}:{number}");
+        let known = seen(&conn, &marker)?.is_some();
+        if !known {
+            remember(&conn, &marker, "1", now)?;
         }
-    }
-    for group in groups {
-        let ReviewGroup { slug, items: list } = group;
-        let baseline = format!("baseline:review:{slug}");
-        let first = seen(&conn, &baseline)?.is_none();
-        if first {
-            remember(&conn, &baseline, "1")?;
-        }
-        for OpenReview { number, reasons } in list {
-            for reason in reasons {
-                let item = format!("review:{slug}:{number}:{reason}");
-                if first {
-                    remember(&conn, &item, "1")?;
-                    continue;
-                }
-                if seen(&conn, &item)?.is_some() {
-                    continue;
-                }
+        for reason in attention(pr) {
+            let item = format!("{marker}:{reason}");
+            let already = seen(&conn, &item)?.is_some();
+            if known && !already {
                 if let Some(draft) = review_attention(&slug, number, reason) {
                     if enqueue_on(&conn, &draft, now)? {
                         out.push(draft);
                     }
                 }
-                remember(&conn, &item, "1")?;
             }
+            remember(&conn, &item, "1", now)?;
+        }
+        if known {
+            remember(&conn, &marker, "1", now)?;
         }
     }
     Ok(out)
@@ -284,7 +271,7 @@ pub fn task_progress(slug: &str, number: u64, stamp: &str) -> Option<NoticeDraft
     draft(
         NoticeCategory::Task,
         "progress",
-        format!("task:{slug}:{number}:progress:{stamp}"),
+        &format!("{slug}:{number}:progress:{stamp}"),
     )
 }
 
@@ -292,7 +279,7 @@ pub fn task_complete(slug: &str, number: u64) -> Option<NoticeDraft> {
     draft(
         NoticeCategory::Task,
         "complete",
-        format!("task:{slug}:{number}:complete"),
+        &format!("{slug}:{number}:complete"),
     )
 }
 
@@ -300,7 +287,7 @@ pub fn review_attention(slug: &str, number: u64, reason: &str) -> Option<NoticeD
     draft(
         NoticeCategory::Review,
         "attention",
-        format!("review:{slug}:{number}:{reason}"),
+        &format!("{slug}:{number}:{reason}"),
     )
 }
 
@@ -311,7 +298,7 @@ pub fn workflow_failure(run_id: &str, status: &str) -> Option<NoticeDraft> {
     draft(
         NoticeCategory::Failure,
         "failed",
-        format!("failure:workflow:{}", piece(run_id, 80)),
+        &format!("workflow:{}", piece(run_id, 80)),
     )
 }
 
@@ -319,7 +306,7 @@ pub fn desktop_update(version: &str) -> Option<NoticeDraft> {
     draft(
         NoticeCategory::DesktopUpdate,
         "available",
-        format!("desktop-update:{}", piece(version, 40)),
+        &piece(version, 40),
     )
 }
 
@@ -327,8 +314,8 @@ pub fn workflow_question(run_id: &str, step_id: &str, opened_at: i64) -> Option<
     draft(
         NoticeCategory::Workflow,
         "question",
-        format!(
-            "workflow:question:{}:{}:{opened_at}",
+        &format!(
+            "question:{}:{}:{opened_at}",
             piece(run_id, 80),
             piece(step_id, 80)
         ),
@@ -339,15 +326,27 @@ pub fn workflow_approval(run_id: &str, step_id: &str, opened_at: i64) -> Option<
     draft(
         NoticeCategory::Workflow,
         "approval",
-        format!(
-            "workflow:approval:{}:{}:{opened_at}",
+        &format!(
+            "approval:{}:{}:{opened_at}",
             piece(run_id, 80),
             piece(step_id, 80)
         ),
     )
 }
 
-fn draft(category: NoticeCategory, kind: &'static str, event_key: String) -> Option<NoticeDraft> {
+/// The category prefix plus the hex SHA-256 of `rest`. The repository, the number and the run
+/// stay out of the key the server stores. Two computers hash the same rest to the same key.
+fn event_key(category: NoticeCategory, rest: &str) -> String {
+    let digest = Sha256::digest(rest.as_bytes());
+    let mut key = category.prefix().to_owned();
+    for byte in digest {
+        key.push_str(&format!("{byte:02x}"));
+    }
+    key
+}
+
+fn draft(category: NoticeCategory, kind: &'static str, rest: &str) -> Option<NoticeDraft> {
+    let event_key = event_key(category, rest);
     remote_proto::notify::valid_event_key(category, &event_key).then_some(NoticeDraft {
         event_key,
         category,
@@ -519,6 +518,11 @@ mod tests {
                 category,
                 &draft.event_key
             ));
+            let rest = draft.event_key.strip_prefix(category.prefix()).unwrap();
+            assert_eq!(rest.len(), 64, "{}", draft.event_key);
+            assert!(rest.chars().all(|c| c.is_ascii_hexdigit()));
+            assert!(!draft.event_key.contains("example"));
+            assert!(!draft.event_key.contains("widgets"));
             let text = format!("{draft:?}{}", draft.event_key);
             assert!(!text.contains(&code), "{text}");
             assert!(!text.contains("secret title"));
@@ -561,6 +565,33 @@ mod tests {
     }
 
     #[test]
+    fn an_open_list_then_old_closed_tasks_sends_nothing() {
+        let store = Store::in_memory();
+        let open = task(
+            "https://github.com/Example/widgets/issues/1",
+            "2026-10-02T18:00:00Z",
+            None,
+        );
+        assert!(observe_tasks(&store, std::slice::from_ref(&open), 1)
+            .unwrap()
+            .is_empty());
+        let old = task(
+            "https://github.com/Example/widgets/issues/2",
+            "2020-01-01T00:00:00Z",
+            Some(ClosedAs::Completed),
+        );
+        assert!(
+            observe_tasks(&store, std::slice::from_ref(&old), 2)
+                .unwrap()
+                .is_empty(),
+            "a completed task seen for the first time is recorded quietly"
+        );
+        assert!(observe_tasks(&store, std::slice::from_ref(&old), 3)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
     fn a_review_reason_is_notified_once() {
         let store = Store::in_memory();
         let quiet = pr(
@@ -587,20 +618,30 @@ mod tests {
             )),
         );
         let found = observe_reviews(&store, std::slice::from_ref(&failing), 3).unwrap();
-        let kinds: Vec<_> = found
-            .iter()
-            .map(|d| d.event_key.rsplit(':').next().unwrap())
-            .collect();
-        assert!(kinds.contains(&"checks"));
-        assert!(kinds.contains(&"conflicts"));
-        assert!(kinds.contains(&"changes"));
-        assert!(!kinds.contains(&"unreviewed"));
+        let mut keys: Vec<_> = found.iter().map(|d| d.event_key.clone()).collect();
+        keys.sort();
+        let mut expected = ["checks", "conflicts", "changes"].map(|reason| {
+            review_attention("example.widgets", 41, reason)
+                .unwrap()
+                .event_key
+        });
+        expected.sort();
+        assert_eq!(keys, expected);
         assert!(observe_reviews(&store, std::slice::from_ref(&failing), 4)
             .unwrap()
             .is_empty());
         for row in &found {
             assert!(!row.event_key.contains("secret"));
         }
+        let mut later = failing.clone();
+        later.number = 99;
+        later.url = "https://github.com/Example/widgets/pull/99".into();
+        assert!(
+            observe_reviews(&store, std::slice::from_ref(&later), 5)
+                .unwrap()
+                .is_empty(),
+            "a pull request seen for the first time is recorded quietly"
+        );
     }
 
     #[test]
@@ -620,5 +661,13 @@ mod tests {
         let later = pending(&store, 40 + NOTICE_TTL_MS).unwrap();
         assert!(later.is_empty());
         assert!(pending(&store, 40 + NOTICE_TTL_MS).unwrap().is_empty());
+        let kept = desktop_update("9.9.9").unwrap();
+        assert!(enqueue(&store, &kept, 1).unwrap());
+        settle(&store, &kept.event_key, true).unwrap();
+        pending(&store, 1 + WEEK_MS + 1).unwrap();
+        assert!(
+            enqueue(&store, &kept, 2).unwrap(),
+            "a sent row older than a week is gone, so the key can be queued again"
+        );
     }
 }

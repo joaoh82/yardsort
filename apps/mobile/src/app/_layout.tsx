@@ -1,7 +1,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
+import { DarkTheme, DefaultTheme, router, Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -18,6 +18,7 @@ import {
   systemBrowser,
 } from "../lib/native";
 import { incoming } from "../lib/pairing";
+import { installPushHandlers } from "../lib/push-token";
 import { Button, FONTS, Problem, Screen, useColors, useScheme } from "../ui/parts";
 
 appearance.start(appearanceFile);
@@ -52,6 +53,18 @@ export default function Layout() {
   useEffect(() => {
     void load();
   }, []);
+  // Taps, including one that launched the app, and a token the system rotates. Permission is
+  // asked from Settings → Notifications, not here.
+  useEffect(
+    () =>
+      installPushHandlers(
+        (route) => router.push(route),
+        (token) => {
+          void app.accounts.registerForNotifications(async () => token).catch(() => {});
+        },
+      ),
+    [],
+  );
 
   return (
     <SafeAreaProvider>

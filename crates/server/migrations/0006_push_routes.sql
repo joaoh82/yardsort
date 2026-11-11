@@ -45,6 +45,8 @@ CREATE TABLE mobile_notice_deliveries (
     queued_at BIGINT NOT NULL,
     expires_at BIGINT NOT NULL,
     sent_at BIGINT,
+    -- Set when a flush claims the row. Another flush may take it after the lease.
+    claimed_at BIGINT,
     PRIMARY KEY (notice, device)
 );
 

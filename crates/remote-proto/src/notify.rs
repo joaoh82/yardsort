@@ -56,7 +56,7 @@ impl NoticeCategory {
     }
 }
 
-/// What a host submits. The server ignores anything else in the JSON.
+/// What a host submits. A field this struct does not know is refused.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NoticeSubmission {

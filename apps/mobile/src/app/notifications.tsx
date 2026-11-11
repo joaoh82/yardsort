@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { messageOf } from "../lib/accounts";
 import { useApp, useSnapshot } from "../lib/context";
-import { readPushToken } from "../lib/push-token";
+import { readPushToken, requestPushPermissionOnce } from "../lib/push-token";
 import { Body, Group, Problem, Row, Screen, Section, Waiting } from "../ui/parts";
 
 const DEFAULTS: NotificationPreferences = {
@@ -37,12 +37,25 @@ export default function Notifications() {
       },
       (error: unknown) => setProblem(messageOf(error)),
     );
-    void accounts.registerForNotifications(readPushToken).catch(() => {});
   }, [accounts, signedIn]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!signedIn) return;
+    let live = true;
+    void (async () => {
+      const allowed = await requestPushPermissionOnce();
+      if (!live) return;
+      if (allowed) await accounts.registerForNotifications(readPushToken);
+      else await accounts.refreshQueuedNotifications();
+    })().catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [accounts, signedIn]);
 
   const toggle = (patch: Partial<NotificationPreferences>) => {
     if (!preferences) return;
@@ -61,7 +74,7 @@ export default function Notifications() {
         <Body muted>Sign in to choose what reaches this phone.</Body>
       ) : preferences ? (
         <>
-          <Section title="This phone">
+          <Section title="This account">
             <Group>
               <Row
                 title="Mute all"

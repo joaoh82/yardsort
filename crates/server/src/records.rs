@@ -557,25 +557,31 @@ pub trait Records: Send + Sync {
         now: i64,
     ) -> impl Future<Output = Result<NoticeRecord>> + Send;
 
-    /// Expire what has lapsed, drop what the preferences now refuse, keep the newest
-    /// [`crate::FLUSH_CAP`] queued deliveries per phone, and return those that have a token.
+    /// Expire what has lapsed, take back claims older than [`CLAIM_LEASE_MS`], drop what the
+    /// preferences now refuse, keep the newest [`crate::FLUSH_CAP`] queued deliveries per phone,
+    /// and return those that have a token on a phone that is still signed in.
     fn prepare_flush(
         &self,
         account: &AccountId,
         now: i64,
     ) -> impl Future<Output = Result<Vec<NoticeToSend>>> + Send;
 
-    /// Claim a queued delivery so a second flush does not send it too. False when it was not queued.
+    /// Claim a queued delivery so a second flush does not send it too. The claim time, when this
+    /// caller took it. `None` when it was not queued.
     fn claim_delivery(
         &self,
         notice: &str,
         device: &DeviceId,
-    ) -> impl Future<Output = Result<bool>> + Send;
+        now: i64,
+    ) -> impl Future<Output = Result<Option<i64>>> + Send;
 
+    /// Finish a delivery this caller still holds. A row claimed again after the lease is left
+    /// for whoever holds it now.
     fn finish_delivery(
         &self,
         notice: &str,
         device: &DeviceId,
+        claimed_at: i64,
         end: DeliveryEnd,
     ) -> impl Future<Output = Result<()>> + Send;
 
@@ -608,9 +614,12 @@ impl Default for MemoryRecords {
     }
 }
 
-/// How many notices one account keeps that can still be delivered. Past this, a new one is
-/// remembered for deduplication and is not sent.
+/// How many notices one account may still have waiting to be delivered. Already sent notices
+/// do not count. Past this, a new one is remembered for deduplication and is not sent.
 pub const OPEN_NOTICE_CAP: usize = 100;
+
+/// How long a flush may hold a delivery before another flush may take it. Two minutes.
+pub const CLAIM_LEASE_MS: i64 = 2 * 60 * 1000;
 
 /// What a host asked the server to tell the phone. The words are already the server's own.
 #[derive(Debug, Clone)]
@@ -689,6 +698,25 @@ struct DeliveryRow {
     state: &'static str,
     queued_at: i64,
     expires_at: i64,
+    claimed_at: Option<i64>,
+}
+
+fn undelivered(state: &State, account: &str) -> usize {
+    state
+        .deliveries
+        .iter()
+        .filter(|delivery| matches!(delivery.state, "queued" | "sending"))
+        .filter(|delivery| {
+            state
+                .notices
+                .iter()
+                .any(|notice| notice.id == delivery.notice && notice.account == account)
+        })
+        .count()
+}
+
+fn claim_expired(claimed_at: Option<i64>, now: i64) -> bool {
+    claimed_at.is_none_or(|at| now.saturating_sub(at) >= CLAIM_LEASE_MS)
 }
 
 /// Whether `category` (the wire name) is one `preferences` still delivers.
@@ -973,6 +1001,7 @@ impl Records for MemoryRecords {
         self.with(|s| match s.device_mut(device) {
             Some(d) if d.account == *account => {
                 d.revoked.get_or_insert(revoked);
+                s.push_tokens.remove(device.as_str());
                 true
             }
             _ => false,
@@ -990,11 +1019,18 @@ impl Records for MemoryRecords {
                 .get(&(issuer.to_owned(), subject.to_owned()))?
                 .clone();
             let mut count = 0;
+            let mut gone = Vec::new();
             for device in &mut s.devices {
-                if device.account == account && device.revoked.is_none() {
-                    device.revoked = Some(revoked);
-                    count += 1;
+                if device.account == account {
+                    gone.push(device.id.as_str().to_owned());
+                    if device.revoked.is_none() {
+                        device.revoked = Some(revoked);
+                        count += 1;
+                    }
                 }
+            }
+            for id in gone {
+                s.push_tokens.remove(&id);
             }
             Some(count)
         })
@@ -1336,12 +1372,15 @@ impl Records for MemoryRecords {
                     suppressed: existing.suppressed,
                 };
             }
-            let open = s
-                .notices
-                .iter()
-                .filter(|n| n.account == account.0 && !n.suppressed)
-                .count();
+            let open = undelivered(s, &account.0);
             let suppressed = notice.suppressed || open >= OPEN_NOTICE_CAP;
+            if !notice.suppressed && open >= OPEN_NOTICE_CAP {
+                tracing::warn!(
+                    account = %account.0,
+                    count = open,
+                    "notice cap dropped a notice"
+                );
+            }
             s.notices.push(NoticeRow {
                 id: notice.id.clone(),
                 account: account.0.clone(),
@@ -1363,6 +1402,7 @@ impl Records for MemoryRecords {
                         state: "queued",
                         queued_at: now,
                         expires_at: notice.expires_at,
+                        claimed_at: None,
                     });
                 }
             }
@@ -1378,17 +1418,19 @@ impl Records for MemoryRecords {
         self.with(|s| s.prepare_flush(account, now))
     }
 
-    async fn claim_delivery(&self, notice: &str, device: &DeviceId) -> Result<bool> {
+    async fn claim_delivery(
+        &self,
+        notice: &str,
+        device: &DeviceId,
+        now: i64,
+    ) -> Result<Option<i64>> {
         self.with(|s| {
-            let Some(row) = s
-                .deliveries
-                .iter_mut()
-                .find(|d| d.notice == notice && d.device == device.as_str() && d.state == "queued")
-            else {
-                return false;
-            };
+            let row = s.deliveries.iter_mut().find(|d| {
+                d.notice == notice && d.device == device.as_str() && d.state == "queued"
+            })?;
             row.state = "sending";
-            true
+            row.claimed_at = Some(now);
+            Some(now)
         })
     }
 
@@ -1396,18 +1438,25 @@ impl Records for MemoryRecords {
         &self,
         notice: &str,
         device: &DeviceId,
+        claimed_at: i64,
         end: DeliveryEnd,
     ) -> Result<()> {
         self.with(|s| {
-            if let Some(row) = s
-                .deliveries
-                .iter_mut()
-                .find(|d| d.notice == notice && d.device == device.as_str())
-            {
-                row.state = match end {
-                    DeliveryEnd::Sent => "sent",
-                    DeliveryEnd::Again | DeliveryEnd::Gone => "queued",
-                };
+            let found = s.deliveries.iter().position(|d| {
+                d.notice == notice
+                    && d.device == device.as_str()
+                    && d.state == "sending"
+                    && d.claimed_at == Some(claimed_at)
+            });
+            let Some(index) = found else {
+                return;
+            };
+            match end {
+                DeliveryEnd::Sent => s.deliveries[index].state = "sent",
+                DeliveryEnd::Again | DeliveryEnd::Gone => {
+                    s.deliveries[index].state = "queued";
+                    s.deliveries[index].claimed_at = None;
+                }
             }
             if end == DeliveryEnd::Gone {
                 s.push_tokens.remove(device.as_str());
@@ -1439,10 +1488,16 @@ impl State {
             .cloned()
             .unwrap_or_default();
         for delivery in &mut self.deliveries {
+            if notice_of(&self.notices, &delivery.notice)
+                .is_none_or(|notice| notice.account != account.0)
+            {
+                continue;
+            }
             if delivery.expires_at <= now && matches!(delivery.state, "queued" | "sending") {
                 delivery.state = "expired";
-            } else if delivery.state == "sending" {
+            } else if delivery.state == "sending" && claim_expired(delivery.claimed_at, now) {
                 delivery.state = "queued";
+                delivery.claimed_at = None;
             }
         }
         fn notice_of<'a>(rows: &'a [NoticeRow], id: &str) -> Option<&'a NoticeRow> {
@@ -1484,6 +1539,7 @@ impl State {
                     .push(index);
             }
         }
+        let mut dropped = 0usize;
         for indexes in by_device.values_mut() {
             indexes.sort_by(|a, b| {
                 self.deliveries[*b]
@@ -1493,7 +1549,15 @@ impl State {
             });
             for index in indexes.iter().skip(remote_proto::notify::FLUSH_CAP) {
                 self.deliveries[*index].state = "dropped";
+                dropped += 1;
             }
+        }
+        if dropped > 0 {
+            tracing::warn!(
+                account = %account.0,
+                count = dropped,
+                "notice flush cap dropped queued notices"
+            );
         }
         let mut ready = Vec::new();
         for delivery in &self.deliveries {
@@ -1510,6 +1574,13 @@ impl State {
                 continue;
             };
             if token.account != account.0 {
+                continue;
+            }
+            let revoked = self
+                .devices
+                .iter()
+                .any(|device| device.id.as_str() == delivery.device && device.revoked.is_some());
+            if revoked {
                 continue;
             }
             let Ok(device) = DeviceId::new(delivery.device.clone()) else {

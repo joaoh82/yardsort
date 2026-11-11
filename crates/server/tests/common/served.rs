@@ -29,18 +29,21 @@ pub struct Served {
 }
 
 impl Served {
-    pub async fn start(records: impl Records + 'static) -> Self {
+    pub async fn start(records: impl Records + Clone + 'static) -> Self {
         Self::start_with(records, http::Options::default()).await
     }
 
-    pub async fn start_with(records: impl Records + 'static, options: http::Options) -> Self {
+    pub async fn start_with(
+        records: impl Records + Clone + 'static,
+        options: http::Options,
+    ) -> Self {
         Self::start_as(records, options, Relay::default()).await
     }
 
     /// As one of several instances of a server: `relay` names this one, and how requests reach
     /// the others.
     pub async fn start_as(
-        records: impl Records + 'static,
+        records: impl Records + Clone + 'static,
         options: http::Options,
         relay: Relay,
     ) -> Self {
@@ -49,12 +52,20 @@ impl Served {
 
     /// With `push` recording or refusing what would be sent to a phone.
     pub async fn start_notifying(
-        records: impl Records + 'static,
+        records: impl Records + Clone + 'static,
         push: Arc<dyn PushProvider>,
+    ) -> Self {
+        Self::start_notifying_with(records, push, http::Options::default()).await
+    }
+
+    pub async fn start_notifying_with(
+        records: impl Records + Clone + 'static,
+        push: Arc<dyn PushProvider>,
+        options: http::Options,
     ) -> Self {
         Self::open(
             records,
-            http::Options::default(),
+            options,
             Relay::default(),
             vec![APP.into()],
             Some(push),
@@ -64,7 +75,7 @@ impl Served {
 
     /// With `redirects` as the device redirects the server allows.
     pub async fn start_allowing(
-        records: impl Records + 'static,
+        records: impl Records + Clone + 'static,
         options: http::Options,
         relay: Relay,
         redirects: Vec<String>,
@@ -73,7 +84,7 @@ impl Served {
     }
 
     async fn open(
-        records: impl Records + 'static,
+        records: impl Records + Clone + 'static,
         options: http::Options,
         relay: Relay,
         redirects: Vec<String>,

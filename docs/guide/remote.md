@@ -196,9 +196,14 @@ The notification opens that item in the phone app. The phone does not answer, ap
 A one-time code stays on this computer. It can still appear in a notification here when
 Settings → General includes it. It is never in the one the phone receives.
 
-On the phone, Settings → Notifications can mute everything, or turn one of those categories off.
-A notice that was skipped while a category was off is not sent later if you turn it back on. A new
-event after that is.
+On the phone, Settings → Notifications asks once for permission to send notifications, then can
+mute everything for this account, or turn one of those categories off. A tap opens the item,
+including when the app was not running. A notice that was skipped while a category was off is not
+sent later if you turn it back on. A new event after that is.
+
+A task or review notice is sent when this computer loads that list. It is not sent on a timer of
+its own. Opening a list of tasks that were already finished, or a pull request this computer has
+not shown before, does not notify. A change after that does.
 
 If this computer cannot reach the server, or the phone cannot be reached, the notice waits up to a
 day and is delivered once when the path is open again. The same event from two computers is one

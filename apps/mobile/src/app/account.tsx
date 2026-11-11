@@ -9,7 +9,6 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Alert } from "react-native";
 
 import { messageOf } from "../lib/accounts";
-import { readPushToken } from "../lib/push-token";
 import { useApp, useSnapshot } from "../lib/context";
 import { moment } from "../lib/format";
 import type { Profile } from "../lib/profiles";
@@ -136,7 +135,8 @@ function SignedIn({
   }, [fetchDevices, profile.id]);
 
   useEffect(() => {
-    void accounts.registerForNotifications(readPushToken).catch(() => {});
+    // The queue can flush without a token. Asking for permission stays on Settings → Notifications.
+    void accounts.refreshQueuedNotifications().catch(() => {});
   }, [accounts, profile.id]);
 
   const refresh = async () => {

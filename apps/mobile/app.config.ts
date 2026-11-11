@@ -31,10 +31,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ...(process.env.APPLE_TEAM_ID ? { appleTeamId: process.env.APPLE_TEAM_ID } : {}),
     supportsTablet: true,
     config: { usesNonExemptEncryption: false },
+    // A release build talks to production APNs. A development build talks to the sandbox.
+    entitlements: { "aps-environment": release ? "production" : "development" },
   },
   android: {
     package: identifier,
     adaptiveIcon: { foregroundImage: "./assets/icon-foreground.png", backgroundColor: "#14171c" },
+    // Placeholder credentials so the project configures FCM without a real key in the repo.
+    // `GOOGLE_SERVICES_JSON` points at the file from Firebase when one is issued.
+    googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? "./google-services.json",
   },
   plugins: [
     "expo-router",
@@ -72,6 +77,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           "Yardsort sends a picture you choose to an agent on your computer, and nothing else.",
       },
     ],
+    "expo-notifications",
     [
       "expo-camera",
       {

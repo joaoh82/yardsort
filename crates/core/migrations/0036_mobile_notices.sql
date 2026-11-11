@@ -14,5 +14,6 @@ CREATE TABLE mobile_notice_outbox (
 -- about every open task and every review.
 CREATE TABLE mobile_notice_seen (
     item_key TEXT PRIMARY KEY,
-    stamp TEXT NOT NULL
+    stamp TEXT NOT NULL,
+    seen_at INTEGER NOT NULL
 );

@@ -9,8 +9,10 @@ has the downloads and the full commit lists.
   moved or finished, a review that needs attention, a failed workflow, an available desktop
   update, and a workflow question or approval each send one notification. It opens that item
   in the phone app. You answer, approve, and install on the computer. The phone notification
-  never includes a one-time code. On the phone, Settings → Notifications can mute all of them
-  or turn a category off. A notice waits up to a day when the phone or the server cannot be
+  never includes a one-time code. On the phone, Settings → Notifications asks once for
+  permission, then can mute all of them for this account or turn a category off. A tap opens
+  the item, including when the app was not running. Task and review notices are sent when
+  this computer loads those lists. A notice waits up to a day when the phone or the server cannot be
   reached, and is delivered once when it can. See
   [Notifications](docs/guide/remote.md#notifications).
 - **An agent in a workflow can ask you a question and continue in the same session.**

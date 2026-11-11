@@ -35,7 +35,7 @@ use crate::records::{
     allowance, category_allowed, AccountId, Allowance, Decision, DeliveryEnd, Device, GrantFilter,
     GrantRecord, GrantStatus, GrantView, Handoff, Host, HostOffer, IncomingNotice, Issued,
     LinkPlace, NoticePage, NoticeRecord, NoticeToSend, PendingLogin, Records, RecordsError,
-    Redemption, Result, RevokeReason, Revoked, Rotation, Signal, OPEN_NOTICE_CAP,
+    Redemption, Result, RevokeReason, Revoked, Rotation, Signal, CLAIM_LEASE_MS, OPEN_NOTICE_CAP,
     SEEN_RESOLUTION_MS, SIGNALS_KEPT,
 };
 use crate::tokens::TokenHash;
@@ -109,6 +109,7 @@ const PROBE: &str = "probe";
 /// Where an instance's signals are handed out: `None` while nothing listens for them.
 type Listeners = Arc<Mutex<Option<broadcast::Sender<Signal>>>>;
 
+#[derive(Clone)]
 pub struct PgRecords {
     pool: Pool,
     /// For the listening connection, which is not one of the pool's.
@@ -691,9 +692,8 @@ impl Records for PgRecords {
         revoked: Revoked,
     ) -> Result<bool> {
         // An earlier revocation, and its reason, stand.
-        let changed = self
-            .client()
-            .await?
+        let client = self.client().await?;
+        let changed = client
             .execute(
                 "UPDATE devices SET revoked_at = COALESCE(revoked_at, $3),
                                     revoked_reason = COALESCE(revoked_reason, $4)
@@ -704,6 +704,13 @@ impl Records for PgRecords {
                     &revoked.at,
                     &reason_spelled(revoked.reason),
                 ],
+            )
+            .await
+            .map_err(failed)?;
+        client
+            .execute(
+                "DELETE FROM push_tokens WHERE device = $1 AND account = $2",
+                &[&device.as_str(), &account.0],
             )
             .await
             .map_err(failed)?;
@@ -726,8 +733,13 @@ impl Records for PgRecords {
                      UPDATE devices SET revoked_at = $3, revoked_reason = $4
                      WHERE account IN (SELECT id FROM account) AND revoked_at IS NULL
                      RETURNING 1
+                 ), dropped AS (
+                     DELETE FROM push_tokens
+                     WHERE account IN (SELECT id FROM account)
+                     RETURNING 1
                  )
-                 SELECT (SELECT count(*) FROM account), (SELECT count(*) FROM revoked)",
+                 SELECT (SELECT count(*) FROM account), (SELECT count(*) FROM revoked),
+                        (SELECT count(*) FROM dropped)",
                 &[
                     &issuer,
                     &subject,
@@ -1321,51 +1333,63 @@ impl Records for PgRecords {
         )
         .await
         .map_err(failed)?;
-        if let Some(row) = tx
-            .query_opt(
-                "SELECT id, suppressed FROM mobile_notices
-                 WHERE account = $1 AND event_key = $2",
-                &[&account.0, &notice.event_key],
-            )
-            .await
-            .map_err(failed)?
-        {
-            tx.commit().await.map_err(failed)?;
-            return Ok(NoticeRecord {
-                id: row.get(0),
-                fresh: false,
-                suppressed: row.get(1),
-            });
-        }
         let open: i64 = tx
             .query_one(
-                "SELECT COUNT(*) FROM mobile_notices WHERE account = $1 AND NOT suppressed",
+                "SELECT COUNT(*) FROM mobile_notice_deliveries d
+                 JOIN mobile_notices n ON n.id = d.notice
+                 WHERE n.account = $1 AND d.state IN ('queued', 'sending')",
                 &[&account.0],
             )
             .await
             .map_err(failed)?
             .get(0);
         let suppressed = notice.suppressed || open >= OPEN_NOTICE_CAP as i64;
-        tx.execute(
-            "INSERT INTO mobile_notices
-                 (id, account, event_key, category, kind, title, body, created_at, expires_at, suppressed)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-            &[
-                &notice.id,
-                &account.0,
-                &notice.event_key,
-                &notice.category,
-                &notice.kind,
-                &notice.title,
-                &notice.body,
-                &now,
-                &notice.expires_at,
-                &suppressed,
-            ],
-        )
-        .await
-        .map_err(failed)?;
-        if !suppressed {
+        let inserted = tx
+            .query_opt(
+                "INSERT INTO mobile_notices
+                     (id, account, event_key, category, kind, title, body, created_at, expires_at, suppressed)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 ON CONFLICT (account, event_key) DO NOTHING
+                 RETURNING id, suppressed",
+                &[
+                    &notice.id,
+                    &account.0,
+                    &notice.event_key,
+                    &notice.category,
+                    &notice.kind,
+                    &notice.title,
+                    &notice.body,
+                    &now,
+                    &notice.expires_at,
+                    &suppressed,
+                ],
+            )
+            .await
+            .map_err(failed)?;
+        let Some(row) = inserted else {
+            let existing = tx
+                .query_one(
+                    "SELECT id, suppressed FROM mobile_notices
+                     WHERE account = $1 AND event_key = $2",
+                    &[&account.0, &notice.event_key],
+                )
+                .await
+                .map_err(failed)?;
+            tx.commit().await.map_err(failed)?;
+            return Ok(NoticeRecord {
+                id: existing.get(0),
+                fresh: false,
+                suppressed: existing.get(1),
+            });
+        };
+        if !notice.suppressed && open >= OPEN_NOTICE_CAP as i64 {
+            tracing::warn!(
+                account = %account.0,
+                count = open,
+                "notice cap dropped a notice"
+            );
+        }
+        if !row.get::<_, bool>(1) {
             tx.execute(
                 "INSERT INTO mobile_notice_deliveries (notice, device, state, queued_at, expires_at)
                  SELECT $1, id, 'queued', $2, $3 FROM devices
@@ -1396,11 +1420,14 @@ impl Records for PgRecords {
         )
         .await
         .map_err(failed)?;
+        let stale = now.saturating_sub(CLAIM_LEASE_MS);
         tx.execute(
-            "UPDATE mobile_notice_deliveries AS d SET state = 'queued'
+            "UPDATE mobile_notice_deliveries AS d
+             SET state = 'queued', claimed_at = NULL
              FROM mobile_notices n
-             WHERE d.notice = n.id AND n.account = $1 AND d.state = 'sending'",
-            &[&account.0],
+             WHERE d.notice = n.id AND n.account = $1 AND d.state = 'sending'
+               AND (d.claimed_at IS NULL OR d.claimed_at <= $2)",
+            &[&account.0, &stale],
         )
         .await
         .map_err(failed)?;
@@ -1432,6 +1459,7 @@ impl Records for PgRecords {
             .map_err(failed)?;
         let mut device = String::new();
         let mut kept = 0usize;
+        let mut dropped = 0u64;
         for row in &queued {
             let this: String = row.get(1);
             if this != device {
@@ -1440,16 +1468,24 @@ impl Records for PgRecords {
             }
             if kept >= FLUSH_CAP {
                 let notice: String = row.get(0);
-                tx.execute(
-                    "UPDATE mobile_notice_deliveries SET state = 'dropped'
-                     WHERE notice = $1 AND device = $2 AND state = 'queued'",
-                    &[&notice, &device],
-                )
-                .await
-                .map_err(failed)?;
+                dropped += tx
+                    .execute(
+                        "UPDATE mobile_notice_deliveries SET state = 'dropped'
+                         WHERE notice = $1 AND device = $2 AND state = 'queued'",
+                        &[&notice, &device],
+                    )
+                    .await
+                    .map_err(failed)?;
             } else {
                 kept += 1;
             }
+        }
+        if dropped > 0 {
+            tracing::warn!(
+                account = %account.0,
+                count = dropped,
+                "notice flush cap dropped queued notices"
+            );
         }
         let rows = tx
             .query(
@@ -1457,6 +1493,7 @@ impl Records for PgRecords {
                  FROM mobile_notice_deliveries d
                  JOIN mobile_notices n ON n.id = d.notice
                  JOIN push_tokens t ON t.device = d.device AND t.account = n.account
+                 JOIN devices dev ON dev.id = d.device AND dev.revoked_at IS NULL
                  WHERE n.account = $1 AND d.state = 'queued'
                  ORDER BY d.notice",
                 &[&account.0],
@@ -1480,24 +1517,31 @@ impl Records for PgRecords {
         Ok(ready)
     }
 
-    async fn claim_delivery(&self, notice: &str, device: &DeviceId) -> Result<bool> {
-        let updated = self
+    async fn claim_delivery(
+        &self,
+        notice: &str,
+        device: &DeviceId,
+        now: i64,
+    ) -> Result<Option<i64>> {
+        let row = self
             .client()
             .await?
-            .execute(
-                "UPDATE mobile_notice_deliveries SET state = 'sending'
-                 WHERE notice = $1 AND device = $2 AND state = 'queued'",
-                &[&notice, &device.as_str()],
+            .query_opt(
+                "UPDATE mobile_notice_deliveries SET state = 'sending', claimed_at = $3
+                 WHERE notice = $1 AND device = $2 AND state = 'queued'
+                 RETURNING claimed_at",
+                &[&notice, &device.as_str(), &now],
             )
             .await
             .map_err(failed)?;
-        Ok(updated > 0)
+        Ok(row.map(|row| row.get(0)))
     }
 
     async fn finish_delivery(
         &self,
         notice: &str,
         device: &DeviceId,
+        claimed_at: i64,
         end: DeliveryEnd,
     ) -> Result<()> {
         let state = match end {
@@ -1505,16 +1549,23 @@ impl Records for PgRecords {
             DeliveryEnd::Again | DeliveryEnd::Gone => "queued",
         };
         let client = self.client().await?;
-        client
+        let updated = client
             .execute(
                 "UPDATE mobile_notice_deliveries SET state = $3,
-                     sent_at = CASE WHEN $3 = 'sent' THEN $4 ELSE sent_at END
-                 WHERE notice = $1 AND device = $2",
-                &[&notice, &device.as_str(), &state, &crate::http::now_ms()],
+                     sent_at = CASE WHEN $3 = 'sent' THEN $4 ELSE sent_at END,
+                     claimed_at = CASE WHEN $3 = 'queued' THEN NULL ELSE claimed_at END
+                 WHERE notice = $1 AND device = $2 AND state = 'sending' AND claimed_at = $5",
+                &[
+                    &notice,
+                    &device.as_str(),
+                    &state,
+                    &crate::http::now_ms(),
+                    &claimed_at,
+                ],
             )
             .await
             .map_err(failed)?;
-        if end == DeliveryEnd::Gone {
+        if end == DeliveryEnd::Gone && updated > 0 {
             client
                 .execute(
                     "DELETE FROM push_tokens WHERE device = $1",

@@ -111,7 +111,9 @@ async fn host_grants(s: &Served, host: &Credentials, id: &HostSummary) -> Vec<Gr
     page.grants
 }
 
-async fn a_phone_pairs_with_a_host_and_the_hosts_person_decides(records: impl Records + 'static) {
+async fn a_phone_pairs_with_a_host_and_the_hosts_person_decides(
+    records: impl Records + Clone + 'static,
+) {
     let s = Served::start(records).await;
     let host = s.sign_in("alice", "Workstation", DeviceKind::Host).await;
     let phone = s.sign_in("alice", "Phone", DeviceKind::Phone).await;
@@ -342,7 +344,7 @@ async fn a_phone_pairs_with_a_host_and_the_hosts_person_decides(records: impl Re
 /// the device out. Signing in again must be the same host: a new one would leave the old one on the
 /// phone for good, and the phone with a pairing to neither.
 async fn a_host_signed_out_for_a_reused_sign_in_comes_back_as_itself(
-    records: impl Records + 'static,
+    records: impl Records + Clone + 'static,
 ) {
     let s = Served::start(records).await;
     let host = s.sign_in("alice", "Workstation", DeviceKind::Host).await;
@@ -398,7 +400,7 @@ async fn a_host_signed_out_for_a_reused_sign_in_comes_back_as_itself(
     offer(&s, &again, &back).await;
 }
 
-async fn another_account_reaches_none_of_it(records: impl Records + 'static) {
+async fn another_account_reaches_none_of_it(records: impl Records + Clone + 'static) {
     let s = Served::start(records).await;
     let host = s.sign_in("alice", "Workstation", DeviceKind::Host).await;
     let phone = s.sign_in("alice", "Phone", DeviceKind::Phone).await;

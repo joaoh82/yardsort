@@ -72,7 +72,7 @@ fn category_of(name: &str) -> Option<NoticeCategory> {
     })
 }
 
-impl<R: Records> ControlService<R> {
+impl<R: Records + Clone + 'static> ControlService<R> {
     pub(crate) async fn submit_notice(
         &self,
         caller: &Caller,
@@ -124,11 +124,19 @@ impl<R: Records> ControlService<R> {
             .await
             .map_err(unreadable)?;
         if record.fresh && !record.suppressed {
-            self.deliver(&caller.account, now).await;
+            // The computer is not kept waiting on APNs or FCM. The receipt is the row.
+            let records = self.records.clone();
+            let push = std::sync::Arc::clone(&self.push);
+            let account = caller.account.clone();
+            tokio::spawn(async move {
+                deliver(&records, push.as_ref(), &account, now).await;
+            });
         }
         Ok(NoticeReceipt { id: record.id })
     }
+}
 
+impl<R: Records> ControlService<R> {
     pub(crate) async fn save_push_token(
         &self,
         caller: &Caller,
@@ -168,7 +176,7 @@ impl<R: Records> ControlService<R> {
                 "A phone registers its push token.",
             ));
         }
-        self.deliver(&caller.account, now).await;
+        deliver(&self.records, self.push.as_ref(), &caller.account, now).await;
         Ok(())
     }
 
@@ -205,7 +213,7 @@ impl<R: Records> ControlService<R> {
             ));
         }
         Ok(ReachableReceipt {
-            sent: self.deliver(&caller.account, now).await,
+            sent: deliver(&self.records, self.push.as_ref(), &caller.account, now).await,
         })
     }
 
@@ -234,61 +242,64 @@ impl<R: Records> ControlService<R> {
             body: page.body,
         })
     }
+}
 
-    async fn deliver(&self, account: &crate::records::AccountId, now: i64) -> u32 {
-        let ready = match self.records.prepare_flush(account, now).await {
-            Ok(ready) => ready,
-            Err(error) => {
-                tracing::error!("notices: {error}");
-                return 0;
-            }
-        };
-        let mut sent = 0u32;
-        for item in ready {
-            let claimed = self
-                .records
-                .claim_delivery(&item.notice_id, &item.device)
-                .await
-                .unwrap_or(false);
-            if !claimed {
-                continue;
-            }
-            let category = category_of(&item.category)
-                .map(|c| c.slug())
-                .unwrap_or("task");
-            let outcome = self
-                .push
-                .send(PushMessage {
-                    platform: match item.platform.as_str() {
-                        "fcm" => remote_proto::notify::PushPlatform::Fcm,
-                        _ => remote_proto::notify::PushPlatform::Apns,
-                    },
-                    token: item.token,
-                    collapse: collapse(&account.0, &item.event_key),
-                    title: item.title,
-                    body: item.body,
-                    deep_link: format!("yardsort://notice/{category}/{}", item.notice_id),
-                    category: category.to_owned(),
-                })
-                .await;
-            let end = match outcome {
-                PushOutcome::Sent => {
-                    sent += 1;
-                    DeliveryEnd::Sent
-                }
-                PushOutcome::Unreachable => DeliveryEnd::Again,
-                PushOutcome::Gone => DeliveryEnd::Gone,
-            };
-            if let Err(error) = self
-                .records
-                .finish_delivery(&item.notice_id, &item.device, end)
-                .await
-            {
-                tracing::error!("notices: {error}");
-            }
+async fn deliver<R: Records>(
+    records: &R,
+    push: &dyn crate::push::PushProvider,
+    account: &crate::records::AccountId,
+    now: i64,
+) -> u32 {
+    let ready = match records.prepare_flush(account, now).await {
+        Ok(ready) => ready,
+        Err(error) => {
+            tracing::error!("notices: {error}");
+            return 0;
         }
-        sent
+    };
+    let mut sent = 0u32;
+    for item in ready {
+        let claimed = records
+            .claim_delivery(&item.notice_id, &item.device, now)
+            .await
+            .ok()
+            .flatten();
+        let Some(claimed_at) = claimed else {
+            continue;
+        };
+        let category = category_of(&item.category)
+            .map(|c| c.slug())
+            .unwrap_or("task");
+        let outcome = push
+            .send(PushMessage {
+                platform: match item.platform.as_str() {
+                    "fcm" => remote_proto::notify::PushPlatform::Fcm,
+                    _ => remote_proto::notify::PushPlatform::Apns,
+                },
+                token: item.token,
+                collapse: collapse(&account.0, &item.event_key),
+                title: item.title,
+                body: item.body,
+                deep_link: format!("yardsort://notice/{category}/{}", item.notice_id),
+                category: category.to_owned(),
+            })
+            .await;
+        let end = match outcome {
+            PushOutcome::Sent => {
+                sent += 1;
+                DeliveryEnd::Sent
+            }
+            PushOutcome::Unreachable => DeliveryEnd::Again,
+            PushOutcome::Gone => DeliveryEnd::Gone,
+        };
+        if let Err(error) = records
+            .finish_delivery(&item.notice_id, &item.device, claimed_at, end)
+            .await
+        {
+            tracing::error!("notices: {error}");
+        }
     }
+    sent
 }
 
 /// A collapse id of 64 hex characters. It does not reveal the event key.
