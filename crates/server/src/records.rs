@@ -127,6 +127,9 @@ pub struct Host {
     pub created_at: i64,
     /// Its device's.
     pub last_seen_at: Option<i64>,
+    /// The protocol minor it last stated, on an offer or its relay link. None when this
+    /// sign-in has not stated one. Signing in again clears it until this process states one.
+    pub protocol_minor: Option<u16>,
 }
 
 /// What a host showed to let one device in, as kept: two hashes, either of which redeems it.
@@ -189,6 +192,8 @@ pub struct GrantView {
     pub device_revoked: bool,
     /// The signed-in device's kind, when this record still has that device.
     pub device_kind: Option<DeviceKind>,
+    /// The host's stated protocol minor. None when it has not stated one.
+    pub host_protocol_minor: Option<u16>,
 }
 
 /// Which grants to list. Always within one account.
@@ -416,6 +421,15 @@ pub trait Records: Send + Sync {
 
     /// The account's hosts, removed ones left out.
     fn hosts(&self, account: &AccountId) -> impl Future<Output = Result<Vec<Host>>> + Send;
+
+    /// Record the protocol minor this host just stated, or clear it when this request
+    /// stated none. A removed host is left as it was.
+    fn note_host_protocol(
+        &self,
+        account: &AccountId,
+        id: &HostId,
+        minor: Option<u16>,
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Keep an offer, in place of any other its host still had open. Lapsed offers may be
     /// dropped.
@@ -854,6 +868,11 @@ impl State {
             device_name: device.map(|d| d.name.clone()).unwrap_or_default(),
             device_revoked: device.is_none_or(|d| d.revoked.is_some()),
             device_kind: device.map(|d| d.kind),
+            host_protocol_minor: self
+                .hosts
+                .iter()
+                .find(|(host, _)| host.id == grant.host)
+                .and_then(|(host, _)| host.protocol_minor),
             grant: grant.clone(),
         }
     }
@@ -1068,12 +1087,29 @@ impl Records for MemoryRecords {
                 .find(|(h, removed)| h.id == *id && h.account == *account && removed.is_none())?;
             host.device = device.clone();
             host.name = name.to_owned();
+            // This process has not stated a protocol yet. The next offer or relay link does.
+            host.protocol_minor = None;
             s.host(account, id)
         })
     }
 
     async fn host(&self, account: &AccountId, id: &HostId) -> Result<Option<Host>> {
         self.with(|s| s.host(account, id))
+    }
+
+    async fn note_host_protocol(
+        &self,
+        account: &AccountId,
+        id: &HostId,
+        minor: Option<u16>,
+    ) -> Result<()> {
+        self.with(|s| {
+            if let Some((host, _)) = s.hosts.iter_mut().find(|(host, removed)| {
+                host.id == *id && host.account == *account && removed.is_none()
+            }) {
+                host.protocol_minor = minor;
+            }
+        })
     }
 
     async fn hosts(&self, account: &AccountId) -> Result<Vec<Host>> {

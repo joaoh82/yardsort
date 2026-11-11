@@ -356,6 +356,8 @@ pub struct RemoteRequest {
     pub device_name: String,
     /// It asked to type into terminals, not only watch.
     pub wants_control: bool,
+    /// It asked to read or decide a workflow.
+    pub wants_workflows: bool,
     pub expires_in_ms: u32,
 }
 
@@ -522,6 +524,7 @@ impl From<Request> for RemoteRequest {
             grant_id: request.grant_id,
             device_name: request.device_name,
             wants_control: request.wants_control,
+            wants_workflows: request.wants_workflows,
             expires_in_ms: request.expires_in_ms,
         }
     }

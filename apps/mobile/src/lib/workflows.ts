@@ -7,6 +7,8 @@
  * itself failed before a reply, so a retry applies once.
  */
 
+import { ClientError } from "@yardsort/remote-client";
+
 export const OFFLINE =
   "This computer is offline. The action was not sent, and it will not be sent later.";
 
@@ -48,6 +50,14 @@ export class DecisionIds {
   settled(): void {
     this.#pending = null;
   }
+}
+
+/**
+ * The computer refused a challenge because the step moved on. The code is what
+ * decides it. The message is only what to show.
+ */
+export function staleChallenge(error: unknown): boolean {
+  return error instanceof ClientError && error.code === "stale";
 }
 
 /** What a conflicting decision id turned out to be, after the run is read again. */

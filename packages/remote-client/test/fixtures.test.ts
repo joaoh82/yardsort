@@ -383,6 +383,7 @@ describe("what a newer peer sends", () => {
       "control_conflict",
       "lease_lost",
       "invalid_request",
+      "stale",
     ] as const) {
       expect(retryable(code)).toBe(false);
     }

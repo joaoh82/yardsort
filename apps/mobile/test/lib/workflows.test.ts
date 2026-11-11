@@ -2,6 +2,7 @@
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import { describe, expect, test } from "bun:test";
+import { ClientError } from "@yardsort/remote-client";
 
 import { noticeRoute } from "../../src/lib/notice-link";
 import { askedScopes } from "../../src/lib/accounts";
@@ -10,6 +11,7 @@ import {
   conflictSummary,
   decisionAvailability,
   OFFLINE,
+  staleChallenge,
   workflowTarget,
 } from "../../src/lib/workflows";
 
@@ -55,6 +57,23 @@ describe("a workflow notice", () => {
     expect(askedScopes({ major: 1, minor: 6 })).not.toContain("workflow:decide");
     expect(askedScopes({ major: 1, minor: 7 })).toContain("workflow:decide");
     expect(askedScopes({ major: 2, minor: 7 })).not.toContain("workflow:decide");
+  });
+
+  test("a stale challenge is the error code, not the message", () => {
+    expect(
+      staleChallenge(
+        ClientError.from({ code: "stale", message: "Read it again.", retryable: false }),
+      ),
+    ).toBe(true);
+    expect(
+      staleChallenge(
+        ClientError.from({
+          code: "invalid_request",
+          message: "This changed. Refresh and read it again.",
+          retryable: false,
+        }),
+      ),
+    ).toBe(false);
   });
 
   test("a conflict says what the run is doing now", () => {

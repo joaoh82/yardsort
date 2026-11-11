@@ -203,10 +203,14 @@ impl Client {
             .await
     }
 
-    /// `POST /v1/hosts/{host}/offers`.
+    /// `POST /v1/hosts/{host}/offers`. The body states the protocol this host speaks.
     pub async fn offer(&self, access: &Secret, host: &HostId) -> Result<Offer> {
         let url = self.url(&format!("v1/hosts/{host}/offers"))?;
-        self.send(self.authed(self.http.post(url), access)).await
+        let body = remote_proto::pairing::OfferRequest {
+            protocol: Some(remote_proto::ProtocolVersion::CURRENT),
+        };
+        let request = self.http.post(url).json(&body);
+        self.send(self.authed(request, access)).await
     }
 
     /// `GET /v1/hosts/{host}/grants`.

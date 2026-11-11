@@ -10,7 +10,7 @@ use remote_proto::pairing::{
     normalize_code, GrantDecision, GrantPage, GrantState, GrantSummary, HostPage, HostRegistration,
     HostSummary, Offer, OfferKey, PairingRequest, OFFER_TTL_MS,
 };
-use remote_proto::{ErrorCode, GrantId, HostId, RemoteError};
+use remote_proto::{ErrorCode, GrantId, HostId, RemoteError, WORKFLOW_SCOPES_MINOR};
 
 use crate::records::{
     Decision, GrantFilter, GrantRecord, GrantStatus, GrantView, Host, HostOffer, Records,
@@ -55,6 +55,7 @@ impl<R: Records> ControlService<R> {
                     name: name.to_owned(),
                     created_at: now,
                     last_seen_at: None,
+                    protocol_minor: None,
                 };
                 self.records
                     .add_host(host.clone())
@@ -84,9 +85,14 @@ impl<R: Records> ControlService<R> {
         &self,
         caller: &Caller,
         host: &HostId,
+        stated: Option<u16>,
         now: i64,
     ) -> Result<Offer, RemoteError> {
         let host = self.own_host(caller, host).await?;
+        self.records
+            .note_host_protocol(&caller.account, &host.id, stated)
+            .await
+            .map_err(unreadable)?;
         let secret = tokens::mint(Kind::Offer);
         let code = tokens::short_code();
         self.records
@@ -246,7 +252,7 @@ impl<R: Records> ControlService<R> {
         now: i64,
     ) -> Result<GrantSummary, RemoteError> {
         let view = self.grant_view(caller, id).await?;
-        self.own_host(caller, &view.grant.host).await?;
+        let host = self.own_host(caller, &view.grant.host).await?;
         let not_waiting = || {
             RemoteError::new(
                 ErrorCode::InvalidRequest,
@@ -259,8 +265,18 @@ impl<R: Records> ControlService<R> {
         let decision = match decision {
             Some(decision) => {
                 decision.validate(&view.grant.requested)?;
+                let mut scopes = decision.scopes.clone();
+                if !speaks_workflows(host.protocol_minor) {
+                    scopes.retain(|scope| !workflow_scope(*scope));
+                }
+                if scopes.is_empty() {
+                    return Err(RemoteError::new(
+                        ErrorCode::InvalidRequest,
+                        "An approval gives at least one scope.",
+                    ));
+                }
                 Decision::Approve {
-                    scopes: decision.scopes.clone(),
+                    scopes,
                     projects: decision.projects.clone(),
                 }
             }
@@ -353,6 +369,25 @@ impl<R: Records> ControlService<R> {
     }
 }
 
+/// The minor a host stated, when it is this protocol's major. Anything else is
+/// a host that has not stated a minor this server can trust.
+pub(crate) fn stated_minor(protocol: Option<remote_proto::ProtocolVersion>) -> Option<u16> {
+    protocol
+        .filter(|version| version.major == remote_proto::PROTOCOL_MAJOR)
+        .map(|version| version.minor)
+}
+
+fn speaks_workflows(minor: Option<u16>) -> bool {
+    minor.is_some_and(|minor| minor >= WORKFLOW_SCOPES_MINOR)
+}
+
+fn workflow_scope(scope: remote_proto::Scope) -> bool {
+    matches!(
+        scope,
+        remote_proto::Scope::WorkflowRead | remote_proto::Scope::WorkflowDecide
+    )
+}
+
 fn host_summary(host: Host, caller: &Caller) -> HostSummary {
     HostSummary {
         current: host.device == caller.device,
@@ -375,6 +410,12 @@ fn grant_summary(view: GrantView, now: i64) -> GrantSummary {
         GrantStatus::Denied => GrantState::Denied,
         GrantStatus::Revoked => GrantState::Revoked,
     };
+    let mut requested = grant.requested;
+    let mut scopes = grant.scopes;
+    if !speaks_workflows(view.host_protocol_minor) {
+        requested.retain(|scope| !workflow_scope(*scope));
+        scopes.retain(|scope| !workflow_scope(*scope));
+    }
     GrantSummary {
         id: grant.id,
         host: grant.host,
@@ -383,8 +424,8 @@ fn grant_summary(view: GrantView, now: i64) -> GrantSummary {
         device_name: view.device_name,
         device_kind: view.device_kind,
         state,
-        requested: grant.requested,
-        scopes: grant.scopes,
+        requested,
+        scopes,
         projects: grant.projects,
         created_at: grant.created_at,
         decided_at: grant.decided_at,

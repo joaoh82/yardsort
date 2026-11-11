@@ -50,6 +50,7 @@ for_each_store!(
     a_phone_pairs_with_a_host_and_the_hosts_person_decides,
     another_account_reaches_none_of_it,
     a_host_signed_out_for_a_reused_sign_in_comes_back_as_itself,
+    workflow_scopes_follow_the_host_protocol,
 );
 
 async fn ok<T: DeserializeOwned>(response: reqwest::Response) -> T {
@@ -72,8 +73,12 @@ async fn register(s: &Served, host: &Credentials, body: Value) -> reqwest::Respo
 }
 
 async fn offer(s: &Served, host: &Credentials, id: &HostSummary) -> Offer {
+    offer_as(s, host, id, None).await
+}
+
+async fn offer_as(s: &Served, host: &Credentials, id: &HostSummary, body: Option<&Value>) -> Offer {
     ok(
-        s.post_as(&host.access, &format!("v1/hosts/{}/offers", id.id), None)
+        s.post_as(&host.access, &format!("v1/hosts/{}/offers", id.id), body)
             .await,
     )
     .await
@@ -608,6 +613,115 @@ async fn malformed_pairings_are_refused_before_anything_is_spent() {
     .await;
     // None of that spent the offer.
     ok::<GrantSummary>(pair(&s, &phone, code(&open), &["workspace:read"]).await).await;
+}
+
+/// A desktop from before workflow scopes cannot read those names. The server drops
+/// them from every summary of a host that has not stated minor 7, and does not
+/// store them as granted. A host that states minor 7 still sees them.
+async fn workflow_scopes_follow_the_host_protocol(records: impl Records + Clone + 'static) {
+    let s = Served::start(records).await;
+    let host = s.sign_in("alice", "Workstation", DeviceKind::Host).await;
+    let phone = s.sign_in("alice", "Phone", DeviceKind::Phone).await;
+    let registered: HostSummary =
+        ok(register(&s, &host, json!({ "name": "Workstation" })).await).await;
+    let asked = ["workspace:read", "workflow:read", "workflow:decide"];
+
+    let silent = offer(&s, &host, &registered).await;
+    let pending: GrantSummary = ok(pair(&s, &phone, code(&silent), &asked).await).await;
+    let listed = grant_text(&s, &host, &registered).await;
+    let own = grant_one(&s, &phone, &pending.id).await;
+    assert!(
+        !listed.contains("workflow:") && !own.contains("workflow:"),
+        "a host that stated no minor is not shown workflow scopes"
+    );
+
+    let older = offer_as(
+        &s,
+        &host,
+        &registered,
+        Some(&json!({ "protocol": { "major": 1, "minor": 6 } })),
+    )
+    .await;
+    let pending: GrantSummary = ok(pair(&s, &phone, code(&older), &asked).await).await;
+    let shown = grant_one(&s, &host, &pending.id).await;
+    assert!(!shown.contains("workflow:"), "minor 6 is not shown them");
+    refused(
+        s.post_as(
+            &host.access,
+            &format!("v1/grants/{}/approve", pending.id),
+            Some(&json!({
+                "scopes": ["workflow:read", "workflow:decide"],
+                "projects": { "kind": "all" },
+            })),
+        )
+        .await,
+        StatusCode::BAD_REQUEST,
+        ErrorCode::InvalidRequest,
+    )
+    .await;
+    let given: GrantSummary = ok(s
+        .post_as(
+            &host.access,
+            &format!("v1/grants/{}/approve", pending.id),
+            Some(&json!({
+                "scopes": ["workspace:read", "workflow:read", "workflow:decide"],
+                "projects": { "kind": "all" },
+            })),
+        )
+        .await)
+    .await;
+    assert_eq!(given.scopes, [Scope::WorkspaceRead].into());
+    assert!(!grant_one(&s, &host, &given.id).await.contains("workflow:"));
+
+    // Stating minor 7 later does not put those scopes onto a grant that was given without them.
+    s.post_as(
+        &host.access,
+        "v1/relay/tickets",
+        Some(&json!({
+            "role": "host",
+            "host": registered.id,
+            "protocol": { "major": 1, "minor": 7 },
+        })),
+    )
+    .await
+    .error_for_status()
+    .unwrap();
+    let later: GrantSummary = ok(s
+        .get_as(&host.access, &format!("v1/grants/{}", given.id))
+        .await)
+    .await;
+    assert!(!later.scopes.contains(&Scope::WorkflowRead));
+    assert!(!later.scopes.contains(&Scope::WorkflowDecide));
+    assert!(later.requested.contains(&Scope::WorkflowRead));
+
+    let current = offer_as(
+        &s,
+        &host,
+        &registered,
+        Some(&json!({ "protocol": { "major": 1, "minor": 7 } })),
+    )
+    .await;
+    let visible: GrantSummary = ok(pair(&s, &phone, code(&current), &asked).await).await;
+    let text = grant_one(&s, &host, &visible.id).await;
+    assert!(text.contains("workflow:read") && text.contains("workflow:decide"));
+    assert!(visible.requested.contains(&Scope::WorkflowRead));
+    assert!(visible.requested.contains(&Scope::WorkflowDecide));
+}
+
+async fn grant_text(s: &Served, host: &Credentials, id: &HostSummary) -> String {
+    s.get_as(&host.access, &format!("v1/hosts/{}/grants", id.id))
+        .await
+        .text()
+        .await
+        .unwrap()
+}
+
+async fn grant_one(s: &Served, who: &Credentials, id: &remote_proto::GrantId) -> String {
+    s.get_as(&who.access, &format!("v1/grants/{id}"))
+        .await
+        .text()
+        .await
+        .unwrap()
 }
 
 #[tokio::test]

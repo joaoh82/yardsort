@@ -47,6 +47,7 @@ const phone = {
   grantId: "g-1",
   deviceName: "Ana's phone",
   wantsControl: true,
+  wantsWorkflows: true,
   expiresInMs: 240_000,
 };
 
@@ -293,6 +294,21 @@ it("lets a device approve or answer workflows only when that box is checked", as
     workflows: true,
     projects: null,
   });
+});
+
+it("does not offer workflow approval when the device did not ask for it", async () => {
+  core.remoteStatus.mockResolvedValue(on);
+  core.remoteRequests.mockResolvedValue({
+    requests: [{ ...phone, wantsWorkflows: false }],
+    status: on,
+  });
+  render(<RemoteSettings />);
+  const asking = await screen.findByRole("group", { name: "Ana's phone asks to be let in" });
+  expect(asking).not.toHaveTextContent(/workflow runs/);
+  expect(
+    within(asking).queryByRole("checkbox", { name: "and approve or answer workflows" }),
+  ).toBeNull();
+  expect(asking).toHaveTextContent(/workspaces and activity/);
 });
 
 it("offers no typing to a device that asked only to watch, and can refuse", async () => {

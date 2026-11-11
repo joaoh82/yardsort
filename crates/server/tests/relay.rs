@@ -162,6 +162,7 @@ async fn host_link(s: &Served, pair: &Pair) -> RelayLink {
         &pair.host,
         TicketRequest::Host {
             host: pair.host_id.clone(),
+            protocol: None,
         },
     )
     .await
@@ -284,6 +285,7 @@ async fn a_phone_reaches_its_host_and_nothing_else_does(records: impl Records + 
     for asking in [&stranger_host, &p.phone] {
         let as_host = TicketRequest::Host {
             host: p.host_id.clone(),
+            protocol: None,
         };
         assert_eq!(
             refused(c.open_relay(&asking.access, &as_host).await),
@@ -545,6 +547,7 @@ async fn a_host_hears_of_each_device_asking_to_pair_once(records: impl Records +
     let earlier = ask_to_pair(&s, &host, &host_id, "Tablet").await;
     let request = TicketRequest::Host {
         host: host_id.clone(),
+        protocol: None,
     };
     let mut link = link(&s, &host, request).await;
     assert_eq!(heard(&mut link.reader).await, pairing(&earlier));

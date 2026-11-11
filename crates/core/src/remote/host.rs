@@ -229,7 +229,8 @@ pub fn recorded_kind(
     let Some(label) = store
         .remote_grants()?
         .into_iter()
-        .find(|row| row.device_id == device.as_str())
+        .filter(|row| row.device_id == device.as_str())
+        .max_by_key(|row| (row.approved_at, row.id.clone()))
         .and_then(|row| row.device_kind)
     else {
         return Ok(None);
@@ -432,6 +433,46 @@ mod tests {
             })
             .unwrap();
         assert_eq!(local_grants(&store).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn recorded_kind_is_the_newest_grant_for_that_device() {
+        let (_dir, store) = store();
+        // The shipped table keeps one row per device. This drops that so two rows can
+        // exist, and the lookup has to choose.
+        store
+            .conn()
+            .execute_batch(
+                "CREATE TABLE remote_grants_kept AS SELECT * FROM remote_grants;
+                 DROP TABLE remote_grants;
+                 CREATE TABLE remote_grants (
+                    id TEXT PRIMARY KEY,
+                    device_id TEXT NOT NULL,
+                    device_name TEXT NOT NULL,
+                    scopes TEXT NOT NULL,
+                    projects TEXT NOT NULL,
+                    approved_at INTEGER NOT NULL,
+                    device_kind TEXT
+                 );
+                 INSERT INTO remote_grants SELECT * FROM remote_grants_kept;
+                 DROP TABLE remote_grants_kept;",
+            )
+            .unwrap();
+        for (id, at, kind) in [("old", 10, "phone"), ("new", 30, "computer")] {
+            store
+                .conn()
+                .execute(
+                    "INSERT INTO remote_grants
+                        (id, device_id, device_name, scopes, projects, approved_at, device_kind)
+                     VALUES (?1, 'phone', 'Phone', '[]', '{\"kind\":\"all\"}', ?2, ?3)",
+                    rusqlite::params![id, at, kind],
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            recorded_kind(&store, &device("phone")).unwrap(),
+            Some(remote_proto::account::DeviceKind::Computer)
+        );
     }
 
     #[test]

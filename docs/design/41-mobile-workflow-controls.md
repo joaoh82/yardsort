@@ -118,3 +118,13 @@ A phone asks for `workflow:read` and `workflow:decide` only when the server it i
 advertises protocol minor 7 or newer. An older server never sees those names. A scope name this
 build does not know is accepted and then dropped, on a pairing request and on a grant, so a
 newer peer does not make pairing fail. The unknown name is not stored and not granted.
+
+The hosted server is upgraded before the desktops. A new phone can therefore ask for those
+scopes while the desktop is still a build from before them, and that desktop reads
+`requested` and `scopes` strictly: one unknown name fails the whole grant list. The server
+records the protocol minor a host states when it makes a pairing offer or opens its relay
+link. Signing in again clears it until this process states one. A host that has not stated
+minor 7 or newer is not shown `workflow:read` or `workflow:decide` on any grant summary, and
+an approval for that host does not store them. A host that states minor 7 or newer still sees
+the scopes it was asked for and can grant them. A challenge for a step that has moved on is
+`stale`. The phone reads the run again. It does not match the message text.

@@ -77,6 +77,11 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         "notice_subjects",
         include_str!("../migrations/0007_notice_subjects.sql"),
     ),
+    (
+        8,
+        "host_protocol",
+        include_str!("../migrations/0008_host_protocol.sql"),
+    ),
 ];
 
 /// Held while migrating, so instances starting together take turns. Any constant will do, as
@@ -91,12 +96,13 @@ const DEVICE: &str = "d.id, d.account, d.name, d.kind, d.platform, d.created_at,
                       d.last_seen_at, d.revoked_at, d.revoked_reason";
 
 /// A host row, joined to its device for when that was last seen.
-const HOST: &str = "h.id, h.account, h.device, h.name, h.created_at, hd.last_seen_at";
+const HOST: &str =
+    "h.id, h.account, h.device, h.name, h.created_at, hd.last_seen_at, h.protocol_minor";
 
 /// A grant row and its names, as [`GrantView`] holds them.
 const GRANT: &str = "g.id, g.account, g.host, g.device, g.requested, g.scopes, g.projects, \
                      g.status, g.created_at, g.expires_at, g.decided_at, \
-                     h.name, d.name, d.revoked_at IS NOT NULL, d.kind";
+                     h.name, d.name, d.revoked_at IS NOT NULL, d.kind, h.protocol_minor";
 
 /// The notification channel signals travel on.
 pub const SIGNAL_CHANNEL: &str = "yardsort_relay";
@@ -790,7 +796,7 @@ impl Records for PgRecords {
             .query_opt(
                 &format!(
                     "WITH h AS (
-                         UPDATE hosts SET device = $3, name = $4
+                         UPDATE hosts SET device = $3, name = $4, protocol_minor = NULL
                          WHERE id = $1 AND account = $2 AND removed_at IS NULL
                          RETURNING *
                      )
@@ -817,6 +823,24 @@ impl Records for PgRecords {
             .await
             .map_err(failed)?;
         row.map(|row| host(&row)).transpose()
+    }
+
+    async fn note_host_protocol(
+        &self,
+        account: &AccountId,
+        id: &HostId,
+        minor: Option<u16>,
+    ) -> Result<()> {
+        self.client()
+            .await?
+            .execute(
+                "UPDATE hosts SET protocol_minor = $3
+                 WHERE id = $1 AND account = $2 AND removed_at IS NULL",
+                &[&id.as_str(), &account.0, &minor.map(i32::from)],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(())
     }
 
     async fn hosts(&self, account: &AccountId) -> Result<Vec<Host>> {
@@ -1627,6 +1651,9 @@ fn host(row: &Row) -> Result<Host> {
         name: row.get(3),
         created_at: row.get(4),
         last_seen_at: row.get(5),
+        protocol_minor: row
+            .get::<_, Option<i32>>(6)
+            .and_then(|minor| u16::try_from(minor).ok()),
     })
 }
 
@@ -1669,6 +1696,9 @@ fn grant_view(row: &Row) -> Result<GrantView> {
         device_name: row.get(12),
         device_revoked: row.get(13),
         device_kind: unspelled(row.get(14))?,
+        host_protocol_minor: row
+            .get::<_, Option<i32>>(15)
+            .and_then(|minor| u16::try_from(minor).ok()),
     })
 }
 

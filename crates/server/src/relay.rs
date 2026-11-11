@@ -516,10 +516,18 @@ impl<R: Records> ControlService<R> {
             .map_err(unreadable)?
             .ok_or_else(RemoteError::not_found)?;
         let role = match request {
-            TicketRequest::Host { .. } => {
+            TicketRequest::Host { protocol, .. } => {
                 if caller.kind != DeviceKind::Host || host.device != caller.device {
                     return Err(RemoteError::not_found());
                 }
+                self.records
+                    .note_host_protocol(
+                        &caller.account,
+                        &host.id,
+                        crate::pairing::stated_minor(*protocol),
+                    )
+                    .await
+                    .map_err(unreadable)?;
                 Role::Host {
                     account: caller.account.clone(),
                     host: host.id,

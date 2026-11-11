@@ -1153,7 +1153,12 @@ fn remote_prior(
 }
 
 /// The step attempt and the open clarification round. Round 0 means this step is not asking.
-fn generation_of(conn: &Connection, run_id: &str, step_id: &str) -> rusqlite::Result<(u32, u32)> {
+/// None when that step is not on the run: a missing step is not attempt 0.
+fn generation_of(
+    conn: &Connection,
+    run_id: &str,
+    step_id: &str,
+) -> rusqlite::Result<Option<(u32, u32)>> {
     let attempt: Option<i64> = conn
         .query_row(
             "SELECT attempts FROM workflow_step_runs WHERE run_id = ?1 AND step_id = ?2",
@@ -1161,16 +1166,19 @@ fn generation_of(conn: &Connection, run_id: &str, step_id: &str) -> rusqlite::Re
             |row| row.get(0),
         )
         .optional()?;
+    let Some(attempt) = attempt else {
+        return Ok(None);
+    };
     let round: Option<i64> = conn.query_row(
         "SELECT MAX(round) FROM workflow_clarification_rounds
          WHERE run_id = ?1 AND step_id = ?2 AND answer IS NULL AND applied_at IS NULL",
         params![run_id, step_id],
         |row| row.get(0),
     )?;
-    Ok((
-        u32::try_from(attempt.unwrap_or(0)).unwrap_or(0),
+    Ok(Some((
+        u32::try_from(attempt).unwrap_or(0),
         u32::try_from(round.unwrap_or(0)).unwrap_or(0),
-    ))
+    )))
 }
 
 fn generation_matches(
@@ -1179,8 +1187,8 @@ fn generation_matches(
     run_id: &str,
     step_id: &str,
 ) -> rusqlite::Result<bool> {
-    let (attempt, round) = generation_of(conn, run_id, step_id)?;
-    Ok(attempt == stamp.attempt && round == stamp.round)
+    Ok(generation_of(conn, run_id, step_id)?
+        .is_some_and(|(attempt, round)| attempt == stamp.attempt && round == stamp.round))
 }
 
 fn remember_action(
@@ -3714,9 +3722,13 @@ impl Store {
         Ok(false)
     }
 
-    /// Wrong-code count and whether the open human step is locked. Never the hash.
     /// The waiting step's attempt and the open clarification round. Round 0 is not a question.
-    pub fn workflow_generation(&self, run_id: &str, step_id: &str) -> StoreResult<(u32, u32)> {
+    /// None when the step is not on the run.
+    pub fn workflow_generation(
+        &self,
+        run_id: &str,
+        step_id: &str,
+    ) -> StoreResult<Option<(u32, u32)>> {
         Ok(generation_of(&self.conn(), run_id, step_id)?)
     }
 

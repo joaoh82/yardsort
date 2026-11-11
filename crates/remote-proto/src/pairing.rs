@@ -10,7 +10,7 @@
 //!
 //! ```text
 //! host    POST /v1/hosts                          {host?, name}       → HostSummary
-//! host    POST /v1/hosts/{host}/offers                                → Offer
+//! host    POST /v1/hosts/{host}/offers            {protocol?}         → Offer
 //! device  POST /v1/pairings                       {offer, scopes}     → GrantSummary (pending)
 //! host    GET  /v1/hosts/{host}/grants                                → GrantPage
 //! host    POST /v1/grants/{grant}/approve         {scopes, projects}  → GrantSummary
@@ -85,6 +85,17 @@ pub struct HostSummary {
 #[serde(rename_all = "camelCase")]
 pub struct HostPage {
     pub hosts: Vec<HostSummary>,
+}
+
+/// Optional body of `POST /v1/hosts/{host}/offers`. An empty body is a host that has
+/// not stated which protocol it speaks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfferRequest {
+    /// The protocol this host speaks. The server records the minor when the major is
+    /// the one it speaks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<crate::ProtocolVersion>,
 }
 
 /// What a host shows to let one device in: as a QR code, and as a code to type.

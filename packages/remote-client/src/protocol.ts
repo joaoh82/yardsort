@@ -144,6 +144,7 @@ export const ERROR_CODES = [
   "rate_limited",
   "protocol_incompatible",
   "invalid_request",
+  "stale",
   "unsupported",
   "internal",
   "unknown",

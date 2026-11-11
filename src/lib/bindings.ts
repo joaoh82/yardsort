@@ -2764,6 +2764,8 @@ export type RemoteRequest = {
 	deviceName: string,
 	/**  It asked to type into terminals, not only watch. */
 	wantsControl: boolean,
+	/**  It asked to read or decide a workflow. */
+	wantsWorkflows: boolean,
 	expiresInMs: number,
 };
 

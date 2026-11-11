@@ -84,11 +84,14 @@ pub fn answer(
         Operation::WorkflowChallenge(params) => {
             refuses_decision(caller)?;
             let _ = reachable_run(store, grant, &params.run_id)?;
-            let (attempt, round) = store
+            let Some((attempt, round)) = store
                 .workflow_generation(&params.run_id, &params.step_id)
-                .map_err(|_| unreadable())?;
+                .map_err(|_| unreadable())?
+            else {
+                return Err(RemoteError::not_found());
+            };
             if attempt != params.attempt || round != params.round {
-                return Err(RemoteError::new(ErrorCode::InvalidRequest, STALE_MESSAGE));
+                return Err(RemoteError::new(ErrorCode::Stale, STALE_MESSAGE));
             }
             let code = gate
                 .challenge(store, &params.run_id, &params.step_id)
@@ -133,6 +136,16 @@ fn refuses_host(caller: &WorkflowCaller) -> Result<(), RemoteError> {
     Ok(())
 }
 
+/// The same gate the run detail uses. A recorded approval, or a question that already
+/// has an answer, is waiting on the engine, not on the person.
+fn person_is_waiting(kind: &str, answer: Option<&str>, decision_recorded: bool) -> bool {
+    match kind {
+        "question" => answer.is_none(),
+        "approval" => !decision_recorded,
+        _ => false,
+    }
+}
+
 /// Only a signed-in phone decides. A host token, a computer, and an unknown kind are refused
 /// before any row is written.
 fn refuses_decision(caller: &WorkflowCaller) -> Result<(), RemoteError> {
@@ -151,7 +164,7 @@ fn list(
     grant: &Grant,
     params: &remote_proto::workflow::WorkflowRunListParams,
 ) -> Result<WorkflowRunPage, RemoteError> {
-    let open = waits::list_open(store).map_err(|_| unreadable())?;
+    let open = store.workflow_waits_unapplied().map_err(|_| unreadable())?;
     let rows = store.workflow_runs(None, 1_000).map_err(|_| unreadable())?;
     let mut runs = Vec::new();
     for row in rows {
@@ -159,13 +172,28 @@ fn list(
             continue;
         }
         let waiting = open.iter().find(|wait| wait.run_id == row.id);
+        let decided = waiting
+            .and_then(|wait| {
+                store
+                    .workflow_approval(&row.id, &wait.step_id)
+                    .ok()
+                    .flatten()
+            })
+            .is_some();
+        let needs_person = waiting
+            .as_ref()
+            .is_some_and(|wait| person_is_waiting(&wait.kind, wait.answer.as_deref(), decided));
         runs.push(WorkflowRunSummary {
             run_id: row.id,
             name: clip(&row.workflow_name, MAX_TEXT),
             status: row.status,
             workspace: clip(&row.workspace_name, MAX_TEXT),
-            waiting_on: waiting.map(|wait| clip(&wait.step_id, MAX_TEXT)),
-            blocking: waiting.map(|wait| clip(&wait.action_needed, MAX_TEXT)),
+            waiting_on: waiting
+                .filter(|_| needs_person)
+                .map(|wait| clip(&wait.step_id, MAX_TEXT)),
+            blocking: waiting
+                .filter(|_| needs_person)
+                .map(|wait| clip(&wait.action_needed, MAX_TEXT)),
             created_at: row.created_at,
         });
     }
@@ -203,9 +231,9 @@ fn detail(store: &Store, grant: &Grant, run_id: &str) -> Result<WorkflowRunDetai
                 .flatten()
         })
         .is_some();
-    let needs_person = wait.as_ref().is_some_and(|wait| {
-        (wait.kind == "approval" && !decided) || (wait.kind == "question" && wait.answer.is_none())
-    });
+    let needs_person = wait
+        .as_ref()
+        .is_some_and(|wait| person_is_waiting(&wait.kind, wait.answer.as_deref(), decided));
     let refs = wait
         .as_ref()
         .map(|wait| waits::artifact_refs(&wait.artifact_refs))
@@ -246,6 +274,7 @@ fn detail(store: &Store, grant: &Grant, run_id: &str) -> Result<WorkflowRunDetai
                 store
                     .workflow_generation(run_id, &step.step_id)
                     .ok()
+                    .flatten()
                     .map(|(_, round)| round)
             })
             .unwrap_or(0),
@@ -867,8 +896,76 @@ mod tests {
             &asked,
         )
         .unwrap_err();
-        assert_eq!(error.code, ErrorCode::InvalidRequest);
+        assert_eq!(error.code, ErrorCode::Stale);
         assert_eq!(error.message, STALE_MESSAGE);
+    }
+
+    #[test]
+    fn a_missing_step_is_not_attempt_zero_and_yields_no_code() {
+        let store = Store::in_memory();
+        let _code = waiting(&store);
+        assert_eq!(store.workflow_generation("run-1", "gone").unwrap(), None);
+        let boom = Boom;
+        let asked = request(Operation::WorkflowChallenge(
+            remote_proto::workflow::WorkflowStepRef {
+                run_id: "run-1".into(),
+                step_id: "gone".into(),
+                attempt: 0,
+                round: 0,
+            },
+        ));
+        let error = answer(
+            &store,
+            Some(&boom),
+            &caller(DeviceKind::Phone),
+            &grant(),
+            &asked,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn an_answered_question_is_not_listed_as_waiting() {
+        let store = Store::in_memory();
+        let _code = waiting(&store);
+        store
+            .open_workflow_wait(
+                "run-1",
+                "sign-off",
+                "question",
+                "your answer",
+                "Answer the step.",
+                None,
+                "[]",
+                "{}",
+            )
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "UPDATE workflow_waits SET answer = 'Ship' WHERE step_id = 'sign-off'",
+                [],
+            )
+            .unwrap();
+        let listed = request(Operation::WorkflowRunList(
+            remote_proto::workflow::WorkflowRunListParams {
+                cursor: None,
+                limit: None,
+            },
+        ));
+        let Reply::WorkflowRuns(page) = answer(
+            &store,
+            Some(&Boom),
+            &caller(DeviceKind::Phone),
+            &grant(),
+            &listed,
+        )
+        .unwrap() else {
+            panic!("not a list");
+        };
+        assert!(page.runs[0].waiting_on.is_none());
+        assert!(page.runs[0].blocking.is_none());
     }
 
     #[test]

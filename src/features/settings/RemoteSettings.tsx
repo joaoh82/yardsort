@@ -368,7 +368,11 @@ function Request(props: {
       <p>
         <span className="text-ink">{request.deviceName}</span> asks to{" "}
         {request.wantsControl ? "watch and type into" : "watch"} this computer&rsquo;s terminals,
-        and to see its workspaces, activity, and workflow runs.
+        and to see its{" "}
+        {request.wantsWorkflows
+          ? "workspaces, activity, and workflow runs"
+          : "workspaces and activity"}
+        .
       </p>
       {request.wantsControl && (
         <p className="text-ink-faint">
@@ -417,15 +421,17 @@ function Request(props: {
           </div>
         )}
       </fieldset>
-      <label className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={workflows}
-          onChange={(event) => setWorkflows(event.target.checked)}
-          className="accent-(--color-accent)"
-        />
-        and approve or answer workflows
-      </label>
+      {request.wantsWorkflows && (
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={workflows}
+            onChange={(event) => setWorkflows(event.target.checked)}
+            className="accent-(--color-accent)"
+          />
+          and approve or answer workflows
+        </label>
+      )}
       <div className="flex flex-wrap gap-2">
         <button
           type="button"

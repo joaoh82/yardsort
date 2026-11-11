@@ -119,6 +119,8 @@ pub struct Request {
     pub device_name: String,
     /// It asked to type into terminals, not only watch.
     pub wants_control: bool,
+    /// It asked to read or decide a workflow.
+    pub wants_workflows: bool,
     pub expires_in_ms: u32,
 }
 
@@ -440,6 +442,8 @@ async fn asked(home: &impl Home, grant: &GrantId) -> Result<()> {
 fn request(grant: GrantSummary) -> Request {
     Request {
         wants_control: grant.requested.contains(&Scope::TerminalControl),
+        wants_workflows: grant.requested.contains(&Scope::WorkflowRead)
+            || grant.requested.contains(&Scope::WorkflowDecide),
         grant_id: grant.id.to_string(),
         device_name: grant.device_name,
         expires_in_ms: grant

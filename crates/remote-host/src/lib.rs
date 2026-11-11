@@ -211,7 +211,10 @@ async fn keep(
 
 async fn open(host: &HostId, access: &dyn Access) -> Result<RelayLink, AccessError> {
     let (client, secret) = access.access().await?;
-    let request = TicketRequest::Host { host: host.clone() };
+    let request = TicketRequest::Host {
+        host: host.clone(),
+        protocol: Some(remote_proto::ProtocolVersion::CURRENT),
+    };
     client
         .open_relay(&secret, &request)
         .await

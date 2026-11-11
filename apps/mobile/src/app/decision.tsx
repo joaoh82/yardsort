@@ -13,7 +13,7 @@ import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 
 import { messageOf } from "../lib/accounts";
-import { DecisionIds, conflictSummary } from "../lib/workflows";
+import { DecisionIds, conflictSummary, staleChallenge } from "../lib/workflows";
 import { DecisionForm } from "../ui/DecisionForm";
 import { OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
 import { Body, Problem, Screen, Waiting } from "../ui/parts";
@@ -63,6 +63,7 @@ function Decision({ host, run, step }: { host: HostId; run: RunId; step: RunId }
         if (challenged.attempt !== attempt || challenged.round !== round) {
           setProblem("This changed. Refresh and read it again.");
           ids.current.settled();
+          setAsked((n) => n + 1);
           return;
         }
         presented = challenged.code;
@@ -92,12 +93,13 @@ function Decision({ host, run, step }: { host: HostId; run: RunId; step: RunId }
       setMessage(decision.message);
       setAsked((n) => n + 1);
     } catch (error) {
-      const text = messageOf(error);
-      setProblem(
-        text.includes("Refresh and read it again")
-          ? "This changed. Refresh and read it again."
-          : text,
-      );
+      if (staleChallenge(error)) {
+        ids.current.settled();
+        setProblem("This changed. Refresh and read it again.");
+        setAsked((n) => n + 1);
+        return;
+      }
+      setProblem(messageOf(error));
     } finally {
       setBusy(false);
     }

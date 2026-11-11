@@ -9,12 +9,14 @@ has the downloads and the full commit lists.
   in to the same account can see a run, including why it is waiting, and can approve, reject,
   request changes, answer a question, or resume a run that is ready to continue. The one-time
   code is not in the notification. The phone asks this computer for it when you decide, and
-  does not show it. Watching a pairing includes reading workflow runs. Approving or answering
-  is a separate yes. If the step changed before the tap, the phone says to refresh, and that
-  tap does not use up a wrong code. A host token and a computer cannot decide. The action is
-  not sent when this computer is offline, and it is not sent later. A phone paired before this
-  needs to be unpaired and paired again. See
-  [Notifications](docs/guide/remote.md#notifications).
+  does not show it. Watching a pairing includes reading workflow runs when the phone asked to
+  see them. Approving or answering is a separate yes, and that checkbox is shown only when the
+  phone asked for it. If the step changed before the tap, the phone says to refresh and reads
+  the run again, and that tap does not use up a wrong code. A host token and a computer cannot
+  decide. The action is not sent when this computer is offline, and it is not sent later. A
+  phone paired before this needs to be unpaired and paired again. An older desktop is not shown
+  workflow scopes, and they are not granted for it, until that desktop states that it speaks
+  them. See [Notifications](docs/guide/remote.md#notifications).
 
 ## 0.26.0
 

@@ -81,7 +81,13 @@ pub const MAX_MESSAGE: usize = LINK_HEADER_LEN
 #[serde(tag = "role", rename_all = "camelCase")]
 pub enum TicketRequest {
     /// The host's own link. Only the device the host is signed in as may ask.
-    Host { host: HostId },
+    /// `protocol` is the minor this host speaks. Absent from a host that has not said,
+    /// which is how a desktop from before workflow scopes opens its link.
+    Host {
+        host: HostId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        protocol: Option<crate::ProtocolVersion>,
+    },
     /// A device's way to a host. Only with a grant on that host the server has in force.
     Device { host: HostId },
 }
@@ -89,7 +95,7 @@ pub enum TicketRequest {
 impl TicketRequest {
     pub fn host(&self) -> &HostId {
         match self {
-            Self::Host { host } | Self::Device { host } => host,
+            Self::Host { host, .. } | Self::Device { host } => host,
         }
     }
 }

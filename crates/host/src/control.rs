@@ -60,6 +60,9 @@ pub enum Reply {
         grant: String,
         device: String,
         wants_control: bool,
+        /// It asked to read or decide a workflow. Absent from an older host, which did not say.
+        #[serde(default)]
+        wants_workflows: bool,
         /// The projects to choose among, when there is more than one.
         projects: Vec<Project>,
     },
