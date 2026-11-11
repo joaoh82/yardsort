@@ -82,12 +82,12 @@ export function ForgetDialog({
           It disappears from Yardsort, and that is all. The folder stays where it is
           {branch ? (
             <>
-              , and so does the branch <span className="font-mono text-[12px]">{branch}</span>
+              , and so does the branch <span className="font-mono text-detail">{branch}</span>
             </>
           ) : null}
           . Terminals running in it are closed.
         </p>
-        <p className="mt-1 truncate text-[11px] text-ink-faint select-text" title={workspace.path}>
+        <p className="mt-1 truncate text-small text-ink-faint select-text" title={workspace.path}>
           {workspace.path}
         </p>
         <label className="mt-4 flex cursor-pointer items-start gap-2">
@@ -100,7 +100,7 @@ export function ForgetDialog({
           />
           <span>
             Also delete {history}
-            <span className="block text-[11px] text-ink-faint">
+            <span className="block text-small text-ink-faint">
               Left alone, they are back if this worktree is ever imported again.
             </span>
           </span>

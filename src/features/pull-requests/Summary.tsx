@@ -10,7 +10,7 @@ import { age, checksHeadline, type Row } from "./rows";
 // request, so it arrives then — as CodeMirror does for the first file.
 const Markdown = lazy(() => import("@/lib/Markdown").then((m) => ({ default: m.Markdown })));
 
-const heading = "text-[11px] font-semibold tracking-wider text-ink-muted uppercase";
+const heading = "text-small font-semibold tracking-wider text-ink-muted uppercase";
 
 const checkWord = { none: "no result", running: "running", passing: "passed", failing: "failed" };
 /** What needs attention first. */
@@ -95,7 +95,7 @@ export function Summary({ row, now }: { row: Row; now: number }) {
           </ol>
         )}
         {summary && (
-          <p className="mt-3 text-[11px] text-ink-faint">
+          <p className="mt-3 text-small text-ink-faint">
             Comments on particular lines are under <b>Code</b>, beside the lines they are about.
           </p>
         )}
@@ -141,12 +141,12 @@ function Reply({ target }: { target: Target }) {
         }}
         className="w-full resize-y rounded border border-line bg-canvas px-2 py-1.5 outline-none select-text focus:border-accent disabled:opacity-50"
       />
-      <div className="mt-1.5 flex items-center justify-end gap-3 text-[11px] text-ink-faint">
+      <div className="mt-1.5 flex items-center justify-end gap-3 text-small text-ink-faint">
         <span>Markdown, as on GitHub. Ctrl+Enter or ⌘Enter sends.</span>
         <button
           type="submit"
           disabled={!ready}
-          className="rounded bg-accent px-3 py-1 font-medium text-canvas disabled:opacity-40"
+          className="rounded bg-accent px-3 py-1.5 font-medium text-canvas disabled:opacity-40"
         >
           Comment
         </button>
@@ -292,7 +292,7 @@ function Post({ post, now }: { post: PullRequestPost; now: number }) {
   const at = post.at ?? 0;
   return (
     <li className="rounded border border-line">
-      <p className="flex items-baseline gap-1.5 border-b border-line bg-raised px-3 py-1.5 text-[12px]">
+      <p className="flex items-baseline gap-1.5 border-b border-line bg-raised px-3 py-1.5 text-detail">
         <span className="min-w-0 truncate font-medium">{post.author ?? "ghost"}</span>
         <span className={`shrink-0 ${colour}`}>{did(post)}</span>
         <span className="shrink-0 text-ink-faint" title={new Date(at).toLocaleString()}>

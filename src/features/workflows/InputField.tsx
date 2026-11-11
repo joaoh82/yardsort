@@ -3,8 +3,8 @@ import type { TestItem } from "@/lib/ipc";
 import { useHarnessStore } from "@/stores/harnesses";
 
 const control =
-  "h-8 w-full rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
-const label = "text-[11px] font-semibold tracking-wider text-ink-faint uppercase";
+  "h-9 w-full rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
+const label = "text-small font-semibold tracking-wider text-ink-faint uppercase";
 
 /** What a field needs of an input: a workflow's, or a smoke test's, which has fewer kinds. */
 export interface FieldInput {

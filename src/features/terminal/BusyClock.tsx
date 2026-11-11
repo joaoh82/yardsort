@@ -22,7 +22,7 @@ export function BusyClock({ since }: { since: number }) {
   return (
     <span
       aria-label={`busy for ${words}`}
-      className="shrink-0 text-[11px] text-ink-faint tabular-nums"
+      className="shrink-0 text-small text-ink-faint tabular-nums"
     >
       {words}
     </span>

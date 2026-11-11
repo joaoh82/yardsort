@@ -136,7 +136,7 @@ function Limits({ limits, now }: { limits: AgentLimits[]; now: number }) {
   return (
     <section aria-label="Plan limits" className="grid gap-3">
       <header className="flex flex-wrap items-center gap-3">
-        <h3 className="m-0 text-[12px] font-semibold tracking-wider text-ink-muted uppercase">
+        <h3 className="m-0 text-detail font-semibold tracking-wider text-ink-muted uppercase">
           Plan limits
         </h3>
         <span className="text-ink-faint">
@@ -150,12 +150,12 @@ function Limits({ limits, now }: { limits: AgentLimits[]; now: number }) {
               <HarnessIcon id={agent.agent} />
               <span className="text-ink">{name(agent.agent)}</span>
               {agent.plan && (
-                <span className="rounded border border-line px-1.5 text-[10px] tracking-wider text-ink-muted uppercase">
+                <span className="rounded border border-line px-1.5 text-micro tracking-wider text-ink-muted uppercase">
                   {agent.plan}
                 </span>
               )}
               <span
-                className="ml-auto text-[11px] text-ink-faint"
+                className="ml-auto text-small text-ink-faint"
                 title={new Date(agent.observedAt).toLocaleString()}
               >
                 as of {formatUntil(now - agent.observedAt)} ago
@@ -218,7 +218,7 @@ function Sources({ report }: { report: UsageReport }) {
     <ul aria-label="Where the figures come from" className="flex flex-wrap gap-x-5 gap-y-1">
       {report.agents.map((agent) => (
         <li key={agent.agent} className="flex items-center gap-1.5 text-ink-muted">
-          <HarnessIcon id={agent.agent} size={12} />
+          <HarnessIcon id={agent.agent} size={14} />
           <span className="text-ink">{name(agent.agent)}</span>
           <span className="text-ink-faint">
             {agent.location ?? "?"} · {agent.files} log{agent.files === 1 ? "" : "s"}
@@ -249,7 +249,7 @@ function Spending(props: {
   return (
     <section aria-label="Token usage" className="grid gap-4 border-t border-line pt-4">
       <header className="flex flex-wrap items-center gap-3">
-        <h3 className="m-0 text-[12px] font-semibold tracking-wider text-ink-muted uppercase">
+        <h3 className="m-0 text-detail font-semibold tracking-wider text-ink-muted uppercase">
           Token usage
         </h3>
         <span className="text-ink-faint">
@@ -282,13 +282,13 @@ function Spending(props: {
               {metric === "cost" && "*"}
             </div>
             {metric === "cost" ? (
-              <p className="m-0 text-[11px] text-ink-faint">
+              <p className="m-0 text-small text-ink-faint">
                 * if billed per token at API rates. A subscription is not billed this way.
                 {report.unpricedModels.length > 0 &&
                   ` Not priced: ${report.unpricedModels.join(", ")}.`}
               </p>
             ) : (
-              <p className="m-0 text-[11px] text-ink-faint">tokens processed</p>
+              <p className="m-0 text-small text-ink-faint">tokens processed</p>
             )}
           </div>
           <ul aria-label="By agent" className="grid gap-1.5">
@@ -296,10 +296,10 @@ function Spending(props: {
               <li key={agent.agent} className="flex items-center gap-2">
                 <span
                   aria-hidden
-                  className="size-2 rounded-sm"
+                  className="size-2.5 rounded-sm"
                   style={{ background: agentColor(agent.agent) }}
                 />
-                <HarnessIcon id={agent.agent} size={12} />
+                <HarnessIcon id={agent.agent} size={14} />
                 <span className="flex-1 text-ink">{name(agent.agent)}</span>
                 <span className="text-ink tabular-nums">
                   {format(value(agent.cost, agent.tokens))}
@@ -385,7 +385,7 @@ function Models({ report }: { report: UsageReport }) {
               <span className="flex items-center gap-2">
                 <span
                   aria-hidden
-                  className="size-1.5 rounded-full"
+                  className="size-2 rounded-full"
                   style={{ background: agentColor(model.agent) }}
                 />
                 <span className="truncate select-text">{model.model}</span>

@@ -47,7 +47,7 @@ const stepHighlight = StateField.define<DecorationSet>({
 const theme = EditorView.theme({
   "&": {
     height: "100%",
-    fontSize: "12px",
+    fontSize: "13px",
     backgroundColor: "var(--color-canvas)",
     color: "var(--color-ink)",
   },

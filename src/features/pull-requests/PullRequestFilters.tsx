@@ -4,7 +4,7 @@ import type { Project } from "@/lib/ipc";
 import { ME, REVIEW_FILTERS, type Filters, type ReviewFilter } from "./filters";
 
 const control =
-  "h-7 rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent";
+  "h-8 rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent";
 /** A picker is as wide as what is picked, up to a point; the search takes what is left. */
 const picker = `${control} max-w-48`;
 
@@ -143,7 +143,7 @@ export function PullRequestFilters({
         <button
           type="button"
           onClick={onClear}
-          className="h-7 rounded px-2 text-ink-muted hover:bg-raised hover:text-ink"
+          className="h-8 rounded px-2 text-ink-muted hover:bg-raised hover:text-ink"
         >
           Clear filters
         </button>

@@ -99,13 +99,13 @@ export function YsCommand({ ys }: { ys: YsStatus }) {
       </p>
 
       {!current && ys.found !== null && !ours && canInstall && (
-        <p className="text-[12px] text-ink-faint">
+        <p className="text-detail text-ink-faint">
           Installing puts Yardsort&apos;s own at <Path>{ys.target!}</Path>. The one above comes
           first on your <code>PATH</code>, so remove it afterwards.
         </p>
       )}
       {!current && ys.found === null && canInstall && !ys.installed && (
-        <p className="text-[12px] text-ink-faint">
+        <p className="text-detail text-ink-faint">
           It goes to <Path>{ys.target!}</Path>
           {asksForPassword && ", so macOS will ask for your password"}.
           {!ys.targetOnPath && (
@@ -126,7 +126,7 @@ export function YsCommand({ ys }: { ys: YsStatus }) {
               type="button"
               disabled={busy}
               onClick={() => void install(true)}
-              className="h-8 rounded bg-red-500 px-4 font-medium text-canvas disabled:opacity-40"
+              className="h-9 rounded bg-red-500 px-4 font-medium text-canvas disabled:opacity-40"
             >
               Replace it
             </button>
@@ -171,5 +171,5 @@ export function YsCommand({ ys }: { ys: YsStatus }) {
 }
 
 function Path({ children }: { children: string }) {
-  return <code className="font-mono text-[12px] break-all text-ink select-text">{children}</code>;
+  return <code className="font-mono text-detail break-all text-ink select-text">{children}</code>;
 }

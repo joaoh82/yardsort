@@ -51,7 +51,7 @@ export function UpdateDialog() {
         <p className="mt-1 text-ink-muted">You have {status.currentVersion}.</p>
 
         {update.notes && (
-          <pre className="mt-3 min-h-0 flex-1 overflow-y-auto rounded bg-canvas p-3 font-sans text-[12px] whitespace-pre-wrap text-ink-muted select-text">
+          <pre className="mt-3 min-h-0 flex-1 overflow-y-auto rounded bg-canvas p-3 font-sans text-detail whitespace-pre-wrap text-ink-muted select-text">
             {update.notes}
           </pre>
         )}
@@ -82,7 +82,7 @@ export function UpdateDialog() {
                 style={percent === null ? undefined : { width: `${percent}%` }}
               />
             </div>
-            <p className="mt-1 text-[12px] text-ink-faint">
+            <p className="mt-1 text-detail text-ink-faint">
               {percent === null
                 ? `Downloading… ${megabytes(progress?.downloaded ?? 0)}`
                 : percent < 100
@@ -101,7 +101,7 @@ export function UpdateDialog() {
           <button
             type="button"
             onClick={() => void openUrl(update.url).catch(console.error)}
-            className="mr-auto text-[12px] text-accent hover:underline"
+            className="mr-auto text-detail text-accent hover:underline"
           >
             Release page ↗
           </button>

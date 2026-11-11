@@ -14,10 +14,10 @@ import { at, stateColour, stateLabel, type Row } from "./rows";
 // it arrives then — as it does for a pull request.
 const Markdown = lazy(() => import("@/lib/Markdown").then((m) => ({ default: m.Markdown })));
 
-const heading = "text-[11px] font-semibold tracking-wider text-ink-muted uppercase";
+const heading = "text-small font-semibold tracking-wider text-ink-muted uppercase";
 const button =
-  "h-7 rounded border border-line px-2.5 whitespace-nowrap hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent";
-const quiet = "size-6 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink";
+  "h-8 rounded border border-line px-2.5 whitespace-nowrap hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent";
+const quiet = "size-7 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink";
 
 const ago = (time: number, now: number) =>
   age(time, now) === "now" ? "just now" : `${age(time, now)} ago`;
@@ -194,10 +194,10 @@ export function TaskPane({
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 select-text">
         <div>
-          <h2 className="text-[15px] leading-snug font-medium text-ink">
+          <h2 className="text-base leading-snug font-medium text-ink">
             {task.title} <span className="font-mono font-normal text-ink-muted">{task.key}</span>
           </h2>
-          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-ink-muted">
+          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-detail text-ink-muted">
             <span className={`rounded-full px-2 leading-5 ${stateColour(task)}`}>
               {stateLabel(task)}
             </span>
@@ -210,7 +210,7 @@ export function TaskPane({
               <Label key={label.name} label={label} />
             ))}
           </p>
-          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12px]">
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-detail">
             <dt className="text-ink-faint">Assigned to</dt>
             <dd>{task.assignees.length > 0 ? task.assignees.join(", ") : "No one"}</dd>
             {task.linkedPullRequests.length > 0 && (
@@ -258,7 +258,7 @@ export function TaskPane({
           ) : (
             <>
               {left > 0 && (
-                <p className="mt-2 text-[11px] text-ink-faint">
+                <p className="mt-2 text-small text-ink-faint">
                   The latest {detail.comments.length} of {task.comments} comments.{" "}
                   <button
                     type="button"
@@ -312,10 +312,10 @@ function Comment({ comment, now }: { comment: TaskComment; now: number }) {
   const written = at(comment.createdAt);
   return (
     <li className="rounded border border-line">
-      <p className="flex items-baseline gap-1.5 border-b border-line bg-raised px-3 py-1.5 text-[12px]">
+      <p className="flex items-baseline gap-1.5 border-b border-line bg-raised px-3 py-1.5 text-detail">
         <span className="min-w-0 truncate font-medium">{comment.author ?? "ghost"}</span>
         {(comment.bot || comment.maintainer) && (
-          <span className="shrink-0 rounded-full border border-line px-1.5 text-[10px] leading-4 text-ink-muted">
+          <span className="shrink-0 rounded-full border border-line px-1.5 text-micro leading-4.5 text-ink-muted">
             {comment.bot ? "bot" : "maintainer"}
           </span>
         )}

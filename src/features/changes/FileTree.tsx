@@ -85,12 +85,12 @@ function Entry(props: TreeProps & { entry: FileEntry; depth: number; ignored: bo
         onClick={activate}
         onContextMenu={(event) => context.onContextMenu(event, entry.path)}
         style={{ paddingLeft: 12 + depth * 14 }}
-        className={`flex h-6 w-full items-center gap-1.5 pr-2 text-left hover:bg-raised ${
+        className={`flex h-7 w-full items-center gap-1.5 pr-2 text-left hover:bg-raised ${
           selected ? "bg-raised text-ink" : ignored ? "text-ink-faint italic" : "text-ink-muted"
         }`}
         title={ignored ? `${entry.path} — ignored by git` : entry.path}
       >
-        <span aria-hidden className={`w-3 text-[9px] text-ink-faint ${open ? "rotate-90" : ""}`}>
+        <span aria-hidden className={`w-3 text-micro text-ink-faint ${open ? "rotate-90" : ""}`}>
           {entry.isDir ? "▶" : ""}
         </span>
         <span className="truncate">{entry.name}</span>

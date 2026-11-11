@@ -92,7 +92,7 @@ const GLYPHS: Record<string, Glyph> = {
 export function HarnessIcon({
   id,
   label,
-  size = 14,
+  size = 16,
   className = "",
 }: {
   id: string;

@@ -15,8 +15,8 @@ import { useWorkflowStore } from "@/stores/workflows";
 import { InputField } from "./InputField";
 
 const control =
-  "h-8 w-full rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
-const label = "text-[11px] font-semibold tracking-wider text-ink-faint uppercase";
+  "h-9 w-full rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
+const label = "text-small font-semibold tracking-wider text-ink-faint uppercase";
 
 interface Props {
   /** Run this workflow; without it, the dialog asks which. */

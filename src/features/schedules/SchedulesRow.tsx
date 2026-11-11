@@ -25,7 +25,7 @@ export function SchedulesRow() {
       }
       title="Workflows and smoke tests that run at a set time or on a routine"
       onClick={() => useProjectsStore.getState().openSchedules(!open)}
-      className={`flex h-9 w-full shrink-0 items-center gap-2 border-b border-line px-3 text-left hover:bg-raised ${
+      className={`flex h-10 w-full shrink-0 items-center gap-2 border-b border-line px-3.5 text-left hover:bg-raised ${
         open ? "bg-raised text-ink" : "text-ink-muted"
       }`}
     >
@@ -35,7 +35,7 @@ export function SchedulesRow() {
         <span
           aria-hidden
           title={`${count} ${count === 1 ? "needs" : "need"} your attention`}
-          className="shrink-0 rounded-full border border-accent/50 px-1.5 text-[10px] leading-4 text-accent tabular-nums"
+          className="shrink-0 rounded-full border border-accent/50 px-1.5 text-micro leading-4.5 text-accent tabular-nums"
         >
           {count}
         </span>
@@ -55,7 +55,7 @@ export function SchedulesIcon() {
       strokeWidth="1.3"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="size-3.5 shrink-0"
+      className="size-4 shrink-0"
     >
       <circle cx="8" cy="8" r="6" />
       <path d="M8 4.6V8l2.3 1.5" />

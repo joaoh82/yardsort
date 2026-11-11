@@ -19,8 +19,8 @@ const methods: { method: MergeMethod; label: string }[] = [
 ];
 
 const button =
-  "h-7 rounded border border-line px-2.5 whitespace-nowrap hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent";
-const quiet = "size-6 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink";
+  "h-8 rounded border border-line px-2.5 whitespace-nowrap hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent";
+const quiet = "size-7 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink";
 
 /**
  * One pull request, beside the list: who and when, what can be done to it, and two tabs —
@@ -45,7 +45,7 @@ export function PullRequestPane({
   const tab = usePullRequestsStore((s) => s.tab);
   const choose = usePullRequestsStore.getState().showTab;
   const tabClass = (which: DetailTab) =>
-    `rounded-full px-3 py-1 whitespace-nowrap ${
+    `rounded-full px-3 py-1.5 whitespace-nowrap ${
       tab === which ? "bg-raised text-ink" : "text-ink-muted hover:text-ink"
     }`;
 

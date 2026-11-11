@@ -10,11 +10,11 @@ export function LineThread({ thread, now }: { thread: Thread; now: number }) {
   return (
     <article
       aria-label={`Comment on ${placeOf(thread.root)}`}
-      className="my-1 rounded border border-line bg-surface text-[13px] font-sans"
+      className="my-1 rounded border border-line bg-surface text-ui font-sans"
     >
       {[thread.root, ...thread.replies].map((comment, index) => (
         <div key={comment.id} className={`px-3 py-2 ${index > 0 ? "border-t border-line" : ""}`}>
-          <p className="flex items-baseline gap-1.5 text-[12px]">
+          <p className="flex items-baseline gap-1.5 text-detail">
             <span className="min-w-0 truncate font-medium">{comment.author ?? "ghost"}</span>
             {index === 0 && <span className="shrink-0 text-ink-faint">{placeOf(comment)}</span>}
             <span

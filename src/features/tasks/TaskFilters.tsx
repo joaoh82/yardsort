@@ -4,7 +4,7 @@ import type { Project } from "@/lib/ipc";
 import { ME, NOBODY, type Filters } from "./filters";
 
 const control =
-  "h-7 rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent";
+  "h-8 rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent";
 /** A picker is as wide as what is picked, up to a point; the search takes what is left. */
 const picker = `${control} max-w-44`;
 
@@ -147,7 +147,7 @@ export function TaskFilters({
 
       <label
         title="Open, and the last person to speak was not an owner, a member or a collaborator"
-        className="flex h-7 items-center gap-1.5 whitespace-nowrap text-ink-muted"
+        className="flex h-8 items-center gap-1.5 whitespace-nowrap text-ink-muted"
       >
         <input
           type="checkbox"
@@ -177,7 +177,7 @@ export function TaskFilters({
         <button
           type="button"
           onClick={onClear}
-          className="h-7 rounded px-2 text-ink-muted hover:bg-raised hover:text-ink"
+          className="h-8 rounded px-2 text-ink-muted hover:bg-raised hover:text-ink"
         >
           Clear filters
         </button>

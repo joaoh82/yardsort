@@ -282,7 +282,7 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
               : "Nothing waiting in the exit spool."}
           </div>
           <div
-            className="truncate font-mono text-[11px] text-ink-faint"
+            className="truncate font-mono text-small text-ink-faint"
             title={diagnostics.spoolDir}
           >
             spool: {diagnostics.spoolDir}
@@ -293,19 +293,19 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
               : "Nothing waiting in the agents' inbox."}
           </div>
           <div
-            className="truncate font-mono text-[11px] text-ink-faint"
+            className="truncate font-mono text-small text-ink-faint"
             title={diagnostics.inboxDir}
           >
             inbox: {diagnostics.inboxDir}
           </div>
           <div
-            className="truncate font-mono text-[11px] text-ink-faint"
+            className="truncate font-mono text-small text-ink-faint"
             title={diagnostics.claudeHooksFile}
           >
             Claude Code hooks: {diagnostics.claudeHooksFile}
           </div>
           {diagnostics.counters.length > 0 && (
-            <ul className="text-[11px] text-ink-faint">
+            <ul className="text-small text-ink-faint">
               {diagnostics.counters.map((counter) => (
                 <li key={counter.name}>
                   {counter.name}: {counter.count}

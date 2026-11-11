@@ -17,7 +17,7 @@ function UpdateNow() {
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded border border-line px-3 py-2">
-      <span className="font-mono text-[12px] text-ink-muted">Yardsort {version ?? "…"}</span>
+      <span className="font-mono text-detail text-ink-muted">Yardsort {version ?? "…"}</span>
       <button
         type="button"
         disabled={checking}
@@ -199,7 +199,7 @@ export function GeneralSettings() {
             setEditor(e.target.value);
             setSaved(false);
           }}
-          className={`${inputClass} w-72 font-mono text-[12px]`}
+          className={`${inputClass} w-72 font-mono text-detail`}
         />
       </Field>
       <label className="flex items-start gap-2">

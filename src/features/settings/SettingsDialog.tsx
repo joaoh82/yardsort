@@ -45,7 +45,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         aria-label="Settings"
         className="flex h-full max-h-[46rem] w-full max-w-5xl flex-col rounded-lg border border-line bg-surface shadow-2xl shadow-black/50 outline-none"
       >
-        <header className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-3">
+        <header className="flex h-12 shrink-0 items-center gap-1 border-b border-line px-3">
           <h2 className="mr-4 font-semibold">Settings</h2>
           <div role="tablist" className="flex min-w-0 gap-1 overflow-x-auto">
             {SECTIONS.map(([id, label]) => (
@@ -73,7 +73,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     );
                   tabs?.item(next).focus();
                 }}
-                className="rounded px-3 py-1 text-ink-muted hover:text-ink aria-selected:bg-raised aria-selected:text-ink"
+                className="rounded px-3 py-1.5 text-ink-muted hover:text-ink aria-selected:bg-raised aria-selected:text-ink"
               >
                 {label}
               </button>

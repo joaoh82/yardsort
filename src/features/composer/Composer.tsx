@@ -39,7 +39,7 @@ interface LastPicks {
 const picksKey = (projectId: string) => `composer.last.${projectId}`;
 
 const control =
-  "h-8 rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
+  "h-9 rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
 
 /** How long typing must pause before Assist is asked about the message. */
 const SUGGEST_DELAY_MS = 800;
@@ -380,7 +380,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
               {runIn.head && (
                 <>
                   {" on "}
-                  <span className="font-mono text-[12px] text-ink">{runIn.head.label}</span>
+                  <span className="font-mono text-detail text-ink">{runIn.head.label}</span>
                 </>
               )}
             </>
@@ -396,7 +396,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           )}
         </h1>
         {handoff !== null && (
-          <p className="mb-2 text-[12px] text-ink-faint">
+          <p className="mb-2 text-detail text-ink-faint">
             This is what Yardsort recorded about the workspace — and, where the project shares its
             agents&rsquo; conversations, what was said in them — written as the next agent&rsquo;s
             first message. Read it, change it, then start. The task on record stays what you first
@@ -404,14 +404,14 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           </p>
         )}
         {fork && base !== "" && !forking && (
-          <p role="note" className="mb-2 text-[12px] text-amber-400">
+          <p role="note" className="mb-2 text-detail text-amber-400">
             Not starting from <span className="font-mono">{fork.branch}</span>, so its commits will
             not be in the new branch and nothing of {fork.name}&rsquo;s record goes with your
             message. Pick <span className="font-mono">{fork.branch}</span> under Branch to fork it.
           </p>
         )}
         {forking && (
-          <p className="mb-2 text-[12px] text-ink-faint">
+          <p className="mb-2 text-detail text-ink-faint">
             A new branch and worktree, started from{" "}
             <span className="font-mono text-ink-muted">{fork.branch}</span> with all its commits.
             Say what to do next: your message is the new workspace&rsquo;s task and names it. What
@@ -437,13 +437,13 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         {forking && showPacket && (
           <pre
             aria-label="Sent after your message"
-            className="mb-2 max-h-48 overflow-auto rounded border border-line bg-surface p-2 text-[11px] whitespace-pre-wrap select-text"
+            className="mb-2 max-h-48 overflow-auto rounded border border-line bg-surface p-2 text-small whitespace-pre-wrap select-text"
           >
             {fork.packet}
           </pre>
         )}
         {task && (
-          <p className="mb-2 text-[12px] text-ink-faint">
+          <p className="mb-2 text-detail text-ink-faint">
             For task <span className="font-mono text-ink-muted">{task.key}</span>{" "}
             <span className="text-ink-muted">{task.title}</span>. The message quotes the issue as it
             was written on GitHub, by whoever wrote it: read it before you start. The workspace will
@@ -469,7 +469,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
               else projects.compose(null);
             }
           }}
-          className="w-full resize-none rounded-lg border border-line bg-surface p-3 text-[14px] leading-relaxed outline-none select-text focus:border-accent disabled:opacity-60"
+          className="w-full resize-none rounded-lg border border-line bg-surface p-3 text-[15px] leading-relaxed outline-none select-text focus:border-accent disabled:opacity-60"
         />
 
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -532,7 +532,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           )}
 
           {runIn ? (
-            <span className="ml-auto text-[12px] text-ink-faint">no new branch or worktree</span>
+            <span className="ml-auto text-detail text-ink-faint">no new branch or worktree</span>
           ) : (
             <select
               aria-label="Branch"
@@ -540,7 +540,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
               value={base}
               disabled={busy || !branches}
               onChange={(event) => setBase(event.target.value)}
-              className={`${control} ml-auto max-w-56 font-mono text-[12px]`}
+              className={`${control} ml-auto max-w-56 font-mono text-detail`}
             >
               <optgroup label="New branch from">
                 {branches?.branches.map((name) => (
@@ -564,19 +564,19 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           <button
             type="submit"
             disabled={!ready}
-            className="h-8 rounded bg-accent px-4 font-medium text-canvas disabled:opacity-40"
+            className="h-9 rounded bg-accent px-4 font-medium text-canvas disabled:opacity-40"
           >
             {busy ? "Starting…" : "Start"}
           </button>
         </div>
 
         {offering && !busy && (
-          <p className="mt-2 flex items-center justify-end gap-2 text-[11px] text-ink-faint">
+          <p className="mt-2 flex items-center justify-end gap-2 text-small text-ink-faint">
             <span>
               Assist suggests{" "}
               {suggestedHarness && (
                 <span className="inline-flex items-center gap-1 align-middle text-ink-muted">
-                  <HarnessIcon id={suggestedHarness.id} label={suggestedHarness.label} size={12} />
+                  <HarnessIcon id={suggestedHarness.id} label={suggestedHarness.label} size={14} />
                   {suggestedHarness.label}
                 </span>
               )}
@@ -605,7 +605,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         )}
 
         {offersMemory && (
-          <div className="mt-2 text-[12px] text-ink-faint">
+          <div className="mt-2 text-detail text-ink-faint">
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -639,7 +639,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
             {showMemory && (
               <pre
                 aria-label="Project memory to be added"
-                className="mt-2 max-h-48 overflow-auto rounded border border-line bg-surface p-2 text-[11px] whitespace-pre-wrap select-text"
+                className="mt-2 max-h-48 overflow-auto rounded border border-line bg-surface p-2 text-small whitespace-pre-wrap select-text"
               >
                 {memory.preview}
               </pre>
@@ -648,7 +648,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         )}
 
         {conversations && harness && (
-          <div className="mt-2 text-[12px] text-ink-faint">
+          <div className="mt-2 text-detail text-ink-faint">
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -685,7 +685,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         )}
 
         {!runIn && (
-          <p className="mt-2 text-right text-[11px] text-ink-faint">
+          <p className="mt-2 text-right text-small text-ink-faint">
             Have worktrees already?{" "}
             <button
               type="button"
@@ -742,7 +742,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
 function AgentHistoryLine({ history }: { history: AgentOutcomes | undefined }) {
   if (!history || history.attempts === 0) return null;
   return (
-    <p className="mt-2 text-[12px] text-ink-faint" aria-label="Your history with this agent">
+    <p className="mt-2 text-detail text-ink-faint" aria-label="Your history with this agent">
       Your history with this agent, across projects: {describeHistory(history)}. Shown, never used
       to choose for you.
     </p>

@@ -79,7 +79,7 @@ export function OutcomesDialog({ project, onClose }: { project: Project; onClose
           {outcomes && (
             <>
               <section aria-label="Agents" className="mb-5">
-                <h3 className="mb-2 text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+                <h3 className="mb-2 text-small font-semibold tracking-wider text-ink-faint uppercase">
                   Agents in this project
                 </h3>
                 {outcomes.agents.length === 0 ? (
@@ -88,7 +88,7 @@ export function OutcomesDialog({ project, onClose }: { project: Project; onClose
                   <ul className="space-y-1">
                     {outcomes.agents.map((agent) => (
                       <li key={agent.harness} className="flex items-center gap-2">
-                        <HarnessIcon id={agent.harness} label={agent.harness} size={12} />
+                        <HarnessIcon id={agent.harness} label={agent.harness} size={14} />
                         <span className="w-24 shrink-0">{agent.harness}</span>
                         <span className="text-ink-muted">{describeHistory(agent)}</span>
                       </li>
@@ -98,7 +98,7 @@ export function OutcomesDialog({ project, onClose }: { project: Project; onClose
               </section>
 
               <section aria-label="Attempts">
-                <h3 className="mb-2 text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+                <h3 className="mb-2 text-small font-semibold tracking-wider text-ink-faint uppercase">
                   Attempts · {outcomes.attempts.length}
                 </h3>
                 <ul className="space-y-2">
@@ -110,13 +110,13 @@ export function OutcomesDialog({ project, onClose }: { project: Project; onClose
                     >
                       <div className="flex items-baseline gap-2">
                         <span className="font-medium">{attempt.workspaceName}</span>
-                        <span className="min-w-0 flex-1 truncate text-[11px] text-ink-faint">
+                        <span className="min-w-0 flex-1 truncate text-small text-ink-faint">
                           {attempt.harnesses.join(", ") || "no agent"}
                         </span>
-                        <span className="text-[11px] text-ink-muted">{outcomeWords(attempt)}</span>
+                        <span className="text-small text-ink-muted">{outcomeWords(attempt)}</span>
                       </div>
                       {attempt.task && (
-                        <p className="mt-1 text-[12px] text-ink-muted select-text">
+                        <p className="mt-1 text-detail text-ink-muted select-text">
                           {attempt.task}
                         </p>
                       )}
@@ -128,12 +128,12 @@ export function OutcomesDialog({ project, onClose }: { project: Project; onClose
                             disabled={busy}
                             aria-pressed={attempt.label === value}
                             onClick={() => void label(attempt, value)}
-                            className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40 aria-pressed:border-accent aria-pressed:text-ink"
+                            className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40 aria-pressed:border-accent aria-pressed:text-ink"
                           >
                             {text}
                           </button>
                         ))}
-                        <span className="ml-auto text-[11px] text-ink-faint">
+                        <span className="ml-auto text-small text-ink-faint">
                           {evidenceWords(attempt)}
                         </span>
                       </div>

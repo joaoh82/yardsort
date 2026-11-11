@@ -49,7 +49,7 @@ function Group({ title, scope, files }: { title: string; scope: Scope; files: Fi
 
   return (
     <section aria-label={title}>
-      <h3 className="sticky top-0 flex items-center justify-between bg-surface px-3 py-1.5 text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+      <h3 className="sticky top-0 flex items-center justify-between bg-surface px-3 py-1.5 text-small font-semibold tracking-wider text-ink-faint uppercase">
         {title}
         <span className="font-normal">{files.length}</span>
       </h3>
@@ -70,10 +70,10 @@ function Group({ title, scope, files }: { title: string; scope: Scope; files: Fi
                 title={change.oldPath ? `${change.oldPath} → ${change.path}` : change.path}
                 onContextMenu={(event) => context.onContextMenu(event, change.path)}
                 onClick={() => void view({ kind: "diff", change, scope })}
-                className="flex h-7 w-full items-center gap-2 px-3 text-left hover:bg-raised aria-[current=true]:bg-raised"
+                className="flex h-8 w-full items-center gap-2 px-3.5 text-left hover:bg-raised aria-[current=true]:bg-raised"
               >
                 <span
-                  className={`w-3 shrink-0 text-center font-mono text-[11px] ${kind.colour}`}
+                  className={`w-3 shrink-0 text-center font-mono text-small ${kind.colour}`}
                   title={kind.label}
                 >
                   {kind.letter}
@@ -81,12 +81,12 @@ function Group({ title, scope, files }: { title: string; scope: Scope; files: Fi
                 <span className={`truncate ${change.kind === "deleted" ? "line-through" : ""}`}>
                   {change.path.slice(slash + 1)}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[11px] text-ink-faint" dir="rtl">
+                <span className="min-w-0 flex-1 truncate text-small text-ink-faint" dir="rtl">
                   {slash > 0 ? change.path.slice(0, slash) : ""}
                 </span>
                 <ReportedBadges file={reports?.get(change.path)} />
                 <AssistBadges review={judged.get(change.path)} />
-                <span className="shrink-0 font-mono text-[11px]">
+                <span className="shrink-0 font-mono text-small">
                   {change.additions != null && (
                     <span className="text-green-400">+{change.additions}</span>
                   )}{" "}

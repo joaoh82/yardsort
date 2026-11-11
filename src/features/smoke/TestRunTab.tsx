@@ -79,11 +79,11 @@ export function TestRunTab({ run, workspaceId }: Props) {
   return (
     <section aria-label={`Smoke test run: ${run.testName}`} className="flex h-full flex-col">
       <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-3 py-2">
-        <span className={`rounded-full px-1.5 text-[10px] ${statusColour(run.status)}`}>
+        <span className={`rounded-full px-1.5 text-micro ${statusColour(run.status)}`}>
           {statusWords(run)}
         </span>
         <span className="font-medium">{run.testName}</span>
-        <span className="text-[11px] text-ink-faint">
+        <span className="text-small text-ink-faint">
           {run.testId}
           {took && ` · ${took}`}
           {run.port !== null && ` · port ${run.port}`}
@@ -94,7 +94,7 @@ export function TestRunTab({ run, workspaceId }: Props) {
               type="button"
               disabled={run.stopping}
               onClick={() => void cancel(run.id)}
-              className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40"
+              className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40"
             >
               {run.stopping ? "Stopping…" : "Cancel"}
             </button>
@@ -104,7 +104,7 @@ export function TestRunTab({ run, workspaceId }: Props) {
               <button
                 type="button"
                 onClick={() => setRunAgain(true)}
-                className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink"
+                className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink"
               >
                 Run again
               </button>
@@ -139,7 +139,7 @@ export function TestRunTab({ run, workspaceId }: Props) {
             if (inPhase.length === 0) return null;
             return (
               <div key={phase} className="mb-2">
-                <h4 className="px-3 text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+                <h4 className="px-3 text-small font-semibold tracking-wider text-ink-faint uppercase">
                   {PHASE_WORDS[phase]}
                 </h4>
                 <ol>
@@ -155,14 +155,14 @@ export function TestRunTab({ run, workspaceId }: Props) {
                         }`}
                       >
                         <span
-                          className={`w-14 shrink-0 truncate rounded-full px-1.5 text-center text-[10px] ${statusColour(step.status)}`}
+                          className={`w-14 shrink-0 truncate rounded-full px-1.5 text-center text-micro ${statusColour(step.status)}`}
                         >
                           {step.status}
                         </span>
-                        <span className="min-w-0 flex-1 truncate font-mono text-[11px]">
+                        <span className="min-w-0 flex-1 truncate font-mono text-small">
                           {step.stepId}
                         </span>
-                        <span className="shrink-0 text-[10px] text-ink-faint">
+                        <span className="shrink-0 text-micro text-ink-faint">
                           {tookWords(step)?.replace(" so far", "…") ?? ""}
                         </span>
                       </button>
@@ -214,11 +214,11 @@ function StepView({ run, step, words }: { run: TestRun; step: TestStepRun; words
     <div className="flex flex-col gap-3 p-4">
       <div>
         <div className="flex items-center gap-2">
-          <span className={`rounded-full px-1.5 text-[10px] ${statusColour(step.status)}`}>
+          <span className={`rounded-full px-1.5 text-micro ${statusColour(step.status)}`}>
             {stepStatusWords(step)}
           </span>
           <span className="font-mono">{step.stepId}</span>
-          <span className="text-[11px] text-ink-faint">
+          <span className="text-small text-ink-faint">
             {step.action}
             {took && ` · ${took}`}
           </span>
@@ -229,7 +229,7 @@ function StepView({ run, step, words }: { run: TestRun; step: TestStepRun; words
       {step.note && (
         <pre
           aria-label="Note"
-          className={`rounded border border-line bg-canvas p-2 font-mono text-[11px] leading-4 whitespace-pre-wrap select-text ${
+          className={`rounded border border-line bg-canvas p-2 font-mono text-small leading-4 whitespace-pre-wrap select-text ${
             step.status === "failed" ? "text-red-300" : "text-ink-muted"
           }`}
         >
@@ -237,10 +237,7 @@ function StepView({ run, step, words }: { run: TestRun; step: TestStepRun; words
         </pre>
       )}
       {facts.length > 0 && (
-        <dl
-          aria-label="Outputs"
-          className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]"
-        >
+        <dl aria-label="Outputs" className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-small">
           {facts.map(([name, value]) => (
             <div key={name} className="contents">
               <dt className="font-mono text-ink-faint">{name}</dt>
@@ -260,12 +257,12 @@ function StepView({ run, step, words }: { run: TestRun; step: TestStepRun; words
       )}
       {step.screenshots.length > 0 && (
         <div>
-          <h4 className="text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+          <h4 className="text-small font-semibold tracking-wider text-ink-faint uppercase">
             Screenshots
           </h4>
           <ul className="mt-1 flex flex-col gap-0.5">
             {step.screenshots.map((path) => (
-              <li key={path} className="flex items-center gap-2 text-[11px]">
+              <li key={path} className="flex items-center gap-2 text-small">
                 <span className="min-w-0 truncate font-mono select-text">{path}</span>
                 <button
                   type="button"
@@ -338,8 +335,8 @@ function Manual({ run, step }: { run: TestRun; step: TestStepRun }) {
 function Block({ label, text }: { label: string; text: string }) {
   return (
     <div>
-      <h4 className="text-[11px] font-semibold tracking-wider text-ink-faint uppercase">{label}</h4>
-      <pre className="mt-1 max-h-96 overflow-auto rounded border border-line bg-canvas p-2 font-mono text-[11px] leading-4 whitespace-pre-wrap select-text">
+      <h4 className="text-small font-semibold tracking-wider text-ink-faint uppercase">{label}</h4>
+      <pre className="mt-1 max-h-96 overflow-auto rounded border border-line bg-canvas p-2 font-mono text-small leading-4 whitespace-pre-wrap select-text">
         {text}
       </pre>
     </div>
@@ -362,16 +359,16 @@ function Stream({
   if (output.loaded && output.text === "" && !live) return null;
   return (
     <div>
-      <h4 className="text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+      <h4 className="text-small font-semibold tracking-wider text-ink-faint uppercase">
         {stream}
         {live && <span className="ml-2 normal-case tracking-normal">live</span>}
       </h4>
       {output.skipped && (
-        <p className="text-[11px] text-ink-faint">Earlier output is in the file, not shown here.</p>
+        <p className="text-small text-ink-faint">Earlier output is in the file, not shown here.</p>
       )}
       <pre
         aria-label={stream}
-        className="mt-1 max-h-96 overflow-auto rounded border border-line bg-canvas p-2 font-mono text-[11px] leading-4 whitespace-pre-wrap select-text"
+        className="mt-1 max-h-96 overflow-auto rounded border border-line bg-canvas p-2 font-mono text-small leading-4 whitespace-pre-wrap select-text"
       >
         {output.text}
       </pre>
@@ -428,12 +425,12 @@ function SendToAgent({ run, workspaceId }: { run: TestRun; workspaceId: string }
           const box = event.currentTarget.getBoundingClientRect();
           setMenuAt({ x: box.left, y: box.bottom + 2 });
         }}
-        className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40"
+        className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40"
       >
         Send result to agent{agents.length > 1 ? "…" : ""}
       </button>
       {state && (
-        <span role="status" className="text-[11px] text-ink-faint">
+        <span role="status" className="text-small text-ink-faint">
           {state}
         </span>
       )}

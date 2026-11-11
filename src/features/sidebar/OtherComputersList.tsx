@@ -16,7 +16,7 @@ export function OtherComputersList() {
   if (shown.length === 0) return null;
   return (
     <section aria-label="Other computers" className="border-t border-line py-1">
-      <h3 className="px-3 py-1 text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+      <h3 className="px-3 py-1 text-small font-semibold tracking-wider text-ink-muted uppercase">
         Other computers
       </h3>
       <ul>
@@ -33,13 +33,13 @@ export function OtherComputersList() {
                 onClick={() =>
                   useProjectsStore.getState().openRemoteHost(current ? null : host.hostId)
                 }
-                className={`flex h-8 w-full items-center gap-2 px-3 text-left hover:bg-raised disabled:cursor-default disabled:hover:bg-transparent ${
+                className={`flex h-9 w-full items-center gap-2 px-3 text-left hover:bg-raised disabled:cursor-default disabled:hover:bg-transparent ${
                   current ? "bg-raised text-ink" : "text-ink-muted"
                 }`}
               >
                 <ComputerIcon />
                 <span className="min-w-0 flex-1 truncate">{host.name}</span>
-                <span className="shrink-0 text-[11px] text-ink-faint">{shortState(host)}</span>
+                <span className="shrink-0 text-small text-ink-faint">{shortState(host)}</span>
               </button>
             </li>
           );
@@ -66,7 +66,7 @@ function ComputerIcon() {
       strokeWidth="1.3"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="size-3.5 shrink-0"
+      className="size-4 shrink-0"
     >
       <rect x="2" y="2.5" width="12" height="8.5" rx="1" />
       <path d="M6 13.5h4M8 11v2.5" />

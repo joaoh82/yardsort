@@ -93,7 +93,7 @@ function GoneNotice({ onClose }: { onClose: () => void }) {
             type="button"
             autoFocus
             onClick={onClose}
-            className="h-8 rounded border border-line px-3 text-ink-muted hover:border-accent hover:text-ink"
+            className="h-9 rounded border border-line px-3 text-ink-muted hover:border-accent hover:text-ink"
           >
             Close
           </button>
@@ -171,11 +171,11 @@ function ConfirmDialog({
         <p className="mt-2 text-ink-muted">
           Allow runs this one command. Don't allow leaves it unrun.
         </p>
-        <pre className="mt-3 overflow-x-auto rounded border border-line bg-canvas p-3 font-mono text-[12px] text-ink select-text">
+        <pre className="mt-3 overflow-x-auto rounded border border-line bg-canvas p-3 font-mono text-detail text-ink select-text">
           {request.command}
         </pre>
         {more > 0 && (
-          <p className="mt-2 text-[11px] text-ink-faint">
+          <p className="mt-2 text-small text-ink-faint">
             {more === 1
               ? "Another is waiting after this one."
               : `${more} more are waiting after this one.`}
@@ -192,7 +192,7 @@ function ConfirmDialog({
             autoFocus
             disabled={busy}
             onClick={() => void answer(false)}
-            className="h-8 rounded border border-line px-3 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40"
+            className="h-9 rounded border border-line px-3 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40"
           >
             Don't allow
           </button>
@@ -200,7 +200,7 @@ function ConfirmDialog({
             type="button"
             disabled={busy}
             onClick={() => void answer(true)}
-            className="h-8 rounded bg-accent px-4 font-medium text-canvas disabled:opacity-40"
+            className="h-9 rounded bg-accent px-4 font-medium text-canvas disabled:opacity-40"
           >
             Allow
           </button>

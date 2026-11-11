@@ -83,7 +83,7 @@ export function FileEditor({
   };
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-b border-line px-2 py-1 text-[11px]">
+      <div className="flex items-center gap-2 border-b border-line px-2 py-1 text-small">
         {/\.svg$/i.test(path) && (
           <button type="button" onClick={() => setPreview(!preview)}>
             {preview ? "Edit source" : "Preview"}

@@ -60,12 +60,12 @@ export function WorkspaceHarnesses({
       <button
         type="button"
         aria-label={`${harnesses.length} open harnesses`}
-        className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] hover:brightness-125 ${tabs.some((tab) => tab.attention) ? "bg-accent text-canvas" : harnesses.some((tab) => !tab.exit && !tab.busy) ? "bg-accent/15 text-accent" : "bg-canvas text-ink-muted"}`}
+        className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-micro hover:brightness-125 ${tabs.some((tab) => tab.attention) ? "bg-accent text-canvas" : harnesses.some((tab) => !tab.exit && !tab.busy) ? "bg-accent/15 text-accent" : "bg-canvas text-ink-muted"}`}
       >
         <HarnessIcon
           id={first?.harnessId ?? firstTab.title}
           label={first?.harnessLabel ?? firstTab.title}
-          size={12}
+          size={14}
         />
         {harnesses.length}
         <span className={harnesses.some((tab) => !tab.exit) ? "sr-only" : undefined}>

@@ -51,7 +51,7 @@ export function MachineResources() {
     <div className="grid gap-4">
       <div className="flex items-center justify-end gap-4 text-ink-muted">
         <span className="flex items-center gap-1.5">
-          <span aria-hidden className="size-1.5 rounded-full bg-agent-grok" />
+          <span aria-hidden className="size-2 rounded-full bg-agent-grok" />
           Live · this machine · every {MACHINE_POLL_MS / 1000} s
         </span>
         <button
@@ -191,7 +191,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 function Legend({ swatch, label, value }: { swatch: string; label: string; value: string }) {
   return (
     <span className="flex items-center gap-1.5">
-      <span aria-hidden className={`size-2 rounded-full ${swatch}`} />
+      <span aria-hidden className={`size-2.5 rounded-full ${swatch}`} />
       {label} <span className="text-ink tabular-nums">{value}</span>
     </span>
   );
@@ -201,7 +201,7 @@ function Card(props: { title: string; value: string; children: React.ReactNode }
   return (
     <section className="rounded-lg border border-line bg-surface p-3">
       <header className="mb-2 flex items-baseline justify-between">
-        <h3 className="m-0 text-[12px] font-normal text-ink-muted">{props.title}</h3>
+        <h3 className="m-0 text-detail font-normal text-ink-muted">{props.title}</h3>
         <span className="text-base text-ink tabular-nums">{props.value}</span>
       </header>
       {props.children}
@@ -230,7 +230,7 @@ function Processes({ report, sort }: { report: MachineReport; sort: SortKey }) {
   return (
     <table className="w-full border-collapse overflow-hidden rounded-lg border border-line">
       <thead>
-        <tr className="border-b border-line text-left text-[11px] tracking-wider text-ink-muted uppercase">
+        <tr className="border-b border-line text-left text-small tracking-wider text-ink-muted uppercase">
           <th className="px-3 py-2 font-normal">Process</th>
           <th className="w-20 px-3 py-2 text-right font-normal">CPU</th>
           <th className="w-24 px-3 py-2 text-right font-normal">Memory</th>
@@ -346,7 +346,7 @@ function TerminalRow({ terminal, whole }: { terminal: TerminalLoad; whole: numbe
   return (
     <Row
       label={label}
-      icon={terminal.harness ? <HarnessIcon id={terminal.harness} size={12} /> : undefined}
+      icon={terminal.harness ? <HarnessIcon id={terminal.harness} size={14} /> : undefined}
       load={terminal.load}
       whole={whole}
       depth={2}
@@ -373,7 +373,7 @@ function Row(props: {
   const share = props.whole > 0 ? Math.min(100, (props.load.memory / props.whole) * 100) : 0;
   const tone = props.muted ? "text-ink-muted" : "text-ink";
   const name = props.heading ? (
-    <span className="text-[11px] font-semibold tracking-wider uppercase">{props.label}</span>
+    <span className="text-small font-semibold tracking-wider uppercase">{props.label}</span>
   ) : (
     props.label
   );

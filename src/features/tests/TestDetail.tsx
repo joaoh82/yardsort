@@ -44,7 +44,7 @@ export function TestDetail({
       <header className="flex items-start gap-2 border-b border-line px-4 py-2.5">
         <div className="min-w-0 flex-1">
           <h2 className="truncate font-semibold text-ink">{listing.item.name}</h2>
-          <p className="truncate text-[12px] text-ink-faint">
+          <p className="truncate text-detail text-ink-faint">
             <code className="select-text">{listing.item.id}</code> · {listing.projectName} /{" "}
             {listing.workspaceName}
           </p>
@@ -54,7 +54,7 @@ export function TestDetail({
           aria-label="Close test"
           title="Close"
           onClick={onClose}
-          className="size-6 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink"
+          className="size-7 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink"
         >
           ×
         </button>
@@ -88,14 +88,14 @@ export function TestDetail({
 
         {/* Run in… a workspace of this test's project. */}
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+          <span className="text-small font-semibold tracking-wider text-ink-faint uppercase">
             Run in
           </span>
           <select
             aria-label="Run in workspace"
             value={runIn}
             onChange={(event) => setRunIn(event.target.value)}
-            className="h-7 rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent"
+            className="h-8 rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent"
           >
             {places.map((place) => (
               <option key={place.id} value={place.id}>
@@ -108,7 +108,7 @@ export function TestDetail({
             disabled={!listing.item.runnable || places.length === 0}
             title={listing.item.runnable ? "Run this test" : "Fix the problems above first"}
             onClick={() => setRunning(true)}
-            className="rounded bg-accent px-3 py-1 font-medium text-canvas disabled:opacity-40"
+            className="rounded bg-accent px-3 py-1.5 font-medium text-canvas disabled:opacity-40"
           >
             Run…
           </button>
@@ -121,7 +121,7 @@ export function TestDetail({
                 : "Fix the problems above first"
             }
             onClick={() => setScheduling(true)}
-            className="rounded border border-line px-3 py-1 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
+            className="rounded border border-line px-3 py-1.5 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
           >
             Schedule…
           </button>
@@ -129,17 +129,17 @@ export function TestDetail({
 
         {/* The file, read-only: it lives in the worktree, edited there. */}
         <div>
-          <p className="mb-1 text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+          <p className="mb-1 text-small font-semibold tracking-wider text-ink-faint uppercase">
             The file
           </p>
-          <pre className="max-h-96 overflow-auto rounded border border-line bg-canvas p-3 text-[12px] text-ink-muted select-text">
+          <pre className="max-h-96 overflow-auto rounded border border-line bg-canvas p-3 text-detail text-ink-muted select-text">
             {listing.item.text}
           </pre>
         </div>
 
         {/* Its runs, across every workspace. */}
         <div>
-          <p className="mb-1 text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+          <p className="mb-1 text-small font-semibold tracking-wider text-ink-faint uppercase">
             Runs
           </p>
           {history.length === 0 ? (
@@ -154,13 +154,13 @@ export function TestDetail({
                     disabled={!run.workspaceId}
                     className="flex w-full items-baseline gap-2 rounded px-1 py-1 text-left hover:bg-raised disabled:opacity-50"
                   >
-                    <span className={`shrink-0 text-[11px] ${statusColour(run.status)}`}>
+                    <span className={`shrink-0 text-small ${statusColour(run.status)}`}>
                       {statusWords(run)}
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-[12px] text-ink-faint">
+                    <span className="min-w-0 flex-1 truncate text-detail text-ink-faint">
                       {run.workspaceName}
                     </span>
-                    <span className="shrink-0 text-[12px] text-ink-faint tabular-nums">
+                    <span className="shrink-0 text-detail text-ink-faint tabular-nums">
                       {timeAgo(run.createdAt, now)}
                     </span>
                   </button>

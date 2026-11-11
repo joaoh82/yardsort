@@ -55,7 +55,7 @@ export function OtherComputersSettings() {
         <>
           <p>
             Signed in as <span className="text-ink">{client.name}</span> at{" "}
-            <span className="font-mono text-[12px] select-text">{client.serverUrl}</span>.
+            <span className="font-mono text-detail select-text">{client.serverUrl}</span>.
           </p>
           {status.signedOut && (
             <p role="alert" className="text-red-400 select-text">

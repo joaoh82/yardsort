@@ -67,7 +67,7 @@ function Card({ run, behind }: { run: TestRun; behind: number }) {
 
   const inputs = Object.entries(run.inputs);
   const button =
-    "rounded border border-line px-3 py-1 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40";
+    "rounded border border-line px-3 py-1.5 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40";
   return (
     <section
       ref={ref}
@@ -90,7 +90,7 @@ function Card({ run, behind }: { run: TestRun; behind: number }) {
                 {inputs.map(([id, value], index) => (
                   <span key={id}>
                     {index > 0 && ", "}
-                    <span className="font-mono text-[11px]">{id}</span> = {value}
+                    <span className="font-mono text-small">{id}</span> = {value}
                   </span>
                 ))}
               </>
@@ -148,13 +148,13 @@ export function Steps({ review }: { review: TestReview }) {
         if (steps.length === 0) return null;
         return (
           <div key={phase}>
-            <h4 className="text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+            <h4 className="text-small font-semibold tracking-wider text-ink-faint uppercase">
               {PHASE_WORDS[phase]}
             </h4>
             <ol aria-label={`${PHASE_WORDS[phase]} steps`} className="mt-0.5 flex flex-col gap-0.5">
               {steps.map((step) => (
                 <li key={step.id} className="flex gap-2 select-text">
-                  <span className="shrink-0 font-mono text-[11px] leading-5 text-ink-faint">
+                  <span className="shrink-0 font-mono text-small leading-5 text-ink-faint">
                     {step.id}
                   </span>
                   <span className="min-w-0 break-words">{step.words}</span>
@@ -182,10 +182,10 @@ export function EnvUses({ review, className = "" }: { review: TestReview; classN
         {review.environment.map((name, index) => (
           <span key={name}>
             {index > 0 && ", "}
-            <span className="font-mono text-[11px]">{name}</span>
+            <span className="font-mono text-small">{name}</span>
           </span>
         ))}{" "}
-        (as <span className="font-mono text-[11px]">YS_ENV_*</span>)
+        (as <span className="font-mono text-small">YS_ENV_*</span>)
         {unset.length > 0 &&
           `. ${unset.map((use) => use.name).join(", ")} ${
             unset.length === 1 ? "is named but" : "are named but"
@@ -201,7 +201,7 @@ export function EnvUses({ review, className = "" }: { review: TestReview; classN
       {review.env.map((use, index) => (
         <span key={use.name}>
           {index > 0 && ", "}
-          <span className="font-mono text-[11px]">{use.name}</span>
+          <span className="font-mono text-small">{use.name}</span>
           {use.set ? "" : " (not set)"}
         </span>
       ))}{" "}
@@ -223,7 +223,7 @@ export function Changed({ before, after }: { before: string; after: string }) {
       </summary>
       <pre
         aria-label="What changed"
-        className="mt-1 max-h-60 overflow-auto rounded border border-line bg-canvas p-2 font-mono text-[11px] leading-4 select-text"
+        className="mt-1 max-h-60 overflow-auto rounded border border-line bg-canvas p-2 font-mono text-small leading-4 select-text"
       >
         {lines.map((line, index) => (
           <span
