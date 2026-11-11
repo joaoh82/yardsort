@@ -33,14 +33,16 @@ describe("a notification tap", () => {
 
   test("routes the last tap on a cold start and a later tap", async () => {
     const opened: string[] = [];
-    let onResponse: ((data: unknown) => void) | null = null;
+    // A property, not a `let`. Assigning the callback into a `let` makes TypeScript
+    // narrow that variable to `never` at the call.
+    const taps: { current: ((data: unknown) => void) | null } = { current: null };
     let last: { data: unknown } | null = {
       data: { deepLink: `yardsort://notice/workflow/${ID}` },
     };
     const runtime: PushRuntime = {
       getLastNotificationResponseAsync: async () => last,
       addNotificationResponseReceivedListener: (handler) => {
-        onResponse = handler;
+        taps.current = handler;
         return { remove: () => {} };
       },
       addPushTokenListener: () => ({ remove: () => {} }),
@@ -55,20 +57,20 @@ describe("a notification tap", () => {
     await Promise.resolve();
     expect(opened).toEqual([`/notice/${ID}`]);
     last = null;
-    onResponse?.({ deepLink: `yardsort://notice/review/${ID}` });
+    taps.current?.({ deepLink: `yardsort://notice/review/${ID}` });
     expect(opened).toEqual([`/notice/${ID}`, `/notice/${ID}`]);
-    onResponse?.({ deepLink: "yardsort://signed-in?code=Q7K2M9NP" });
+    taps.current?.({ deepLink: "yardsort://signed-in?code=Q7K2M9NP" });
     expect(opened).toHaveLength(2);
   });
 
   test("re-registers when the system rotates the token", () => {
     const tokens: string[] = [];
-    let onToken: ((os: string, data: unknown) => void) | null = null;
+    const rotated: { current: ((os: string, data: unknown) => void) | null } = { current: null };
     const runtime: PushRuntime = {
       getLastNotificationResponseAsync: async () => null,
       addNotificationResponseReceivedListener: () => ({ remove: () => {} }),
       addPushTokenListener: (handler) => {
-        onToken = handler;
+        rotated.current = handler;
         return { remove: () => {} };
       },
     };
@@ -77,9 +79,9 @@ describe("a notification tap", () => {
       () => {},
       (token) => tokens.push(`${token.platform}:${token.token}`),
     );
-    onToken?.("ios", "rotated");
-    onToken?.("android", "next");
-    onToken?.("web", "ignored");
+    rotated.current?.("ios", "rotated");
+    rotated.current?.("android", "next");
+    rotated.current?.("web", "ignored");
     expect(tokens).toEqual(["apns:rotated", "fcm:next"]);
   });
 });
