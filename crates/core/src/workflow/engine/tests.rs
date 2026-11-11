@@ -2517,6 +2517,87 @@ fn a_clarifying_step_without_a_summary_fails_at_its_timeout() {
 }
 
 #[test]
+fn a_dead_session_with_no_summary_fails_without_a_timeout() {
+    let mut run = Run::from(CLARIFY);
+    session_up(&mut run);
+    run.advance();
+    assert_eq!(run.status("discover"), "waiting");
+    run.world.sessions.insert(
+        "pty-9".into(),
+        SessionFacts {
+            alive: false,
+            busy: false,
+            settled_at: None,
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "failed");
+    assert!(run
+        .note("discover")
+        .unwrap()
+        .contains("The session ended without a summary."));
+}
+
+#[test]
+fn an_open_question_fails_when_the_session_ends() {
+    let mut run = Run::from(CLARIFY);
+    session_up(&mut run);
+    run.world.clarifications.insert(
+        "discover".into(),
+        ClarificationState {
+            rounds: 1,
+            waiting: true,
+            ..ClarificationState::default()
+        },
+    );
+    run.world.sessions.insert(
+        "pty-9".into(),
+        SessionFacts {
+            alive: false,
+            busy: false,
+            settled_at: None,
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "failed");
+    assert!(run
+        .note("discover")
+        .unwrap()
+        .contains("The session ended without a summary."));
+}
+
+#[test]
+fn a_pending_answer_fails_when_the_session_ends() {
+    let mut run = Run::from(CLARIFY);
+    session_up(&mut run);
+    run.world.clarifications.insert(
+        "discover".into(),
+        ClarificationState {
+            rounds: 1,
+            pending: Some(PendingAnswer {
+                round: 1,
+                text: "The person answered.\n\nAnswer:\n30 seconds\n".into(),
+            }),
+            ..ClarificationState::default()
+        },
+    );
+    run.world.sessions.insert(
+        "pty-9".into(),
+        SessionFacts {
+            alive: false,
+            busy: false,
+            settled_at: None,
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("discover"), "failed");
+    assert!(run
+        .note("discover")
+        .unwrap()
+        .contains("before the answer could be sent back"));
+}
+
+#[test]
 fn an_open_question_does_not_finish_a_settled_session() {
     let mut run = Run::from(CLARIFY);
     session_up(&mut run);

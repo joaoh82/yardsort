@@ -9,11 +9,14 @@ has the downloads and the full commit lists.
   On a `wait_session` with `clarify: true`, the agent asks with `ys workflow ask`
   (one `--question` each) and the run waits. You answer in the run view, or with
   `ys workflow answer` from a terminal Yardsort did not start. The terminal needs the
-  one-time code shown in the window and in the notification. The window does not.
+  one-time code shown in the window and, unless the run is set not to notify, in the
+  notification. The code is issued either way. The window does not ask for it.
   The answer is typed back into that same session. A question only printed in the
   terminal is not asked. The step finishes when the agent records `ys workflow summary`,
-  or when `until: exited` and the session has ended. Going quiet does not finish it.
-  Without a summary it waits until the step's timeout and then fails. Rounds are
+  or when `until: exited` and the session has ended with no question still open.
+  Going quiet does not finish it. Without a summary, a session that is still running
+  waits until the step's timeout and then fails. If the session ends first, the step
+  fails and says the session ended without a summary. Rounds are
   limited by `max_rounds` (3 when left out, 10 at most). One more than that fails the
   step. `from: brief` hands the questions, the answers and that summary to the next
   phase. This is not an approval. The run says `Blocked: waiting for your answer.`

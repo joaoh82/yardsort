@@ -745,7 +745,7 @@ person answers in the run view, or with `ys workflow answer` from a terminal
 Yardsort did not start. The terminal must present the one-time code. The window
 does not: `answer_in_window` takes a `DesktopWindow`, the same guard as
 `decide_in_window`. The code lives on the question wait (`code_salt`, `code_hash`,
-`code_rounds`, `attempts`, migration `0036_clarification_delivery`, index 35). It
+`code_rounds`, `attempts`, migration `0035_workflow_clarifications`, index 34). It
 is checked before the write, and the update matches that hash and attempt count.
 Five wrong codes lock the terminal until Show a new code. A new round clears the
 hash, so the next question gets a new code.
@@ -761,10 +761,14 @@ a cancel or a halt cannot type into a dead run. An answer to a step that has
 already failed or timed out is refused, even when the run is still going.
 
 A clarifying step finishes only when `ys workflow summary` has been recorded, or
-when `until` is `exited` and the session has ended. A settled session with no
-summary keeps waiting until the step's timeout, then the step fails. A question
-only printed in the terminal is not a round, and a session going quiet is not a
-summary.
+when `until` is `exited` and the session has ended with no question still open. A
+settled session that is still running, with no summary, keeps waiting until the
+step's timeout, then the step fails. A session that has ended, with no summary,
+fails at once, including while an answer is still owed. An answer that was given
+and not yet typed fails because the session ended before it could be sent back.
+The code is issued even when `notify` is `never`; that setting only skips the
+notification. A question only printed in the terminal is not a round, and a
+session going quiet is not a summary.
 
 Each round is also a row in `workflow_clarification_rounds` (migration
 `0035_workflow_clarifications`, index 34), because the wait is one row per step

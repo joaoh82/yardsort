@@ -45,7 +45,6 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0033_workflow_attempts.sql"),
     include_str!("../migrations/0034_workflow_approval_history.sql"),
     include_str!("../migrations/0035_workflow_clarifications.sql"),
-    include_str!("../migrations/0036_clarification_delivery.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -5663,7 +5662,7 @@ steps:
         {
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[30].contains("CREATE TABLE workflow_approval_decisions"));
-            assert_eq!(MIGRATIONS.len(), 36);
+            assert_eq!(MIGRATIONS.len(), 35);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -5730,7 +5729,7 @@ steps:
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[31].contains("CREATE TABLE workflow_waits"));
             assert!(MIGRATIONS[31].contains("code_rounds"));
-            assert_eq!(MIGRATIONS.len(), 36);
+            assert_eq!(MIGRATIONS.len(), 35);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -6760,6 +6759,84 @@ steps:
             .conn()
             .query_row(
                 "SELECT attempts FROM workflow_approval_decisions WHERE run_id = 'run-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(attempts, 0);
+    }
+
+    #[test]
+    fn an_answer_code_replaced_while_it_is_checked_is_not_accepted() {
+        use crate::workflow::waits::AnswerWrite;
+        let store = Store::in_memory();
+        waiting_approval(&store, "run-1");
+        store
+            .conn()
+            .execute(
+                "INSERT INTO workflow_step_runs
+                 (run_id, step_id, position, action, status)
+                 VALUES ('run-1', 'ask', 1, 'wait_session', 'waiting')",
+                [],
+            )
+            .unwrap();
+        store
+            .open_workflow_wait(
+                "run-1",
+                "ask",
+                crate::workflow::waits::KIND_QUESTION,
+                crate::workflow::waits::BLOCKED_QUESTION,
+                crate::workflow::waits::ACTION_QUESTION,
+                Some("Which name?"),
+                "[]",
+                "{}",
+            )
+            .unwrap();
+        let code = store.begin_answer_code("run-1", "ask").unwrap().unwrap();
+        let original: Vec<u8> = store
+            .conn()
+            .query_row(
+                "SELECT code_hash FROM workflow_waits
+                 WHERE run_id = 'run-1' AND step_id = 'ask'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        // The hook runs after the presented code has matched and before the write,
+        // which is the window a restart reissue has while the hash runs.
+        let store_ptr: *const Store = &store;
+        CODE_CHECK_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                let store = unsafe { &*store_ptr };
+                store
+                    .save_answer_code("run-1", "ask", "REPLACED", b"other-salt", &[9u8; 32], false)
+                    .unwrap();
+            }));
+        });
+        let result =
+            crate::workflow::waits::answer_with_code(&store, "run-1", "ask", "Ship", "ada", &code);
+        CODE_CHECK_HOOK.with(|hook| *hook.borrow_mut() = None);
+        assert_eq!(result.unwrap(), AnswerWrite::WrongCode);
+        assert!(store
+            .workflow_wait("run-1", "ask")
+            .unwrap()
+            .unwrap()
+            .answer
+            .is_none());
+        let now: Vec<u8> = store
+            .conn()
+            .query_row(
+                "SELECT code_hash FROM workflow_waits
+                 WHERE run_id = 'run-1' AND step_id = 'ask'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_ne!(now, original);
+        let attempts: i64 = store
+            .conn()
+            .query_row(
+                "SELECT attempts FROM workflow_waits WHERE run_id = 'run-1' AND step_id = 'ask'",
                 [],
                 |row| row.get(0),
             )

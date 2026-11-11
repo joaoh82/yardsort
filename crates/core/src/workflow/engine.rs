@@ -1139,8 +1139,10 @@ fn begin(
 }
 
 /// A clarifying wait. It finishes on a recorded summary, or when `until` is exited and the
-/// session has ended. A quiet session keeps waiting until the timeout, then the step fails.
-/// A claim that was not confirmed typed fails the step and is not typed again.
+/// session has ended with no question still open. A quiet session keeps waiting until the
+/// timeout, then the step fails. A session that has ended, with no summary, fails at once,
+/// including while an answer is still owed. A claim that was not confirmed typed fails the
+/// step and is not typed again.
 #[allow(clippy::too_many_arguments)]
 fn clarify_wait(
     id: &str,
@@ -1206,6 +1208,17 @@ fn clarify_wait(
         });
     }
     if state.waiting {
+        let facts = session_of(session)
+            .as_deref()
+            .map(|pty| world.session(pty))
+            .unwrap_or_default();
+        if !facts.alive {
+            return Some(fail(
+                id,
+                StepStatus::Waiting,
+                "The session ended without a summary.",
+            ));
+        }
         return if timed_out {
             Some(fail(
                 id,
@@ -1226,13 +1239,23 @@ fn clarify_wait(
         });
     }
     let facts = session_of(session)
-        .map(|pty| world.session(&pty))
+        .as_deref()
+        .map(|pty| world.session(pty))
         .unwrap_or_default();
     if until == super::Until::Exited && !facts.alive {
         return Some(Move {
             outputs: Some("{\"outcome\":\"exited\"}".to_owned()),
             ..to(id, StepStatus::Waiting, StepStatus::Succeeded)
         });
+    }
+    // `until: settled` has no "the program ended" outcome. A dead session with no summary
+    // would otherwise wait forever when the step has no timeout.
+    if !facts.alive {
+        return Some(fail(
+            id,
+            StepStatus::Waiting,
+            "The session ended without a summary.",
+        ));
     }
     if timed_out {
         return Some(fail(

@@ -47,7 +47,8 @@ pub fn with_note(prompt: Option<String>) -> Option<String> {
 
 /// What the engine needs to know about one step's rounds. The driver fills this from the
 /// tables. A world with no clarifications leaves it empty. A clarifying step does not
-/// finish on a quiet session: it finishes on [`Self::summary`], or on `until: exited`.
+/// finish on a quiet session: it finishes on [`Self::summary`], or on `until: exited`
+/// when no question is still open. A session that has ended with no summary fails.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClarificationState {
     /// Rounds stored, including one the limit already refused.

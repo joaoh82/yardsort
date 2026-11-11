@@ -1413,17 +1413,17 @@ fn is_applied_decision(change: &Move) -> bool {
 /// Open the wait and issue the first code when an approval starts waiting. A notification
 /// that cannot be shown does not fail the step. The code is not written into the step.
 /// A question opened since the last tick, or reopened for another round. The one-time code
-/// is issued the same way as an approval. `notify: never` stays quiet.
+/// is issued the same way as an approval, including when `notify` is `never`: a terminal
+/// still has to present it. The notification is what stays quiet.
 fn tell_open_questions(
     driver: &Driver,
     store: &Store,
     hands: &dyn Hands,
     run: &WorkflowRunRow,
 ) -> IpcResult<()> {
+    // A lookup error is told anyway: missing a notice is worse than an extra one.
+    // The code is issued either way, so `ys workflow answer` is not left with no code.
     let tell = store.tell_workflow_approval(&run.id).unwrap_or(true);
-    if !tell {
-        return Ok(());
-    }
     for wait in store.workflow_waits_unapplied()? {
         if wait.run_id != run.id || wait.kind != super::waits::KIND_QUESTION {
             continue;
@@ -1442,6 +1442,9 @@ fn tell_open_questions(
             continue;
         };
         hands.approval_code(&run.id, &wait.step_id, &code);
+        if !tell {
+            continue;
+        }
         let replaced = had && wait.notified_at.is_some();
         let title = if replaced {
             super::waits::TITLE_ANSWER_REPLACED

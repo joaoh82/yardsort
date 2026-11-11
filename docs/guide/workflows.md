@@ -392,9 +392,12 @@ with the answer.
 `ys workflow ask --question "..."`, one `--question` for each question in the round.
 Yardsort stores that round and the run waits. A question the agent only prints is not
 asked. The step does not finish because the session went quiet. It finishes when the
-agent records a summary, or when `until: exited` and the session has ended. With
-`until: settled`, a quiet session with no summary keeps waiting until `timeout`, and
-then the step fails.
+agent records a summary, or when `until: exited` and the session has ended with no
+question still open. With `until: settled`, a quiet session that is still running and
+has no summary keeps waiting until `timeout`, and then the step fails. If that session
+ends first, with no summary, the step fails and says the session ended without a
+summary. The same happens when a question is still waiting for an answer. An answer
+that was given and not yet typed fails because it could not be sent back.
 
 You answer in the run view, which does not ask for a code, or from a terminal Yardsort
 did not start. The terminal needs the one-time code the window and the notification
@@ -427,7 +430,8 @@ stops until you press **Show a new code**.
 
 `timeout` still fails the step when you have not answered in time, or when a summary
 never arrives. A schedule or a trigger whose notify is not `never` tells you a
-question is waiting.
+question is waiting. `notify: never` stays quiet, and the code is still issued, so a
+terminal can answer.
 
 ### Conditional paths
 
@@ -595,7 +599,7 @@ circle are reported, because none of them could ever start.
 | Action             | Keys                                                              | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------------ | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `start_session`    | `harness` (required), `prompt`, `model`, `effort`, `skip_memory`  | Starts an agent in the workspace, like the composer does, with `prompt` as its first message. It opens as a tab there. `harness` is an agent's id, like `claude`, or exactly `{{ inputs.<id> }}` for an input of kind `harness`.                                                                                                                                                                                                                                                                                                               |
-| `wait_session`     | `session` (required), `until`, `timeout`, `clarify`, `max_rounds` | Waits for a session. `until: settled`, the default, means it has gone quiet after at least 8 seconds of output, or its harness reported a finished turn. `until: exited` means the program has ended. `clarify: true` lets the agent ask you questions. That step finishes when the agent records `ys workflow summary`, or when `until` is `exited` and the session has ended. Going quiet does not finish it; without a summary it waits until `timeout` and then fails. `max_rounds` is how many rounds, from 1 to 10, and 3 when left out. |
+| `wait_session`     | `session` (required), `until`, `timeout`, `clarify`, `max_rounds` | Waits for a session. `until: settled`, the default, means it has gone quiet after at least 8 seconds of output, or its harness reported a finished turn. `until: exited` means the program has ended. `clarify: true` lets the agent ask you questions. That step finishes when the agent records `ys workflow summary`, or when `until` is `exited` and the session has ended with no question still open. Going quiet does not finish it. A session that ends with no summary fails the step. A session that is still running and has no summary waits until `timeout` and then fails. `max_rounds` is how many rounds, from 1 to 10, and 3 when left out. |
 | `send_to_session`  | `session` (required), `prompt` (required), `timeout`              | Types `prompt` into a running session. It waits until that session is quiet: a busy agent is never interrupted. If the session is gone, the step is skipped.                                                                                                                                                                                                                                                                                                                                                                                   |
 | `wait_pr_activity` | `kind`, `timeout`                                                 | Waits for a new review or comment on the workspace's pull request, since the run started. `kind` is `review`, `comment` or `any`, the default.                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `run_test`         | `test` (required), `inputs`, `timeout`, `gate`                    | Runs a smoke test in the workspace and waits for its verdict. The step succeeds whether the test passed or failed, so a later step can read `verdict` and act on either; it fails only on no verdict or a timeout. `gate: true` makes a failed verdict fail the step, skip the steps still going, and stop the run. `test` is a test id, or exactly `{{ inputs.<id> }}` for an input of kind `test`. `inputs` is a map of the test's own input ids to values.                                                                                  |

@@ -600,7 +600,9 @@ cannot use it, and neither can the Floor Manager. It asks for the one-time code 
 the window and in the notification, the same way `approve` does. Leave `--code` out to
 type it with echo off, or pass `--code -` and the code on standard input. The window does
 not ask for the code. The same session receives the answer. A clarifying step finishes
-when the agent records `summary`, not when the session goes quiet.
+when the agent records `summary`, or when `until: exited` and the session has ended
+with no question still open. Going quiet does not finish it. A session that ends
+with no summary fails the step.
 See [Asking a question](workflows.md#asking-a-question).
 
 `copy` writes into the `workflows` folder and never overwrites; `--as <new-id>` makes a second

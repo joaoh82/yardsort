@@ -2392,6 +2392,16 @@ impl pty_host::TerminalHost for QuietHost {
 
 struct Asking {
     notices: Mutex<Vec<(String, String)>>,
+    codes: Mutex<Vec<String>>,
+}
+
+impl Asking {
+    fn new() -> Self {
+        Self {
+            notices: Mutex::new(Vec::new()),
+            codes: Mutex::new(Vec::new()),
+        }
+    }
 }
 
 impl Hands for Asking {
@@ -2421,6 +2431,10 @@ impl Hands for Asking {
     ) -> Result<Conversation, String> {
         Ok(Conversation::Ready(Some(PRINTED_QUESTION.to_owned())))
     }
+
+    fn approval_code(&self, _: &str, _: &str, code: &str) {
+        self.codes.lock().unwrap().push(code.to_owned());
+    }
 }
 
 fn clarify_run(yaml: &str) -> (tempfile::TempDir, Store, String) {
@@ -2439,9 +2453,7 @@ fn quiet(driver: &Driver) {
 fn a_clarification_round_pauses_and_the_same_session_receives_the_answer() {
     let (_dir, store, run) = clarify_run(CLARIFY_YAML);
     let host = QuietHost::new();
-    let hands = Asking {
-        notices: Mutex::new(Vec::new()),
-    };
+    let hands = Asking::new();
     let driver = Driver::new(1, Duration::from_secs(3600));
     driver.tick(&store, &host, &hands, &git()).unwrap();
     assert_eq!(step(&store, &run, "start").status, "succeeded");
@@ -2548,12 +2560,94 @@ fn a_clarification_round_pauses_and_the_same_session_receives_the_answer() {
 }
 
 #[test]
+fn a_question_under_notify_never_still_gets_a_code() {
+    let (_dir, store, run) = clarify_run(CLARIFY_YAML);
+    let row = store.workflow_run(&run).unwrap().unwrap();
+    let spec = crate::schedule::ScheduleSpec::Daily {
+        time: crate::schedule::TimeOfDay { hour: 9, minute: 0 },
+    }
+    .to_json();
+    let schedule = store
+        .add_schedule(
+            &crate::store::ScheduleFields {
+                name: "Nightly",
+                target_kind: "workflow",
+                target_id: "clarify",
+                project_id: row.project_id.as_deref().unwrap(),
+                workspace_id: row.workspace_id.as_deref().unwrap(),
+                workspace_name: &row.workspace_name,
+                inputs: "{}",
+                spec: &spec,
+                missed: "run_once",
+                notify: "never",
+                next_at: Some(1),
+            },
+            "cli",
+        )
+        .unwrap();
+    store
+        .record_schedule_run(&crate::store::NewScheduleRun {
+            schedule_id: &schedule.id,
+            due_at: 1,
+            fired_at: 1,
+            outcome: "started",
+            manual: false,
+            run_id: Some(&run),
+            note: None,
+        })
+        .unwrap();
+    let host = QuietHost::new();
+    let hands = Asking::new();
+    let driver = Driver::new(1, Duration::from_secs(3600));
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert_eq!(
+        crate::workflow::clarify::ask(
+            &store,
+            &run,
+            "discover",
+            &["What should the timeout be?".to_owned()]
+        )
+        .unwrap(),
+        crate::workflow::clarify::AskWrite::Recorded { round: 1 }
+    );
+    driver.tick(&store, &host, &hands, &git()).unwrap();
+    assert!(
+        !hands
+            .notices
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(title, _)| title == crate::workflow::waits::TITLE_ANSWER),
+        "notify never stays quiet: {:?}",
+        hands.notices.lock().unwrap()
+    );
+    assert!(store.answer_code_present(&run, "discover").unwrap());
+    let code = hands
+        .codes
+        .lock()
+        .unwrap()
+        .last()
+        .cloned()
+        .expect("the window was given a code");
+    assert_eq!(
+        crate::workflow::waits::answer_with_code(
+            &store,
+            &run,
+            "discover",
+            "30 seconds",
+            "ada",
+            &code
+        )
+        .unwrap(),
+        crate::workflow::waits::AnswerWrite::Recorded
+    );
+}
+
+#[test]
 fn a_question_only_printed_in_the_session_does_not_pause_the_step() {
     let (_dir, store, run) = clarify_run(CLARIFY_YAML);
     let host = QuietHost::new();
-    let hands = Asking {
-        notices: Mutex::new(Vec::new()),
-    };
+    let hands = Asking::new();
     let driver = Driver::new(1, Duration::from_secs(3600));
     driver.tick(&store, &host, &hands, &git()).unwrap();
     assert!(store.workflow_wait(&run, "discover").unwrap().is_none());
@@ -2588,9 +2682,7 @@ fn a_question_only_printed_in_the_session_does_not_pause_the_step() {
 fn clarification_can_take_more_than_one_round() {
     let (_dir, store, run) = clarify_run(CLARIFY_YAML);
     let host = QuietHost::new();
-    let hands = Asking {
-        notices: Mutex::new(Vec::new()),
-    };
+    let hands = Asking::new();
     let driver = Driver::new(1, Duration::from_secs(3600));
     driver.tick(&store, &host, &hands, &git()).unwrap();
     assert_eq!(
@@ -2645,9 +2737,7 @@ fn a_clarification_past_the_round_limit_fails_the_step() {
     let yaml = CLARIFY_YAML.replace("max_rounds: 3", "max_rounds: 1");
     let (_dir, store, run) = clarify_run(&yaml);
     let host = QuietHost::new();
-    let hands = Asking {
-        notices: Mutex::new(Vec::new()),
-    };
+    let hands = Asking::new();
     let driver = Driver::new(1, Duration::from_secs(3600));
     driver.tick(&store, &host, &hands, &git()).unwrap();
     crate::workflow::clarify::ask(&store, &run, "discover", &["Only once?".to_owned()]).unwrap();
@@ -2676,9 +2766,7 @@ fn a_clarification_past_the_round_limit_fails_the_step() {
 fn an_answer_is_typed_once_across_a_restart() {
     let (_dir, store, run) = clarify_run(CLARIFY_YAML);
     let host = QuietHost::new();
-    let hands = Asking {
-        notices: Mutex::new(Vec::new()),
-    };
+    let hands = Asking::new();
     let driver = Driver::new(1, Duration::from_secs(3600));
     driver.tick(&store, &host, &hands, &git()).unwrap();
     crate::workflow::clarify::ask(&store, &run, "discover", &["Which name?".to_owned()]).unwrap();
@@ -2747,9 +2835,7 @@ fn a_busy_session_releases_the_claim_and_the_next_tick_types_the_answer() {
     let (_dir, store, run) = clarify_run(CLARIFY_YAML);
     let host = QuietHost::new();
     host.hold.store(true, Ordering::SeqCst);
-    let hands = Asking {
-        notices: Mutex::new(Vec::new()),
-    };
+    let hands = Asking::new();
     let driver = Driver::new(1, Duration::from_secs(3600));
     driver.tick(&store, &host, &hands, &git()).unwrap();
     crate::workflow::clarify::ask(&store, &run, "discover", &["Which name?".to_owned()]).unwrap();
@@ -2778,9 +2864,7 @@ fn a_busy_session_releases_the_claim_and_the_next_tick_types_the_answer() {
 fn a_cancelled_or_halted_run_is_not_typed_an_answer() {
     let (_dir, store, run) = clarify_run(CLARIFY_YAML);
     let host = QuietHost::new();
-    let hands = Asking {
-        notices: Mutex::new(Vec::new()),
-    };
+    let hands = Asking::new();
     let driver = Driver::new(1, Duration::from_secs(3600));
     driver.tick(&store, &host, &hands, &git()).unwrap();
     crate::workflow::clarify::ask(&store, &run, "discover", &["Which name?".to_owned()]).unwrap();
