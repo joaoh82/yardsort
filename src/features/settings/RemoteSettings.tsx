@@ -108,9 +108,7 @@ export function RemoteSettings() {
   return (
     <div className="grid gap-5 p-5">
       <section className="grid gap-2">
-        <h3 className="text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
-          Remote
-        </h3>
+        <h3 className="text-small font-semibold tracking-wider text-ink-muted uppercase">Remote</h3>
         <p role="note" className="rounded border border-accent/40 bg-accent/10 px-3 py-2 text-ink">
           Remote is still under development, and will be until the whole plan for it is finished.
           Expect it to change. It stays off, and connects to nothing, unless you turn it on below.
@@ -144,7 +142,7 @@ export function RemoteSettings() {
           <section aria-label="This computer" className="grid gap-2">
             <p>
               On, as <span className="text-ink">{status.host.name}</span> at{" "}
-              <span className="font-mono text-[12px] select-text">{status.host.serverUrl}</span>.
+              <span className="font-mono text-detail select-text">{status.host.serverUrl}</span>.
             </p>
             <p className="text-ink-faint">Its sign-in is kept {status.credentials}.</p>
             <LinkLine link={status.host.link} />
@@ -525,7 +523,7 @@ function EarlierDaemon(props: {
             be resumed afterwards.
           </p>
           {daemon.agents.length > 0 && (
-            <ul className="max-h-40 overflow-y-auto rounded bg-canvas p-2 text-[12px]">
+            <ul className="max-h-40 overflow-y-auto rounded bg-canvas p-2 text-detail">
               {agentPlaces(daemon.agents, tabs, projects).map((agent) => (
                 <li key={agent.id} className="flex gap-2 py-0.5">
                   <span className="font-medium text-ink">{agent.title}</span>

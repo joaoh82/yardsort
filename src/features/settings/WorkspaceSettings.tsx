@@ -94,7 +94,7 @@ export function WorkspaceSettings() {
             setRoot(e.target.value);
             setSaved(false);
           }}
-          className={`${inputClass} font-mono text-[12px]`}
+          className={`${inputClass} font-mono text-detail`}
         />
       </Field>
 
@@ -113,7 +113,7 @@ export function WorkspaceSettings() {
             setPrefix(e.target.value);
             setSaved(false);
           }}
-          className={`${inputClass} w-48 font-mono text-[12px]`}
+          className={`${inputClass} w-48 font-mono text-detail`}
         />
       </Field>
 
@@ -128,7 +128,7 @@ export function WorkspaceSettings() {
         </button>
         {saved && !dirty && <span className="text-ink-faint">Saved.</span>}
       </div>
-      <p className="text-[11px] text-ink-faint select-text">Settings file: {info.filePath}</p>
+      <p className="text-small text-ink-faint select-text">Settings file: {info.filePath}</p>
     </form>
   );
 }

@@ -82,7 +82,7 @@ export function RemoveProjectDialog({
           <span>
             Also delete its {workspaces === 1 ? "workspace" : `${workspaces} workspaces`} and their
             saved conversations from Yardsort
-            <span className="block text-[11px] text-ink-faint">
+            <span className="block text-small text-ink-faint">
               Left alone, they are all back — imported worktrees too — when this folder is added
               again.
             </span>

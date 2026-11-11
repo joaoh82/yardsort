@@ -8,13 +8,30 @@
   --color-line: #262b34;
   --color-ink: #e8eaed;
   --color-ink-muted: #9aa3af;
-  --color-ink-faint: #6b7380;
+  --color-ink-faint: #808a99;
   --color-accent: #f5b83d;
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono:
     "JetBrains Mono", "JetBrainsMono Nerd Font", ui-monospace, "Cascadia Code", "SF Mono", Menlo,
     Consolas, monospace;
+}
+
+/* The type scale. Every text size in the app is one of these four, or a heading (`text-base` and
+   up). Nothing is smaller than `micro`. `static`, because `body` reads `--text-ui` below.
+     ui      row labels, tab titles, buttons, body text
+     detail  hints and secondary lines in dialogs and views, inline code
+     small   branch names, statuses, section labels, the two bottom bars
+     micro   count badges, pull request numbers, key hints
+   The size ladder that goes with it, in Tailwind steps: bars `h-7`, rows and compact controls
+   `h-8`, form controls `h-9`, panel headers, nav rows and tabs `h-10`; icon buttons `size-7`,
+   icons `size-4`, status dots `size-2`. The terminal's size is set in `TerminalView.tsx`, and the
+   code viewers' in their CodeMirror themes. */
+@theme static {
+  --text-ui: 14px;
+  --text-detail: 13px;
+  --text-small: 12px;
+  --text-micro: 11px;
 }
 
 /* One per agent in the Usage view's charts. Validated for colour-blind separation against the
@@ -40,7 +57,7 @@
     --color-line: #d9dde3;
     --color-ink: #14171c;
     --color-ink-muted: #4b5563;
-    --color-ink-faint: #7b8493;
+    --color-ink-faint: #667080;
     --color-accent: #b77a00;
     --color-agent-claude: #c2603f;
     --color-agent-codex: #2f74c0;
@@ -60,7 +77,7 @@ body {
   background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: var(--text-ui);
   -webkit-font-smoothing: antialiased;
   /* This is an app, not a page: no text selection or rubber-banding on chrome. */
   user-select: none;

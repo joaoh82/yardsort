@@ -50,7 +50,7 @@ export function OtherHostView({ hostId }: { hostId: string }) {
             <span className="font-semibold">{title}</span>
             <span className="text-ink-muted"> · another computer</span>
           </p>
-          <p className="text-[12px] text-ink-faint">
+          <p className="text-detail text-ink-faint">
             What runs there, through the relay. Its terminals can be watched here, and typed into
             only once this computer takes control. What is started here runs there. Nothing here
             acts on this computer.
@@ -139,7 +139,7 @@ function Shown({ view, acts: given }: { view: View; acts: Omit<Acts, "mayStart" 
         view.projects.map((project) => (
           <section key={project.id} aria-label={project.name} className="grid gap-2">
             <div className="flex items-center gap-2">
-              <h3 className="flex-1 text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+              <h3 className="flex-1 text-small font-semibold tracking-wider text-ink-muted uppercase">
                 {project.name}
               </h3>
               {acts.mayStart && (
@@ -167,10 +167,10 @@ function Shown({ view, acts: given }: { view: View; acts: Omit<Acts, "mayStart" 
       )}
       {view.activity.length > 0 && (
         <section aria-label="Activity" className="grid gap-2">
-          <h3 className="text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+          <h3 className="text-small font-semibold tracking-wider text-ink-muted uppercase">
             Activity
           </h3>
-          <ul className="grid gap-0.5 text-[12px]">
+          <ul className="grid gap-0.5 text-detail">
             {view.activity.map((event) => (
               <li key={event.id} className="flex gap-3">
                 <span className="w-24 shrink-0 text-ink-faint tabular-nums">
@@ -210,7 +210,7 @@ function Workspace({ workspace, acts }: { workspace: OtherWorkspace; acts: Acts 
       <div className="flex items-baseline gap-2">
         <span className="text-ink">{workspace.name}</span>
         {workspace.branch && (
-          <span className="font-mono text-[12px] text-ink-faint">{workspace.branch}</span>
+          <span className="font-mono text-detail text-ink-faint">{workspace.branch}</span>
         )}
         {workspace.archived && <span className="text-ink-faint">archived</span>}
         <span className="flex-1" />
@@ -230,7 +230,7 @@ function Workspace({ workspace, acts }: { workspace: OtherWorkspace; acts: Acts 
         )}
       </div>
       {workspace.sessions.length + workspace.terminals.length > 0 && (
-        <ul className="mt-1 grid gap-0.5 text-[12px]">
+        <ul className="mt-1 grid gap-0.5 text-detail">
           {workspace.sessions.map((session) => (
             <Session key={session.id} session={session} acts={acts} />
           ))}
@@ -430,7 +430,7 @@ function StartForm({
       )}
       {picks && agents && agents.length > 0 && (
         <label className="grid gap-1">
-          <span className="text-[12px] text-ink-muted">Agent</span>
+          <span className="text-detail text-ink-muted">Agent</span>
           <select
             value={chosen ?? ""}
             onChange={(e) => setAgent(e.target.value)}
@@ -447,7 +447,7 @@ function StartForm({
       )}
       <div className="grid gap-1">
         <label className="grid gap-1">
-          <span className="text-[12px] text-ink-muted">{words.field}</span>
+          <span className="text-detail text-ink-muted">{words.field}</span>
           <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
@@ -456,7 +456,7 @@ function StartForm({
             className="rounded border border-line bg-surface px-2 py-1 text-ink"
           />
         </label>
-        <p className="text-[12px] text-ink-faint">{words.hint}</p>
+        <p className="text-detail text-ink-faint">{words.hint}</p>
       </div>
       {problem && (
         <p role="alert" className="text-red-300 select-text">
@@ -473,7 +473,7 @@ function StartForm({
           type="button"
           onClick={() => void go()}
           disabled={!ready}
-          className="rounded bg-accent px-3 py-1 text-white disabled:opacity-50"
+          className="rounded bg-accent px-3 py-1.5 text-white disabled:opacity-50"
         >
           {busy ? `${words.go}…` : words.go}
         </button>
@@ -481,7 +481,7 @@ function StartForm({
           type="button"
           onClick={onBack}
           disabled={busy}
-          className="rounded border border-line px-3 py-1 text-ink-muted hover:text-ink"
+          className="rounded border border-line px-3 py-1.5 text-ink-muted hover:text-ink"
         >
           Back
         </button>

@@ -48,8 +48,8 @@ export function PullRequestDetails({
           </span>
         )}
       </div>
-      <p className="text-sm font-medium break-words">{pr.title}</p>
-      <p className="font-mono text-[11px] break-all text-ink-muted">
+      <p className="text-[15px] font-medium break-words">{pr.title}</p>
+      <p className="font-mono text-small break-all text-ink-muted">
         {pr.branch}
         {details?.base ? ` → ${details.base}` : ""}
       </p>
@@ -81,7 +81,7 @@ export function PullRequestDetails({
         </div>
       )}
       {updated && !Number.isNaN(updated.getTime()) && (
-        <p className="text-[11px] text-ink-faint">Updated {updated.toLocaleString()}</p>
+        <p className="text-small text-ink-faint">Updated {updated.toLocaleString()}</p>
       )}
       {link && (
         <button

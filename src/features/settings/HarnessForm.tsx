@@ -205,7 +205,7 @@ export function HarnessForm({ harness, isNew, onSaved, onRemoved }: Props) {
             disabled={!isNew}
             spellCheck={false}
             onChange={(e) => set({ id: e.target.value })}
-            className={`${inputClass} font-mono text-[12px]`}
+            className={`${inputClass} font-mono text-detail`}
           />
         </Field>
       </div>
@@ -224,7 +224,7 @@ export function HarnessForm({ harness, isNew, onSaved, onRemoved }: Props) {
           value={draft.command}
           spellCheck={false}
           onChange={(e) => set({ command: e.target.value })}
-          className={`${inputClass} font-mono text-[12px]`}
+          className={`${inputClass} font-mono text-detail`}
         />
       </Field>
 
@@ -241,7 +241,7 @@ export function HarnessForm({ harness, isNew, onSaved, onRemoved }: Props) {
       </Field>
 
       <fieldset className="grid gap-3">
-        <legend className="mb-2 text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+        <legend className="mb-2 text-small font-semibold tracking-wider text-ink-muted uppercase">
           Arguments
         </legend>
         <label className="flex items-start gap-2">
@@ -254,7 +254,7 @@ export function HarnessForm({ harness, isNew, onSaved, onRemoved }: Props) {
           />
           <span className="grid gap-0.5">
             Always start in auto mode
-            <span className="text-[12px] text-ink-faint">
+            <span className="text-detail text-ink-faint">
               {draft.args.autoArgs.trim() ? (
                 <>
                   Every new, resumed and forked session starts with{" "}
@@ -281,7 +281,7 @@ export function HarnessForm({ harness, isNew, onSaved, onRemoved }: Props) {
               value={draft.args[key]}
               spellCheck={false}
               onChange={(e) => set({ args: { ...draft.args, [key]: e.target.value } })}
-              className={`${inputClass} font-mono text-[12px]`}
+              className={`${inputClass} font-mono text-detail`}
             />
           </Field>
         ))}
@@ -358,11 +358,11 @@ export function HarnessForm({ harness, isNew, onSaved, onRemoved }: Props) {
       </div>
 
       <section aria-label="Command preview" className="rounded border border-line bg-canvas p-3">
-        <h3 className="mb-2 text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+        <h3 className="mb-2 text-small font-semibold tracking-wider text-ink-muted uppercase">
           What will run
         </h3>
         {preview && def ? (
-          <dl className="grid gap-2 font-mono text-[12px]">
+          <dl className="grid gap-2 font-mono text-detail">
             {(["start", "resume", "fork"] as const).map((kind) => (
               <div key={kind} className="grid grid-cols-[4rem_1fr] gap-2">
                 <dt className="text-ink-faint">{kind}</dt>

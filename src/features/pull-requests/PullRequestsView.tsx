@@ -158,7 +158,7 @@ export function PullRequestsView() {
   return (
     <section aria-label="Pull requests" className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-4 py-2">
-        <h1 className="text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+        <h1 className="text-small font-semibold tracking-wider text-ink-muted uppercase">
           Pull requests
         </h1>
         <div role="tablist" aria-label="State" className="flex gap-1">
@@ -169,7 +169,7 @@ export function PullRequestsView() {
               role="tab"
               aria-selected={filters.state === tab.id}
               onClick={() => setFilters({ state: tab.id })}
-              className={`rounded-full px-3 py-1 whitespace-nowrap ${
+              className={`rounded-full px-3 py-1.5 whitespace-nowrap ${
                 filters.state === tab.id ? "bg-raised text-ink" : "text-ink-muted hover:text-ink"
               }`}
             >
@@ -199,7 +199,7 @@ export function PullRequestsView() {
           aria-label="Close pull requests"
           title="Close"
           onClick={() => useProjectsStore.getState().openPullRequests(false)}
-          className="size-6 rounded text-ink-muted hover:bg-raised hover:text-ink"
+          className="size-7 rounded text-ink-muted hover:bg-raised hover:text-ink"
         >
           ×
         </button>
@@ -293,7 +293,7 @@ function Empty({
         <button
           type="button"
           onClick={onClear}
-          className="mt-2 rounded border border-line px-3 py-1 text-ink-muted hover:border-accent hover:text-ink"
+          className="mt-2 rounded border border-line px-3 py-1.5 text-ink-muted hover:border-accent hover:text-ink"
         >
           Clear filters
         </button>
@@ -451,7 +451,7 @@ export function Notice({
   return (
     <p
       role={alert ? "alert" : "note"}
-      className={`shrink-0 border-b border-line px-4 py-1.5 text-[12px] ${alert ? "text-red-400" : "text-ink-muted"}`}
+      className={`shrink-0 border-b border-line px-4 py-1.5 text-detail ${alert ? "text-red-400" : "text-ink-muted"}`}
     >
       {children}
     </p>

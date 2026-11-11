@@ -21,6 +21,7 @@
 //!   else, a name made up at each start.
 //!
 //! Push is optional. With none of these set, notices wait until a provider is configured.
+//! The design is `docs/design/40-mobile-notifications.md`.
 //! - `YARDSORT_APNS_KEY_ID`, `YARDSORT_APNS_TEAM_ID`, `YARDSORT_APNS_BUNDLE_ID`
 //!   (`dev.yardsort.mobile` for a release build, `dev.yardsort.mobile.development` for a
 //!   development build), and `YARDSORT_APNS_KEY` or `YARDSORT_APNS_KEY_FILE` (the `.p8` PEM).

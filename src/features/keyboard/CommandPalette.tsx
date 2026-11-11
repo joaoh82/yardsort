@@ -112,14 +112,14 @@ export function CommandPalette() {
               className={`flex cursor-pointer items-center justify-between gap-3 rounded px-3 py-2 ${i === active ? "bg-raised text-accent" : "text-ink-muted"} ${item.disabled ? "opacity-40" : ""}`}
             >
               <span>{item.label}</span>
-              <kbd className="shrink-0 text-[11px]">{item.detail}</kbd>
+              <kbd className="shrink-0 text-small">{item.detail}</kbd>
             </li>
           ))}
           {!items.length && (
             <li className="p-4 text-ink-faint">No matching commands or workspaces.</li>
           )}
         </ul>
-        <p className="border-t border-line px-4 py-2 text-[11px] text-ink-faint">
+        <p className="border-t border-line px-4 py-2 text-small text-ink-faint">
           ↑ ↓ to navigate · Enter to select · Esc to close
         </p>
       </div>

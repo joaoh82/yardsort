@@ -57,7 +57,7 @@ export function DescribeWorkflow() {
       className="flex shrink-0 flex-col gap-2 border-b border-line bg-canvas/40 px-4 py-3"
     >
       <label className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+        <span className="text-small font-semibold tracking-wider text-ink-faint uppercase">
           Or describe it
         </span>
         <textarea
@@ -72,7 +72,7 @@ export function DescribeWorkflow() {
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          className="rounded border border-line px-3 py-1 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40"
+          className="rounded border border-line px-3 py-1.5 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40"
           disabled={!can}
           onClick={() => void write()}
         >

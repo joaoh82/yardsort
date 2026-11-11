@@ -325,7 +325,7 @@ projects, and sends a fixed sentence: "An agent on Build box needs you" is too m
 is the person's content); "Yardsort: an agent needs you" is the default. Tapping opens the app, which
 signs in and fetches the current state; it approves nothing. PTY quiet never becomes "needs you".
 
-YARD-4 built the shared notices in [39](39-mobile-notifications.md). A computer posts a category
+YARD-4 built the shared notices in [40](40-mobile-notifications.md). A computer posts a category
 and a stable event key over HTTP. The server chooses a fixed sentence and the phone opens that
 item. "An agent needs you" from a quiet terminal is still not this. A tap still approves nothing,
 and a one-time code is never in the push.

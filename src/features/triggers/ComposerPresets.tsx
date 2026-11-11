@@ -11,7 +11,7 @@ import { useHarnessStore } from "@/stores/harnesses";
 import { useTriggersStore } from "@/stores/triggers";
 
 const control =
-  "h-7 rounded border border-line bg-canvas px-1.5 text-[12px] text-ink outline-none focus:border-accent disabled:opacity-50";
+  "h-8 rounded border border-line bg-canvas px-1.5 text-detail text-ink outline-none focus:border-accent disabled:opacity-50";
 
 /** The presets ticked, by id, with the answer to each one's question: `""` for one that asks
  *  nothing. What the composer remembers per project. */
@@ -115,7 +115,7 @@ export function ComposerPresets({
 }) {
   if (choices.presets.length === 0) return null;
   return (
-    <fieldset className="mt-2 text-[12px] text-ink-faint">
+    <fieldset className="mt-2 text-detail text-ink-faint">
       <legend className="mb-1">When something happens in the new workspace</legend>
       <ul className="flex flex-col gap-1">
         {choices.presets.map((preset) => {

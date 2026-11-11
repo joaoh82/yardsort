@@ -148,7 +148,7 @@ function selectedLines(state: EditorState, side: DiffSideName): LineSelection | 
 const theme = EditorView.theme({
   "&": {
     height: "100%",
-    fontSize: "12px",
+    fontSize: "13px",
     backgroundColor: "var(--color-canvas)",
     color: "var(--color-ink)",
   },

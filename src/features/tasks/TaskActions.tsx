@@ -4,7 +4,7 @@ import { useTasksStore, type Target } from "@/stores/tasks";
 import type { Row } from "./rows";
 
 const button =
-  "h-7 rounded border border-line px-2.5 whitespace-nowrap hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent";
+  "h-8 rounded border border-line px-2.5 whitespace-nowrap hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent";
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 /** Each name once, whatever its capitals, in the order given. */
@@ -196,12 +196,12 @@ export function Reply({ target }: { target: Target }) {
         }}
         className="w-full resize-y rounded border border-line bg-canvas px-2 py-1.5 outline-none select-text focus:border-accent disabled:opacity-50"
       />
-      <div className="mt-1.5 flex items-center justify-end gap-3 text-[11px] text-ink-faint">
+      <div className="mt-1.5 flex items-center justify-end gap-3 text-small text-ink-faint">
         <span>Markdown, as on GitHub. Ctrl+Enter or ⌘Enter sends.</span>
         <button
           type="submit"
           disabled={!ready}
-          className="rounded bg-accent px-3 py-1 font-medium text-canvas disabled:opacity-40"
+          className="rounded bg-accent px-3 py-1.5 font-medium text-canvas disabled:opacity-40"
         >
           Comment
         </button>

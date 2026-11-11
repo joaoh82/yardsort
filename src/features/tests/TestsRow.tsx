@@ -25,7 +25,7 @@ export function TestsRow() {
       }
       title="Every project's smoke tests and their runs"
       onClick={() => useProjectsStore.getState().openTests(!open)}
-      className={`flex h-9 w-full shrink-0 items-center gap-2 border-b border-line px-3 text-left hover:bg-raised ${
+      className={`flex h-10 w-full shrink-0 items-center gap-2 border-b border-line px-3.5 text-left hover:bg-raised ${
         open ? "bg-raised text-ink" : "text-ink-muted"
       }`}
     >
@@ -35,7 +35,7 @@ export function TestsRow() {
         <span
           aria-hidden
           title={`${count} waiting for approval`}
-          className="shrink-0 rounded-full border border-accent/50 px-1.5 text-[10px] leading-4 text-accent tabular-nums"
+          className="shrink-0 rounded-full border border-accent/50 px-1.5 text-micro leading-4.5 text-accent tabular-nums"
         >
           {count}
         </span>
@@ -55,7 +55,7 @@ export function TestsIcon() {
       strokeWidth="1.3"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="size-3.5 shrink-0"
+      className="size-4 shrink-0"
     >
       <path d="M6 1.8h4" />
       <path d="M6.6 1.8v4.2L3 12.2a1.3 1.3 0 0 0 1.1 2h7.8a1.3 1.3 0 0 0 1.1-2L9.4 6V1.8" />

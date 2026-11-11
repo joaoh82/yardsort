@@ -1,4 +1,4 @@
-# 39 · Mobile notifications
+# 40 · Mobile notifications
 
 Built for YARD-4. One shared way for a computer to tell the phone that something happened.
 Workflows and desktop updates keep doing their own work. This delivers a notice and opens the item.

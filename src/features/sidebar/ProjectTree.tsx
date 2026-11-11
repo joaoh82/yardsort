@@ -121,7 +121,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
   return (
     <li role="treeitem" aria-expanded={expanded} aria-label={project.name}>
       <div
-        className="group flex h-7 items-center pr-1 hover:bg-raised"
+        className="group flex h-8 items-center pr-1 hover:bg-raised"
         onContextMenu={(event) => {
           event.preventDefault();
           setMenuAt({ x: event.clientX, y: event.clientY });
@@ -135,7 +135,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
         >
           <span
             aria-hidden
-            className={`w-3 text-[10px] text-ink-faint ${expanded ? "rotate-90" : ""}`}
+            className={`w-3 text-micro text-ink-faint ${expanded ? "rotate-90" : ""}`}
           >
             ▶
           </span>
@@ -144,7 +144,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
           >
             {project.name}
           </span>
-          {project.missing && <span className="text-[11px] text-red-400">missing</span>}
+          {project.missing && <span className="text-small text-red-400">missing</span>}
         </button>
         {waiting > 0 && (
           <button
@@ -152,7 +152,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
             onClick={() => setMemoryOpen(true)}
             title={`${waiting} memory ${waiting === 1 ? "proposal waits" : "proposals wait"} for you`}
             aria-label={`${waiting} memory ${waiting === 1 ? "proposal" : "proposals"} waiting in ${project.name}`}
-            className="mr-1 shrink-0 rounded-full border border-accent/50 px-1.5 text-[10px] leading-4 text-accent hover:bg-raised"
+            className="mr-1 shrink-0 rounded-full border border-accent/50 px-1.5 text-micro leading-4.5 text-accent hover:bg-raised"
           >
             {waiting}
           </button>
@@ -188,8 +188,8 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
               />
             ))}
           {composing && (
-            <li className="flex h-7 items-center gap-2 bg-raised pr-2 pl-7 text-ink-muted italic">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full border border-accent" />
+            <li className="flex h-8 items-center gap-2 bg-raised pr-2 pl-8 text-ink-muted italic">
+              <span aria-hidden className="size-2 shrink-0 rounded-full border border-accent" />
               new workspace…
             </li>
           )}
@@ -220,9 +220,9 @@ function ArchivedGroup({ project }: { project: Project }) {
       <button
         type="button"
         onClick={() => useProjectsStore.getState().remember(key, !open)}
-        className="flex h-6 w-full items-center gap-1 pl-7 text-left text-[11px] text-ink-faint hover:text-ink-muted"
+        className="flex h-7 w-full items-center gap-1 pl-8 text-left text-small text-ink-faint hover:text-ink-muted"
       >
-        <span aria-hidden className={`w-3 text-[9px] ${open ? "rotate-90" : ""}`}>
+        <span aria-hidden className={`w-3 text-micro ${open ? "rotate-90" : ""}`}>
           ▶
         </span>
         archived ({archived.length})
@@ -355,7 +355,7 @@ function WorkspaceNode({
         side="right"
         content={
           <div className="space-y-3">
-            <p className="text-sm font-medium break-words">{workspace.name}</p>
+            <p className="text-[15px] font-medium break-words">{workspace.name}</p>
             {!pr && (
               <p className="font-mono break-all text-ink-muted">{head?.label ?? "No branch"}</p>
             )}
@@ -400,7 +400,7 @@ function WorkspaceNode({
             ) : null}
           </div>
         }
-        className={`group flex h-7 items-center pr-1 ${
+        className={`group flex h-8 items-center pr-1 ${
           selected ? "bg-raised text-ink" : "text-ink-muted hover:bg-raised"
         }`}
         onContextMenu={(event) => {
@@ -430,7 +430,7 @@ function WorkspaceNode({
                   : workspace.path
           }
           className={`flex h-full min-w-0 flex-1 items-center gap-2 pr-1 text-left disabled:opacity-40 ${
-            workspace.archived ? "pl-11" : "pl-7"
+            workspace.archived ? "pl-12" : "pl-8"
           }`}
         >
           <StatusDot activity={summarise(tabs)} attention={tabs.some((tab) => tab.attention)} />
@@ -440,7 +440,7 @@ function WorkspaceNode({
           {busySince !== null && <BusyClock since={busySince} />}
           {(workspace.missing || unrestorable) && !disabled && (
             <span
-              className="text-[11px] text-red-400"
+              className="text-small text-red-400"
               title={
                 unrestorable
                   ? "Its folder and its branch were both removed. There is nothing left to restore it from."
@@ -454,7 +454,7 @@ function WorkspaceNode({
             {/* A worktree's branch is its name with a prefix; only `local` has news to tell. */}
             {head && !isWorktree && (
               <span
-                className="max-w-32 truncate font-mono text-[11px] text-ink-faint"
+                className="max-w-32 truncate font-mono text-small text-ink-faint"
                 title={head.detached ? "Detached HEAD" : head.unborn ? "No commits yet" : "Branch"}
               >
                 {head.detached ? `@${head.label}` : head.label}
@@ -469,7 +469,7 @@ function WorkspaceNode({
             onClick={() => enterWorkspace(workspace.id, isWorktree)}
             title={`${waitingRuns} smoke test ${waitingRuns === 1 ? "run waits" : "runs wait"} for your approval`}
             aria-label={`${waitingRuns} smoke test ${waitingRuns === 1 ? "run" : "runs"} waiting for approval in ${workspace.name}`}
-            className="mr-0.5 shrink-0 rounded-full border border-accent/50 px-1.5 text-[10px] leading-4 text-accent hover:bg-raised"
+            className="mr-0.5 shrink-0 rounded-full border border-accent/50 px-1.5 text-micro leading-4.5 text-accent hover:bg-raised"
           >
             {waitingRuns}
           </button>
@@ -487,7 +487,7 @@ function WorkspaceNode({
             {otherPrs.length > 0 && (
               <span
                 aria-label={`${otherPrs.length} more pull request${otherPrs.length === 1 ? "" : "s"} from this workspace`}
-                className="text-[10px] text-ink-faint tabular-nums"
+                className="text-micro text-ink-faint tabular-nums"
               >
                 +{otherPrs.length}
               </span>
@@ -546,7 +546,7 @@ function RowButton(props: {
       title={props.label}
       disabled={props.disabled}
       onClick={props.onClick}
-      className="size-6 shrink-0 rounded text-ink-faint opacity-0 group-hover:opacity-100 hover:bg-line hover:text-ink focus-visible:opacity-100 disabled:hover:bg-transparent disabled:hover:text-ink-faint"
+      className="size-7 shrink-0 rounded text-ink-faint opacity-0 group-hover:opacity-100 hover:bg-line hover:text-ink focus-visible:opacity-100 disabled:hover:bg-transparent disabled:hover:text-ink-faint"
     >
       {props.children}
     </button>

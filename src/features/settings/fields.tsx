@@ -1,13 +1,13 @@
 import type { ReactNode } from "react";
 
 export const inputClass =
-  "h-8 w-full rounded border border-line bg-canvas px-2 text-ink outline-none select-text focus:border-accent disabled:opacity-50";
+  "h-9 w-full rounded border border-line bg-canvas px-2 text-ink outline-none select-text focus:border-accent disabled:opacity-50";
 
 export const buttonClass =
-  "h-8 rounded border border-line px-3 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40 disabled:hover:border-line disabled:hover:text-ink-muted";
+  "h-9 rounded border border-line px-3 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40 disabled:hover:border-line disabled:hover:text-ink-muted";
 
 export const primaryButtonClass =
-  "h-8 rounded bg-accent px-4 font-medium text-canvas disabled:opacity-40";
+  "h-9 rounded bg-accent px-4 font-medium text-canvas disabled:opacity-40";
 
 /**
  * A labelled form row. Only the label text and the control live inside `<label>`, so the
@@ -31,11 +31,11 @@ export function Field(props: {
         {props.trailing}
       </div>
       {props.error ? (
-        <span role="alert" className="text-[11px] text-red-400">
+        <span role="alert" className="text-small text-red-400">
           {props.error}
         </span>
       ) : (
-        props.hint && <span className="text-[11px] text-ink-faint">{props.hint}</span>
+        props.hint && <span className="text-small text-ink-faint">{props.hint}</span>
       )}
     </div>
   );

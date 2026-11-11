@@ -56,7 +56,7 @@ export function AssistBadges({ review }: { review: FileReview | undefined }) {
         <span
           key={badge.label}
           title={`Assist: ${badge.title}${review.told ? ` Assist was told: ${review.told}.` : ""}`}
-          className={`rounded border px-1 text-[10px] leading-4 ${badge.tone}`}
+          className={`rounded border px-1 text-micro leading-4.5 ${badge.tone}`}
         >
           {badge.label}
         </span>
@@ -78,7 +78,7 @@ export function AssistNote() {
   ).length;
 
   return (
-    <p className="flex items-center gap-2 px-3 py-1 text-[11px] text-ink-faint">
+    <p className="flex items-center gap-2 px-3 py-1 text-small text-ink-faint">
       <span className="min-w-0 flex-1 truncate">
         {error ? (
           <span role="alert" className="text-amber-400">

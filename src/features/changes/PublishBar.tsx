@@ -57,7 +57,7 @@ export function PublishBar({
             disabled={busy !== null}
             title={`Push ${state.branch} to ${state.remote}`}
             onClick={() => void usePublishStore.getState().push()}
-            className="rounded border border-line px-3 py-1 hover:bg-raised disabled:opacity-40"
+            className="rounded border border-line px-3 py-1.5 hover:bg-raised disabled:opacity-40"
           >
             {busy === "push"
               ? "Pushing…"
@@ -70,7 +70,7 @@ export function PublishBar({
             type="button"
             disabled={busy !== null}
             onClick={() => setOpening(true)}
-            className="rounded border border-line px-3 py-1 hover:bg-raised disabled:opacity-40"
+            className="rounded border border-line px-3 py-1.5 hover:bg-raised disabled:opacity-40"
           >
             {busy === "pullRequest" ? "Opening…" : `Open ${noun}`}
           </button>
@@ -80,7 +80,7 @@ export function PublishBar({
       </CommitBox>
 
       {follows !== null && (
-        <p className="mt-2 text-[11px] text-ink-faint">
+        <p className="mt-2 text-small text-ink-faint">
           This branch follows pull request #{follows}, which comes from a fork. Commits stay here:
           Yardsort does not push to forks.
         </p>
@@ -177,7 +177,7 @@ function CommitBox({
             />
           </div>
           {identity === null && (
-            <p className="mt-1 text-[11px] text-ink-faint">
+            <p className="mt-1 text-small text-ink-faint">
               git has no name and email to commit with yet. Set them with{" "}
               <code className="select-text">git config --global user.name</code> and{" "}
               <code className="select-text">user.email</code>.
@@ -191,7 +191,7 @@ function CommitBox({
           <button
             type="submit"
             disabled={!canCommit || busy !== null}
-            className="rounded bg-accent px-3 py-1 font-medium text-canvas disabled:opacity-40"
+            className="rounded bg-accent px-3 py-1.5 font-medium text-canvas disabled:opacity-40"
           >
             {busy === "commit"
               ? "Committing…"

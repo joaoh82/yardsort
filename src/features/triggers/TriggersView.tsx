@@ -67,7 +67,7 @@ export function TriggersView() {
   return (
     <section aria-label="Triggers" className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-2">
-        <h1 className="text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+        <h1 className="text-small font-semibold tracking-wider text-ink-muted uppercase">
           Triggers
         </h1>
         {focus && (
@@ -79,7 +79,7 @@ export function TriggersView() {
             <button
               type="button"
               onClick={() => useProjectsStore.getState().openTriggers(true)}
-              className="shrink-0 text-[12px] text-accent hover:underline"
+              className="shrink-0 text-detail text-accent hover:underline"
             >
               Show all
             </button>
@@ -88,7 +88,7 @@ export function TriggersView() {
         <button
           type="button"
           onClick={() => setEditing("new")}
-          className="ml-auto rounded bg-accent px-3 py-1 font-medium text-canvas"
+          className="ml-auto rounded bg-accent px-3 py-1.5 font-medium text-canvas"
         >
           New trigger…
         </button>
@@ -97,7 +97,7 @@ export function TriggersView() {
           aria-label="Close triggers"
           title="Close"
           onClick={() => useProjectsStore.getState().openTriggers(false)}
-          className="size-6 rounded text-ink-muted hover:bg-raised hover:text-ink"
+          className="size-7 rounded text-ink-muted hover:bg-raised hover:text-ink"
         >
           ×
         </button>
@@ -141,18 +141,18 @@ export function TriggersView() {
                         {item.name}
                       </span>
                       <span
-                        className={`shrink-0 rounded-full px-1.5 text-[10px] ${standingColour(item)}`}
+                        className={`shrink-0 rounded-full px-1.5 text-micro ${standingColour(item)}`}
                       >
                         {standingWords(item)}
                       </span>
                     </div>
-                    <div className="truncate text-[12px] text-ink-muted">{item.when}</div>
-                    <div className="truncate text-[12px] text-ink-faint">
+                    <div className="truncate text-detail text-ink-muted">{item.when}</div>
+                    <div className="truncate text-detail text-ink-faint">
                       {targetWords(item)} · {projectName(item.projectId)} / {item.workspaceName}
                       {item.sessionId && ` · ${item.sessionTitle ?? "an agent"}'s tab`}
                     </div>
                     {item.last && (
-                      <div className="text-[12px] text-ink-faint">
+                      <div className="text-detail text-ink-faint">
                         Last: {fireWords(item.last)},{" "}
                         {timeAgo(item.last.decidedAt ?? item.last.firstAt, now)}
                       </div>
@@ -264,7 +264,7 @@ function TriggerDetail({
           aria-label="Close trigger"
           title="Close"
           onClick={onClose}
-          className="size-6 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink"
+          className="size-7 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink"
         >
           ×
         </button>
@@ -311,7 +311,7 @@ function TriggerDetail({
           <div className="flex gap-2">
             <button
               type="button"
-              className="rounded bg-red-500/80 px-3 py-1 font-medium text-white disabled:opacity-40"
+              className="rounded bg-red-500/80 px-3 py-1.5 font-medium text-white disabled:opacity-40"
               disabled={busy}
               onClick={() =>
                 void act(() => remove(trigger.id)).then((removed) => removed && onClose())
@@ -435,7 +435,7 @@ function TriggerDetail({
       </dl>
 
       <section aria-label="History">
-        <h3 className="mb-1 text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+        <h3 className="mb-1 text-small font-semibold tracking-wider text-ink-faint uppercase">
           History
         </h3>
         {history.length === 0 ? (
@@ -444,17 +444,17 @@ function TriggerDetail({
           <ul className="flex flex-col">
             {history.map((fire) => (
               <li key={fire.id} className="flex items-baseline gap-2 py-1">
-                <span className={`shrink-0 rounded-full px-1.5 text-[10px] ${fireColour(fire)}`}>
+                <span className={`shrink-0 rounded-full px-1.5 text-micro ${fireColour(fire)}`}>
                   {fireWords(fire)}
                 </span>
-                <span className="shrink-0 text-[12px] text-ink-muted tabular-nums">
+                <span className="shrink-0 text-detail text-ink-muted tabular-nums">
                   {clockTime(fire.decidedAt ?? fire.firstAt)}
                 </span>
-                <span className="shrink-0 font-mono text-[11px] text-ink-faint">
+                <span className="shrink-0 font-mono text-small text-ink-faint">
                   {fire.event}
                   {fire.events > 1 && ` ×${fire.events}`}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[12px] text-ink-faint select-text">
+                <span className="min-w-0 flex-1 truncate text-detail text-ink-faint select-text">
                   {fire.note ?? fire.summary ?? ""}
                 </span>
                 {fire.runId && (
@@ -462,7 +462,7 @@ function TriggerDetail({
                     type="button"
                     disabled={!canOpen}
                     onClick={() => openRun(fire)}
-                    className="shrink-0 text-[12px] text-accent hover:underline disabled:opacity-40"
+                    className="shrink-0 text-detail text-accent hover:underline disabled:opacity-40"
                   >
                     Open run
                   </button>

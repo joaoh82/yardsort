@@ -210,4 +210,4 @@ day and is delivered once when the path is open again. The same event from two c
 notification. A long wait does not arrive as a burst: only the newest few are sent.
 
 The server can do this without Apple or Google push credentials. Notices wait until those are set.
-What to set is in [Mobile notifications](../design/39-mobile-notifications.md#what-to-configure).
+What to set is in [Mobile notifications](../design/40-mobile-notifications.md#what-to-configure).

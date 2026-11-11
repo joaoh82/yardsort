@@ -35,9 +35,9 @@ export function Viewer({
     "shrink-0 rounded px-1.5 py-0.5 whitespace-nowrap text-ink-faint hover:bg-raised hover:text-ink";
   return (
     <section aria-label={`Viewing ${path}`} className="flex h-full min-h-0 flex-col">
-      <header className="flex h-8 shrink-0 items-center gap-1 border-b border-line bg-surface px-2">
+      <header className="flex h-9 shrink-0 items-center gap-1 border-b border-line bg-surface px-2">
         {/* In a narrow panel the file name is what identifies it; the folder is in the tooltip. */}
-        <span className="min-w-0 flex-1 truncate font-mono text-[12px]" title={path}>
+        <span className="min-w-0 flex-1 truncate font-mono text-detail" title={path}>
           {expanded && viewing.kind === "diff" && viewing.change.oldPath && (
             <span className="text-ink-faint">{viewing.change.oldPath} → </span>
           )}
@@ -45,7 +45,7 @@ export function Viewer({
         </span>
         {/* The side panel is narrow and the list above already says which group this is. */}
         {expanded && viewing.kind === "diff" && (
-          <span className="shrink-0 text-[11px] text-ink-faint">
+          <span className="shrink-0 text-small text-ink-faint">
             {viewing.scope === "uncommitted" ? "uncommitted" : "on this branch"}
           </span>
         )}

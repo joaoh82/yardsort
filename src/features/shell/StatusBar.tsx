@@ -20,7 +20,7 @@ export function StatusBar() {
   const asking = useRemoteStore((s) => s.asking);
 
   return (
-    <footer className="flex h-6 shrink-0 items-center justify-between border-t border-line bg-surface px-2 text-[11px] text-ink-faint">
+    <footer className="flex h-7 shrink-0 items-center justify-between border-t border-line bg-surface px-2 text-small text-ink-faint">
       <div className="flex items-center gap-1">
         <PanelToggle
           label="projects"

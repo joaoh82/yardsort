@@ -52,13 +52,13 @@ export function SchedulesView() {
   return (
     <section aria-label="Schedules" className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-2">
-        <h1 className="text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+        <h1 className="text-small font-semibold tracking-wider text-ink-muted uppercase">
           Schedules
         </h1>
         <button
           type="button"
           onClick={() => setEditing("new")}
-          className="ml-auto rounded bg-accent px-3 py-1 font-medium text-canvas"
+          className="ml-auto rounded bg-accent px-3 py-1.5 font-medium text-canvas"
         >
           New schedule…
         </button>
@@ -67,7 +67,7 @@ export function SchedulesView() {
           aria-label="Close schedules"
           title="Close"
           onClick={() => useProjectsStore.getState().openSchedules(false)}
-          className="size-6 rounded text-ink-muted hover:bg-raised hover:text-ink"
+          className="size-7 rounded text-ink-muted hover:bg-raised hover:text-ink"
         >
           ×
         </button>
@@ -109,17 +109,17 @@ export function SchedulesView() {
                         {item.name}
                       </span>
                       <span
-                        className={`shrink-0 rounded-full px-1.5 text-[10px] ${standingColour(item.standing)}`}
+                        className={`shrink-0 rounded-full px-1.5 text-micro ${standingColour(item.standing)}`}
                       >
                         {standingWords(item.standing)}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 text-[12px] text-ink-faint">
+                    <div className="flex items-center gap-2 text-detail text-ink-faint">
                       <span className="truncate">
                         {targetWords(item)} · {projectName(item.projectId)} / {item.workspaceName}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 text-[12px] text-ink-muted">
+                    <div className="flex items-center gap-2 text-detail text-ink-muted">
                       <span className="truncate">{item.when}</span>
                       {item.enabled && item.nextAt !== null && (
                         <span className="shrink-0 text-ink-faint tabular-nums">
@@ -128,7 +128,7 @@ export function SchedulesView() {
                       )}
                     </div>
                     {item.last && (
-                      <div className="text-[12px] text-ink-faint">
+                      <div className="text-detail text-ink-faint">
                         Last: {lineWords(item.last)}, {timeAgo(item.last.firedAt, now)}
                       </div>
                     )}
@@ -218,7 +218,7 @@ function ScheduleDetail({
           aria-label="Close schedule"
           title="Close"
           onClick={onClose}
-          className="size-6 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink"
+          className="size-7 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink"
         >
           ×
         </button>
@@ -263,7 +263,7 @@ function ScheduleDetail({
           <div className="flex gap-2">
             <button
               type="button"
-              className="rounded bg-red-500/80 px-3 py-1 font-medium text-white disabled:opacity-40"
+              className="rounded bg-red-500/80 px-3 py-1.5 font-medium text-white disabled:opacity-40"
               disabled={busy}
               onClick={() =>
                 void act(() => remove(schedule.id)).then((removed) => removed && onClose())
@@ -323,7 +323,7 @@ function ScheduleDetail({
       )}
 
       <section aria-label="History">
-        <h3 className="mb-1 text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+        <h3 className="mb-1 text-small font-semibold tracking-wider text-ink-faint uppercase">
           History
         </h3>
         {history.length === 0 ? (
@@ -332,13 +332,13 @@ function ScheduleDetail({
           <ul className="flex flex-col">
             {history.map((run) => (
               <li key={run.id} className="flex items-baseline gap-2 py-1">
-                <span className={`shrink-0 rounded-full px-1.5 text-[10px] ${lineColour(run)}`}>
+                <span className={`shrink-0 rounded-full px-1.5 text-micro ${lineColour(run)}`}>
                   {lineWords(run)}
                 </span>
-                <span className="shrink-0 text-[12px] text-ink-muted tabular-nums">
+                <span className="shrink-0 text-detail text-ink-muted tabular-nums">
                   {clockTime(run.firedAt)}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[12px] text-ink-faint select-text">
+                <span className="min-w-0 flex-1 truncate text-detail text-ink-faint select-text">
                   {run.manual ? "Run now" : (run.note ?? "")}
                 </span>
                 {run.runId && (
@@ -346,7 +346,7 @@ function ScheduleDetail({
                     type="button"
                     disabled={!canOpen}
                     onClick={() => openRun(run)}
-                    className="shrink-0 text-[12px] text-accent hover:underline disabled:opacity-40"
+                    className="shrink-0 text-detail text-accent hover:underline disabled:opacity-40"
                   >
                     Open run
                   </button>

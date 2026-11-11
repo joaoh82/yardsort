@@ -52,7 +52,7 @@ export function QuitDialog() {
           you open it again.
         </p>
 
-        <ul className="mt-3 min-h-0 flex-1 overflow-y-auto rounded bg-canvas p-3 text-[12px]">
+        <ul className="mt-3 min-h-0 flex-1 overflow-y-auto rounded bg-canvas p-3 text-detail">
           {where.map((agent) => (
             <li key={agent.id} className="flex gap-2 py-0.5">
               <span className="font-medium text-ink">{agent.title}</span>

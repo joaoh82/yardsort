@@ -14,7 +14,7 @@ import { useMemoryStore } from "@/stores/memory";
 
 const MAX_CHARS = 500;
 const button =
-  "shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40";
+  "shrink-0 rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40";
 
 /**
  * A project's memory: short lessons for its agents. The user writes entries, approved as they are
@@ -135,7 +135,7 @@ export function MemoryDialog({ project, onClose }: { project: Project; onClose: 
               <span className="block text-ink-faint">
                 Approved entries go after the first message of each agent you start here, and into
                 handoffs, cited, as notes rather than instructions. Agents can also run{" "}
-                <code className="font-mono text-[11px]">ys memory search</code>. What the workspace
+                <code className="font-mono text-small">ys memory search</code>. What the workspace
                 was asked stays your own words. On unless you turn it off.
               </span>
             </span>
@@ -154,9 +154,9 @@ export function MemoryDialog({ project, onClose }: { project: Project; onClose: 
               Share conversations between this project&rsquo;s agents
               <span className="block text-ink-faint">
                 An agent in a workspace can run{" "}
-                <code className="font-mono text-[11px]">ys workspace context</code> to read the
-                other conversations there: every message you typed and each turn&rsquo;s reply, from
-                the agents&rsquo; own transcripts, without tool output. What it reads goes to that
+                <code className="font-mono text-small">ys workspace context</code> to read the other
+                conversations there: every message you typed and each turn&rsquo;s reply, from the
+                agents&rsquo; own transcripts, without tool output. What it reads goes to that
                 agent&rsquo;s provider, which may not be the one you said it to. Nothing is stored.
                 On unless you turn it off.
               </span>
@@ -194,7 +194,7 @@ export function MemoryDialog({ project, onClose }: { project: Project; onClose: 
             {candidates.length === 0 ? (
               <p className="text-ink-faint">
                 No proposals. An agent proposes with{" "}
-                <code className="font-mono text-[11px]">ys memory propose</code>.
+                <code className="font-mono text-small">ys memory propose</code>.
               </p>
             ) : (
               candidates.map((entry) => (
@@ -243,13 +243,13 @@ export function MemoryDialog({ project, onClose }: { project: Project; onClose: 
 
           {setAside.length > 0 && (
             <details className="mt-5">
-              <summary className="cursor-pointer text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+              <summary className="cursor-pointer text-small font-semibold tracking-wider text-ink-faint uppercase">
                 Rejected and revoked · {setAside.length}
               </summary>
               <ul className="mt-2 space-y-2">
                 {setAside.map((entry) => (
                   <Entry key={entry.id} entry={entry} busy={busy}>
-                    <span className="text-[11px] text-ink-faint">{entry.state}</span>
+                    <span className="text-small text-ink-faint">{entry.state}</span>
                     <button
                       type="button"
                       disabled={busy}
@@ -292,7 +292,7 @@ function Section({
 }) {
   return (
     <section aria-label={title} className="mt-5">
-      <h3 className="mb-2 text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+      <h3 className="mb-2 text-small font-semibold tracking-wider text-ink-faint uppercase">
         {title} · {count}
       </h3>
       <ul className="space-y-2">{children}</ul>
@@ -329,7 +329,7 @@ function Entry({
         />
       )}
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
-        <span className="min-w-0 flex-1 text-[11px] text-ink-faint">
+        <span className="min-w-0 flex-1 text-small text-ink-faint">
           from {entry.from} · {entry.shortId}
           {edited ? " · edited" : ""}
         </span>
@@ -395,7 +395,7 @@ function CheckTags({ check }: { check: MemoryCheck | undefined }) {
         <span
           key={tag.label}
           title={tag.title}
-          className="rounded border border-amber-400/40 px-1 text-[10px] leading-4 text-amber-300"
+          className="rounded border border-amber-400/40 px-1 text-micro leading-4.5 text-amber-300"
         >
           {tag.label}
         </span>

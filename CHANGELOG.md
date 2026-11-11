@@ -128,6 +128,13 @@ has the downloads and the full commit lists.
   asked whether it still answers, and opened again within a few seconds if not; one already waiting to
   be reached again is tried at once. See
   [When the phone changes network](docs/guide/remote.md#when-the-phone-changes-network).
+- **A larger interface.** Everything in the window is one step bigger, and the smallest text grows
+  the most: text is 14, 13, 12 and 11 px where it was 13, 12, 11 and 10, and nothing is smaller
+  than 11. Rows, headers, tabs, the bottom bars, buttons, icons and status dots are each a few
+  pixels larger, and the faintest text is lighter in dark mode and darker in light, so it is
+  easier to read. Diffs and the file viewer are 13 px, like the terminal, which is unchanged. In
+  a new profile the side panels open a little wider; yours keep the widths you set. Nothing is
+  added, moved or renamed. See [The desktop app's sizes](docs/design/39-desktop-sizes.md).
 
 ## 0.25.0
 

@@ -23,7 +23,7 @@ export function StatusDot({ activity, attention }: { activity: Activity; attenti
       role="img"
       aria-label={label}
       title={label}
-      className={`size-1.5 shrink-0 rounded-full ${colour} ${
+      className={`size-2 shrink-0 rounded-full ${colour} ${
         attention ? "ring-2 ring-accent/60 ring-offset-1 ring-offset-surface" : ""
       }`}
     />

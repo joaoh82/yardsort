@@ -19,7 +19,7 @@ import type { Row } from "./rows";
 import { placeOf, placed, threadCounts, threadsOf, unplaced, type Thread } from "./threads";
 
 const quiet =
-  "h-7 shrink-0 rounded px-2 whitespace-nowrap text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent";
+  "h-8 shrink-0 rounded px-2 whitespace-nowrap text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent";
 
 /** One file's two sides, for the file in view: asked for when it is chosen. */
 function useFileDiff(
@@ -143,7 +143,7 @@ export function Code({ row, now }: { row: Row; now: number }) {
         )}
         <p className="shrink-0 border-b border-line px-4 py-2 text-ink-muted">
           {files.length === 1 ? "1 file changed" : `${files.length} files changed`}
-          <span className="ml-2 font-mono text-[12px]">
+          <span className="ml-2 font-mono text-detail">
             <span className="text-green-400">+{added}</span>{" "}
             <span className="text-red-400">−{removed}</span>
           </span>
@@ -181,7 +181,7 @@ export function Code({ row, now }: { row: Row; now: number }) {
           aria-label="Files"
           value={file.path}
           onChange={(event) => open(event.target.value)}
-          className="h-7 min-w-0 flex-1 rounded border border-line bg-canvas px-2 font-mono text-[12px] text-ink outline-none focus:border-accent"
+          className="h-8 min-w-0 flex-1 rounded border border-line bg-canvas px-2 font-mono text-detail text-ink outline-none focus:border-accent"
         >
           {files.map((each) => (
             <option key={each.path} value={each.path}>
@@ -199,7 +199,7 @@ export function Code({ row, now }: { row: Row; now: number }) {
         >
           <span aria-hidden>‹</span>
         </button>
-        <span className="shrink-0 text-[11px] text-ink-faint tabular-nums">
+        <span className="shrink-0 text-small text-ink-faint tabular-nums">
           {index + 1} of {files.length}
         </span>
         <button
@@ -245,7 +245,7 @@ export function Code({ row, now }: { row: Row; now: number }) {
         </button>
       </div>
       {file.oldPath && (
-        <p className="shrink-0 border-b border-line px-3 py-1 font-mono text-[11px] text-ink-faint">
+        <p className="shrink-0 border-b border-line px-3 py-1 font-mono text-small text-ink-faint">
           {file.oldPath} → {file.path}
         </p>
       )}
@@ -290,7 +290,7 @@ function Elsewhere({ threads, now }: { threads: Thread[]; now: number }) {
         {threads.length === 1
           ? "1 comment the diff has moved on from"
           : `${threads.length} comments the diff has moved on from`}
-        <span className="ml-2 text-[11px] text-ink-faint">
+        <span className="ml-2 text-small text-ink-faint">
           {threads.map((thread) => placeOf(thread.root)).join(" · ")}
         </span>
       </summary>
@@ -320,10 +320,10 @@ function FileRow({
         type="button"
         title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
         onClick={onOpen}
-        className="flex h-7 w-full items-center gap-2 px-4 text-left hover:bg-raised"
+        className="flex h-8 w-full items-center gap-2 px-4 text-left hover:bg-raised"
       >
         <span
-          className={`w-3 shrink-0 text-center font-mono text-[11px] ${kind.colour}`}
+          className={`w-3 shrink-0 text-center font-mono text-small ${kind.colour}`}
           title={kind.label}
         >
           {kind.letter}
@@ -331,20 +331,20 @@ function FileRow({
         <span className={`truncate ${file.kind === "deleted" ? "line-through" : ""}`}>
           {file.path.slice(slash + 1)}
         </span>
-        <span className="min-w-0 flex-1 truncate text-[11px] text-ink-faint" dir="rtl">
+        <span className="min-w-0 flex-1 truncate text-small text-ink-faint" dir="rtl">
           {slash > 0 ? file.path.slice(0, slash) : ""}
         </span>
         {threads > 0 && (
           <span
             aria-label={threads === 1 ? "1 comment thread" : `${threads} comment threads`}
             title={threads === 1 ? "1 comment thread" : `${threads} comment threads`}
-            className="shrink-0 rounded-full border border-line px-1.5 text-[10px] leading-4 text-ink-muted tabular-nums"
+            className="shrink-0 rounded-full border border-line px-1.5 text-micro leading-4.5 text-ink-muted tabular-nums"
           >
             <span aria-hidden>💬 </span>
             {threads}
           </span>
         )}
-        <span className="shrink-0 font-mono text-[11px]">
+        <span className="shrink-0 font-mono text-small">
           {file.additions != null && <span className="text-green-400">+{file.additions}</span>}{" "}
           {file.deletions != null && <span className="text-red-400">−{file.deletions}</span>}
         </span>

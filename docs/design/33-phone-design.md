@@ -16,8 +16,9 @@ Components, Screens and App icon. Names in it are made up.
 ## The look
 
 - **Colours.** The desktop's dark and light sets (`src/styles.css`), with three differences for a phone.
-  Faint text is stronger for small text: `#858d9a` in dark and `#636c7a` in light, where the desktop has
-  `#6b7380` and `#7b8493`. The light accent stays the bright amber, `#f5b83d`, where the desktop has
+  Faint text is stronger for small text: `#858d9a` in dark and `#636c7a` in light, where the desktop
+  had `#6b7380` and `#7b8493` then; it has `#808a99` and `#667080` since
+  [its sizes changed](39-desktop-sizes.md). The light accent stays the bright amber, `#f5b83d`, where the desktop has
   `#b77a00`, because here it fills buttons under dark text. Amber words use `accentText`, a darker
   `#8a5c00` in light. The phone's colours are in `apps/mobile/src/ui/parts.tsx` and in the Figma file's
   variables under the same names: a change to one goes in the other. The desktop's are separate.

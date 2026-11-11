@@ -164,7 +164,7 @@ export function HoverCard({
             onMouseEnter={cancel}
             onMouseLeave={leave}
             onFocus={cancel}
-            className="fixed z-40 max-h-[calc(100vh-16px)] w-[340px] max-w-[calc(100vw-16px)] overflow-y-auto rounded-lg border border-line bg-raised p-4 text-xs text-ink shadow-xl shadow-black/40 select-text"
+            className="fixed z-40 max-h-[calc(100vh-16px)] w-[340px] max-w-[calc(100vw-16px)] overflow-y-auto rounded-lg border border-line bg-raised p-4 text-detail text-ink shadow-xl shadow-black/40 select-text"
           >
             {content}
           </div>,

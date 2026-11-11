@@ -40,9 +40,9 @@ export function ActivityPanel({
   return (
     <section
       aria-label="Activity"
-      className="flex max-h-[40%] shrink-0 flex-col border-t border-line bg-surface text-[12px]"
+      className="flex max-h-[40%] shrink-0 flex-col border-t border-line bg-surface text-detail"
     >
-      <header className="flex h-7 shrink-0 items-center gap-3 border-b border-line px-3">
+      <header className="flex h-8 shrink-0 items-center gap-3 border-b border-line px-3.5">
         <h2 className="font-semibold">Activity</h2>
         <span className="text-ink-faint">
           Experimental · starts and exits Yardsort saw, and what Claude Code reports when capture is
@@ -120,7 +120,7 @@ function Row({ event }: { event: ActivityEvent }) {
     <li className="flex items-baseline gap-3 px-3 py-1">
       <time
         dateTime={new Date(at).toISOString()}
-        className="w-[4.5rem] shrink-0 font-mono text-[11px] text-ink-faint"
+        className="w-[4.5rem] shrink-0 font-mono text-small text-ink-faint"
       >
         {eventTime(at)}
       </time>
@@ -135,13 +135,13 @@ function Row({ event }: { event: ActivityEvent }) {
           type="button"
           onClick={diff.open}
           title="Show this file's diff in the Changes panel. The diff is everything that changed since the last commit, whoever changed it."
-          className="shrink-0 rounded border border-line px-1.5 text-[10px] leading-4 text-ink-muted hover:bg-raised hover:text-ink"
+          className="shrink-0 rounded border border-line px-1.5 text-micro leading-4.5 text-ink-muted hover:bg-raised hover:text-ink"
         >
           Show diff
         </button>
       )}
       <span
-        className="shrink-0 font-mono text-[10px] text-ink-faint"
+        className="shrink-0 font-mono text-micro text-ink-faint"
         title={`Recorded by ${event.producer} (${event.method}, ${event.fidelity})`}
       >
         {event.producer}/{event.method}

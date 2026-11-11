@@ -45,7 +45,7 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
 
   return (
     <section aria-label="Runs" className="flex min-h-0 flex-1 flex-col">
-      <h3 className="shrink-0 px-3 pt-3 pb-2 text-[11px] font-semibold tracking-wider text-ink-faint uppercase">
+      <h3 className="shrink-0 px-3 pt-3 pb-2 text-small font-semibold tracking-wider text-ink-faint uppercase">
         Runs
       </h3>
       {error && (
@@ -72,20 +72,20 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                   onClick={() => onSelect(open ? null : run.id)}
                 >
                   <span
-                    className={`shrink-0 rounded-full px-1.5 text-[10px] ${statusColour(run.status)}`}
+                    className={`shrink-0 rounded-full px-1.5 text-micro ${statusColour(run.status)}`}
                   >
                     {run.status}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{run.workspaceName}</span>
                   {run.blockedOn && (
-                    <span className="shrink-0 text-[11px] text-amber-300">
+                    <span className="shrink-0 text-small text-amber-300">
                       Blocked: waiting for {run.blockedOn}.
                     </span>
                   )}
                   {!open && run.status === "failed" && run.error && (
                     <span
                       title={run.error}
-                      className="max-w-[40%] shrink truncate text-[11px] text-red-400"
+                      className="max-w-[40%] shrink truncate text-small text-red-400"
                     >
                       {run.error}
                     </span>
@@ -93,7 +93,7 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                   {scheduled && (
                     <span
                       title={`Started by the schedule “${scheduled.scheduleName}”`}
-                      className="shrink-0 text-[11px] text-ink-faint"
+                      className="shrink-0 text-small text-ink-faint"
                     >
                       scheduled
                     </span>
@@ -101,12 +101,12 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                   {fired && (
                     <span
                       title={`Started by the trigger “${fired.triggerName}”`}
-                      className="shrink-0 text-[11px] text-ink-faint"
+                      className="shrink-0 text-small text-ink-faint"
                     >
                       triggered
                     </span>
                   )}
-                  <span className="shrink-0 text-[11px] text-ink-faint">
+                  <span className="shrink-0 text-small text-ink-faint">
                     {timeAgo(run.createdAt)}
                   </span>
                 </button>
@@ -136,7 +136,7 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                         <li key={step.stepId} className="flex flex-col">
                           <span className="flex items-center gap-2">
                             <span
-                              className={`shrink-0 rounded-full px-1.5 text-[10px] ${statusColour(step.status)}`}
+                              className={`shrink-0 rounded-full px-1.5 text-micro ${statusColour(step.status)}`}
                             >
                               {step.status}
                             </span>
@@ -144,12 +144,12 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                               {ACTION_WORDS[step.action as keyof typeof ACTION_WORDS] ??
                                 step.action}
                             </span>
-                            <span className="truncate font-mono text-[11px] text-ink-faint">
+                            <span className="truncate font-mono text-small text-ink-faint">
                               {step.stepId}
                             </span>
                           </span>
                           {step.note && (
-                            <span className="pl-1 whitespace-pre-wrap text-[11px] text-ink-muted select-text">
+                            <span className="pl-1 whitespace-pre-wrap text-small text-ink-muted select-text">
                               {step.note}
                             </span>
                           )}
@@ -170,22 +170,22 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                             />
                           )}
                           {step.outcome?.decision && (
-                            <span className="pl-1 text-[11px] text-ink-muted select-text">
+                            <span className="pl-1 text-small text-ink-muted select-text">
                               {decisionWord(step.outcome.decision)}
                               {step.outcome.feedback ? `: ${step.outcome.feedback}` : ""}
                             </span>
                           )}
                           {step.artifacts.map((artifact) => (
                             <span key={artifact.name} className="mt-1 flex flex-col gap-0.5 pl-1">
-                              <span className="text-[11px] text-ink-muted">
+                              <span className="text-small text-ink-muted">
                                 Artifact {artifact.name}
                                 {artifact.truncated ? " (cut short)" : ""}
                               </span>
-                              <span className="font-mono text-[10px] text-ink-faint">
+                              <span className="font-mono text-micro text-ink-faint">
                                 {artifact.source}
                                 {artifact.detail ? ` ${artifact.detail}` : ""}
                               </span>
-                              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-[11px] text-ink select-text">
+                              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-small text-ink select-text">
                                 {artifact.body}
                               </pre>
                             </span>
@@ -196,7 +196,7 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                     {active && (
                       <button
                         type="button"
-                        className="mt-2 rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink"
+                        className="mt-2 rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink"
                         onClick={() => void cancel(run)}
                       >
                         Cancel run
@@ -264,22 +264,22 @@ function AnswerBox({
 
   return (
     <div className="mt-1 flex flex-col gap-1 pl-1">
-      <span className="text-[11px] text-amber-300">Blocked: waiting for your answer.</span>
+      <span className="text-small text-amber-300">Blocked: waiting for your answer.</span>
       {step.approvalCode ? (
-        <span className="text-[11px] text-ink select-text">
+        <span className="text-small text-ink select-text">
           Code {step.approvalCode}. A terminal needs this. This window does not.
         </span>
       ) : (
-        <span className="text-[11px] text-ink-muted">
+        <span className="text-small text-ink-muted">
           The code is not in this window yet. Show a new code to use a terminal.
         </span>
       )}
       {step.approvalLocked ? (
-        <span className="text-[11px] text-ink-muted">
+        <span className="text-small text-ink-muted">
           Too many wrong codes. Show a new code to use a terminal again.
         </span>
       ) : null}
-      <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-[11px] text-ink select-text">
+      <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-small text-ink select-text">
         {step.clarificationPrompt}
       </pre>
       <textarea
@@ -287,14 +287,14 @@ function AnswerBox({
         value={text}
         onChange={(event) => setText(event.target.value)}
         rows={2}
-        className="rounded border border-line bg-canvas px-1.5 py-1 text-[11px] text-ink"
+        className="rounded border border-line bg-canvas px-1.5 py-1 text-small text-ink"
         placeholder="Your answer"
       />
       <span>
         <button
           type="button"
           disabled={busy || text.trim() === ""}
-          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
           onClick={() => void send()}
         >
           Answer
@@ -302,7 +302,7 @@ function AnswerBox({
         <button
           type="button"
           disabled={busy}
-          className="ml-1 rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          className="ml-1 rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
           onClick={() => void showCode()}
         >
           Show a new code
@@ -357,29 +357,29 @@ function ApprovalBox({
 
   return (
     <div className="mt-1 flex flex-col gap-1 pl-1">
-      <span className="text-[11px] text-amber-300">Blocked: waiting for your approval.</span>
-      <span className="text-[11px] text-ink-muted">Approve, reject, or request changes.</span>
+      <span className="text-small text-amber-300">Blocked: waiting for your approval.</span>
+      <span className="text-small text-ink-muted">Approve, reject, or request changes.</span>
       {step.approvalCode ? (
-        <span className="text-[11px] text-ink select-text">
+        <span className="text-small text-ink select-text">
           Code {step.approvalCode}. A terminal needs this. This window does not.
         </span>
       ) : (
-        <span className="text-[11px] text-ink-muted">
+        <span className="text-small text-ink-muted">
           The code is not in this window yet. Show a new code to use a terminal.
         </span>
       )}
       {step.approvalLocked ? (
-        <span className="text-[11px] text-ink-muted">
+        <span className="text-small text-ink-muted">
           Too many wrong codes. Show a new code to use a terminal again.
         </span>
       ) : null}
       {consumed.map((artifact) => (
         <span key={artifact.name} className="flex flex-col gap-0.5">
-          <span className="text-[11px] text-ink-muted">
+          <span className="text-small text-ink-muted">
             To review {artifact.name}
             {artifact.truncated ? " (cut short)" : ""}
           </span>
-          <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-[11px] text-ink select-text">
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-small text-ink select-text">
             {artifact.body}
           </pre>
         </span>
@@ -389,14 +389,14 @@ function ApprovalBox({
         value={feedback}
         onChange={(event) => setFeedback(event.target.value)}
         rows={2}
-        className="rounded border border-line bg-canvas px-1.5 py-1 text-[11px] text-ink"
+        className="rounded border border-line bg-canvas px-1.5 py-1 text-small text-ink"
         placeholder="A note, if you have one. Required when you request changes."
       />
       <span className="flex gap-1">
         <button
           type="button"
           disabled={busy}
-          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
           onClick={() => void decide("approved")}
         >
           Approve
@@ -404,7 +404,7 @@ function ApprovalBox({
         <button
           type="button"
           disabled={busy}
-          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
           onClick={() => void decide("rejected")}
         >
           Reject
@@ -412,7 +412,7 @@ function ApprovalBox({
         <button
           type="button"
           disabled={busy || feedback.trim() === ""}
-          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
           onClick={() => void decide("changes_requested")}
         >
           Request changes
@@ -420,7 +420,7 @@ function ApprovalBox({
         <button
           type="button"
           disabled={busy}
-          className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
           onClick={() => void showCode()}
         >
           Show a new code

@@ -146,7 +146,7 @@ function TourDialog({ replay }: { replay: boolean }) {
           }
         }}
       >
-        <p className="mb-3 text-[11px] font-medium tracking-widest text-accent uppercase">
+        <p className="mb-3 text-small font-medium tracking-widest text-accent uppercase">
           {current ? `Welcome tour · ${step + 1} of ${STEPS.length}` : "Welcome to Yardsort"}
         </p>
         <h2 id="tour-title" className="text-xl font-semibold">
@@ -202,7 +202,7 @@ function TourDialog({ replay }: { replay: boolean }) {
           </button>
         </div>
         {current && (
-          <p className="mt-3 text-[11px] text-ink-faint">
+          <p className="mt-3 text-small text-ink-faint">
             ← → to explore · Tab to move between buttons · Esc to leave
           </p>
         )}

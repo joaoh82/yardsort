@@ -196,10 +196,10 @@ export function NoteDialog({
           Note on {lines} of {excerpt.path.slice(excerpt.path.lastIndexOf("/") + 1)}
         </h2>
         <p className="mt-1 text-ink-muted">
-          <span className="font-mono text-[12px]">{excerpt.path}</span>, {lines}
+          <span className="font-mono text-detail">{excerpt.path}</span>, {lines}
           {excerpt.side === "left" ? ", as the file was before the pull request" : ""}.
         </p>
-        <pre className="mt-3 max-h-40 overflow-auto rounded bg-canvas p-2 font-mono text-[12px] leading-relaxed select-text">
+        <pre className="mt-3 max-h-40 overflow-auto rounded bg-canvas p-2 font-mono text-detail leading-relaxed select-text">
           {excerpt.text}
         </pre>
         <textarea
