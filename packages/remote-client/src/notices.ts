@@ -8,7 +8,7 @@
 
 import { bool, DecodeError, integer, object, optional, text, type Decoder } from "./decode.ts";
 
-export type NoticeCategory = "task" | "review" | "failure" | "desktopUpdate" | "workflow";
+export type NoticeCategory = "task" | "review" | "failure" | "desktopUpdate" | "workflow" | "agent";
 
 export interface NotificationPreferences {
   muted: boolean;
@@ -17,6 +17,11 @@ export interface NotificationPreferences {
   failure: boolean;
   desktopUpdate: boolean;
   workflow: boolean;
+  /**
+   * Agents that need a person. An older server does not know it and leaves it out; saving
+   * without it keeps what the server has.
+   */
+  agent?: boolean;
 }
 
 export interface PushRegistration {
@@ -34,6 +39,9 @@ export interface NoticeView {
   /** A workflow notice's run and step, and the computer that submitted it. */
   runId?: string;
   stepId?: string;
+  /** An agent notice's workspace and terminal, as the computer's own ids. */
+  workspaceId?: string;
+  terminalId?: string;
   hostId?: string;
 }
 
@@ -48,7 +56,8 @@ const category: Decoder<NoticeCategory> = (value, path) => {
     name === "review" ||
     name === "failure" ||
     name === "desktopUpdate" ||
-    name === "workflow"
+    name === "workflow" ||
+    name === "agent"
   ) {
     return name;
   }
@@ -62,6 +71,7 @@ export const notificationPreferences: Decoder<NotificationPreferences> = object(
   failure: bool,
   desktopUpdate: bool,
   workflow: bool,
+  agent: optional(bool),
 });
 
 export const noticeView: Decoder<NoticeView> = object({
@@ -73,6 +83,8 @@ export const noticeView: Decoder<NoticeView> = object({
   deepLink: text(300),
   runId: optional(text(128)),
   stepId: optional(text(128)),
+  workspaceId: optional(text(128)),
+  terminalId: optional(text(128)),
   hostId: optional(text(128)),
 });
 

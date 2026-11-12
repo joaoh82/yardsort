@@ -652,6 +652,9 @@ pub struct IncomingNotice {
     /// A workflow notice's run. Absent otherwise, and dropped when it is not an id.
     pub run_id: Option<String>,
     pub step_id: Option<String>,
+    /// An agent notice's workspace and terminal. Absent otherwise, and dropped when not ids.
+    pub workspace_id: Option<String>,
+    pub terminal_id: Option<String>,
     /// The host row of the computer that submitted it. The client does not choose this.
     pub host_id: Option<String>,
 }
@@ -684,6 +687,8 @@ pub struct NoticePage {
     pub body: String,
     pub run_id: Option<String>,
     pub step_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub terminal_id: Option<String>,
     pub host_id: Option<String>,
 }
 
@@ -716,6 +721,8 @@ struct NoticeRow {
     suppressed: bool,
     run_id: Option<String>,
     step_id: Option<String>,
+    workspace_id: Option<String>,
+    terminal_id: Option<String>,
     host_id: Option<String>,
 }
 
@@ -755,6 +762,7 @@ pub(crate) fn category_allowed(preferences: &NotificationPreferences, category: 
         "failure" => preferences.allows(NoticeCategory::Failure),
         "desktopUpdate" => preferences.allows(NoticeCategory::DesktopUpdate),
         "workflow" => preferences.allows(NoticeCategory::Workflow),
+        "agent" => preferences.allows(NoticeCategory::Agent),
         _ => false,
     }
 }
@@ -1391,7 +1399,11 @@ impl Records for MemoryRecords {
         preferences: &NotificationPreferences,
     ) -> Result<()> {
         self.with(|s| {
-            s.preferences.insert(account.0.clone(), preferences.clone());
+            let mut kept = preferences.clone();
+            if kept.agent.is_none() {
+                kept.agent = s.preferences.get(&account.0).and_then(|p| p.agent);
+            }
+            s.preferences.insert(account.0.clone(), kept);
         })
     }
 
@@ -1443,6 +1455,8 @@ impl Records for MemoryRecords {
                 suppressed,
                 run_id: notice.run_id.clone(),
                 step_id: notice.step_id.clone(),
+                workspace_id: notice.workspace_id.clone(),
+                terminal_id: notice.terminal_id.clone(),
                 host_id: notice.host_id.clone(),
             });
             if !suppressed {
@@ -1530,6 +1544,8 @@ impl Records for MemoryRecords {
                     body: n.body.clone(),
                     run_id: n.run_id.clone(),
                     step_id: n.step_id.clone(),
+                    workspace_id: n.workspace_id.clone(),
+                    terminal_id: n.terminal_id.clone(),
                     host_id: n.host_id.clone(),
                 })
         })

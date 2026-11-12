@@ -1059,6 +1059,10 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       it was about, the one leak found. Every screen inside a computer now says when an offline one
       was last seen, and a terminal no longer says its program runs on. **Settings → Diagnostics**
       on the phone, read in full before it is shared.
+      Slice 11 was built on 2026-11-12 ([35 §20](35-remote-r4-r5.md#20--what-the-eleventh-slice-adds)),
+      on the push YARD-4 had already built: an agent that asks for a permission, reported by its own
+      hook, now reaches the phone as **An agent needs you**, once per wait, and opens its terminal.
+      Its local smoke test, the real `yardsort-host` with a pretend phone, passed.
       Slice 12 was added on 2026-11-08 at the owner's request: the slim image and a full one, with
       toolchains, `gh` and the harnesses whose licence allows it, published to the GitHub Container
       Registry on each release beside the tarballs; the other harnesses installed by the operator

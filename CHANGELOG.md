@@ -3,6 +3,15 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **An agent that needs you reaches your phone.** When Claude Code, OpenCode or Pi asks for a
+  permission, on this computer or on one with no screen running `yardsort-host`, a phone with
+  notifications on gets **An agent needs you**, and opening it opens that agent's terminal. One
+  notification per wait: asking again before anyone answers sends nothing more. It can be turned
+  off in **Settings → Notifications** on the phone. See
+  [Notifications](docs/guide/remote.md#notifications).
+
 ## 0.28.1
 
 - **Describe a change to a workflow.** **Customize** on a built-in now opens a box on your copy:

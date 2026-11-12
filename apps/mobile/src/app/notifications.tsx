@@ -106,10 +106,19 @@ export default function Notifications() {
                 disabled={preferences.muted}
                 onPress={() => toggle({ workflow: !preferences.workflow })}
               />
+              {preferences.agent === undefined ? null : (
+                <Row
+                  title="Agents that need you"
+                  checked={preferences.agent}
+                  disabled={preferences.muted}
+                  onPress={() => toggle({ agent: !preferences.agent })}
+                />
+              )}
             </Group>
             <Body muted>
-              A notification opens the item here. You answer a workflow, approve it, and install an
-              update on the computer.
+              A notification opens the item here. An agent that asks for a permission opens its
+              terminal, where you can take control and answer. You install an update on the
+              computer.
             </Body>
           </Section>
         </>

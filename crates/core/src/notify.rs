@@ -24,6 +24,9 @@ pub struct NoticeDraft {
     /// The run and step a workflow notice opens. Never a one-time code.
     pub run_id: Option<String>,
     pub step_id: Option<String>,
+    /// The workspace and terminal an agent notice opens.
+    pub workspace_id: Option<String>,
+    pub terminal_id: Option<String>,
 }
 
 impl NoticeDraft {
@@ -34,6 +37,8 @@ impl NoticeDraft {
             kind: self.kind.to_owned(),
             run_id: self.run_id.clone(),
             step_id: self.step_id.clone(),
+            workspace_id: self.workspace_id.clone(),
+            terminal_id: self.terminal_id.clone(),
         }
     }
 }
@@ -46,6 +51,8 @@ pub struct QueuedNotice {
     pub kind: String,
     pub run_id: Option<String>,
     pub step_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub terminal_id: Option<String>,
 }
 
 /// Keep `draft` until the server has accepted it. A key already waiting, sent, or dropped is
@@ -57,8 +64,9 @@ pub fn enqueue(store: &Store, draft: &NoticeDraft, now: i64) -> StoreResult<bool
 fn enqueue_on(conn: &rusqlite::Connection, draft: &NoticeDraft, now: i64) -> StoreResult<bool> {
     let written = conn.execute(
         "INSERT OR IGNORE INTO mobile_notice_outbox
-         (event_key, category, kind, created_at, expires_at, state, run_id, step_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6, ?7)",
+         (event_key, category, kind, created_at, expires_at, state, run_id, step_id,
+          workspace_id, terminal_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6, ?7, ?8, ?9)",
         params![
             draft.event_key,
             category_name(draft.category),
@@ -67,6 +75,8 @@ fn enqueue_on(conn: &rusqlite::Connection, draft: &NoticeDraft, now: i64) -> Sto
             now.saturating_add(NOTICE_TTL_MS),
             draft.run_id,
             draft.step_id,
+            draft.workspace_id,
+            draft.terminal_id,
         ],
     )?;
     Ok(written > 0)
@@ -79,6 +89,7 @@ fn category_name(category: NoticeCategory) -> &'static str {
         NoticeCategory::Failure => "failure",
         NoticeCategory::DesktopUpdate => "desktopUpdate",
         NoticeCategory::Workflow => "workflow",
+        NoticeCategory::Agent => "agent",
     }
 }
 
@@ -119,7 +130,8 @@ pub fn pending(store: &Store, now: i64) -> StoreResult<Vec<QueuedNotice>> {
     for key in keep {
         if let Some(row) = conn
             .query_row(
-                "SELECT event_key, category, kind, run_id, step_id FROM mobile_notice_outbox
+                "SELECT event_key, category, kind, run_id, step_id, workspace_id, terminal_id
+                 FROM mobile_notice_outbox
                  WHERE event_key = ?1 AND state = 'queued'",
                 [key],
                 |row| {
@@ -129,6 +141,8 @@ pub fn pending(store: &Store, now: i64) -> StoreResult<Vec<QueuedNotice>> {
                         kind: row.get(2)?,
                         run_id: row.get(3)?,
                         step_id: row.get(4)?,
+                        workspace_id: row.get(5)?,
+                        terminal_id: row.get(6)?,
                     })
                 },
             )
@@ -369,6 +383,69 @@ pub fn workflow_approval(run_id: &str, step_id: &str, opened_at: i64) -> Option<
     )
 }
 
+/// What an agent does once a person has answered it: the tool it asked about ran or failed, the
+/// request was settled, or the turn moved on. Until one of these, a second request in the same
+/// run is the same wait for the person and sends nothing more.
+const ANSWERED: [&str; 7] = [
+    "tool.completed",
+    "tool.failed",
+    "approval.resolved",
+    "prompt.submitted",
+    "turn.completed",
+    "turn.failed",
+    "session.ended",
+];
+
+/// An agent in `run` asked for a permission at `at` (the event `approval.requested`, which
+/// every harness that can ask reports from its own hooks, never from what its terminal shows).
+/// One notice per wait: a request while an earlier one in the same run is still unanswered is
+/// coalesced into it. Only a computer signed in to a server queues one, and only for a run whose
+/// terminal is still there to open.
+pub fn agent_approval(
+    store: &Store,
+    run: &crate::store::RunRow,
+    at: i64,
+    now: i64,
+) -> StoreResult<Option<NoticeDraft>> {
+    if run.ended_at.is_some() || store.remote_host()?.is_none() {
+        return Ok(None);
+    }
+    let Some(terminal) = run.pty_session_id.as_deref() else {
+        return Ok(None);
+    };
+    let conn = store.conn();
+    prune_outbox(&conn, now)?;
+    let item = format!("agent:{}", piece(&run.id, 80));
+    if let Some(since) = seen(&conn, &item)?.and_then(|stamp| stamp.parse::<i64>().ok()) {
+        let answered: bool = conn.query_row(
+            &format!(
+                "SELECT EXISTS (SELECT 1 FROM agent_events
+                 WHERE run_id = ?1 AND occurred_at > ?2 AND kind IN ({}))",
+                ANSWERED.map(|kind| format!("'{kind}'")).join(", ")
+            ),
+            params![run.id, since],
+            |row| row.get(0),
+        )?;
+        if !answered {
+            return Ok(None);
+        }
+    }
+    let Some(mut draft) = draft(
+        NoticeCategory::Agent,
+        "approval",
+        &format!("{}:approval:{at}", piece(&run.id, 80)),
+    ) else {
+        return Ok(None);
+    };
+    if subject_ok(&run.workspace_id) && subject_ok(terminal) {
+        draft.workspace_id = Some(run.workspace_id.clone());
+        draft.terminal_id = Some(terminal.to_owned());
+    }
+    remember(&conn, &item, &at.to_string(), now)?;
+    prune_seen(&conn, "agent:", now)?;
+    Ok(enqueue_on(&conn, &draft, now)?.then_some(draft))
+}
+
 /// Attach the run and step when both are ids and neither is a one-time code. Otherwise the
 /// notice still goes out, without a subject the phone could open.
 fn about(draft: Option<NoticeDraft>, run_id: &str, step_id: &str) -> Option<NoticeDraft> {
@@ -412,6 +489,8 @@ fn draft(category: NoticeCategory, kind: &'static str, rest: &str) -> Option<Not
         kind,
         run_id: None,
         step_id: None,
+        workspace_id: None,
+        terminal_id: None,
     })
 }
 

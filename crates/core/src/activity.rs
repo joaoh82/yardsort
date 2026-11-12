@@ -650,6 +650,9 @@ pub fn import_inbox(store: &Store, data_dir: &Path) -> InboxReport {
                         report
                             .pull_requests
                             .extend(seen(&entry.kind, &entry.payload, &link));
+                        if entry.kind == "approval.requested" {
+                            note_approval(store, link.run_id.as_deref(), entry.at_ms);
+                        }
                         report.workspaces.insert(link.workspace_id);
                     }
                     Some(false) => report.duplicates += 1,
@@ -674,6 +677,18 @@ pub fn import_inbox(store: &Store, data_dir: &Path) -> InboxReport {
         let _ = store.bump_diagnostic("inbox_dropped", Some(&report.dropped.to_string()));
     }
     report
+}
+
+/// An agent asked a person for something: tell the phone, once per wait (see
+/// [`crate::notify::agent_approval`]). Recorded only when the event itself was new, so a
+/// second drain of the same file sends nothing. A failure here costs the notice, never the event.
+fn note_approval(store: &Store, run_id: Option<&str>, at: i64) {
+    let Some(run) = run_id.and_then(|id| store.run(id).ok().flatten()) else {
+        return;
+    };
+    if let Err(error) = crate::notify::agent_approval(store, &run, at, crate::store::now_ms()) {
+        let _ = store.bump_diagnostic("agent_notice", Some(&error.to_string()));
+    }
 }
 
 /// Expand a Codex turn trigger into the turn's events. Returns whether the trigger's file is
@@ -1646,6 +1661,84 @@ mod tests {
         // The run's start says it could report.
         let started = events.iter().find(|e| e.kind == "process.started").unwrap();
         assert_eq!(payload(started)["capture"], "hook");
+    }
+
+    /// An agent asking for a permission tells the phone once per wait, naming its terminal,
+    /// and only when this computer is signed in to a server.
+    #[test]
+    fn an_approval_request_queues_one_notice_per_wait() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        let recorder = recorder(&store);
+        let draft = harness_draft(&ws);
+        let run_id = recorder.begin(&draft).unwrap();
+        recorder.spawned(&run_id, &draft, "pty-1", Some(claude::METHOD));
+        let inbox = Inbox::new(inbox_dir(dir.path()));
+        let mut at = 1_790_000_000_000;
+        let mut send = |id: &str, kind: &str| {
+            at += 1_000;
+            let mut entry = inbox_entry(id, kind);
+            entry.at_ms = at;
+            entry.run_id = Some(run_id.clone());
+            inbox.record(&entry).unwrap();
+            import_inbox(&store, dir.path());
+        };
+        let queued = || crate::notify::pending(&store, crate::store::now_ms()).unwrap();
+
+        send("e-alone", "approval.requested");
+        assert!(
+            queued().is_empty(),
+            "a computer not signed in queues nothing"
+        );
+
+        store
+            .set_remote_host(&crate::store::RemoteHostRow {
+                server_url: "https://remote.example.com".into(),
+                server_id: "server-1".into(),
+                host_id: "host-1".into(),
+                device_id: "device-host".into(),
+                name: "Workstation".into(),
+                enabled_at: 1,
+            })
+            .unwrap();
+        send("e-ask", "approval.requested");
+        let first = queued();
+        assert_eq!(first.len(), 1);
+        assert_eq!(
+            (first[0].category.as_str(), first[0].kind.as_str()),
+            ("agent", "approval")
+        );
+        assert!(first[0].event_key.starts_with("agent:"));
+        assert!(
+            !first[0].event_key.contains(&run_id),
+            "the run stays out of the key"
+        );
+        assert_eq!(first[0].workspace_id.as_deref(), Some(ws.as_str()));
+        assert_eq!(first[0].terminal_id.as_deref(), Some("pty-1"));
+
+        // Asked again before anyone answered: the same wait.
+        send("e-again", "tool.started");
+        send("e-ask-2", "approval.requested");
+        assert_eq!(queued().len(), 1);
+
+        // Answered, then a new request: a new wait.
+        send("e-ran", "tool.completed");
+        send("e-ask-3", "approval.requested");
+        assert_eq!(queued().len(), 2);
+
+        // The same file drained twice is one event, and one notice.
+        let mut twice = inbox_entry("e-ask-3", "approval.requested");
+        twice.run_id = Some(run_id.clone());
+        inbox.record(&twice).unwrap();
+        import_inbox(&store, dir.path());
+        assert_eq!(queued().len(), 2);
+
+        // A run that ended has no terminal to open.
+        store.end_run(&run_id, Some(0), "exited").unwrap();
+        send("e-done", "turn.completed");
+        send("e-late", "approval.requested");
+        assert_eq!(queued().len(), 2);
     }
 
     #[test]

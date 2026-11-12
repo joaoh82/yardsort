@@ -17,6 +17,7 @@ import Connect from "../../src/app/connect";
 import DiagnosticsScreen from "../../src/app/diagnostics";
 import Start from "../../src/app/index";
 import MemoryScreen from "../../src/app/memory";
+import Notice from "../../src/app/notice/[id]";
 import TerminalScreen from "../../src/app/terminal";
 import Pair from "../../src/app/pair";
 import Servers from "../../src/app/servers";
@@ -84,6 +85,7 @@ async function start({
       terminal: TerminalScreen,
       start: StartWork,
       diagnostics: DiagnosticsScreen,
+      "notice/[id]": Notice,
     },
     { initialUrl: "/" },
   );
@@ -1569,6 +1571,35 @@ describe("A computer", () => {
         terminal: "terminal-1",
         label: "claude",
         // Its workspace's id, for a picture to go to: an id, like the others.
+        workspace: "workspace-1",
+      });
+    });
+
+    test("an agent's notice opens its terminal, named by ids alone", async () => {
+      const server = new FakeServer();
+      const id = "22222222-2222-4222-8222-222222222222";
+      server.notices.set(id, {
+        id,
+        category: "agent",
+        kind: "approval",
+        title: "An agent needs you",
+        body: "Open its terminal on this phone. It waits for you there.",
+        deepLink: `yardsort://notice/agent/${id}`,
+        workspaceId: "workspace-1",
+        terminalId: "terminal-1",
+        hostId: "host-work",
+      });
+      await paired(new MemoryVault(), server);
+      await act(async () => router.push(`/notice/${id}`));
+      await screen.findByTestId("terminal");
+      const route = screen as unknown as {
+        getPathname(): string;
+        getSearchParams(): Record<string, string>;
+      };
+      expect(route.getPathname()).toBe("/terminal");
+      expect(route.getSearchParams()).toEqual({
+        host: "host-work",
+        terminal: "terminal-1",
         workspace: "workspace-1",
       });
     });

@@ -13,3 +13,22 @@ export function noticeRoute(path: string): string | null {
   const id = NOTICE.exec(path)?.[1];
   return id ? `/notice/${id}` : null;
 }
+
+/**
+ * Where an agent notice opens: the terminal of the agent that asked, on the computer that said
+ * so. Ids only, as the server gave them. Null for any other notice, or one without all three.
+ */
+export function terminalTarget(notice: {
+  category: string;
+  workspaceId?: string | undefined;
+  terminalId?: string | undefined;
+  hostId?: string | undefined;
+}): string | null {
+  if (notice.category !== "agent" || !notice.workspaceId || !notice.terminalId || !notice.hostId) {
+    return null;
+  }
+  const host = encodeURIComponent(notice.hostId);
+  const terminal = encodeURIComponent(notice.terminalId);
+  const workspace = encodeURIComponent(notice.workspaceId);
+  return `/terminal?host=${host}&terminal=${terminal}&workspace=${workspace}`;
+}

@@ -7,6 +7,7 @@
 //   bun .yardsort/tests/support/phone.ts <run dir> sees <name> <expected>
 //   bun .yardsort/tests/support/phone.ts <run dir> refused <name> | ends <name>
 //   bun .yardsort/tests/support/phone.ts <run dir> resumes <name> <message> <expected>
+//   bun .yardsort/tests/support/phone.ts <run dir> registers | opens-notice <name> <pushes file>
 //
 // `type` takes control of the one session running on the computer, types the line and a return,
 // and waits for the expected text in what the terminal prints. `take-over` does the same while
@@ -14,6 +15,9 @@
 // `refused` expects a phone let only watch to be refused starting and resuming. `ends` types an
 // end of input into the one running session, which ends a stand-in agent. `resumes` resumes the
 // one ended conversation the computer can resume, with a message, and waits for the expected text.
+// `registers` gives the server a push token, as a phone allowed to notify does. `opens-notice`
+// takes the one push the stand-in recorded, reads its notice, and checks it names the terminal of
+// the one session running on the computer, and that the push itself names nothing.
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -295,6 +299,41 @@ switch (doing) {
     console.log(`saw: ${expected}`);
     await attachment.detach();
     channel.close();
+    break;
+  }
+  case "registers": {
+    const phone = await session();
+    await client.registerPushToken(await phone.access(), {
+      platform: "apns",
+      token: "smoke-phone-token",
+    });
+    console.log("registered for notifications");
+    break;
+  }
+  case "opens-notice": {
+    // Here `line` is the file of pushes the stand-in recorded.
+    const pushes = readFileSync(line, "utf8").trim().split("\n").filter(Boolean);
+    if (pushes.length !== 1)
+      throw new Error(`${pushes.length} pushes, not one:\n${pushes.join("\n")}`);
+    const alert = JSON.parse(pushes[0]);
+    if (Object.keys(alert).sort().join() !== "body,category,deepLink,title") {
+      throw new Error(`The push says more than it should: ${pushes[0]}`);
+    }
+    if (alert.title !== "An agent needs you" || alert.category !== "agent") {
+      throw new Error(`Not an agent's notice: ${pushes[0]}`);
+    }
+    const id = /^yardsort:\/\/notice\/agent\/([0-9a-f-]{36})$/.exec(alert.deepLink)?.[1];
+    if (!id) throw new Error(`Not a notice's link: ${alert.deepLink}`);
+    const phone = await session();
+    const host = await theComputer(phone);
+    const notice = await client.notice(await phone.access(), id);
+    const channel = await reach(phone, host);
+    const terminal = await theRunningTerminal(channel);
+    channel.close();
+    if (notice.hostId !== host || notice.terminalId !== terminal || !notice.workspaceId) {
+      throw new Error(`It opens somewhere else: ${JSON.stringify(notice)}`);
+    }
+    console.log("the notice opens the terminal that asked");
     break;
   }
   case "spend-sign-in": {

@@ -22,6 +22,7 @@ and the body. The computer does not send words, a project name, a prompt, or a o
 | `desktopUpdate` | `available` | `{version}`                             | A desktop update is available      |
 | `workflow`      | `question`  | `question:{run}:{step}:{opened}`        | A workflow has a question          |
 | `workflow`      | `approval`  | `approval:{run}:{step}:{opened}`        | A workflow is waiting for approval |
+| `agent`         | `approval`  | `{run}:approval:{asked}`                | An agent needs you                 |
 
 The event key the computer submits, and the server stores, is the category prefix plus the
 SHA-256 of that rest, written in hex. Two computers hash the same rest, so they still dedupe.
@@ -45,7 +46,28 @@ case letters, digits, and `:._-`. Upper case is refused, so a one-time code cann
 the key. A field the server does not know, including `code`, is refused.
 
 The body is a fixed sentence. It says to open the item on the phone. A workflow question or
-approval says to answer or approve there. Installing a desktop update stays on the computer.
+approval says to answer or approve there. An agent's says to open its terminal there. Installing a
+desktop update stays on the computer.
+
+### An agent that needs you
+
+Added in Remote's slice 11 ([35 §20](35-remote-r4-r5.md#20--what-the-eleventh-slice-adds)). An
+agent that asks for a permission reports it from its own hook as `approval.requested`: Claude
+Code's `PermissionRequest`, OpenCode's `permission.asked`, Pi's `tool_approval_requested`. When the
+inbox drain records such an event for the first time, and the run it belongs to still has a
+terminal, the computer queues an `agent` notice (`notify::agent_approval`). Nothing is read from
+the terminal, and the tool, its arguments and the conversation stay on the computer. `asked` is
+when the hook ran, by the computer's clock.
+
+One notice is one wait. A second request in the same run before anyone answered is coalesced into
+the first, and sends nothing. The run has been answered once it has an event after the notice that
+only follows an answer: `tool.completed`, `tool.failed`, `approval.resolved`, `prompt.submitted`,
+`turn.completed`, `turn.failed` or `session.ended`. The next request after that is a new notice.
+When the last notice was is kept in `mobile_notice_seen` under `agent:{run}`, and goes after a week
+as the other seen rows do.
+
+Only a computer signed in to a server as a host queues one. An ended run does not, since there is
+no terminal left to open.
 
 ## Delivery
 
@@ -72,11 +94,16 @@ The computer's post returns as soon as the notice is stored. Sending to APNs or 
 after that, so the computer is not held open for the provider.
 
 The deep link is `yardsort://notice/{category}/{id}`. `id` is the server's notice id. The category
-in the path is `task`, `review`, `failure`, `desktop-update`, or `workflow`. The phone's screen
+in the path is `task`, `review`, `failure`, `desktop-update`, `workflow`, or `agent`. The phone's screen
 shows the title and the body. It asks every account the phone is signed in to, the one in use
 first, so a notice for another signed-in account still opens. A workflow notice then opens the
-decision for that run. `GET` may add `runId`, `stepId`, and `hostId` for that. The push payload
-does not. Installing a desktop update stays on the computer. A link with a query string is left
+decision for that run. `GET` may add `runId`, `stepId`, and `hostId` for that. An agent notice
+opens the terminal of the session that asked: `GET` may add `workspaceId`, `terminalId`, and
+`hostId`, the computer's own ids (migrations `0039` on the computer and `0009` on the server). The
+server keeps them only for that category, and only when each is an id and none looks like a
+one-time code. The push payload has none of them. A computer whose server is older sends the
+notice again without these fields when it is refused; an older server refuses the `agent`
+category itself, and the notice is dropped. Installing a desktop update stays on the computer. A link with a query string is left
 alone, so a code cannot ride on it.
 
 Permission is asked once, from Settings → Notifications, not when the app launches and not
@@ -97,8 +124,12 @@ token exchange logs its status and leaves the notice queued.
 ## Preferences
 
 `GET` and `POST /v1/notifications/preferences` are the account's settings: `muted`, and one flag
-each for `task`, `review`, `failure`, `desktopUpdate`, and `workflow`. Any device signed in to the
-account may read or replace them. The default is all on, and not muted.
+each for `task`, `review`, `failure`, `desktopUpdate`, `workflow`, and `agent`. Any device signed
+in to the account may read or replace them. The default is all on, and not muted.
+
+`agent` came later than the rest, so it may be absent both ways. A phone from before it saves
+without it, and the stored value is kept. A server from before it does not send it, and the phone
+then does not show the switch.
 
 The phone's Settings → Notifications is that screen. The mute and the categories are for the
 account in use, and the section is titled for that account. Mute covers every category. A
