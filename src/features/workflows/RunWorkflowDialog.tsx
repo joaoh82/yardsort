@@ -163,13 +163,14 @@ export function RunWorkflowDialog({
       .map((w) => ({ id: w.id, name: `${project.name} / ${w.name}` })),
   );
   const missing = inputs.filter((input) => input.required && !answers[input.id]?.trim());
-  const blockedByPullRequest = preview?.needsPullRequest && !preview.pullRequest;
+  const blockedByPullRequest =
+    !!preview?.needsPullRequest && !preview.pullRequest && !!preview.pullRequestProblem;
 
   // No open pull request of its own, but open ones the workspace tracks elsewhere — often the
   // whole of its work, in a parent project. The workflow's `-elsewhere` twin can run on one.
   const projectId = projects.find((p) => p.workspaces.some((w) => w.id === chosenWorkspace))?.id;
   const openElsewhere =
-    !tracked && blockedByPullRequest && projectId
+    !tracked && preview?.needsPullRequest && !preview.pullRequest && projectId
       ? (pullRequestsByProject[projectId]?.tracked ?? []).filter(
           (t) => t.workspaceId === chosenWorkspace && t.pullRequest?.state === "open",
         )
@@ -301,9 +302,15 @@ export function RunWorkflowDialog({
               </p>
             ) : (
               <div className="flex flex-col gap-2">
-                <p role="alert" className="text-red-400 select-text">
-                  {preview.pullRequestProblem}
-                </p>
+                {preview.pullRequestProblem ? (
+                  <p role="alert" className="text-red-400 select-text">
+                    {preview.pullRequestProblem}
+                  </p>
+                ) : preview.pullRequestNote ? (
+                  <p className="rounded border border-line bg-canvas/40 p-2.5 text-ink-muted">
+                    {preview.pullRequestNote}
+                  </p>
+                ) : null}
                 {openElsewhere.length > 0 &&
                   (twin ? (
                     <div className="flex flex-col gap-1.5">

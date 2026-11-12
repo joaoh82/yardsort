@@ -103,6 +103,173 @@ fn the_built_in_code_review_is_valid_and_ends_in_two_branches() {
 }
 
 #[test]
+fn the_built_in_software_factory_parses_with_its_phases_and_loops() {
+    let text = BUILT_IN
+        .iter()
+        .find(|(id, _)| *id == "software-factory")
+        .expect("software-factory ships")
+        .1;
+    let workflow = parse(text).unwrap_or_else(|invalid| panic!("{:#?}", invalid.problems));
+    assert_eq!(workflow.id, "software-factory");
+    assert_eq!(workflow.name, "Software factory");
+    assert_eq!(workflow.trigger.context, RunContext::Workspace);
+    let input = |id: &str| workflow.inputs.iter().find(|input| input.id == id).unwrap();
+    assert!(input("task").required && matches!(input("task").kind, InputKind::Text));
+    assert!(input("agent").required && matches!(input("agent").kind, InputKind::Harness));
+    assert!(input("suite").required && matches!(input("suite").kind, InputKind::Test));
+
+    let ids: Vec<&str> = workflow.steps.iter().map(|step| step.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            "define",
+            "brief",
+            "gather",
+            "context",
+            "plan",
+            "plan-ready",
+            "approve-plan",
+            "implement",
+            "implement-ready",
+            "verify",
+            "await-review",
+            "accept-review",
+            "release",
+            "ready",
+        ]
+    );
+    let step = |id: &str| workflow.steps.iter().find(|step| step.id == id).unwrap();
+
+    let brief = step("brief");
+    assert!(matches!(
+        &brief.action,
+        Action::WaitSession {
+            clarify: true,
+            max_rounds: 5,
+            session: SessionRef::Step(source),
+            ..
+        } if source == "define"
+    ));
+    assert_eq!(brief.produces[0].name, "brief");
+    assert_eq!(brief.produces[0].source, ArtifactSource::Brief);
+
+    assert_eq!(
+        step("gather").consumes,
+        ["brief"],
+        "context gathering reads the brief"
+    );
+    assert_eq!(
+        step("context").produces[0].source,
+        ArtifactSource::File {
+            path: "factory/context.md".into(),
+        }
+    );
+    assert_eq!(
+        step("plan").consumes,
+        ["brief", "context", "changes-approve-plan"]
+    );
+    assert_eq!(
+        step("plan-ready").produces[0].source,
+        ArtifactSource::File {
+            path: "factory/plan.md".into(),
+        }
+    );
+    let prompt = |id: &str| match &step(id).action {
+        Action::StartSession { prompt, .. } => prompt.clone().unwrap_or_default(),
+        other => panic!("{id} is not a session: {other:?}"),
+    };
+    let gather = prompt("gather");
+    assert!(
+        gather.contains("Delete `factory/context.md`"),
+        "gather does not clear the previous notes: {gather}"
+    );
+    let plan = prompt("plan");
+    assert!(
+        plan.contains("Delete `factory/plan.md`"),
+        "plan does not clear the previous plan: {plan}"
+    );
+    let implement = prompt("implement");
+    assert!(
+        implement.contains("gh pr create --draft"),
+        "implement does not open a draft pull request: {implement}"
+    );
+    assert!(
+        !implement.contains("pr.number"),
+        "implement still names the pull request, which may not exist yet: {implement}"
+    );
+
+    let plan_gate = step("approve-plan");
+    assert!(plan_gate.gate);
+    assert_eq!(plan_gate.consumes, ["plan"]);
+    assert_eq!(plan_gate.max_attempts, Some(3));
+    assert!(plan_gate
+        .routes
+        .iter()
+        .any(|route| { route.when == OutcomeName::Approved && route.to == "implement" }));
+    assert!(plan_gate
+        .routes
+        .iter()
+        .any(|route| { route.when == OutcomeName::ChangesRequested && route.to == "plan" }));
+    assert!(plan_gate
+        .routes
+        .iter()
+        .any(|route| route.when == OutcomeName::Rejected && route.stops()));
+
+    assert_eq!(
+        step("implement").consumes,
+        ["plan", "failure-verify", "changes-accept-review"]
+    );
+
+    let verify = step("verify");
+    assert!(verify.gate);
+    assert_eq!(verify.max_attempts, Some(3));
+    assert!(matches!(
+        &verify.action,
+        Action::RunTest { test, .. } if test == "{{ inputs.suite }}"
+    ));
+    assert!(verify
+        .routes
+        .iter()
+        .any(|route| route.when == OutcomeName::Passed && route.to == "await-review"));
+    assert!(verify
+        .routes
+        .iter()
+        .any(|route| route.when == OutcomeName::Failed && route.to == "implement"));
+
+    assert!(matches!(
+        step("await-review").action,
+        Action::WaitPrActivity {
+            kind: PrActivity::Review,
+            timeout_secs: None,
+        }
+    ));
+
+    let review_gate = step("accept-review");
+    assert_eq!(review_gate.max_attempts, Some(3));
+    assert!(review_gate
+        .routes
+        .iter()
+        .any(|route| { route.when == OutcomeName::Approved && route.to == "release" }));
+    assert!(review_gate
+        .routes
+        .iter()
+        .any(|route| { route.when == OutcomeName::ChangesRequested && route.to == "implement" }));
+    assert!(review_gate
+        .routes
+        .iter()
+        .any(|route| route.when == OutcomeName::Rejected && route.stops()));
+
+    let release = step("release");
+    assert!(
+        release.routes.is_empty(),
+        "the release gate has no revision loop"
+    );
+    assert!(matches!(release.action, Action::Approve { .. }));
+    assert_eq!(step("ready").needs, ["release"]);
+    assert!(matches!(step("ready").action, Action::Notify { .. }));
+}
+
+#[test]
 fn the_parsed_form_is_serialised_the_way_the_app_will_read_it() {
     let workflow = parse(BUILT_IN[0].1).unwrap();
     let json = serde_json::to_value(&workflow).unwrap();
@@ -774,7 +941,8 @@ fn a_users_files_are_listed_beside_the_built_ins_by_name() {
             "Request code review",
             "Request code review elsewhere",
             "Review the branch",
-            "Smoke test, then tell the agent"
+            "Smoke test, then tell the agent",
+            "Software factory",
         ]
     );
     assert!(matches!(

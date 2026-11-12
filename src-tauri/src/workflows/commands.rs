@@ -119,8 +119,11 @@ pub struct RunPreview {
     pub needs_pull_request: bool,
     /// Found: the workspace's open pull request.
     pub pull_request: Option<PrFacts>,
-    /// Why there is none to use, when one is needed.
+    /// Why there is none to use, when the run cannot look. Not set when the branch simply has
+    /// no open pull request: the run may open one.
     pub pull_request_problem: Option<String>,
+    /// Shown when the branch has no open pull request and the run can still start.
+    pub pull_request_note: Option<String>,
     /// The workflow talks to the workspace's own agent.
     pub needs_origin: bool,
     /// Variables the run will render as nothing, and why. A run still goes ahead.
@@ -438,35 +441,38 @@ pub async fn workflow_preview(
             .ok_or_else(|| IpcError::new("workspace_not_found", "That workspace is not there."))?;
         // A run on a pull request elsewhere is about it, whatever its steps use.
         let needs_pull_request = tracked_id.is_some() || runs::needs_pull_request(&workflow);
-        let (pull_request, pull_request_problem) = if let Some(tracked) = &tracked_id {
-            // One the workspace tracks elsewhere, read by its link.
-            match crate::publish::tracked::for_a_run(state, &workspace.id, tracked) {
-                Ok(pr) => match runs::tracked_problem(&workflow, &pr) {
-                    Some(problem) => (None, Some(problem.message)),
-                    None => (Some(pr), None),
-                },
-                Err(why) => (None, Some(why.message)),
-            }
-        } else if needs_pull_request {
-            match AppLook(state).pull_request(&workspace) {
-                Ok(Some(pr)) if pr.state == yardsort_core::forge::PullRequestState::Open => (
-                    Some(PrFacts {
-                        number: pr.number,
-                        url: pr.url,
-                        title: pr.title,
-                        elsewhere: None,
-                    }),
-                    None,
-                ),
-                Ok(_) => (
-                    None,
-                    Some(format!("`{}` has no open pull request.", workspace.name)),
-                ),
-                Err(why) => (None, Some(why)),
-            }
-        } else {
-            (None, None)
-        };
+        let (pull_request, pull_request_problem, pull_request_note) =
+            if let Some(tracked) = &tracked_id {
+                // One the workspace tracks elsewhere, read by its link.
+                match crate::publish::tracked::for_a_run(state, &workspace.id, tracked) {
+                    Ok(pr) => match runs::tracked_problem(&workflow, &pr) {
+                        Some(problem) => (None, Some(problem.message), None),
+                        None => (Some(pr), None, None),
+                    },
+                    Err(why) => (None, Some(why.message), None),
+                }
+            } else if needs_pull_request {
+                match AppLook(state).pull_request(&workspace) {
+                    Ok(Some(pr)) if pr.state == yardsort_core::forge::PullRequestState::Open => (
+                        Some(PrFacts {
+                            number: pr.number,
+                            url: pr.url,
+                            title: pr.title,
+                            elsewhere: None,
+                        }),
+                        None,
+                        None,
+                    ),
+                    Ok(_) => {
+                        let (problem, note) =
+                            runs::missing_pull_request_preview(&workflow, &workspace.name);
+                        (None, problem, note)
+                    }
+                    Err(why) => (None, Some(why), None),
+                }
+            } else {
+                (None, None, None)
+            };
         let git = crate::git::Git::new(&state.env())?;
         let empty = match runs::Place::load(&state.store, &workspace.id, &git)? {
             Some(place) => {
@@ -479,6 +485,7 @@ pub async fn workflow_preview(
             needs_pull_request,
             pull_request,
             pull_request_problem,
+            pull_request_note,
             needs_origin: runs::needs_origin(&workflow),
             empty,
         })

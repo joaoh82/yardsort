@@ -34,12 +34,20 @@ steps:
     timeout: 5m
 "#;
 
+/// One review or comment, at a moment.
+struct Posted {
+    kind: PrActivity,
+    at_ms: i64,
+}
+
 struct Fake {
     now: i64,
     sessions: HashMap<String, SessionFacts>,
     origin: Option<String>,
-    /// Reviews and comments on the pull request since the run started.
-    posts: Vec<PrActivity>,
+    /// Reviews and comments on the pull request, each at a time.
+    posts: Vec<Posted>,
+    /// Whether a step may render `{{ pr.* }}`. `None` means the lookup is still out.
+    pull_request: Option<bool>,
     /// Smoke test runs by id, as `run_test` would see them.
     test_runs: HashMap<String, TestRun>,
     /// Named artifacts already stored for this run. A consumer reads these at render time,
@@ -73,15 +81,23 @@ impl World for Fake {
     fn origin(&self) -> Option<String> {
         self.origin.clone()
     }
-    fn pr_activity(&self, kind: PrActivity) -> Option<PrSeen> {
-        let count = self
+    fn pr_known(&self) -> Option<bool> {
+        self.pull_request
+    }
+
+    fn pr_activity(&self, kind: PrActivity, since: i64) -> Option<PrSeen> {
+        let matched: Vec<_> = self
             .posts
             .iter()
-            .filter(|posted| kind == PrActivity::Any || **posted == kind)
-            .count() as u32;
+            .filter(|posted| posted.at_ms >= since)
+            .filter(|posted| kind == PrActivity::Any || posted.kind == kind)
+            .collect();
+        let count = matched.len() as u32;
         Some(PrSeen {
             count,
-            latest_url: (count > 0).then(|| "https://example.test/pull/42".to_owned()),
+            latest_url: matched
+                .last()
+                .map(|_| "https://example.test/pull/42".to_owned()),
         })
     }
     fn test_run(&self, run_id: &str) -> Option<TestRun> {
@@ -137,6 +153,7 @@ impl Run {
                 sessions: HashMap::new(),
                 origin: None,
                 posts: Vec::new(),
+                pull_request: Some(true),
                 test_runs: HashMap::new(),
                 artifacts: BTreeMap::new(),
                 approvals: HashMap::new(),
@@ -292,6 +309,12 @@ impl Run {
 
     fn later(&mut self, ms: i64) {
         self.world.now += ms;
+    }
+
+    /// A review or comment on the pull request, posted now.
+    fn post(&mut self, kind: PrActivity) {
+        let at_ms = self.world.now;
+        self.world.posts.push(Posted { kind, at_ms });
     }
 
     /// Start the agent and let it work, so `settle` is waiting on a busy session.
@@ -658,12 +681,12 @@ fn the_forge_is_watched_until_a_post_of_the_kind_asked_for_appears() {
     );
     assert!(run.advance().is_empty());
     assert_eq!(run.status("posted"), "waiting");
-    run.world.posts.push(PrActivity::Comment);
+    run.post(PrActivity::Comment);
     assert!(
         run.advance().is_empty(),
         "a comment is not the review asked for"
     );
-    run.world.posts.push(PrActivity::Review);
+    run.post(PrActivity::Review);
     let effects = run.advance();
     assert_eq!(run.status("posted"), "succeeded");
     assert_eq!(
@@ -694,7 +717,7 @@ fn a_review_that_never_comes_fails_the_wait_saying_so() {
 #[test]
 fn with_no_agent_of_its_own_in_the_workspace_the_author_step_is_skipped_saying_why() {
     let mut run = review_run(None);
-    run.world.posts.push(PrActivity::Review);
+    run.post(PrActivity::Review);
     run.advance();
     assert_eq!(run.status("tell_author"), "skipped");
     assert_eq!(
@@ -917,7 +940,7 @@ steps:
         },
     );
     // A review arrives on the same tick the gate fails, which would have started `late`.
-    run.world.posts.push(PrActivity::Review);
+    run.post(PrActivity::Review);
     let effects = run.advance();
     assert!(
         effects.is_empty(),
@@ -2787,4 +2810,592 @@ steps:
         .artifacts
         .get("failure-right")
         .is_some_and(|body| body.contains("right broke")));
+}
+
+fn software_factory() -> Run {
+    let source = crate::workflow::BUILT_IN
+        .iter()
+        .find(|(id, _)| *id == "software-factory")
+        .expect("software-factory ships")
+        .1;
+    let mut run = Run::from(source);
+    run.inputs = [
+        ("task".into(), "Add a logout button".into()),
+        ("agent".into(), "claude".into()),
+        ("suite".into(), "login".into()),
+    ]
+    .into();
+    run
+}
+
+fn started(effects: &[Effect], step: &str) -> String {
+    effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Start {
+                step: id,
+                prompt,
+                harness,
+                ..
+            } if id == step => {
+                assert_eq!(harness, "claude");
+                Some(prompt.clone().unwrap_or_default())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("expected `{step}` to start: {effects:?}"))
+}
+
+fn spawn(run: &mut Run, step: &str, pty: &str) -> String {
+    let effects = run.advance();
+    let prompt = started(&effects, step);
+    assert!(run.apply(&done(
+        step,
+        &Outputs::from([
+            ("session".into(), pty.into()),
+            ("run".into(), format!("run-{step}")),
+        ]),
+    )));
+    run.session(
+        pty,
+        SessionFacts {
+            alive: true,
+            busy: true,
+            settled_at: None,
+        },
+    );
+    prompt
+}
+
+/// The wait is open. A clarifying one finishes when its summary is recorded. Any other
+/// finishes when the session settles. A producing wait stays running until the artifact
+/// is stored, and `body` is what the next step will read.
+fn finish_wait(run: &mut Run, step: &str, pty: &str, body: Option<(&str, &str)>) -> Vec<Effect> {
+    if run.status(step) == "pending" {
+        run.advance();
+    }
+    assert_eq!(run.status(step), "waiting", "{step}");
+    let clarify = run.workflow.steps.iter().any(|candidate| {
+        candidate.id == step
+            && matches!(
+                candidate.action,
+                crate::workflow::Action::WaitSession { clarify: true, .. }
+            )
+    });
+    if clarify {
+        run.world.clarifications.insert(
+            step.into(),
+            ClarificationState {
+                summary: true,
+                ..ClarificationState::default()
+            },
+        );
+    }
+    run.session(
+        pty,
+        SessionFacts {
+            alive: true,
+            busy: false,
+            settled_at: Some(run.world.now),
+        },
+    );
+    let effects = run.advance();
+    let produces = run
+        .workflow
+        .steps
+        .iter()
+        .any(|candidate| candidate.id == step && !candidate.produces.is_empty());
+    if produces {
+        let Effect::Capture {
+            outputs,
+            note,
+            outcome,
+            ..
+        } = effects
+            .iter()
+            .find(|effect| matches!(effect, Effect::Capture { step: id, .. } if id == step))
+            .unwrap_or_else(|| panic!("expected `{step}` to store an artifact: {effects:?}"))
+        else {
+            unreachable!("the find above matched a capture");
+        };
+        assert_eq!(run.status(step), "running", "{step}");
+        assert!(run.apply(&recorded(step, outputs, note.clone(), outcome.clone())));
+        let (name, text) = body.expect("a producing wait needs a body");
+        run.world.artifacts.insert(name.into(), text.into());
+    } else {
+        assert!(body.is_none());
+        assert_eq!(run.status(step), "succeeded", "{step}: {effects:?}");
+    }
+    effects
+}
+
+fn approve(run: &mut Run, step: &str, decision: ApprovalDecision, feedback: Option<&str>) {
+    assert_eq!(run.status(step), "waiting", "{step}");
+    run.world
+        .approvals
+        .insert(step.into(), decided(decision, feedback));
+}
+
+/// Through the plan gate, which is waiting.
+fn to_plan_gate(run: &mut Run) -> String {
+    let prompt = spawn(run, "define", "pty-define");
+    assert!(prompt.contains("Add a logout button"), "{prompt}");
+    assert!(prompt.contains("ys workflow ask"), "{prompt}");
+    finish_wait(
+        run,
+        "brief",
+        "pty-define",
+        Some(("brief", "Problem: sessions never expire.")),
+    );
+    let prompt = spawn(run, "gather", "pty-gather");
+    assert!(
+        prompt.contains("sessions never expire"),
+        "gathering did not read the brief: {prompt}"
+    );
+    finish_wait(
+        run,
+        "context",
+        "pty-gather",
+        Some(("context", "The timer lives in src/auth.ts.")),
+    );
+    let prompt = spawn(run, "plan", "pty-plan");
+    assert!(prompt.contains("src/auth.ts"), "{prompt}");
+    assert!(
+        !prompt.contains("changes-approve-plan\n\n"),
+        "the first plan was given a changes note: {prompt}"
+    );
+    finish_wait(
+        run,
+        "plan-ready",
+        "pty-plan",
+        Some(("plan", "Add a logout button beside the avatar.")),
+    );
+    run.advance();
+    assert_eq!(run.status("approve-plan"), "waiting");
+    prompt
+}
+
+fn implement_once(run: &mut Run, pty: &str) -> String {
+    let prompt = spawn(run, "implement", pty);
+    let effects = finish_wait(run, "implement-ready", pty, None);
+    assert!(
+        effects.iter().any(|effect| matches!(
+            effect,
+            Effect::RunTest { step, test, .. } if step == "verify" && test == "login"
+        )),
+        "settling implementation should start the smoke test: {effects:?}"
+    );
+    prompt
+}
+
+fn queue_verify(run: &mut Run, run_id: &str) {
+    // Settling implementation starts the test in the same pass, so it may already be running.
+    if run.status("verify") == "pending" {
+        let effects = run.advance();
+        assert!(
+            effects.iter().any(|effect| matches!(
+                effect,
+                Effect::RunTest { step, test, .. } if step == "verify" && test == "login"
+            )),
+            "{effects:?}"
+        );
+    }
+    assert_eq!(run.status("verify"), "running");
+    assert!(run.apply(&queued(
+        "verify",
+        &Outputs::from([("run".into(), run_id.into())])
+    )));
+}
+
+fn fail_verify(run: &mut Run, run_id: &str, summary: &str) {
+    run.world.test_runs.insert(
+        run_id.into(),
+        TestRun {
+            status: "failed".into(),
+            summary: summary.into(),
+        },
+    );
+    run.advance();
+}
+
+#[test]
+fn the_software_factory_walks_the_happy_path_to_ready() {
+    let mut run = software_factory();
+    to_plan_gate(&mut run);
+    approve(&mut run, "approve-plan", ApprovalDecision::Approved, None);
+    let prompt = implement_once(&mut run, "pty-implement");
+    assert!(
+        prompt.contains("beside the avatar"),
+        "implementation did not read the plan: {prompt}"
+    );
+    assert!(
+        prompt.contains("gh pr create --draft"),
+        "implementation did not open a pull request when the branch has none: {prompt}"
+    );
+    queue_verify(&mut run, "tr-1");
+    run.world.test_runs.insert(
+        "tr-1".into(),
+        TestRun {
+            status: "passed".into(),
+            summary: "login: ok".into(),
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("verify"), "succeeded");
+    assert_eq!(run.status("await-review"), "waiting");
+    assert_eq!(attempts(&run, "verify"), 1);
+
+    run.post(PrActivity::Review);
+    run.advance();
+    assert_eq!(run.status("await-review"), "succeeded");
+    assert_eq!(run.status("accept-review"), "waiting");
+
+    approve(&mut run, "accept-review", ApprovalDecision::Approved, None);
+    run.advance();
+    assert_eq!(run.status("accept-review"), "succeeded");
+    assert_eq!(run.status("release"), "waiting");
+    assert_eq!(run.status("ready"), "pending");
+
+    approve(
+        &mut run,
+        "release",
+        ApprovalDecision::Approved,
+        Some("ship it"),
+    );
+    let effects = run.advance();
+    assert_eq!(run.status("release"), "succeeded");
+    assert!(
+        effects.iter().any(|effect| matches!(
+            effect,
+            Effect::Notify { step, title, .. } if step == "ready" && title.contains("ready to release")
+        )),
+        "{effects:?}"
+    );
+    finish_notify(&mut run, "ready");
+    run.advance();
+    assert!(matches!(run.finished, Some(Finish::Succeeded)));
+    assert!(run.rows.iter().all(|row| row.status == "succeeded"));
+}
+
+#[test]
+fn requesting_changes_on_the_plan_loops_back_to_planning() {
+    let mut run = software_factory();
+    to_plan_gate(&mut run);
+    approve(
+        &mut run,
+        "approve-plan",
+        ApprovalDecision::ChangesRequested,
+        Some("name the edge cases"),
+    );
+    run.advance();
+    assert_eq!(run.status("plan"), "pending");
+    assert_eq!(run.status("plan-ready"), "pending");
+    assert_eq!(run.status("approve-plan"), "pending");
+    assert_eq!(run.status("implement"), "pending");
+    assert_eq!(attempts(&run, "approve-plan"), 1);
+    assert!(run.world.approvals.is_empty());
+    assert_eq!(
+        run.world
+            .artifacts
+            .get("changes-approve-plan")
+            .map(String::as_str),
+        Some("name the edge cases")
+    );
+    assert!(run.finished.is_none());
+
+    let prompt = spawn(&mut run, "plan", "pty-plan-2");
+    assert!(
+        prompt.contains("name the edge cases"),
+        "planning did not read the note: {prompt}"
+    );
+    assert!(prompt.contains("src/auth.ts"), "{prompt}");
+}
+
+#[test]
+fn a_failed_verdict_loops_back_to_implement_and_stops_at_the_limit() {
+    let mut run = software_factory();
+    to_plan_gate(&mut run);
+    approve(&mut run, "approve-plan", ApprovalDecision::Approved, None);
+    let first = implement_once(&mut run, "pty-1");
+    assert!(
+        !first.contains("the button is missing"),
+        "the first implementation was given a failure: {first}"
+    );
+    queue_verify(&mut run, "tr-1");
+    fail_verify(&mut run, "tr-1", "login: the button is missing");
+    assert_eq!(run.status("implement"), "pending");
+    assert_eq!(run.status("verify"), "pending");
+    assert_eq!(run.status("approve-plan"), "succeeded");
+    assert_eq!(attempts(&run, "verify"), 1);
+    assert!(run.world.approvals.contains_key("approve-plan"));
+    assert!(run
+        .world
+        .artifacts
+        .get("failure-verify")
+        .is_some_and(|body| body.contains("the button is missing")));
+    assert!(run.finished.is_none());
+
+    let second = implement_once(&mut run, "pty-2");
+    assert!(
+        second.contains("the button is missing"),
+        "the retry did not read the report: {second}"
+    );
+    queue_verify(&mut run, "tr-2");
+    fail_verify(&mut run, "tr-2", "login: still missing");
+    assert_eq!(attempts(&run, "verify"), 2);
+    assert!(run.finished.is_none());
+
+    implement_once(&mut run, "pty-3");
+    queue_verify(&mut run, "tr-3");
+    fail_verify(&mut run, "tr-3", "login: still missing");
+    assert_eq!(run.status("verify"), "failed");
+    assert_eq!(attempts(&run, "verify"), 3);
+    assert_eq!(run.status("implement"), "succeeded");
+    assert_eq!(run.status("await-review"), "skipped");
+    let Finish::Failed(error) = run.finished.clone().unwrap() else {
+        panic!("the run should stop: {:?}", run.finished);
+    };
+    assert!(
+        error.contains("the verdict was a failure 3 times, which is the limit (3)"),
+        "{error}"
+    );
+    assert!(error.contains("Start a new run to try again."), "{error}");
+}
+
+#[test]
+fn review_changes_requested_loops_back_to_implement() {
+    let mut run = software_factory();
+    to_plan_gate(&mut run);
+    approve(&mut run, "approve-plan", ApprovalDecision::Approved, None);
+    implement_once(&mut run, "pty-1");
+    queue_verify(&mut run, "tr-1");
+    run.world.test_runs.insert(
+        "tr-1".into(),
+        TestRun {
+            status: "passed".into(),
+            summary: "login: ok".into(),
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("await-review"), "waiting");
+    run.post(PrActivity::Review);
+    run.advance();
+    assert_eq!(run.status("accept-review"), "waiting");
+    approve(
+        &mut run,
+        "accept-review",
+        ApprovalDecision::ChangesRequested,
+        Some("the button needs a label"),
+    );
+    run.advance();
+    assert_eq!(run.status("implement"), "pending");
+    assert_eq!(run.status("implement-ready"), "pending");
+    assert_eq!(run.status("verify"), "pending");
+    assert_eq!(run.status("await-review"), "pending");
+    assert_eq!(run.status("accept-review"), "pending");
+    assert_eq!(run.status("release"), "pending");
+    assert_eq!(run.status("approve-plan"), "succeeded");
+    assert_eq!(run.status("plan"), "succeeded");
+    assert_eq!(attempts(&run, "accept-review"), 1);
+    assert!(run.world.approvals.contains_key("approve-plan"));
+    assert!(!run.world.approvals.contains_key("accept-review"));
+    assert_eq!(
+        run.world
+            .artifacts
+            .get("changes-accept-review")
+            .map(String::as_str),
+        Some("the button needs a label")
+    );
+    assert!(run.finished.is_none());
+
+    let prompt = spawn(&mut run, "implement", "pty-2");
+    assert!(
+        prompt.contains("the button needs a label"),
+        "implementation did not read the review note: {prompt}"
+    );
+    assert!(
+        prompt.contains("beside the avatar"),
+        "implementation lost the plan: {prompt}"
+    );
+}
+
+/// A review from the first pass does not finish the wait that starts after the work went back.
+#[test]
+fn a_second_review_wait_ignores_the_review_from_before_it() {
+    let mut run = software_factory();
+    to_plan_gate(&mut run);
+    approve(&mut run, "approve-plan", ApprovalDecision::Approved, None);
+    implement_once(&mut run, "pty-1");
+    queue_verify(&mut run, "tr-1");
+    run.world.test_runs.insert(
+        "tr-1".into(),
+        TestRun {
+            status: "passed".into(),
+            summary: "login: ok".into(),
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("await-review"), "waiting");
+    run.post(PrActivity::Review);
+    run.advance();
+    approve(
+        &mut run,
+        "accept-review",
+        ApprovalDecision::ChangesRequested,
+        Some("rename the button"),
+    );
+    run.advance();
+    implement_once(&mut run, "pty-2");
+    queue_verify(&mut run, "tr-2");
+    run.world.test_runs.insert(
+        "tr-2".into(),
+        TestRun {
+            status: "passed".into(),
+            summary: "login: ok".into(),
+        },
+    );
+    // The new wait starts after the first review. The clock has to move, or the two share a second
+    // and the floor would still count the old one.
+    run.later(2_000);
+    run.advance();
+    assert_eq!(run.status("await-review"), "waiting");
+    run.advance();
+    assert_eq!(
+        run.status("await-review"),
+        "waiting",
+        "the review from the first pass finished the second wait"
+    );
+
+    run.post(PrActivity::Review);
+    run.advance();
+    assert_eq!(run.status("await-review"), "succeeded");
+    assert_eq!(run.status("accept-review"), "waiting");
+}
+
+#[test]
+fn rejecting_the_plan_stops_the_factory() {
+    let mut run = software_factory();
+    to_plan_gate(&mut run);
+    approve(
+        &mut run,
+        "approve-plan",
+        ApprovalDecision::Rejected,
+        Some("wrong approach"),
+    );
+    run.advance();
+    assert_eq!(run.status("approve-plan"), "failed");
+    assert_eq!(run.status("implement"), "skipped");
+    assert_eq!(run.status("ready"), "skipped");
+    match &run.finished {
+        Some(Finish::Failed(message)) => assert!(
+            message.contains("approve-plan"),
+            "the failure did not name the gate: {message}"
+        ),
+        other => panic!("rejecting the plan did not fail the run: {other:?}"),
+    }
+}
+
+#[test]
+fn rejecting_the_review_stops_the_factory() {
+    let mut run = software_factory();
+    to_plan_gate(&mut run);
+    approve(&mut run, "approve-plan", ApprovalDecision::Approved, None);
+    implement_once(&mut run, "pty-1");
+    queue_verify(&mut run, "tr-1");
+    run.world.test_runs.insert(
+        "tr-1".into(),
+        TestRun {
+            status: "passed".into(),
+            summary: "login: ok".into(),
+        },
+    );
+    run.advance();
+    run.post(PrActivity::Review);
+    run.advance();
+    approve(
+        &mut run,
+        "accept-review",
+        ApprovalDecision::Rejected,
+        Some("start over"),
+    );
+    run.advance();
+    assert_eq!(run.status("accept-review"), "failed");
+    assert_eq!(run.status("release"), "skipped");
+    assert_eq!(run.status("ready"), "skipped");
+    match &run.finished {
+        Some(Finish::Failed(message)) => assert!(
+            message.contains("accept-review"),
+            "the failure did not name the gate: {message}"
+        ),
+        other => panic!("rejecting the review did not fail the run: {other:?}"),
+    }
+}
+
+#[test]
+fn the_release_gate_stops_on_changes_or_a_rejection() {
+    for decision in [
+        ApprovalDecision::ChangesRequested,
+        ApprovalDecision::Rejected,
+    ] {
+        let mut run = software_factory();
+        to_plan_gate(&mut run);
+        approve(&mut run, "approve-plan", ApprovalDecision::Approved, None);
+        implement_once(&mut run, "pty-1");
+        queue_verify(&mut run, "tr-1");
+        run.world.test_runs.insert(
+            "tr-1".into(),
+            TestRun {
+                status: "passed".into(),
+                summary: "login: ok".into(),
+            },
+        );
+        run.advance();
+        run.post(PrActivity::Review);
+        run.advance();
+        approve(&mut run, "accept-review", ApprovalDecision::Approved, None);
+        run.advance();
+        assert_eq!(run.status("release"), "waiting");
+        approve(&mut run, "release", decision, Some("not yet"));
+        run.advance();
+        assert_eq!(run.status("release"), "failed");
+        assert_eq!(run.status("ready"), "skipped");
+        match &run.finished {
+            Some(Finish::Failed(message)) => assert!(
+                message.contains("release"),
+                "the failure did not name the gate: {message}"
+            ),
+            other => panic!("the release gate did not fail the run: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_step_that_names_the_pull_request_waits_for_the_lookup_then_fails_without_one() {
+    let source = r#"
+version: 1
+id: names-pr
+name: Names the pull request
+trigger: { kind: manual }
+steps:
+  - id: say
+    action: notify
+    title: "PR #{{ pr.number }}"
+    body: ready
+"#;
+    let mut run = Run::from(source);
+    run.world.pull_request = None;
+    run.advance();
+    assert_eq!(run.status("say"), "pending");
+    assert!(run.finished.is_none());
+
+    run.world.pull_request = Some(false);
+    run.advance();
+    assert_eq!(run.status("say"), "failed");
+    match &run.finished {
+        Some(Finish::Failed(message)) => {
+            assert!(message.contains("no open pull request"), "{message}");
+            assert!(message.contains("pr.number"), "{message}");
+        }
+        other => panic!("a missing pull request did not fail the step: {other:?}"),
+    }
 }

@@ -186,7 +186,8 @@ to reopen it with its conversation intact.
   work on, what agents can read of each other
 - [Tasks](guide/tasks.md) — your projects' GitHub issues: which need an answer, and handing one
   to an agent
-- [Workflows](guide/workflows.md) — named agent work in steps, the built-in code review
+- [Workflows](guide/workflows.md) — named agent work in steps, the built-in code review and
+  software factory
 - [Smoke tests](guide/smoke-tests.md) — the ten-minute check written as a file an agent runs
 - [Remote](guide/remote.md) — your phone, through a server; still under development, and off until
   you turn it on

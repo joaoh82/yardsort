@@ -206,14 +206,27 @@ fn a_named_harness_in_a_step_is_checked_too() {
 }
 
 #[test]
-fn a_workflow_that_uses_the_pull_request_needs_one_open_and_keeps_it() {
+fn a_workflow_that_names_the_pull_request_before_waiting_needs_one_open() {
     let mut fx = Fixture::new();
+    let code_review = crate::workflow::find(fx.dir.path(), "code-review")
+        .unwrap()
+        .workflow
+        .unwrap();
+    assert!(
+        !defers_pull_request(&code_review),
+        "code review names the pull request before it waits"
+    );
+    assert_eq!(
+        missing_pull_request_preview(&code_review, "fix-login"),
+        (Some("`fix-login` has no open pull request.".into()), None)
+    );
+
     let error = fx
         .queue("code-review", &[("reviewer", "claude")])
         .unwrap_err();
     assert_eq!(error.code, "pull_request_missing");
     assert!(
-        error.message.contains("has no open one"),
+        error.message.contains("has no open one") && error.message.contains("Open one first"),
         "{}",
         error.message
     );
@@ -254,6 +267,36 @@ fn a_workflow_that_uses_the_pull_request_needs_one_open_and_keeps_it() {
     let var = |path: &str| facts.var(&path.split('.').map(str::to_owned).collect::<Vec<_>>());
     assert_eq!(var("pr.number").as_deref(), Some("7"));
     assert_eq!(var("pr.title").as_deref(), Some("Fix the login"));
+}
+
+#[test]
+fn the_software_factory_queues_before_the_branch_has_a_pull_request() {
+    let fx = Fixture::new();
+    let factory = crate::workflow::find(fx.dir.path(), "software-factory")
+        .unwrap()
+        .workflow
+        .unwrap();
+    assert!(
+        defers_pull_request(&factory),
+        "the factory names the pull request only after it waits for a review"
+    );
+    assert_eq!(
+        missing_pull_request_preview(&factory, "fix-login"),
+        (None, Some("Will use the PR the run opens.".into()))
+    );
+    let id = fx
+        .queue(
+            "software-factory",
+            &[
+                ("task", "Add a logout button"),
+                ("agent", "claude"),
+                ("suite", "login"),
+            ],
+        )
+        .unwrap();
+    let run = fx.store.workflow_run(&id).unwrap().unwrap();
+    assert_eq!(run.workflow_id, "software-factory");
+    assert!(Facts::parse(&run.context).pr.is_none());
 }
 
 /// A pull request the workspace tracks in another repository: its run is about that one, read

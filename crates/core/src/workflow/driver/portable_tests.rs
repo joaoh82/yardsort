@@ -2934,3 +2934,440 @@ fn a_cancelled_or_halted_run_is_not_typed_an_answer() {
         .claim_clarification_answer(&run, "discover", 1, "note")
         .unwrap());
 }
+
+/// Waits for a review, then names the pull request. Queued before the branch has one.
+const FIND_THE_PULL_REQUEST: &str = r##"id: find-pr
+name: Find the pull request
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: posted
+    action: wait_pr_activity
+    kind: review
+  - id: tell
+    action: notify
+    needs: [posted]
+    title: "#{{ pr.number }}"
+"##;
+
+/// Names the pull request in the first step, so a missing one fails that step.
+const NAME_THE_PULL_REQUEST: &str = r##"id: name-pr
+name: Name the pull request
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: say
+    action: notify
+    title: "#{{ pr.number }}"
+"##;
+
+/// The answer `open_pull_request` gives, changed by the test once the wait is known to be holding.
+struct LatePr {
+    answer: Mutex<Option<crate::workflow::runs::PrFacts>>,
+    posts: Mutex<Vec<PrPost>>,
+    notified: Mutex<Vec<String>>,
+}
+
+impl Hands for LatePr {
+    fn start(&self, _: &str, _: HarnessRequest) -> Result<SessionInfo, String> {
+        unreachable!("these workflows start no agent")
+    }
+
+    fn notify(&self, title: &str, _body: Option<&str>) -> Result<(), String> {
+        self.notified.lock().unwrap().push(title.to_owned());
+        Ok(())
+    }
+
+    fn handoff(&self, _: &str) -> Option<String> {
+        None
+    }
+
+    fn pr_posts(&self, _: &str, pr: &crate::workflow::runs::PrFacts) -> PrAsk {
+        assert_eq!(pr.number, 9);
+        let posts = self.posts.lock().unwrap().clone();
+        Box::new(move || Ok(posts))
+    }
+
+    fn open_pull_request(&self, _: &str) -> OpenPr {
+        let found = self.answer.lock().unwrap().clone();
+        Box::new(move || Ok(found))
+    }
+}
+
+fn queue_without_pull_request(profile: &Profile, workflow: &str) -> String {
+    queue(
+        &profile.store,
+        profile.dir.path(),
+        &Request {
+            workflow_id: workflow,
+            workspace_id: &profile.workspace,
+            inputs: &BTreeMap::new(),
+            requested_by: "cli",
+            unattended: false,
+            origin_record: None,
+            depth: 0,
+            event: None,
+            tracked: None,
+        },
+        &crate::workflow::runs::Accepting::default(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_run_queued_without_a_pull_request_waits_then_follows_the_one_it_finds() {
+    let profile = Profile::new(&[("find-pr", FIND_THE_PULL_REQUEST)]);
+    let run = queue_without_pull_request(&profile, "find-pr");
+    let hands = LatePr {
+        answer: Mutex::new(None),
+        posts: Mutex::new(Vec::new()),
+        notified: Mutex::new(Vec::new()),
+    };
+    let driver = Driver::new(1, Duration::ZERO);
+    profile.until(&driver, &hands, || {
+        profile.step(&run, "posted").status == "waiting"
+    });
+    let host = PtyHost::new(Arc::new(|_| {}));
+    driver.tick(&profile.store, &host, &hands, &git()).unwrap();
+    // That tick may have a lookup in flight. Let it land before the answer changes, or a late
+    // "none" can overwrite the pull request the next question finds.
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(profile.step(&run, "posted").status, "waiting");
+    assert!(
+        crate::workflow::runs::Facts::parse(
+            &profile.store.workflow_run(&run).unwrap().unwrap().context
+        )
+        .pr
+        .is_none(),
+        "the wait must not invent a pull request"
+    );
+
+    *hands.answer.lock().unwrap() = Some(crate::workflow::runs::PrFacts {
+        number: 9,
+        url: "https://github.com/o/r/pull/9".into(),
+        title: "Add a logout button".into(),
+        elsewhere: None,
+    });
+    *hands.posts.lock().unwrap() = vec![post(
+        crate::forge::PrPostKind::Review,
+        9_000_000_000_000,
+        "https://github.com/o/r/pull/9#pullrequestreview-1",
+    )];
+    profile.until(&driver, &hands, || profile.status(&run) == "succeeded");
+    assert_eq!(hands.notified.lock().unwrap().as_slice(), ["#9".to_owned()]);
+    let facts = crate::workflow::runs::Facts::parse(
+        &profile.store.workflow_run(&run).unwrap().unwrap().context,
+    );
+    assert_eq!(facts.pr.as_ref().map(|pr| pr.number), Some(9));
+}
+
+#[test]
+fn a_step_that_names_the_pull_request_with_nothing_waiting_before_it_is_not_queued() {
+    let profile = Profile::new(&[("name-pr", NAME_THE_PULL_REQUEST)]);
+    let error = queue(
+        &profile.store,
+        profile.dir.path(),
+        &Request {
+            workflow_id: "name-pr",
+            workspace_id: &profile.workspace,
+            inputs: &BTreeMap::new(),
+            requested_by: "cli",
+            unattended: false,
+            origin_record: None,
+            depth: 0,
+            event: None,
+            tracked: None,
+        },
+        &crate::workflow::runs::Accepting::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "pull_request_missing");
+    assert!(
+        error.message.contains("Open one first"),
+        "{}",
+        error.message
+    );
+    assert!(profile.store.workflow_runs(None, 10).unwrap().is_empty());
+}
+
+/// Counts lookups that fail, so a second tick can be seen asking again.
+struct FailingLookup {
+    asked: std::sync::atomic::AtomicU32,
+}
+
+impl Hands for FailingLookup {
+    fn start(&self, _: &str, _: HarnessRequest) -> Result<SessionInfo, String> {
+        unreachable!("this workflow starts no agent")
+    }
+
+    fn notify(&self, _: &str, _: Option<&str>) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn handoff(&self, _: &str) -> Option<String> {
+        None
+    }
+
+    fn pr_posts(&self, _: &str, _: &crate::workflow::runs::PrFacts) -> PrAsk {
+        Box::new(|| Ok(Vec::new()))
+    }
+
+    fn open_pull_request(&self, _: &str) -> OpenPr {
+        self.asked.fetch_add(1, Ordering::Relaxed);
+        Box::new(|| Err("gh is not logged in.".into()))
+    }
+}
+
+#[test]
+fn a_failed_pull_request_lookup_is_not_retried_on_the_next_tick() {
+    let profile = Profile::new(&[("find-pr", FIND_THE_PULL_REQUEST)]);
+    queue_without_pull_request(&profile, "find-pr");
+    let hands = FailingLookup {
+        asked: std::sync::atomic::AtomicU32::new(0),
+    };
+    let driver = Driver::new(1, Duration::from_secs(3600));
+    let host = PtyHost::new(Arc::new(|_| {}));
+    driver.tick(&profile.store, &host, &hands, &git()).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(hands.asked.load(Ordering::Relaxed), 1);
+    driver.tick(&profile.store, &host, &hands, &git()).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        hands.asked.load(Ordering::Relaxed),
+        1,
+        "a failed lookup was asked again before the interval"
+    );
+}
+
+/// Writes a note the following wait captures. A stale file must not survive the start.
+const REWRITE_NOTES: &str = r#"id: notes
+name: Notes
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: write
+    action: start_session
+    harness: claude
+    prompt: write the plan
+  - id: saved
+    needs: [write]
+    action: wait_session
+    session: "{{ steps.write.session }}"
+    until: settled
+    produces:
+      - name: plan
+        path: factory/plan.md
+      - name: source
+        path: src.md
+"#;
+
+struct Starting {
+    notified: Mutex<Vec<String>>,
+}
+
+impl Hands for Starting {
+    fn start(&self, _: &str, _: HarnessRequest) -> Result<SessionInfo, String> {
+        Ok(QuietHost::session())
+    }
+
+    fn notify(&self, title: &str, _: Option<&str>) -> Result<(), String> {
+        self.notified.lock().unwrap().push(title.to_owned());
+        Ok(())
+    }
+
+    fn handoff(&self, _: &str) -> Option<String> {
+        None
+    }
+
+    fn pr_posts(&self, _: &str, _: &crate::workflow::runs::PrFacts) -> PrAsk {
+        Box::new(|| Ok(Vec::new()))
+    }
+}
+
+#[test]
+fn starting_a_session_clears_an_untracked_factory_note_and_not_the_shared_exclude() {
+    let scratch = tempfile::tempdir().unwrap();
+    let repo = scratch.path().join("main");
+    let linked = scratch.path().join("linked");
+    std::fs::create_dir(&repo).unwrap();
+    let git = git();
+    git.run(&repo, &["init"]).unwrap();
+    std::fs::write(repo.join("src.md"), "the project's file").unwrap();
+    git.run(&repo, &["add", "src.md"]).unwrap();
+    git.run(&repo, &["commit", "-m", "init"]).unwrap();
+    git.run(
+        &repo,
+        &["worktree", "add", "-b", "feature", linked.to_str().unwrap()],
+    )
+    .unwrap();
+    std::fs::create_dir_all(linked.join("factory")).unwrap();
+    std::fs::write(linked.join("factory/plan.md"), "stale plan").unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("yardsort.db")).unwrap();
+    let project = store.add_project("app", "/code/app").unwrap();
+    let workspace = store
+        .add_worktree(
+            &project.id,
+            "fix-login",
+            linked.to_str().unwrap(),
+            Some("feature"),
+            None,
+        )
+        .unwrap();
+    let folder = crate::workflow::user_dir(dir.path());
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("notes.yaml"), REWRITE_NOTES).unwrap();
+    queue(
+        &store,
+        dir.path(),
+        &Request {
+            workflow_id: "notes",
+            workspace_id: &workspace.id,
+            inputs: &BTreeMap::new(),
+            requested_by: "cli",
+            unattended: false,
+            origin_record: None,
+            depth: 0,
+            event: None,
+            tracked: None,
+        },
+        &crate::workflow::runs::Accepting::default(),
+    )
+    .unwrap();
+
+    let host = PtyHost::new(Arc::new(|_| {}));
+    let hands = Starting {
+        notified: Mutex::new(Vec::new()),
+    };
+    let driver = Driver::default();
+    driver.tick(&store, &host, &hands, &git).unwrap();
+    assert!(
+        !linked.join("factory/plan.md").exists(),
+        "the stale plan was still there when the session started"
+    );
+    assert_eq!(
+        std::fs::read_to_string(linked.join("src.md")).unwrap(),
+        "the project's file",
+        "a tracked file was deleted with the notes"
+    );
+    let gitignore = std::fs::read_to_string(linked.join("factory/.gitignore")).unwrap();
+    assert!(
+        gitignore.lines().any(|line| line.trim() == "*"),
+        "factory/.gitignore did not ignore the notes: {gitignore}"
+    );
+    assert!(
+        git.run(&linked, &["check-ignore", "factory/plan.md"])
+            .is_ok(),
+        "the linked worktree does not ignore factory/"
+    );
+    assert!(
+        git.run(&repo, &["check-ignore", "factory/plan.md"])
+            .is_err(),
+        "the main checkout ignores factory/ too"
+    );
+    let exclude = git
+        .run(
+            &repo,
+            &[
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-path",
+                "info/exclude",
+            ],
+        )
+        .unwrap();
+    let shared = std::fs::read_to_string(exclude.trim()).unwrap_or_default();
+    assert!(
+        !shared.lines().any(|line| line.trim() == "factory/"),
+        "the shared exclude lists factory/: {shared}"
+    );
+
+    // The next tick must not write the gitignore again.
+    std::fs::remove_file(linked.join("factory/.gitignore")).unwrap();
+    driver.tick(&store, &host, &hands, &git).unwrap();
+    assert!(
+        !linked.join("factory/.gitignore").exists(),
+        "a second tick wrote factory/.gitignore again"
+    );
+}
+
+/// A committed note under `factory/` is the project's. Clearing a rewrite must leave it.
+const REWRITE_TRACKED: &str = r#"id: notes
+name: Notes
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: write
+    action: start_session
+    harness: claude
+    prompt: write the plan
+  - id: saved
+    needs: [write]
+    action: wait_session
+    session: "{{ steps.write.session }}"
+    until: settled
+    produces:
+      - name: kept
+        path: factory/kept.md
+"#;
+
+#[test]
+fn a_tracked_file_under_factory_survives_the_rewrite_clear() {
+    let repo = tempfile::tempdir().unwrap();
+    let git = git();
+    git.run(repo.path(), &["init"]).unwrap();
+    std::fs::create_dir_all(repo.path().join("factory")).unwrap();
+    std::fs::write(repo.path().join("factory/kept.md"), "committed note").unwrap();
+    git.run(repo.path(), &["add", "factory/kept.md"]).unwrap();
+    git.run(repo.path(), &["commit", "-m", "keep the note"])
+        .unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("yardsort.db")).unwrap();
+    let project = store.add_project("app", "/code/app").unwrap();
+    let workspace = store
+        .add_worktree(
+            &project.id,
+            "fix-login",
+            repo.path().to_str().unwrap(),
+            Some("main"),
+            None,
+        )
+        .unwrap();
+    let folder = crate::workflow::user_dir(dir.path());
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("notes.yaml"), REWRITE_TRACKED).unwrap();
+    queue(
+        &store,
+        dir.path(),
+        &Request {
+            workflow_id: "notes",
+            workspace_id: &workspace.id,
+            inputs: &BTreeMap::new(),
+            requested_by: "cli",
+            unattended: false,
+            origin_record: None,
+            depth: 0,
+            event: None,
+            tracked: None,
+        },
+        &crate::workflow::runs::Accepting::default(),
+    )
+    .unwrap();
+
+    let host = PtyHost::new(Arc::new(|_| {}));
+    let hands = Starting {
+        notified: Mutex::new(Vec::new()),
+    };
+    Driver::default().tick(&store, &host, &hands, &git).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("factory/kept.md")).unwrap(),
+        "committed note",
+        "a tracked file under factory/ was deleted"
+    );
+}

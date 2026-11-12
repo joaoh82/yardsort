@@ -70,6 +70,7 @@ const withPr: RunPreview = {
   needsPullRequest: true,
   pullRequest: { number: 7, url: "https://github.com/o/r/pull/7", title: "Fix the login" },
   pullRequestProblem: null,
+  pullRequestNote: null,
   needsOrigin: true,
   empty: [],
 };
@@ -283,6 +284,7 @@ describe("RunWorkflowDialog", () => {
       needsPullRequest: false,
       pullRequest: null,
       pullRequestProblem: null,
+      pullRequestNote: null,
       needsOrigin: false,
       empty: [],
     });
@@ -344,6 +346,73 @@ describe("RunWorkflowDialog", () => {
       "`fix-login` has no open pull request.",
     );
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
+  it("starts the software factory with no pull request, and says the run will open one", async () => {
+    const factory: WorkflowItem = {
+      ...review,
+      id: "software-factory",
+      name: "Software factory",
+      workflow: {
+        ...review.workflow!,
+        id: "software-factory",
+        name: "Software factory",
+        inputs: [
+          {
+            id: "task",
+            kind: "text",
+            label: "What to build",
+            required: true,
+            default: null,
+            options: [],
+          },
+          {
+            id: "agent",
+            kind: "harness",
+            label: "Who does the work",
+            required: true,
+            default: null,
+            options: [],
+          },
+          {
+            id: "suite",
+            kind: "test",
+            label: "Smoke test to run",
+            required: true,
+            default: null,
+            options: [],
+          },
+        ],
+      },
+    };
+    useWorkflowStore.setState({ items: [factory], loaded: true });
+    core.testList.mockResolvedValue([
+      {
+        id: "login",
+        name: "Log in",
+        description: null,
+        path: "/w/.yardsort/tests/login.yaml",
+        text: "",
+        problems: [],
+        runnable: true,
+        usesBrowser: false,
+        browserMissing: false,
+        inputs: [],
+      },
+    ]);
+    core.workflowPreview.mockResolvedValue({
+      ...withPr,
+      pullRequest: null,
+      pullRequestNote: "Will use the PR the run opens.",
+    });
+    const user = userEvent.setup();
+    render(
+      <RunWorkflowDialog workflowId="software-factory" workspace={fixLogin} onClose={() => {}} />,
+    );
+    expect(await screen.findByText("Will use the PR the run opens.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    await user.type(screen.getByRole("textbox", { name: "What to build" }), "Add a logout button");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run" })).toBeEnabled());
   });
 
   it("asks which workflow and which workspace when neither is given", async () => {
