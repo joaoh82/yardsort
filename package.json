@@ -1,6 +1,6 @@
 {
   "name": "yardsort",
-  "version": "0.28.1",
+  "version": "0.29.0",
   "description": "Orchestrate coding agents on Linux, macOS and Windows — shared worktrees, handoff with context",
   "license": "GPL-3.0-only",
   "repository": {
