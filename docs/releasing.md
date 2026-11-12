@@ -40,14 +40,17 @@ pushes both. Then:
    Edit them afterwards if you like.
 
 If a build fails: fix the cause, then re-run the failed jobs from the _Actions_ tab (or run the
-_Release_ workflow by hand with the same tag). To abandon the attempt instead, delete the draft
+_Release_ workflow by hand from the same tag, as below). To abandon the attempt instead, delete the draft
 and the tag: `gh release delete v0.2.0 --cleanup-tag`.
 
 Versions follow [semver](https://semver.org). A tag with a suffix — `v0.2.0-beta.1` — is marked as
 a pre-release automatically.
 
-To rebuild without a new tag, run the _Release_ workflow by hand (_Actions → Release → Run
-workflow_) and give it an existing tag.
+To rebuild without a new tag, run the _Release_ workflow by hand **from that tag**: _Actions →
+Release → Run workflow_, pick the tag under _Use workflow from_, and give the same tag below it. Or
+`gh workflow run release.yml --ref v0.2.0 -f tag=v0.2.0`. A run from a branch is refused at once: the
+images are signed as the workflow at the ref it runs from, and
+[the guide](guide/headless-host.md#in-a-container) checks for the tag's.
 
 ## What gets built
 

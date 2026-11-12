@@ -178,13 +178,17 @@ Their workspaces, worktrees and records stay in the volumes, and so do their con
 the agents keep in the workspaces and your home: [resume them](#after-a-restart) with `ys`.
 
 **Checking an image.** Each is signed with Sigstore by the release workflow, with no key to keep, and
-carries an SBOM and the build's provenance. With [cosign](https://docs.sigstore.dev/cosign/):
+carries an SBOM and the build's provenance. With [cosign](https://docs.sigstore.dev/cosign/), name the
+release's tag in both places:
 
 ```sh
 cosign verify ghcr.io/joaoh82/yardsort-host-full:0.30.0 \
-  --certificate-identity-regexp '^https://github.com/joaoh82/yardsort/.github/workflows/release.yml@refs/tags/v' \
+  --certificate-identity https://github.com/joaoh82/yardsort/.github/workflows/release.yml@refs/tags/v0.30.0 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
+
+The identity is the release workflow at that tag: the workflow runs only from a version's tag, a rebuild
+too, so an image signed any other way is not one of these.
 
 **Building them yourself**, from the repository's root, the slim image first, with your own ids:
 

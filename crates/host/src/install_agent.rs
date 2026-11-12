@@ -122,6 +122,20 @@ pub fn run(id: &str, installer: Option<PathBuf>) -> Result<(), String> {
             harness.name
         ));
     }
+    // Before anything is made or fetched: an installer asked for and not used would be the
+    // network instead of what the operator read.
+    if let Some(path) = &installer {
+        if let Source::Npm { package } = harness.source {
+            return Err(format!(
+                "{} comes from npm, as {package}, not from an installer script: --installer is \
+                 for claude, cursor and grok.",
+                harness.name
+            ));
+        }
+        if !path.is_file() {
+            return Err(format!("No installer at {}.", path.display()));
+        }
+    }
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or("HOME is not set, so there is no ~/.local to install into.")?;

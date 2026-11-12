@@ -1309,6 +1309,20 @@ Yardsort, and it passed:
 - `install-agent` put the stand-in's `claude` first on `PATH` in a new container.
 - The image linked to the stand-in 1 second after it started, and `docker stop` ended it with status 0.
 
+**Review.** Three fixes:
+
+- **`--installer` for an agent from npm** was ignored, and npm ran instead: the network in place of
+  the file the operator had read. Now it is refused, as is an installer that is not there, before
+  anything is made or fetched. Tested with a logging `npm` that must not run.
+- **The image check passed a harness that failed**, since a version was printed through `head`
+  inside a command substitution. Now each program's whole output is captured and its status
+  checked. The script also checks itself: a `pi` that exits 42, mounted first on `PATH`, must fail
+  the check on `pi`.
+- **A rebuild run by hand from a branch** would have signed the version's images as that branch,
+  which the guide's `cosign verify` refuses. The release workflow now refuses a run by hand that is
+  not from the tag it rebuilds. The guide checks the exact identity, the workflow at
+  `refs/tags/v<version>`, and `releasing.md` says how to run it from the tag.
+
 **Still to do, by the owner.**
 
 1. **Confirm the harness list**: the four shipped and the three left to `install-agent`, on the

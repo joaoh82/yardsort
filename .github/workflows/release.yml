@@ -6,10 +6,12 @@ name: Release
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  # Run from the tag itself ("Use workflow from"), with the same tag below: the draft job refuses
+  # anything else.
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag to (re)build, e.g. v0.2.0
+        description: Existing tag to (re)build, e.g. v0.2.0, the same one picked under "Use workflow from"
         required: true
 
 permissions:
@@ -39,6 +41,16 @@ jobs:
           version="$(jq -r .version src-tauri/tauri.conf.json)"
           if [ "v$version" != "$TAG" ]; then
             echo "::error::Tag $TAG does not match version $version in src-tauri/tauri.conf.json. Use 'just release <version>'."
+            exit 1
+          fi
+
+      # The images are signed as this workflow at the ref it runs from, and the guide checks for
+      # the tag's. A run by hand from a branch would sign the version's images as that branch.
+      - name: A run by hand runs from the tag it rebuilds
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "$GITHUB_REF" != "refs/tags/$TAG" ]; then
+            echo "::error::Run it from the tag: under 'Use workflow from' pick $TAG, or 'gh workflow run release.yml --ref $TAG -f tag=$TAG'. This run is from $GITHUB_REF."
             exit 1
           fi
 
