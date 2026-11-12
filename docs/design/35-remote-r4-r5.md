@@ -1325,7 +1325,8 @@ Yardsort, and it passed:
 
 **Still to do, by the owner.**
 
-1. **Confirm the harness list**: the four shipped and the three left to `install-agent`, on the
+1. ~~**Confirm the harness list**~~: confirmed by the owner on 2026-11-12, with Grok's terms page as
+   named. The four shipped and the three left to `install-agent`, on the
    licences above. Also confirm the terms page each vendor's installer is named with. Grok's is
    `https://x.ai/cli`, xAI's CLI page: xAI's terms page could not be fetched from here to check.
 2. Approve `host-images` in Yardsort, and run it (`ys test run host-images`).

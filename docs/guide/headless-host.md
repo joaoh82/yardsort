@@ -1,8 +1,8 @@
 # A computer with no screen
 
 > **Still under development, like the rest of [Remote](remote.md).** Expect it to change. Each release
-> since 0.23.0 carries a tarball of it for Linux. From the next release, each also publishes two container
-> images of it; see [In a container](#in-a-container).
+> since 0.23.0 carries a tarball of it for Linux, and since 0.30.0 two container images of it; see
+> [In a container](#in-a-container).
 
 `yardsort-host` runs Yardsort on a computer with no display, such as a server you reach over SSH, as a
 host your phone reaches through a Yardsort server. You start agents there with [`ys`](cli.md), or from

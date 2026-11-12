@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.30.0
 
 - **Container images for a computer with no screen.** Each release now publishes
   `ghcr.io/joaoh82/yardsort-host-full` and `ghcr.io/joaoh82/yardsort-host`, for amd64 and arm64,
