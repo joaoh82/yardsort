@@ -1164,7 +1164,9 @@ with Remote on sends it as `yardsort-host` does.
 
 **Coalescing.** One notice is one wait. A request in a run that has had no answer since its last notice
 sends nothing: an answer is an event that only follows one (the tool ran or failed, the request was
-settled, a prompt, the end of a turn or of the session). Claude Code asks for each tool call on its own,
+settled, a prompt, the end of a turn or of the session). A tool or a settled request counts only when
+it names a request of that wait by its tool call or permission id, so another tool running beside it
+finishing is not an answer ([40](40-mobile-notifications.md)). Claude Code asks for each tool call on its own,
 so an agent left waiting does not fill the phone. The server's own deduplication and collapse id, from
 YARD-4, cover a retry and a second computer.
 
@@ -1178,7 +1180,8 @@ them, as it drops any notice refused for good.
 TypeScript side.
 
 **Tests that fail without it.** The core: a request queues one notice naming the workspace and the
-terminal, and not the run; a second before an answer is coalesced; after the tool ran a new one queues;
+terminal, and not the run; a second before an answer is coalesced, and still is after another tool call finished; after the
+asking call ran a new one queues;
 the same file drained twice is one; nothing on a computer not signed in, or for a run that ended
 (`activity.rs`). The server, against memory and PostgreSQL: the sentence; the subject kept for `agent`
 only, never one that looks like a one-time code, and never in the push; agents turned off send nothing;

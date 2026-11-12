@@ -60,9 +60,12 @@ the terminal, and the tool, its arguments and the conversation stay on the compu
 when the hook ran, by the computer's clock.
 
 One notice is one wait. A second request in the same run before anyone answered is coalesced into
-the first, and sends nothing. The run has been answered once it has an event after the notice that
-only follows an answer: `tool.completed`, `tool.failed`, `approval.resolved`, `prompt.submitted`,
-`turn.completed`, `turn.failed` or `session.ended`. The next request after that is a new notice.
+the first, and sends nothing. The wait is over once the run has an event after the notice that only
+follows an answer. `prompt.submitted`, `turn.completed`, `turn.failed` and `session.ended` end it for
+the whole run. `tool.completed`, `tool.failed` and `approval.resolved` end it only for a request in
+the wait they name, by its `toolUseId` or `permissionId`: with tools running side by side, another
+call finishing is not an answer. One with neither id, or a request with neither, cannot be matched,
+and ends the wait as before. The next request after that is a new notice.
 When the last notice was is kept in `mobile_notice_seen` under `agent:{run}`, and goes after a week
 as the other seen rows do.
 

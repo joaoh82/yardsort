@@ -1676,17 +1676,20 @@ mod tests {
         recorder.spawned(&run_id, &draft, "pty-1", Some(claude::METHOD));
         let inbox = Inbox::new(inbox_dir(dir.path()));
         let mut at = 1_790_000_000_000;
-        let mut send = |id: &str, kind: &str| {
+        let mut send = |id: &str, kind: &str, call: Option<&str>| {
             at += 1_000;
             let mut entry = inbox_entry(id, kind);
             entry.at_ms = at;
+            if let Some(call) = call {
+                entry.payload["toolUseId"] = json!(call);
+            }
             entry.run_id = Some(run_id.clone());
             inbox.record(&entry).unwrap();
             import_inbox(&store, dir.path());
         };
         let queued = || crate::notify::pending(&store, crate::store::now_ms()).unwrap();
 
-        send("e-alone", "approval.requested");
+        send("e-alone", "approval.requested", None);
         assert!(
             queued().is_empty(),
             "a computer not signed in queues nothing"
@@ -1702,7 +1705,7 @@ mod tests {
                 enabled_at: 1,
             })
             .unwrap();
-        send("e-ask", "approval.requested");
+        send("e-ask", "approval.requested", None);
         let first = queued();
         assert_eq!(first.len(), 1);
         assert_eq!(
@@ -1718,27 +1721,44 @@ mod tests {
         assert_eq!(first[0].terminal_id.as_deref(), Some("pty-1"));
 
         // Asked again before anyone answered: the same wait.
-        send("e-again", "tool.started");
-        send("e-ask-2", "approval.requested");
+        send("e-again", "tool.started", None);
+        send("e-ask-2", "approval.requested", None);
         assert_eq!(queued().len(), 1);
 
         // Answered, then a new request: a new wait.
-        send("e-ran", "tool.completed");
-        send("e-ask-3", "approval.requested");
+        send("e-ran", "tool.completed", None);
+        send("e-ask-3", "approval.requested", None);
         assert_eq!(queued().len(), 2);
+
+        // Tools side by side: another call finishing does not answer the one that asked.
+        send("e-turn", "turn.completed", None);
+        send("e-ask-a1", "approval.requested", Some("call-a"));
+        assert_eq!(queued().len(), 3);
+        send("e-ran-b", "tool.completed", Some("call-b"));
+        send("e-ask-c", "approval.requested", Some("call-c"));
+        assert_eq!(queued().len(), 3, "call-a is still waiting");
+        // The waiting call ran: answered.
+        send("e-ran-a", "tool.completed", Some("call-a"));
+        send("e-ask-d", "approval.requested", Some("call-d"));
+        assert_eq!(queued().len(), 4);
+        // A later request in the same wait counts too, once its own call ran.
+        send("e-ask-e", "approval.requested", Some("call-e"));
+        send("e-ran-e", "tool.failed", Some("call-e"));
+        send("e-ask-f", "approval.requested", Some("call-f"));
+        assert_eq!(queued().len(), 5);
 
         // The same file drained twice is one event, and one notice.
         let mut twice = inbox_entry("e-ask-3", "approval.requested");
         twice.run_id = Some(run_id.clone());
         inbox.record(&twice).unwrap();
         import_inbox(&store, dir.path());
-        assert_eq!(queued().len(), 2);
+        assert_eq!(queued().len(), 5);
 
         // A run that ended has no terminal to open.
         store.end_run(&run_id, Some(0), "exited").unwrap();
-        send("e-done", "turn.completed");
-        send("e-late", "approval.requested");
-        assert_eq!(queued().len(), 2);
+        send("e-done", "turn.completed", None);
+        send("e-late", "approval.requested", None);
+        assert_eq!(queued().len(), 5);
     }
 
     #[test]

@@ -383,18 +383,19 @@ pub fn workflow_approval(run_id: &str, step_id: &str, opened_at: i64) -> Option<
     )
 }
 
-/// What an agent does once a person has answered it: the tool it asked about ran or failed, the
-/// request was settled, or the turn moved on. Until one of these, a second request in the same
-/// run is the same wait for the person and sends nothing more.
-const ANSWERED: [&str; 7] = [
-    "tool.completed",
-    "tool.failed",
-    "approval.resolved",
+/// What ends a wait for the whole run: a person typed, or the turn or session moved on.
+const RUN_ANSWERED: [&str; 4] = [
     "prompt.submitted",
     "turn.completed",
     "turn.failed",
     "session.ended",
 ];
+
+/// What ends a wait for one request: the tool it asked about ran or failed, or the request was
+/// settled. With tools running side by side, another tool finishing is not an answer, so these
+/// count only when they name the request's tool call or permission — or when one side names
+/// neither, and there is nothing to match them by.
+const REQUEST_ANSWERED: [&str; 3] = ["tool.completed", "tool.failed", "approval.resolved"];
 
 /// An agent in `run` asked for a permission at `at` (the event `approval.requested`, which
 /// every harness that can ask reports from its own hooks, never from what its terminal shows).
@@ -417,15 +418,7 @@ pub fn agent_approval(
     prune_outbox(&conn, now)?;
     let item = format!("agent:{}", piece(&run.id, 80));
     if let Some(since) = seen(&conn, &item)?.and_then(|stamp| stamp.parse::<i64>().ok()) {
-        let answered: bool = conn.query_row(
-            &format!(
-                "SELECT EXISTS (SELECT 1 FROM agent_events
-                 WHERE run_id = ?1 AND occurred_at > ?2 AND kind IN ({}))",
-                ANSWERED.map(|kind| format!("'{kind}'")).join(", ")
-            ),
-            params![run.id, since],
-            |row| row.get(0),
-        )?;
+        let answered = wait_answered(&conn, &run.id, since)?;
         if !answered {
             return Ok(None);
         }
@@ -444,6 +437,57 @@ pub fn agent_approval(
     remember(&conn, &item, &at.to_string(), now)?;
     prune_seen(&conn, "agent:", now)?;
     Ok(enqueue_on(&conn, &draft, now)?.then_some(draft))
+}
+
+/// Whether anything since `since` — when the run's current wait began — answered it. The wait's
+/// requests are the `approval.requested` events from then on; see [`REQUEST_ANSWERED`].
+fn wait_answered(conn: &rusqlite::Connection, run_id: &str, since: i64) -> StoreResult<bool> {
+    let ids = |payload: &str| {
+        let payload: serde_json::Value = serde_json::from_str(payload).unwrap_or_default();
+        let id = |key: &str| {
+            payload
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        (id("toolUseId"), id("permissionId"))
+    };
+    let mut statement = conn.prepare(&format!(
+        "SELECT kind, payload FROM agent_events
+         WHERE run_id = ?1 AND occurred_at >= ?2 AND kind IN ('approval.requested', {})
+         ORDER BY occurred_at, seq",
+        RUN_ANSWERED
+            .iter()
+            .chain(&REQUEST_ANSWERED)
+            .map(|kind| format!("'{kind}'"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))?;
+    let events = statement
+        .query_map(params![run_id, since], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut asked: Vec<(Option<String>, Option<String>)> = Vec::new();
+    for (kind, payload) in events {
+        if kind == "approval.requested" {
+            asked.push(ids(&payload));
+        } else if RUN_ANSWERED.contains(&kind.as_str()) {
+            return Ok(true);
+        } else {
+            let (tool, permission) = ids(&payload);
+            let matches = |(asked_tool, asked_permission): &(Option<String>, Option<String>)| {
+                let unnamed = asked_tool.is_none() && asked_permission.is_none();
+                unnamed
+                    || (tool.is_some() && tool == *asked_tool)
+                    || (permission.is_some() && permission == *asked_permission)
+            };
+            if (tool.is_none() && permission.is_none()) || asked.iter().any(matches) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// Attach the run and step when both are ids and neither is a one-time code. Otherwise the
