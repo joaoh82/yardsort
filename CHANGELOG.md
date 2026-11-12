@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.28.0
 
 - **Software factory.** A built-in workflow, `software-factory`, takes a task from a brief the
   agent clarifies with you, through context, a plan you approve, implementation, a smoke test
