@@ -15,6 +15,8 @@ mod guard;
 #[cfg(unix)]
 mod home;
 #[cfg(unix)]
+mod install_agent;
+#[cfg(unix)]
 mod pair;
 #[cfg(unix)]
 mod profile;
@@ -94,10 +96,30 @@ mod cli {
         Status,
         /// Sign this computer out at the server, which removes it there, and forget its sign-in.
         SignOut,
+        /// Install an agent, or bring it up to date, into ~/.local, as you.
+        ///
+        /// Claude Code, Cursor's CLI and Grok come from each vendor's own installer, under the
+        /// vendor's terms, which it names before it runs. Codex, OpenCode, Pi and Oh My Pi come from
+        /// npm; the full image already has them. Run it as the user that runs `serve`.
+        InstallAgent {
+            /// claude, cursor, grok, codex, opencode, pi or omp.
+            harness: String,
+            /// Run this installer file instead of downloading the vendor's: one you fetched and
+            /// read yourself, or a mirror's.
+            #[arg(long, value_name = "FILE")]
+            installer: Option<PathBuf>,
+        },
     }
 
     pub fn main() -> i32 {
         let cli = Cli::parse();
+        // Needs no profile, and no runtime: it runs the vendor's installer and waits.
+        if let Command::InstallAgent { harness, installer } = &cli.command {
+            return match crate::install_agent::run(harness, installer.clone()) {
+                Ok(()) => 0,
+                Err(why) => failed(&why),
+            };
+        }
         let profile = match Profile::resolve(cli.data_dir) {
             Ok(profile) => profile,
             Err(why) => return failed(&why),
@@ -117,6 +139,7 @@ mod cli {
                 Command::Revoke { device } => revoke(&profile, device).await,
                 Command::Status => status(&profile).await,
                 Command::SignOut => crate::sign_in::sign_out(profile).await,
+                Command::InstallAgent { .. } => unreachable!("handled before the profile"),
             }
         });
         match done {

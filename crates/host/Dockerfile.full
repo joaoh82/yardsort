@@ -1,0 +1,154 @@
+# syntax=docker/dockerfile:1
+#
+# The full headless host image: the slim one (crates/host/Dockerfile) with what an agent usually
+# reaches for, so that a container can start work without a Dockerfile of your own. Built from the
+# repository root, on top of a slim image you name:
+#
+#   docker build -f crates/host/Dockerfile -t yardsort-host .
+#   docker build -f crates/host/Dockerfile.full --build-arg SLIM=yardsort-host -t yardsort-host-full .
+#
+# The release builds it on the slim image it has just pushed, by digest, and publishes both as
+# ghcr.io/joaoh82/yardsort-host and ghcr.io/joaoh82/yardsort-host-full (.github/workflows/release.yml).
+#
+# It ships only the harnesses whose licence lets anyone redistribute them: Codex CLI (Apache-2.0),
+# OpenCode, Pi and Oh My Pi (MIT), pinned with their whole dependency tree in agents/package-lock.json.
+# The others are installed by the operator, with each vendor's own installer, so that the operator
+# accepts that vendor's terms: `yardsort-host install-agent claude`, `cursor` or `grok`. Those land in
+# ~/.local, which is in the home volume, and survive a new image. NOTICE.md lists what is in here and
+# under which licence; it is copied to /usr/share/doc/yardsort-host-full/.
+#
+# Every download is pinned by version and checked against the checksum its publisher prints, for
+# both architectures. Versions are at least two weeks old when they are picked. Moving one: change
+# the version and both checksums together, from the publisher's own list (each line says where).
+
+ARG SLIM=yardsort-host
+FROM ${SLIM}
+
+USER root
+ARG TARGETARCH
+
+# Debian's own: compilers and headers for native modules, Python, the search tools agents use.
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       build-essential pkg-config libssl-dev \
+       curl file jq less procps ripgrep unzip xz-utils \
+       python3 python3-pip python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Checked download: `fetch <url> <sha256> <file>`.
+RUN printf '%s\n' '#!/bin/sh' 'set -eu' \
+       'curl -fsSL --proto =https --tlsv1.2 -o "$3" "$1"' \
+       'echo "$2  $3" | sha256sum -c -' > /usr/local/sbin/fetch \
+    && chmod 755 /usr/local/sbin/fetch
+
+# Node.js, LTS. https://nodejs.org/dist/v26.13.0/SHASUMS256.txt
+ARG NODE_VERSION=26.13.0
+RUN case "$TARGETARCH" in \
+       amd64) arch=x64 sum=d28a96af6c38596f6d9d97c0ee531c13d238d757742387d1928de822d959e997 ;; \
+       arm64) arch=arm64 sum=406fe3fbde1c054adff8b297c16fdb5af6659db327c1ac8acd46b56ef1af9a92 ;; \
+       *) echo "no Node.js for $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && fetch "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-$arch.tar.xz" "$sum" /tmp/node.tar.xz \
+    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner \
+       --exclude='*/CHANGELOG.md' --exclude='*/README.md' \
+    && install -d /usr/share/doc/nodejs && mv /usr/local/LICENSE /usr/share/doc/nodejs/LICENSE \
+    && rm /tmp/node.tar.xz \
+    && node --version && npm --version
+
+# Bun, which Oh My Pi runs on. https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/SHASUMS256.txt
+ARG BUN_VERSION=1.4.4
+RUN case "$TARGETARCH" in \
+       amd64) file=bun-linux-x64-baseline sum=e0446eb55995772eb9894bebae9a6be368d985a8b9271ee124486f9946eedd76 ;; \
+       arm64) file=bun-linux-aarch64 sum=baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e ;; \
+       *) echo "no Bun for $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && fetch "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/$file.zip" "$sum" /tmp/bun.zip \
+    && unzip -q /tmp/bun.zip -d /tmp/bun \
+    && install -m 755 "/tmp/bun/$file/bun" /usr/local/bin/bun \
+    && rm -rf /tmp/bun /tmp/bun.zip \
+    && bun --version
+
+# Go. https://go.dev/dl/?mode=json&include=all
+ARG GO_VERSION=1.27.3
+RUN case "$TARGETARCH" in \
+       amd64) sum=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40 ;; \
+       arm64) sum=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49 ;; \
+       *) echo "no Go for $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && fetch "https://go.dev/dl/go$GO_VERSION.linux-$TARGETARCH.tar.gz" "$sum" /tmp/go.tar.gz \
+    && tar -xzf /tmp/go.tar.gz -C /usr/local --no-same-owner \
+    && rm /tmp/go.tar.gz \
+    && /usr/local/go/bin/go version
+
+# Rust, through rustup, into folders every user may write, as the official Rust images do, so that
+# `cargo install` and `rustup` work for the agents. Toolchain as the build stage's (Dockerfile).
+# https://static.rust-lang.org/rustup/archive/1.29.2/<triple>/rustup-init.sha256
+ARG RUSTUP_VERSION=1.29.2
+ARG RUST_VERSION=1.98.1
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo
+RUN case "$TARGETARCH" in \
+       amd64) triple=x86_64-unknown-linux-gnu sum=5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4 ;; \
+       arm64) triple=aarch64-unknown-linux-gnu sum=a9c168dbea81a84671c6b7a5c1795cb0eb699020110d107ddfca427bd797e697 ;; \
+       *) echo "no Rust for $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && fetch "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/$triple/rustup-init" "$sum" /tmp/rustup-init \
+    && chmod 755 /tmp/rustup-init \
+    && /tmp/rustup-init -y --no-modify-path --profile minimal \
+       --default-toolchain "$RUST_VERSION" --component clippy,rustfmt \
+    && rm /tmp/rustup-init \
+    && chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME" \
+    && "$CARGO_HOME/bin/cargo" --version
+
+# GitHub's CLI. https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_checksums.txt
+ARG GH_VERSION=2.103.3
+RUN case "$TARGETARCH" in \
+       amd64) sum=4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d ;; \
+       arm64) sum=ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63 ;; \
+       *) echo "no gh for $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && fetch "https://github.com/cli/cli/releases/download/v$GH_VERSION/gh_${GH_VERSION}_linux_$TARGETARCH.tar.gz" "$sum" /tmp/gh.tar.gz \
+    && tar -xzf /tmp/gh.tar.gz -C /tmp \
+    && install -m 755 "/tmp/gh_${GH_VERSION}_linux_$TARGETARCH/bin/gh" /usr/local/bin/gh \
+    && install -Dm644 "/tmp/gh_${GH_VERSION}_linux_$TARGETARCH/LICENSE" /usr/share/doc/gh/LICENSE \
+    && rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_$TARGETARCH" \
+    && gh --version
+
+# The harnesses that may be redistributed, with their whole tree as the lockfile pins it. Their
+# install scripts run: OpenCode's puts its binary in place. Each package keeps its own licence file.
+# OpenCode's script picks the build for the CPU it runs on, the build machine's, and npm installs
+# all four of its Linux builds for the architecture: keep the one that runs on any CPU of it (on
+# x64, the build without AVX2), and drop the rest, about 700 MB.
+COPY crates/host/agents/package.json crates/host/agents/package-lock.json /opt/yardsort-agents/
+RUN cd /opt/yardsort-agents \
+    && npm ci --omit=dev --no-audit --no-fund \
+    && npm cache clean --force \
+    && case "$TARGETARCH" in \
+       amd64) opencode=cli-linux-x64-baseline ;; \
+       arm64) opencode=cli-linux-arm64 ;; \
+    esac \
+    && rm node_modules/@opencode/cli/bin/opencode.exe \
+    && cp "node_modules/@opencode/$opencode/bin/opencode" node_modules/@opencode/cli/bin/opencode.exe \
+    && rm -rf node_modules/@opencode/cli-linux-* \
+    && for program in codex opencode pi omp; do \
+         ln -s "/opt/yardsort-agents/node_modules/.bin/$program" "/usr/local/bin/$program"; \
+       done
+
+COPY crates/host/agents/NOTICE.md /usr/share/doc/yardsort-host-full/NOTICE.md
+# A login shell, which is what agents are started from, resets PATH on Debian: put the toolchains
+# and ~/.local/bin, where `install-agent` and `npm install -g` put things, back on it.
+COPY crates/host/agents/profile.sh /etc/profile.d/yardsort-full.sh
+
+# The agents' own global installs go to the home volume, not into the image.
+ENV PATH=/home/yardsort/.local/bin:/usr/local/cargo/bin:/usr/local/go/bin:/home/yardsort/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    NPM_CONFIG_PREFIX=/home/yardsort/.local
+
+LABEL org.opencontainers.image.title="yardsort-host-full" \
+      org.opencontainers.image.description="Yardsort's headless host with the tools agents use, and the harnesses that may be redistributed" \
+      org.opencontainers.image.source="https://github.com/joaoh82/yardsort" \
+      org.opencontainers.image.documentation="https://yardsort.sh/docs/guide/headless-host" \
+      org.opencontainers.image.licenses="GPL-3.0-only"
+
+USER yardsort
+RUN mkdir -p /home/yardsort/.local/bin
+WORKDIR /home/yardsort

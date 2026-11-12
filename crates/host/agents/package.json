@@ -1,0 +1,12 @@
+{
+  "name": "yardsort-host-full-agents",
+  "private": true,
+  "description": "The harnesses the full yardsort-host image ships: only those whose licence lets anyone redistribute them. Installed with npm ci from the lockfile beside this file (crates/host/Dockerfile.full).",
+  "license": "GPL-3.0-only",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@oh-my-pi/pi-coding-agent": "18.14.0",
+    "@openai/codex": "0.166.0",
+    "@opencode/cli": "2.2.2"
+  }
+}
