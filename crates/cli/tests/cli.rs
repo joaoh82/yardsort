@@ -2544,6 +2544,19 @@ fn the_floor_manager_saves_a_workflow_only_as_its_permission_allows() {
     assert!(!shown.contains('\u{202e}'), "{shown}");
     assert_eq!(std::fs::read_to_string(&mine).unwrap(), before);
 
+    // A long file is shown whole, not cut at a comment's preview length: the steps are at the end.
+    let padded = format!(
+        "{}{changed}",
+        "# padding to push the steps down\n".repeat(400)
+    );
+    assert!(padded.len() > 9 * 1024);
+    std::fs::write(&draft, &padded).unwrap();
+    let whole = fx.ys_floor(&args, None).failed();
+    assert!(whole.contains("id: fix-ci"), "{whole}");
+    assert!(whole.contains("action: start_session"), "{whole}");
+    assert!(!whole.contains("The rest is in the file"), "{whole}");
+    std::fs::write(&draft, &changed).unwrap();
+
     // A no is respected.
     fx.ys_floor(&args, Some("no")).failed();
     assert_eq!(std::fs::read_to_string(&mine).unwrap(), before);

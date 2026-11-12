@@ -171,7 +171,7 @@ function ConfirmDialog({
         <p className="mt-2 text-ink-muted">
           Allow runs this one command. Don't allow leaves it unrun.
         </p>
-        <pre className="mt-3 overflow-x-auto rounded border border-line bg-canvas p-3 font-mono text-detail text-ink select-text">
+        <pre className="mt-3 max-h-[60vh] overflow-auto rounded border border-line bg-canvas p-3 font-mono text-detail text-ink select-text">
           {request.command}
         </pre>
         {more > 0 && (

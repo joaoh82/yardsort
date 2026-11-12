@@ -113,8 +113,8 @@ in its own folder, checks it with `ys workflow validate`, and saves it with `ys 
 It is told to change only what you asked and keep the workflow's `id`, so a changed built-in
 becomes your copy, used instead of it. `save` refuses a file with problems.
 
-Saving is a write. At ask first the confirmation shows the whole file that would be saved, and
-the text you allowed is the text written, even if the file changes afterwards. The Floor Manager
+Saving is a write. At ask first the confirmation shows the whole file that would be saved,
+scrolling when it is long, and the text you allowed is the text written, even if the file changes afterwards. The Floor Manager
 must name a file: `ys workflow save -` is refused at ask first, because the confirmation could
 not show what standard input holds. At read only it can show you the change and cannot save
 it. A workflow open in the window shows the saved file within a second or two. If you had

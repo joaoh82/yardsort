@@ -101,9 +101,11 @@ again. The writer is the one chosen for new workflows, in **Settings → Assist 
 It is shown the whole file as it is in the editor, unsaved changes included, and told to change
 only what you asked and to keep the workflow's `id`. An answer with another `id` counts as a
 problem and is sent back with the others, because a copy with another `id` would stop replacing
-the built-in. What comes back is your unsaved text, with **Revert** to go back and **Save** to
-keep it. If you type in the editor, save, or revert while it is being written, the answer is set
-aside and the box says so.
+the built-in. If the second answer still has another `id`, it is set aside and the box says why;
+nothing in the editor changes. What comes back is your unsaved text, with **Revert** to go back
+and **Save** to keep it. If you type in the editor, save, or revert while it is being written, or
+the file is changed outside the window (by the Floor Manager, say), the answer is set aside and
+the box says so.
 
 You can also ask the [Floor Manager](floor-manager.md#changing-a-workflow) to change a workflow.
 

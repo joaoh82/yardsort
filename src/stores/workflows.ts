@@ -78,7 +78,16 @@ export const useWorkflowStore = create<WorkflowsState>((set, get) => ({
     if (!hasCore()) return;
     try {
       const [items, waits] = await Promise.all([ipc.workflowList(), ipc.workflowWaits()]);
-      set({ items, waits, loaded: true });
+      // A file that changed under a workflow — saved by `ys`, or by hand — is newer than what a
+      // writer was shown, so a generation asked against the old text is set aside too.
+      set((state) => {
+        const serials = { ...state.serials };
+        for (const item of items) {
+          const before = state.items.find((old) => old.id === item.id);
+          if (before && before.text !== item.text) serials[item.id] = (serials[item.id] ?? 0) + 1;
+        }
+        return { items, waits, loaded: true, serials };
+      });
     } catch (error) {
       set({ error: errorMessage(error), loaded: true });
     }

@@ -608,6 +608,7 @@ pub async fn workflow_describe(
         so_far = Some(describe::finish(ask, &answer, tries));
     }
     let done = so_far.expect("the first prompt is always asked");
+    describe::keep_id(ask, &done)?;
     Ok(Described {
         text: done.text,
         problems: done.problems,

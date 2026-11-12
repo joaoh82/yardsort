@@ -212,6 +212,26 @@ fn is_own_repository(dir: &Path, git: &Git) -> IpcResult<bool> {
         .is_some_and(|root| crate::git::normalize(&root) == crate::git::normalize(dir)))
 }
 
+/// Refuse a change's last answer that still gives the workflow another id. Every other problem
+/// is the file's own, and the editor marks it again when it checks the text; this one is about
+/// what the file was before, which the editor does not know, so handed over it would be counted
+/// and never shown, and Save would write the renamed workflow over the old one.
+pub fn keep_id(ask: Ask<'_>, done: &Described) -> IpcResult<()> {
+    let (Some(keep), Some(id)) = (ask.keep_id(), id_of(&done.text)) else {
+        return Ok(());
+    };
+    if id == keep {
+        return Ok(());
+    }
+    Err(IpcError::new(
+        "workflow_id_changed",
+        format!(
+            "The writer gave the workflow another id, `{id}`, after being asked to keep `{keep}`, \
+             so its answer was set aside. Try describing the change again."
+        ),
+    ))
+}
+
 /// What a model wrote, checked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Described {
@@ -348,13 +368,25 @@ mod tests {
         assert!(again.starts_with(&first_prompt(ask)));
         assert!(again.contains("keep it `code-review`"));
 
+        // Renamed twice: refused, rather than handed over with a problem the editor cannot see.
+        let twice = finish(ask, &renamed, MAX_TRIES);
+        assert_eq!(next_prompt(ask, Some(&twice)), None);
+        let refused = keep_id(ask, &twice).unwrap_err();
+        assert_eq!(refused.code, "workflow_id_changed");
+        assert!(
+            refused.message.contains("`careful-review`"),
+            "{}",
+            refused.message
+        );
+
         let kept = finish(ask, current, 1);
+        keep_id(ask, &kept).unwrap();
         assert!(kept.problems.is_empty(), "{:?}", kept.problems);
         assert_eq!(next_prompt(ask, Some(&kept)), None);
         // A new workflow may be called anything.
-        assert!(finish(Ask::new("Review it."), &renamed, 1)
-            .problems
-            .is_empty());
+        let new = finish(Ask::new("Review it."), &renamed, 1);
+        assert!(new.problems.is_empty());
+        keep_id(Ask::new("Review it."), &new).unwrap();
     }
 
     #[test]

@@ -88,8 +88,22 @@ fn confirmation_text(command: &mut Command, line: &str) -> Result<String, Failur
             if workflow { "saved" } else { "posted" }
         ))
     })?;
+    // A workflow decides what is sent to agents, so the dialog shows all of it: the snapshot
+    // that would be saved, not a start and a pointer to a file that may change. One too big to
+    // save is refused here, before anybody is asked.
+    if workflow && text.len() as u64 > yardsort_core::workflow::MAX_FILE_BYTES {
+        return Err(Failure::new(format!(
+            "Not run: {file} is larger than a workflow file may be ({} bytes), so it would not \
+             be saved.",
+            yardsort_core::workflow::MAX_FILE_BYTES
+        )));
+    }
     remember_body(command, text.clone());
-    let (shown, cut) = preview_body(&text);
+    let (shown, cut) = if workflow {
+        (show_text(&text), false)
+    } else {
+        preview_body(&text)
+    };
     let heading = if workflow {
         "The workflow that would be saved:"
     } else {
