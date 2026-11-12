@@ -346,7 +346,16 @@ for a GitHub review (`wait_pr_activity`) is not this. That is a comment on a pul
 not a decision you make here.
 
 The run shows the artifacts the step consumes, so you can read the plan or the review
-before you decide. You approve, reject, or request changes, and you can leave a note.
+before you decide. The waiting step names them and has a **Review and decide** button
+(**Review plan and decide** when there is one document, named plan). It opens a dialog almost
+the size of the window. The document fills most of it, with tabs when there is more than one. A
+`.md` file, or text with a Markdown heading, is shown formatted, and **Show plain text** shows
+the text as it was written. The step's own words, the note and the decisions are beside it.
+**Close** keeps the note you wrote, and the step then says the note is not sent.
+A gate that reads no documents, such as a release sign-off, has **Approve** and **Reject** right
+on the step, which decide at once and send a note you left in the dialog. **Add a note…** opens
+the dialog, which is where **Request changes** is.
+You approve, reject, or request changes, and you can leave a note.
 Requesting changes needs a note. With no `on` routes, a request for changes stops the
 run. The note is kept as an artifact named `changes-<step id>`, source `decision`, for
 a later revision to read. [Conditional paths](#conditional-paths) can send that note
@@ -451,6 +460,18 @@ that was given and not yet typed fails because it could not be sent back.
 
 You answer in the run view, which does not ask for a code, from a terminal Yardsort
 did not start, or on a phone signed in to the same account while this computer is online.
+
+In the run view the waiting step lists the round's questions and has an **Answer** button
+(**Answer the question**, or **Answer 6 questions** when there are six). It opens a dialog that
+shows one question at a time with room to answer it. **Next** moves on, and so does ⌘Enter
+(Ctrl+Enter elsewhere). The numbers along the top jump to any question. You can leave a question
+blank. After the last question, **Review** shows every question with its answer, and **Change**
+goes back to one of them. **Send answers** sends the whole round as one answer, numbered in the
+order the questions were asked, with `(no answer)` for a blank. It needs at least one answer.
+A round with one question has no review: **Send answer** sends what you typed as it is.
+**Close** keeps what you typed. The step then says how many are answered and not sent, and
+**Continue answering** opens the dialog at the first blank question. A new round starts empty.
+
 The terminal and the phone need the one-time code the window shows, the same way an approval does:
 
 ```sh

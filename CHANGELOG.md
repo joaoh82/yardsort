@@ -3,6 +3,17 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Answer a workflow's questions one at a time.** When an agent in a workflow asks several
+  questions, **Answer** in the run view opens a wide dialog with one question at a time, then all
+  of them with your answers to look over before you send. Closing it keeps what you typed. See
+  [Asking a question](docs/guide/workflows.md#asking-a-question).
+- **Read a plan before approving it at the size of the window.** **Review and decide** on a
+  waiting approval opens a dialog with the plan, or any document the step reads, formatted and
+  filling most of the window. The note and **Approve**, **Request changes** and **Reject** are
+  beside it. See [An approval](docs/guide/workflows.md#an-approval).
+
 ## 0.29.0
 
 - **An agent that needs you reaches your phone.** When Claude Code, OpenCode or Pi asks for a

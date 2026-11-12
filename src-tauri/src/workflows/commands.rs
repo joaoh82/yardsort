@@ -95,6 +95,9 @@ pub struct WorkflowStepRun {
     pub approval_locked: bool,
     /// The questions a clarifying step is waiting on. Absent when it is not.
     pub clarification_prompt: Option<String>,
+    /// The same questions one by one, as the agent asked them, for the window to take one
+    /// at a time. Empty when nothing is waiting.
+    pub clarification_questions: Vec<String>,
 }
 
 /// A named document stored on a run, as the run view shows it.
@@ -160,6 +163,28 @@ fn artifact_from(artifact: &WorkflowArtifactRow) -> WorkflowArtifact {
     }
 }
 
+/// The open round's questions, one by one. A round that cannot be found, or an old row that
+/// is not a list, gives the whole prompt as one question, so there is always something to answer.
+fn open_questions(
+    store: &yardsort_core::store::Store,
+    run_id: &str,
+    step_id: &str,
+    prompt: &str,
+) -> yardsort_core::store::StoreResult<Vec<String>> {
+    let questions = store
+        .clarification_rounds(run_id, step_id)?
+        .into_iter()
+        .rev()
+        .find(|round| round.answer.is_none() && round.applied_at.is_none())
+        .map(|round| workflow::clarify::decode_questions(&round.questions))
+        .unwrap_or_default();
+    Ok(if questions.is_empty() {
+        vec![prompt.to_owned()]
+    } else {
+        questions
+    })
+}
+
 fn step_from(
     row: WorkflowStepRow,
     artifacts: &[WorkflowArtifactRow],
@@ -167,6 +192,7 @@ fn step_from(
     approval_code: Option<String>,
     approval_locked: bool,
     clarification_prompt: Option<String>,
+    clarification_questions: Vec<String>,
 ) -> WorkflowStepRun {
     WorkflowStepRun {
         outputs: serde_json::from_str(&row.outputs).unwrap_or_default(),
@@ -193,6 +219,7 @@ fn step_from(
         approval_code,
         approval_locked,
         clarification_prompt,
+        clarification_questions,
     }
 }
 
@@ -392,6 +419,10 @@ pub async fn workflow_run_steps(app: AppHandle, run_id: String) -> IpcResult<Vec
                             && wait.applied_at.is_none()
                     })
                     .and_then(|wait| wait.prompt);
+                let clarification_questions = match &clarification_prompt {
+                    Some(prompt) => open_questions(&state.store, &run_id, &row.step_id, prompt)?,
+                    None => Vec::new(),
+                };
                 let (approval_code, approval_locked) =
                     if row.action == "approve" && row.status == "waiting" {
                         shown_approval_code(&state.store, &run_id, &row.step_id)?
@@ -410,6 +441,7 @@ pub async fn workflow_run_steps(app: AppHandle, run_id: String) -> IpcResult<Vec
                     approval_code,
                     approval_locked,
                     clarification_prompt,
+                    clarification_questions,
                 ))
             })
             .collect()

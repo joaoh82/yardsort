@@ -527,19 +527,108 @@ describe("WorkflowView", () => {
       (await within(runs).findAllByText("Blocked: waiting for your approval.")).length,
     ).toBeGreaterThan(0);
     expect(within(runs).getByText(/ABCD2345/)).toBeInTheDocument();
-    expect(within(runs).getByText("To review plan")).toBeInTheDocument();
-    expect(within(runs).getByText("Split the migration.")).toBeInTheDocument();
-    expect(within(runs).getByRole("button", { name: "Request changes" })).toBeDisabled();
+    expect(within(runs).getByText("To review: plan")).toBeInTheDocument();
     core.workflowShowApprovalCode.mockResolvedValue("ZXCV2345");
     await userEvent.setup().click(within(runs).getByRole("button", { name: "Show a new code" }));
     await waitFor(() =>
       expect(core.workflowShowApprovalCode).toHaveBeenCalledWith("run-1", "sign-off"),
     );
-    await waitFor(() =>
-      expect(within(runs).getByRole("button", { name: "Approve" })).toBeEnabled(),
-    );
-    await userEvent.setup().click(within(runs).getByRole("button", { name: "Approve" }));
+    const review = within(runs).getByRole("button", { name: "Review plan and decide" });
+    await waitFor(() => expect(review).toBeEnabled());
+    await userEvent.setup().click(review);
+    const dialog = screen.getByRole("dialog", { name: "Your approval: sign-off" });
+    expect(within(dialog).getByText("Split the migration.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Waiting for your approval.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Request changes" })).toBeDisabled();
+    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Approve" }));
     expect(core.workflowDecide).toHaveBeenCalledWith("run-1", "sign-off", "approved", null);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("shows a plan formatted in the approval dialog, and keeps the note when it is closed", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    core.workflowRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "demo",
+        workflowName: "Demo",
+        workspaceId: "w",
+        workspaceName: "fix-login",
+        status: "running",
+        requestedBy: "app",
+        error: null,
+        inputs: {},
+        pullRequest: null,
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+        blockedOn: "your approval",
+      },
+    ]);
+    core.workflowRunSteps.mockResolvedValue([
+      {
+        stepId: "approve-plan",
+        action: "approve",
+        status: "waiting",
+        startedAt: null,
+        endedAt: null,
+        outputs: {},
+        note: "Read the plan.",
+        outcome: null,
+        artifacts: [],
+        consumed: [
+          {
+            name: "plan",
+            source: "file",
+            detail: "factory/plan.md",
+            body: "# Plan: cookieless analytics\n\nAdd it to the public site.",
+            truncated: false,
+          },
+          {
+            name: "context",
+            source: "file",
+            detail: "factory/context.md",
+            body: "It is on main.",
+            truncated: false,
+          },
+        ],
+        approvalCode: null,
+        approvalLocked: false,
+        clarificationPrompt: null,
+        clarificationQuestions: [],
+      },
+    ]);
+    core.workflowDecide.mockResolvedValue(undefined);
+    core.workflowList.mockResolvedValue([item("demo", { kind: "builtIn" })]);
+    const user = userEvent.setup();
+    render(<WorkflowView workflowId="demo" />);
+    const runs = await screen.findByRole("region", { name: "Runs" });
+    await user.click(
+      await within(runs).findByRole("button", { name: "Run in fix-login, running" }),
+    );
+    await user.click(within(runs).getByRole("button", { name: "Review and decide" }));
+    let dialog = screen.getByRole("dialog", { name: "Your approval: approve-plan" });
+    // A Markdown file is shown formatted, and the raw text is one click away.
+    expect(
+      within(dialog).getByRole("heading", { name: "Plan: cookieless analytics" }),
+    ).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Show plain text" }));
+    expect(within(dialog).getByText(/# Plan: cookieless analytics/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("tab", { name: "context" }));
+    expect(within(dialog).getByText("It is on main.")).toBeInTheDocument();
+
+    await user.type(within(dialog).getByLabelText("Feedback for approve-plan"), "Split step 2");
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(within(runs).getByText("Note written, not sent")).toBeInTheDocument();
+    await user.click(within(runs).getByRole("button", { name: "Review and decide" }));
+    dialog = screen.getByRole("dialog", { name: "Your approval: approve-plan" });
+    await user.click(within(dialog).getByRole("button", { name: "Request changes" }));
+    expect(core.workflowDecide).toHaveBeenCalledWith(
+      "run-1",
+      "approve-plan",
+      "changes_requested",
+      "Split step 2",
+    );
   });
 
   it("shows a clarification and records the answer", async () => {
@@ -577,6 +666,7 @@ describe("WorkflowView", () => {
         approvalCode: null,
         approvalLocked: false,
         clarificationPrompt: "1. What should the timeout be?",
+        clarificationQuestions: ["What should the timeout be?"],
       },
     ]);
     core.workflowAnswer.mockResolvedValue(undefined);
@@ -598,10 +688,157 @@ describe("WorkflowView", () => {
     core.workflowShowApprovalCode.mockResolvedValue(undefined);
     await userEvent.setup().click(within(runs).getByRole("button", { name: "Show a new code" }));
     expect(core.workflowShowApprovalCode).toHaveBeenCalledWith("run-1", "discover");
-    const answer = within(runs).getByRole("button", { name: "Answer" });
-    expect(answer).toBeDisabled();
-    await userEvent.setup().type(within(runs).getByLabelText("Answer for discover"), "30 seconds");
-    await userEvent.setup().click(answer);
+    await userEvent
+      .setup()
+      .click(within(runs).getByRole("button", { name: "Answer the question" }));
+    const dialog = screen.getByRole("dialog", { name: "The agent has a question" });
+    const send = within(dialog).getByRole("button", { name: "Send answer" });
+    expect(send).toBeDisabled();
+    await userEvent.setup().type(within(dialog).getByLabelText("Your answer"), "30 seconds");
+    await userEvent.setup().click(send);
     expect(core.workflowAnswer).toHaveBeenCalledWith("run-1", "discover", "30 seconds");
+  });
+
+  it("takes several questions one at a time and sends them as one numbered answer", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    core.workflowRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "demo",
+        workflowName: "Demo",
+        workspaceId: "w",
+        workspaceName: "fix-login",
+        status: "running",
+        requestedBy: "app",
+        error: null,
+        inputs: {},
+        pullRequest: null,
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+        blockedOn: "your answer",
+      },
+    ]);
+    core.workflowRunSteps.mockResolvedValue([
+      {
+        stepId: "discover",
+        action: "wait_session",
+        status: "waiting",
+        startedAt: null,
+        endedAt: null,
+        outputs: {},
+        note: null,
+        outcome: null,
+        artifacts: [],
+        consumed: [],
+        approvalCode: null,
+        approvalLocked: false,
+        clarificationPrompt: "1. Where should it run?\n2. Which users?\n3. Any deadline?",
+        clarificationQuestions: ["Where should it run?", "Which users?", "Any deadline?"],
+      },
+    ]);
+    core.workflowAnswer.mockResolvedValue(undefined);
+    core.workflowList.mockResolvedValue([item("demo", { kind: "builtIn" })]);
+    const user = userEvent.setup();
+    render(<WorkflowView workflowId="demo" />);
+    const runs = await screen.findByRole("region", { name: "Runs" });
+    await user.click(
+      await within(runs).findByRole("button", { name: "Run in fix-login, running" }),
+    );
+    await user.click(within(runs).getByRole("button", { name: "Answer 3 questions" }));
+    let dialog = screen.getByRole("dialog", { name: "The agent has 3 questions" });
+    expect(within(dialog).getByText("Question 1 of 3")).toBeInTheDocument();
+    expect(within(dialog).getByText("Where should it run?")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Which users?")).not.toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText("Answer to question 1"), "Both");
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+
+    // Closing keeps what was typed; opening again starts at the first blank question.
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(within(runs).getByText("1 of 3 answered, not sent")).toBeInTheDocument();
+    await user.click(within(runs).getByRole("button", { name: "Continue answering" }));
+    dialog = screen.getByRole("dialog", { name: "The agent has 3 questions" });
+    expect(within(dialog).getByText("Question 2 of 3")).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText("Answer to question 2"), "Agency users only");
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    // The last one is left blank.
+    await user.click(within(dialog).getByRole("button", { name: "Review" }));
+    const review = within(dialog).getByRole("list", { name: "Your answers" });
+    expect(within(review).getByText("No answer")).toBeInTheDocument();
+    expect(core.workflowAnswer).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Send answers" }));
+    expect(core.workflowAnswer).toHaveBeenCalledWith(
+      "run-1",
+      "discover",
+      "1. Both\n\n2. Agency users only\n\n3. (no answer)",
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("approves a gate that reads no documents from the panel, without the dialog", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    core.workflowRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "demo",
+        workflowName: "Demo",
+        workspaceId: "w",
+        workspaceName: "fix-login",
+        status: "running",
+        requestedBy: "app",
+        error: null,
+        inputs: {},
+        pullRequest: null,
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+        blockedOn: "your approval",
+      },
+    ]);
+    core.workflowRunSteps.mockResolvedValue([
+      {
+        stepId: "release",
+        action: "approve",
+        status: "waiting",
+        startedAt: null,
+        endedAt: null,
+        outputs: {},
+        note: "Ready to release?",
+        outcome: null,
+        artifacts: [],
+        consumed: [],
+        approvalCode: null,
+        approvalLocked: false,
+        clarificationPrompt: null,
+        clarificationQuestions: [],
+      },
+    ]);
+    core.workflowDecide.mockResolvedValue(undefined);
+    core.workflowList.mockResolvedValue([item("demo", { kind: "builtIn" })]);
+    const user = userEvent.setup();
+    render(<WorkflowView workflowId="demo" />);
+    const runs = await screen.findByRole("region", { name: "Runs" });
+    await user.click(
+      await within(runs).findByRole("button", { name: "Run in fix-login, running" }),
+    );
+    expect(within(runs).queryByText(/To review/)).not.toBeInTheDocument();
+    expect(within(runs).queryByRole("button", { name: /Review/ })).not.toBeInTheDocument();
+    await user.click(within(runs).getByRole("button", { name: "Approve" }));
+    expect(core.workflowDecide).toHaveBeenCalledWith("run-1", "release", "approved", null);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // A note, and so a request for changes, still goes through the dialog.
+    await user.click(within(runs).getByRole("button", { name: "Add a note…" }));
+    const dialog = screen.getByRole("dialog", { name: "Your approval: release" });
+    expect(within(dialog).getByText("This approval reads no documents.")).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText("Feedback for release"), "Wait for the docs");
+    await user.click(within(dialog).getByRole("button", { name: "Request changes" }));
+    expect(core.workflowDecide).toHaveBeenLastCalledWith(
+      "run-1",
+      "release",
+      "changes_requested",
+      "Wait for the docs",
+    );
   });
 });
