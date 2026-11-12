@@ -58,32 +58,58 @@ pub(crate) fn enforce(data_dir: &Option<PathBuf>, command: &mut Command) -> Resu
     }
 }
 
-/// What ask first puts in the dialog. A comment read from a file is part of the command the
-/// user is allowing, so the text is in the request. `-` is refused: standard input is not
-/// knowable until it is consumed, and consuming it would leave the command with nothing to post.
+/// What ask first puts in the dialog. A comment, or a workflow file, read from a file is part of
+/// the command the user is allowing, so the text is in the request. `-` is refused: standard
+/// input is not knowable until it is consumed, and consuming it would leave the command with
+/// nothing to post or save.
 ///
-/// The text is read once, here, and the command then carries that string. Posting reads the
-/// file again otherwise, and a change between the dialog and the post would send something
-/// other than what was allowed.
+/// The text is read once, here, and the command then carries that string. Posting or saving
+/// reads the file again otherwise, and a change between the dialog and the write would send
+/// something other than what was allowed.
 fn confirmation_text(command: &mut Command, line: &str) -> Result<String, Failure> {
-    let Some(file) = body_file(command).map(str::to_owned) else {
+    let Some(file) = body_file(command) else {
         return Ok(line.to_owned());
     };
+    let workflow = matches!(command, Command::Workflow(workflow::Command::Save { .. }));
     if file == "-" {
-        return Err(Failure::new(
+        return Err(Failure::new(if workflow {
+            "Not run: ys workflow save - would save whatever is on standard input, and ask \
+             first would show only the dash. Write the file somewhere and name it, so the \
+             confirmation shows the workflow that would be saved."
+        } else {
             "Not run: --body-file - would post whatever is on standard input, and ask first \
              would show only the flag. Pass the text as an argument, or name a file, so the \
-             confirmation shows what would be posted.",
-        ));
+             confirmation shows what would be posted."
+        }));
     }
     let text = std::fs::read_to_string(&file).map_err(|error| {
         Failure::new(format!(
-            "Not run: the text in {file} could not be read, so it was not posted: {error}"
+            "Not run: the text in {file} could not be read, so nothing was {}: {error}",
+            if workflow { "saved" } else { "posted" }
         ))
     })?;
+    // A workflow decides what is sent to agents, so the dialog shows all of it: the snapshot
+    // that would be saved, not a start and a pointer to a file that may change. One too big to
+    // save is refused here, before anybody is asked.
+    if workflow && text.len() as u64 > yardsort_core::workflow::MAX_FILE_BYTES {
+        return Err(Failure::new(format!(
+            "Not run: {file} is larger than a workflow file may be ({} bytes), so it would not \
+             be saved.",
+            yardsort_core::workflow::MAX_FILE_BYTES
+        )));
+    }
     remember_body(command, text.clone());
-    let (shown, cut) = preview_body(&text);
-    let mut out = format!("{line}\n\nThe text that would be posted:\n{shown}");
+    let (shown, cut) = if workflow {
+        (show_text(&text), false)
+    } else {
+        preview_body(&text)
+    };
+    let heading = if workflow {
+        "The workflow that would be saved:"
+    } else {
+        "The text that would be posted:"
+    };
+    let mut out = format!("{line}\n\n{heading}\n{shown}");
     if cut {
         out.push_str("\n\nThe rest is in the file.");
     }
@@ -107,14 +133,20 @@ fn remember_body(command: &mut Command, text: String) {
             *slot = Some(text);
             *body_file = None;
         }
+        Command::Workflow(workflow::Command::Save { allowed, .. }) => *allowed = Some(text),
         _ => {}
     }
 }
 
-fn body_file(command: &Command) -> Option<&str> {
+/// The file whose text the confirmation must show. A workflow path that is not UTF-8 is still
+/// one: spelled lossily it cannot be read, so the command is refused rather than shown bare.
+fn body_file(command: &Command) -> Option<String> {
     match command {
         Command::Task(task::Command::Create { body_file, .. })
-        | Command::Task(task::Command::Comment { body_file, .. }) => body_file.as_deref(),
+        | Command::Task(task::Command::Comment { body_file, .. }) => body_file.clone(),
+        Command::Workflow(workflow::Command::Save { file, .. }) => {
+            Some(file.to_string_lossy().into_owned())
+        }
         _ => None,
     }
 }
@@ -209,6 +241,7 @@ fn effect(command: &Command) -> Action {
             | workflow::Command::Runs { .. }
             | workflow::Command::Validate { .. } => Action::Read,
             workflow::Command::Copy { .. }
+            | workflow::Command::Save { .. }
             | workflow::Command::Run { .. }
             | workflow::Command::Cancel { .. }
             | workflow::Command::Ask { .. }

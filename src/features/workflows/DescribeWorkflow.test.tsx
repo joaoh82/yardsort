@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const core = vi.hoisted(() => ({
   workflowWriterStatus: vi.fn(),
   workflowDescribe: vi.fn(),
+  workflowList: vi.fn(),
+  workflowWaits: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -47,7 +49,7 @@ describe("DescribeWorkflow", () => {
     expect(write).toBeDisabled();
     await user.type(screen.getByRole("textbox"), "Review my pull request.");
     await user.click(write);
-    expect(core.workflowDescribe).toHaveBeenCalledWith("Review my pull request.");
+    expect(core.workflowDescribe).toHaveBeenCalledWith("Review my pull request.", null);
     await waitFor(() =>
       expect(useWorkflowStore.getState().drafts[NEW_WORKFLOW]).toBe("id: review\nname: Review\n"),
     );
@@ -144,6 +146,50 @@ describe("DescribeWorkflow", () => {
     finishC(answer("c"));
     expect(await screen.findByText(/set aside/)).toBeInTheDocument();
     expect(useWorkflowStore.getState().drafts[NEW_WORKFLOW]).toBeUndefined();
+  });
+
+  it("a change is asked against the current text, and an edit meanwhile sets the answer aside", async () => {
+    core.workflowWriterStatus.mockResolvedValue({ harnessId: null, status: canWrite });
+    let finish: (v: unknown) => void = () => {};
+    core.workflowDescribe.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    const user = userEvent.setup();
+    render(<DescribeWorkflow workflowId="demo" current={"id: demo\n"} />);
+    const words = screen.getByRole("textbox", { name: "What to change" });
+    await waitFor(() => expect(words).toBeEnabled());
+    await user.type(words, "Add a notify step.");
+    await user.click(screen.getByRole("button", { name: "Change it" }));
+    expect(core.workflowDescribe).toHaveBeenCalledWith("Add a notify step.", "id: demo\n");
+
+    // The person typed in the editor while the agent was writing.
+    useWorkflowStore.getState().setDraft("demo", "id: demo\nname: Mine\n");
+    finish({ text: "id: demo\nname: Theirs\n", problems: [], tries: 1, writer: "Claude Code" });
+    expect(await screen.findByText(/set aside/)).toBeInTheDocument();
+    expect(useWorkflowStore.getState().drafts.demo).toBe("id: demo\nname: Mine\n");
+    expect(useWorkflowStore.getState().drafts[NEW_WORKFLOW]).toBeUndefined();
+  });
+
+  it("a file saved outside the window while the change is written sets the answer aside", async () => {
+    core.workflowWriterStatus.mockResolvedValue({ harnessId: null, status: canWrite });
+    const listed = (text: string) => [
+      { id: "demo", name: "Demo", text, source: { kind: "file", path: "/wf/demo.yaml" } },
+    ];
+    useWorkflowStore.setState({ items: listed("id: demo\n") as never });
+    core.workflowWaits.mockResolvedValue([]);
+    let finish: (v: unknown) => void = () => {};
+    core.workflowDescribe.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    const user = userEvent.setup();
+    render(<DescribeWorkflow workflowId="demo" current={"id: demo\n"} />);
+    const words = screen.getByRole("textbox", { name: "What to change" });
+    await waitFor(() => expect(words).toBeEnabled());
+    await user.type(words, "Add a notify step.");
+    await user.click(screen.getByRole("button", { name: "Change it" }));
+
+    // The Floor Manager saved another version; the folder refresh brings it in.
+    core.workflowList.mockResolvedValue(listed("id: demo\nname: Saved by ys\n"));
+    await useWorkflowStore.getState().load();
+    finish({ text: "id: demo\nname: Theirs\n", problems: [], tries: 1, writer: "Claude Code" });
+    expect(await screen.findByText(/set aside/)).toBeInTheDocument();
+    expect(useWorkflowStore.getState().drafts.demo).toBeUndefined();
   });
 
   it("says why nothing can write, and offers nothing to press", async () => {

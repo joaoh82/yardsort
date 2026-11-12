@@ -1053,9 +1053,10 @@ export const ipc = {
   /** Issue a new approval code and tell the person. Listing a run does not do this. */
   workflowShowApprovalCode: (runId: string, stepId: string) =>
     unwrap(commands.workflowShowApprovalCode(runId, stepId)),
-  /** A model writes a workflow from a description, through Drafting; checked, never saved. */
-  workflowDescribe: (description: string): Promise<Described> =>
-    unwrap(commands.workflowDescribe(description)),
+  /** A model writes a workflow from a description, through Drafting; checked, never saved.
+   *  With `current`, the description is a change to that text, and the id is kept. */
+  workflowDescribe: (description: string, current: string | null = null): Promise<Described> =>
+    unwrap(commands.workflowDescribe(description, current)),
   /** A run was queued, moved on, finished or cancelled. */
   onWorkflowRunsChanged: (handler: () => void) =>
     events.workflowRunsChanged.listen(() => handler()),

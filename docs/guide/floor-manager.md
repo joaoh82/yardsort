@@ -50,6 +50,7 @@ saying yes is safe.
 - _Check the open pull requests and start reviewers on them._
 - _What is waiting in the tasks for api-gateway?_
 - _Start this task in yardsort: …. Is there a workflow for it?_
+- _Change the code review so it runs the smoke tests first._
 
 It answers from `ys`: `ys project list`, `ys session list`, `ys pr list`, `ys task list`,
 `ys workflow list` and the rest. Pull requests and tasks are read from GitHub through your
@@ -103,6 +104,22 @@ writes the database directly is not stopped.
 
 The dialog does not run the command. It records yes or no, and the `ys` that is waiting is the
 one that runs it.
+
+### Changing a workflow
+
+Ask it to change a [workflow](workflows.md), a built-in or one of yours: _make the code review
+run the smoke tests first_. It reads the file with `ys workflow show`, writes the changed file
+in its own folder, checks it with `ys workflow validate`, and saves it with `ys workflow save`.
+It is told to change only what you asked and keep the workflow's `id`, so a changed built-in
+becomes your copy, used instead of it. `save` refuses a file with problems.
+
+Saving is a write. At ask first the confirmation shows the whole file that would be saved,
+scrolling when it is long, and the text you allowed is the text written, even if the file changes afterwards. The Floor Manager
+must name a file: `ys workflow save -` is refused at ask first, because the confirmation could
+not show what standard input holds. At read only it can show you the change and cannot save
+it. A workflow open in the window shows the saved file within a second or two. If you had
+unsaved changes in it, they stay as your draft, and **Revert** shows the saved file. It cannot
+delete a workflow file through `ys`.
 
 ### Reviewing pull requests
 

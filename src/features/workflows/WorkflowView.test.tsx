@@ -16,6 +16,7 @@ const core = vi.hoisted(() => ({
   workflowShowApprovalCode: vi.fn(),
   workflowWaits: vi.fn(),
   workflowWriterStatus: vi.fn(),
+  workflowDescribe: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -164,6 +165,54 @@ describe("WorkflowView", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Customize" }));
     expect(core.workflowCopy).toHaveBeenCalledWith("code-review");
     expect(await screen.findByText(/your copy, used instead of the built-in/)).toBeInTheDocument();
+  });
+
+  it("customizing opens a box to describe the change, and the agent's answer is the copy's draft", async () => {
+    const path = "/wf/code-review.yaml";
+    const able = {
+      enabled: true,
+      available: true,
+      harness: "Claude Code",
+      key: false,
+      model: "claude-opus-5",
+      problem: null,
+    };
+    core.workflowWriterStatus.mockResolvedValue({ harnessId: null, status: able });
+    useWorkflowStore.setState({ items: [item("code-review", { kind: "builtIn" })] });
+    core.workflowList.mockResolvedValue([
+      item("code-review", { kind: "file", path, replacesBuiltIn: true }),
+    ]);
+    const changed = `${TEXT}description: Runs the tests first.\n`;
+    core.workflowDescribe.mockResolvedValue({
+      text: changed,
+      problems: [],
+      tries: 1,
+      writer: "Claude Code",
+    });
+    const user = userEvent.setup();
+    render(<WorkflowView workflowId="code-review" />);
+    expect(screen.queryByRole("region", { name: "Describe a change" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Customize" }));
+    const box = await screen.findByRole("region", { name: "Describe a change" });
+    expect(screen.getByRole("button", { name: "Describe a change" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    const words = within(box).getByRole("textbox", { name: "What to change" });
+    await waitFor(() => expect(words).toBeEnabled());
+    await user.type(words, "Run the tests first.");
+    await user.click(within(box).getByRole("button", { name: "Change it" }));
+    expect(core.workflowDescribe).toHaveBeenCalledWith("Run the tests first.", TEXT);
+    await waitFor(() => expect(useWorkflowStore.getState().drafts["code-review"]).toBe(changed));
+    expect(await within(box).findByText(/Changed by Claude Code/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Revert" })).toBeInTheDocument();
+    expect(core.workflowSave).not.toHaveBeenCalled();
+
+    // The same button closes it; a file of the user's opens it the same way.
+    await user.click(screen.getByRole("button", { name: "Describe a change" }));
+    expect(screen.queryByRole("region", { name: "Describe a change" })).toBeNull();
   });
 
   it("selects a chart node and passes its current YAML location to the editor", async () => {

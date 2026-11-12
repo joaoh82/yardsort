@@ -582,6 +582,7 @@ ys workflow show code-review     # the file that would be used, then any problem
 ys workflow copy code-review     # your own copy to edit, used instead of the built-in
 ys workflow validate fix-ci.yaml # each problem as file:line:column: message; exit 1 if any
 ys workflow validate -           # the same, reading the file from standard input
+ys workflow save fix-ci.yaml     # check it, then write it into your folder; refused with problems
 ys workflow run ping --workspace fix-login --input note=hi   # queue a run; Yardsort must be open
 ys workflow runs                 # runs, newest first, with a WAITING ON column
 ys workflow approve 3f2a9c1e sign-off --feedback "ship it"
@@ -606,7 +607,12 @@ with no summary fails the step.
 See [Asking a question](workflows.md#asking-a-question).
 
 `copy` writes into the `workflows` folder and never overwrites; `--as <new-id>` makes a second
-workflow instead of a replacement. `validate` needs no profile, so it works on any machine, in CI, or on a file an agent has just
+workflow instead of a replacement. `save` checks a file and, only when it has no problems,
+writes it into the folder: over your own file with the same `id`, wherever that file is; as your
+copy of a built-in when the `id` is a built-in's; otherwise as a new `<id>.yaml`. It reads
+standard input for `-`, except from the Floor Manager at ask first, where the file must be named
+so the confirmation can show it. An open Yardsort window shows the change within a second or
+two. `validate` needs no profile, so it works on any machine, in CI, or on a file an agent has just
 written. `list` also prints where the `workflows` folder is.
 
 `run` checks the workflow, the workspace and every input before it queues anything, and refuses

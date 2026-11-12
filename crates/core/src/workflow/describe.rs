@@ -7,6 +7,11 @@
 //! when it has problems it is sent back once, with them, for one more try. Whatever comes back
 //! opens in the editor unsaved: nothing a model wrote is a workflow until the person saves it.
 //!
+//! The same writer also changes a workflow that already exists — a built-in just customized, or
+//! a file of the person's — from a description of the change. It is shown the whole file, told to
+//! keep its `id` (a copy that replaces a built-in does so by that id), and its answer is checked
+//! the same way, with a changed id counted as one more problem.
+//!
 //! The loop is [`next_prompt`] and [`finish`]: the app asks whichever writer it has and calls
 //! `finish` on the answer, until `next_prompt` has nothing more to ask.
 
@@ -107,21 +112,73 @@ pub const SYSTEM: &str = concat!(
     include_str!("builtin/code-review.yaml"),
 );
 
+/// What is being asked for: a new workflow, or a change to the one in `current`.
+#[derive(Debug, Clone, Copy)]
+pub struct Ask<'a> {
+    /// In the person's own words: the whole workflow, or the change to make.
+    pub description: &'a str,
+    /// The workflow's text as it stands, when the description is a change to it.
+    pub current: Option<&'a str>,
+}
+
+impl<'a> Ask<'a> {
+    /// A new workflow, from nothing.
+    pub fn new(description: &'a str) -> Self {
+        Self {
+            description,
+            current: None,
+        }
+    }
+
+    /// A change to `current`.
+    pub fn change(description: &'a str, current: &'a str) -> Self {
+        Self {
+            description,
+            current: Some(current),
+        }
+    }
+
+    /// The id the answer must keep: the current workflow's, when it has one.
+    fn keep_id(&self) -> Option<String> {
+        self.current.and_then(id_of)
+    }
+}
+
+/// The id a workflow's text gives itself, whether or not the rest of it checks out.
+fn id_of(text: &str) -> Option<String> {
+    match parse(text) {
+        Ok(workflow) => Some(workflow.id),
+        Err(invalid) => invalid.id,
+    }
+}
+
 /// What the model is asked first.
-pub fn first_prompt(description: &str) -> String {
-    let description = crate::draft::clamp(description.trim(), MAX_DESCRIPTION_CHARS);
-    format!("Write a workflow that does this:\n\n{description}")
+pub fn first_prompt(ask: Ask<'_>) -> String {
+    let description = crate::draft::clamp(ask.description.trim(), MAX_DESCRIPTION_CHARS);
+    let Some(current) = ask.current else {
+        return format!("Write a workflow that does this:\n\n{description}");
+    };
+    let keep = match ask.keep_id() {
+        Some(id) => format!("Keep its `id`, `{id}`. "),
+        None => String::new(),
+    };
+    format!(
+        "Here is a workflow as it stands:\n\n{}\n\nChange it like this:\n\n{description}\n\n\
+         {keep}Change only what this asks for and keep the rest as it is. Reply with the whole \
+         changed file.",
+        current.trim_end()
+    )
 }
 
 /// What the model is asked again: what was asked the first time, since a second answer is a
 /// fresh conversation with no memory of it, then what it wrote and what is wrong with that.
-pub fn retry_prompt(description: &str, text: &str, problems: &[Problem]) -> String {
+pub fn retry_prompt(ask: Ask<'_>, text: &str, problems: &[Problem]) -> String {
     let listed: Vec<String> = problems.iter().map(|p| format!("- {p}")).collect();
     format!(
         "{}\n\nYour first answer has these problems, each at its line and column:\n\n{}\n\n\
          Here is what you wrote:\n\n{}\n\nReply with the whole corrected file, still doing \
          what was asked.",
-        first_prompt(description),
+        first_prompt(ask),
         listed.join("\n"),
         text.trim_end()
     )
@@ -155,6 +212,26 @@ fn is_own_repository(dir: &Path, git: &Git) -> IpcResult<bool> {
         .is_some_and(|root| crate::git::normalize(&root) == crate::git::normalize(dir)))
 }
 
+/// Refuse a change's last answer that still gives the workflow another id. Every other problem
+/// is the file's own, and the editor marks it again when it checks the text; this one is about
+/// what the file was before, which the editor does not know, so handed over it would be counted
+/// and never shown, and Save would write the renamed workflow over the old one.
+pub fn keep_id(ask: Ask<'_>, done: &Described) -> IpcResult<()> {
+    let (Some(keep), Some(id)) = (ask.keep_id(), id_of(&done.text)) else {
+        return Ok(());
+    };
+    if id == keep {
+        return Ok(());
+    }
+    Err(IpcError::new(
+        "workflow_id_changed",
+        format!(
+            "The writer gave the workflow another id, `{id}`, after being asked to keep `{keep}`, \
+             so its answer was set aside. Try describing the change again."
+        ),
+    ))
+}
+
 /// What a model wrote, checked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Described {
@@ -167,22 +244,34 @@ pub struct Described {
 }
 
 /// The next thing to ask, or nothing: the answer so far is good, or has been tried enough.
-pub fn next_prompt(description: &str, so_far: Option<&Described>) -> Option<String> {
+pub fn next_prompt(ask: Ask<'_>, so_far: Option<&Described>) -> Option<String> {
     match so_far {
-        None => Some(first_prompt(description)),
+        None => Some(first_prompt(ask)),
         Some(done) if done.problems.is_empty() || done.tries >= MAX_TRIES => None,
-        Some(again) => Some(retry_prompt(description, &again.text, &again.problems)),
+        Some(again) => Some(retry_prompt(ask, &again.text, &again.problems)),
     }
 }
 
-/// An answer, tidied and checked, as the `tries`th.
-pub fn finish(answer: &str, tries: u32) -> Described {
+/// An answer to `ask`, tidied and checked, as the `tries`th. A change that gave the workflow
+/// another id has that as a problem too: saved, it would stop replacing the built-in it is a copy
+/// of, or leave the person's other workflows pointing at an id that is gone.
+pub fn finish(ask: Ask<'_>, answer: &str, tries: u32) -> Described {
     let mut text = crate::draft::tidy(answer);
     text.push('\n');
-    let problems = match parse(&text) {
+    let mut problems = match parse(&text) {
         Ok(_) => Vec::new(),
         Err(invalid) => invalid.problems,
     };
+    if let Some(keep) = ask.keep_id() {
+        match id_of(&text) {
+            Some(id) if id == keep => {}
+            Some(id) => problems.push(Problem::whole(format!(
+                "The `id` is `{id}`; keep it `{keep}`, as it was."
+            ))),
+            // A file with no id at all already has that as a problem.
+            None => {}
+        }
+    }
     Described {
         text,
         problems,
@@ -221,18 +310,18 @@ mod tests {
     #[test]
     fn the_description_is_asked_trimmed_and_a_long_one_is_cut() {
         assert_eq!(
-            first_prompt("  Review my PR.  "),
+            first_prompt(Ask::new("  Review my PR.  ")),
             "Write a workflow that does this:\n\nReview my PR."
         );
         let long = "words ".repeat(2_000);
-        assert!(first_prompt(&long).contains("left out because it is very long"));
+        assert!(first_prompt(Ask::new(&long)).contains("left out because it is very long"));
     }
 
     #[test]
     fn a_retry_repeats_what_was_asked_then_names_each_problem_and_shows_the_answer() {
-        let asked = "Run the tests with Codex. Never post a review.";
+        let asked = Ask::new("Run the tests with Codex. Never post a review.");
         // A first answer that lost the whole task: a second writer starts from nothing.
-        let bad = finish("id: draft\nname: Draft\n", 1);
+        let bad = finish(asked, "id: draft\nname: Draft\n", 1);
         assert!(!bad.problems.is_empty());
         let again = retry_prompt(asked, &bad.text, &bad.problems);
         assert!(again.starts_with(&first_prompt(asked)), "{again}");
@@ -247,6 +336,57 @@ mod tests {
             Some(again.as_str()),
             "the loop asks exactly this"
         );
+    }
+
+    #[test]
+    fn a_change_shows_the_whole_workflow_asks_for_the_change_and_to_keep_its_id() {
+        let current = BUILT_IN[0].1;
+        let asked = first_prompt(Ask::change("  Also run the tests first.  ", current));
+        assert!(
+            asked.starts_with("Here is a workflow as it stands:"),
+            "{asked}"
+        );
+        assert!(asked.contains(current.trim_end()), "the whole file");
+        assert!(asked.contains("Change it like this:\n\nAlso run the tests first.\n"));
+        assert!(asked.contains("Keep its `id`, `code-review`."), "{asked}");
+        assert!(asked.contains("keep the rest as it is"));
+    }
+
+    #[test]
+    fn a_change_that_renames_the_workflow_has_that_as_a_problem_and_is_sent_back() {
+        let current = BUILT_IN[0].1;
+        let ask = Ask::change("Call it careful review.", current);
+        let renamed = current.replacen("id: code-review", "id: careful-review", 1);
+        let done = finish(ask, &renamed, 1);
+        assert_eq!(done.problems.len(), 1, "{:?}", done.problems);
+        assert!(
+            done.problems[0].message.contains("keep it `code-review`"),
+            "{:?}",
+            done.problems
+        );
+        let again = next_prompt(ask, Some(&done)).expect("sent back once");
+        assert!(again.starts_with(&first_prompt(ask)));
+        assert!(again.contains("keep it `code-review`"));
+
+        // Renamed twice: refused, rather than handed over with a problem the editor cannot see.
+        let twice = finish(ask, &renamed, MAX_TRIES);
+        assert_eq!(next_prompt(ask, Some(&twice)), None);
+        let refused = keep_id(ask, &twice).unwrap_err();
+        assert_eq!(refused.code, "workflow_id_changed");
+        assert!(
+            refused.message.contains("`careful-review`"),
+            "{}",
+            refused.message
+        );
+
+        let kept = finish(ask, current, 1);
+        keep_id(ask, &kept).unwrap();
+        assert!(kept.problems.is_empty(), "{:?}", kept.problems);
+        assert_eq!(next_prompt(ask, Some(&kept)), None);
+        // A new workflow may be called anything.
+        let new = finish(Ask::new("Review it."), &renamed, 1);
+        assert!(new.problems.is_empty());
+        keep_id(Ask::new("Review it."), &new).unwrap();
     }
 
     #[test]
@@ -297,10 +437,14 @@ mod tests {
 
     #[test]
     fn a_fenced_answer_is_unfenced_and_checked_like_any_file() {
-        let good = finish(&format!("```yaml\n{}\n```", BUILT_IN[0].1), 1);
+        let good = finish(
+            Ask::new("Review it."),
+            &format!("```yaml\n{}\n```", BUILT_IN[0].1),
+            1,
+        );
         assert!(good.problems.is_empty(), "{:?}", good.problems);
         assert_eq!(good.text, BUILT_IN[0].1);
-        let bad = finish("```\nid: nope\n```", 1);
+        let bad = finish(Ask::new("Review it."), "```\nid: nope\n```", 1);
         assert!(!bad.problems.is_empty());
         assert_eq!(bad.text, "id: nope\n");
     }
@@ -318,10 +462,10 @@ mod tests {
             }
         };
         let mut so_far: Option<Described> = None;
-        while let Some(prompt) = next_prompt("Say hi.", so_far.as_ref()) {
+        while let Some(prompt) = next_prompt(Ask::new("Say hi."), so_far.as_ref()) {
             let answer = writer(&prompt);
             let tries = so_far.as_ref().map_or(0, |d| d.tries) + 1;
-            so_far = Some(finish(&answer, tries));
+            so_far = Some(finish(Ask::new("Say hi."), &answer, tries));
         }
         let done = so_far.unwrap();
         assert_eq!(asked.len(), 2);
@@ -339,10 +483,10 @@ mod tests {
     fn two_wrong_answers_end_it_with_the_problems_still_there() {
         let mut asked = 0;
         let mut so_far: Option<Described> = None;
-        while let Some(_prompt) = next_prompt("Say hi.", so_far.as_ref()) {
+        while let Some(_prompt) = next_prompt(Ask::new("Say hi."), so_far.as_ref()) {
             asked += 1;
             let tries = so_far.as_ref().map_or(0, |d| d.tries) + 1;
-            so_far = Some(finish("id: still-wrong\n", tries));
+            so_far = Some(finish(Ask::new("Say hi."), "id: still-wrong\n", tries));
         }
         let done = so_far.unwrap();
         assert_eq!(asked, MAX_TRIES);

@@ -128,6 +128,9 @@ pub fn start(app: &AppHandle) {
 }
 
 fn drive(handle: &AppHandle, woken: &Receiver<()>) {
+    // The user's folder as last seen. A file changed outside the window — `ys workflow save`
+    // from the Floor Manager, say — is shown without waiting for a run to move.
+    let mut folder = None;
     loop {
         match woken.recv_timeout(TICK) {
             Ok(()) | Err(RecvTimeoutError::Timeout) => {}
@@ -140,6 +143,11 @@ fn drive(handle: &AppHandle, woken: &Receiver<()>) {
         else {
             continue;
         };
+        let stamp = yardsort_core::workflow::folder_stamp(&state.data_dir);
+        if folder.as_ref().is_some_and(|seen| *seen != stamp) {
+            let _ = commands::WorkflowRunsChanged {}.emit(handle);
+        }
+        folder = Some(stamp);
         let hands = AppHands {
             handle,
             state: &state,

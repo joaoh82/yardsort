@@ -531,6 +531,29 @@ Describe it, as [the UI](#the-ui) above now describes it. What changed on the wa
   original agent", wrote a valid four-step workflow first time, with no step for the author, and
   wrote nothing into the folder.
 
+## Describe a change: what shipped
+
+Added after slice 5. The same writer changes a workflow that exists, from a description of the
+change, in the window and through the Floor Manager:
+
+- **One loop, two asks.** `workflow::describe::Ask` is the description plus, for a change, the
+  current text. A change's prompt shows the whole file, asks for only what was described, and
+  names the `id` to keep. `finish` counts another `id` as a problem, so it goes back with the
+  others: a customized built-in replaces the built-in only by that id. `workflow_describe` takes
+  the current text as an optional second argument.
+- **Customize opens it.** The copy is made at once, as before, and the view opens a **Describe a
+  change** box on it. A file of the user's has a button for the same box. The answer is the
+  workflow's unsaved draft. The serial that sets aside a stale answer is now kept per workflow
+  id, not only for the new one, so a save, a revert, or typing meanwhile sets it aside too.
+- **The Floor Manager writes through `ys workflow save`**, not into the folder. The gate cannot
+  see a plain file write. `save` is an `Act`, refuses a file with problems (`ys` has no editor
+  to leave it open in), and replaces the user's own file with that id wherever it is. At ask
+  first it is treated like `task comment --body-file`: the file is read once, shown whole in the
+  confirmation, and that text is what is saved; `-` is refused there.
+- **The window notices the folder.** The driver's tick compares `workflow::folder_stamp` (names,
+  sizes, times) and emits `WorkflowRunsChanged` when it moves, so a file saved by `ys` shows up
+  without waiting for a run.
+
 ## Slice 6: what shipped
 
 Words and pictures, nothing of the code. The guide's running section and the changelog line had
