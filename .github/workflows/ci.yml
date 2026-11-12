@@ -142,9 +142,10 @@ jobs:
         run: bun scripts/server-dev.mjs e2e
 
   # The headless host as it ships: the tarball, run with an empty environment, on each
-  # architecture; and on x86_64 the container image, which signs in to the stand-in server, links,
-  # and stops cleanly. The image is tried here only: the local smoke test runs the tarball. See
-  # docs/guide/headless-host.md.
+  # architecture; and on x86_64 the two container images, slim and full. The full one has every
+  # tool and bundled harness an agent gets, takes one from a stand-in installer with
+  # `install-agent`, signs in to the stand-in server, links, and stops cleanly. The release builds
+  # both images for both architectures and publishes them. See docs/guide/headless-host.md.
   host-package:
     name: Host package (${{ matrix.arch }})
     strategy:
@@ -184,21 +185,26 @@ jobs:
         with:
           bun-version: 1.4.2
 
-      # Its user is the runner's, as an operator makes it the repositories' owner.
-      - name: Build the image
+      # The slim image's user is the runner's, as an operator makes it the repositories' owner;
+      # the full one is built on it, as the release builds the published full image on the slim.
+      - name: Build the images
         if: matrix.arch == 'x86_64'
         run: |
           docker build -f crates/host/Dockerfile --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" \
             -t yardsort-host .
-          docker run --rm yardsort-host --version
-          docker run --rm --entrypoint ys yardsort-host --version
+          docker build -f crates/host/Dockerfile.full --build-arg SLIM=yardsort-host -t yardsort-host-full .
 
-      - name: The image signs in to the stand-in, links, and stops cleanly
+      - name: Both run; the full one has its tools and harnesses, and install-agent works
+        if: matrix.arch == 'x86_64'
+        run: scripts/host-image-check.sh yardsort-host yardsort-host-full
+
+      - name: The full image signs in to the stand-in, links, and stops cleanly
         if: matrix.arch == 'x86_64'
         timeout-minutes: 15
         env:
           YS_RUN_DIR: ${{ runner.temp }}/host-image
           YS_INPUT_BUILD: image
+          YS_IMAGE: yardsort-host-full
         run: |
           cargo build -q -p yardsort-server --example stand-in
           mkdir -p "$YS_RUN_DIR/profile" && mkdir -m 700 "$YS_RUN_DIR/credentials"
@@ -206,7 +212,7 @@ jobs:
           until grep -q ready "$YS_RUN_DIR/stand-in.json" 2>/dev/null; do sleep 1; done
           bun .yardsort/tests/support/host.ts "$YS_RUN_DIR" sign-in "CI box"
           docker run -d --name host --network host -v "$YS_RUN_DIR/profile:/data" \
-            -v "$YS_RUN_DIR/credentials:/credentials" yardsort-host
+            -v "$YS_RUN_DIR/credentials:/credentials" "$YS_IMAGE"
           for _ in $(seq 60); do
             docker exec host yardsort-host status | tee status.txt | grep -q "Link: connected" && break
             sleep 1

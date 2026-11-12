@@ -9,7 +9,9 @@
 # The second makes its user the repositories' owner, so what the agents write is yours.
 #
 # No agent is in it, and none of their sign-ins: build `FROM` it to add the ones you use, and mount
-# their sign-ins. It publishes no port, since the host only reaches out. Never give it the Docker
+# their sign-ins, or start from the full image (Dockerfile.full), which has the tools agents use and
+# the harnesses that may be redistributed. Each release publishes both, as
+# ghcr.io/joaoh82/yardsort-host and ghcr.io/joaoh82/yardsort-host-full, with UID and GID 1000. It publishes no port, since the host only reaches out. Never give it the Docker
 # socket. Its volumes, each its own: /data (the profile and settings.toml), /credentials (the host's
 # sign-in), /worktrees, and the repositories wherever you mount them. Stopping the container ends
 # the agents too: the terminal daemon lives inside it. See docs/guide/headless-host.md, and
@@ -46,6 +48,13 @@ RUN groupadd --gid "$GID" yardsort \
     && install -d -o "$UID" -g "$GID" -m 755 /worktrees
 
 COPY --from=build /usr/local/bin/yardsort-host /usr/local/bin/ys /usr/local/bin/
+
+# The source label is also what links the published package to the repository.
+LABEL org.opencontainers.image.title="yardsort-host" \
+      org.opencontainers.image.description="Yardsort's headless host: a computer with no screen that your phone reaches" \
+      org.opencontainers.image.source="https://github.com/joaoh82/yardsort" \
+      org.opencontainers.image.documentation="https://yardsort.sh/docs/guide/headless-host" \
+      org.opencontainers.image.licenses="GPL-3.0-only"
 
 ENV YARDSORT_DATA_DIR=/data \
     YARDSORT_CREDENTIALS_DIR=/credentials \

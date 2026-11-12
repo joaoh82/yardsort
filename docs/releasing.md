@@ -51,12 +51,13 @@ workflow_) and give it an existing tag.
 
 ## What gets built
 
-| System                                   | Artifacts                                              | Signing                                                                                |
-| ---------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| Linux (x86_64)                           | `.AppImage`, `.deb`, `.rpm`; `yardsort-bin` on the AUR | —                                                                                      |
-| macOS (universal: Apple Silicon + Intel) | `.dmg`, `.app.tar.gz`                                  | Signed and notarized when the Apple secrets below are set; otherwise an unsigned build |
-| Windows (x86_64)                         | `-setup.exe` (NSIS), `.msi`                            | Not signed yet — users see a SmartScreen warning                                       |
-| Linux headless host (x86_64, aarch64)    | `yardsort-host-<version>-linux-<arch>.tar.gz`          | —                                                                                      |
+| System                                   | Artifacts                                                               | Signing                                                                                |
+| ---------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Linux (x86_64)                           | `.AppImage`, `.deb`, `.rpm`; `yardsort-bin` on the AUR                  | —                                                                                      |
+| macOS (universal: Apple Silicon + Intel) | `.dmg`, `.app.tar.gz`                                                   | Signed and notarized when the Apple secrets below are set; otherwise an unsigned build |
+| Windows (x86_64)                         | `-setup.exe` (NSIS), `.msi`                                             | Not signed yet — users see a SmartScreen warning                                       |
+| Linux headless host (x86_64, aarch64)    | `yardsort-host-<version>-linux-<arch>.tar.gz`                           | —                                                                                      |
+| Headless host images (amd64, arm64)      | `ghcr.io/joaoh82/yardsort-host` and `-full`, `:<version>` and `:latest` | Sigstore, keyless, with an SBOM and provenance                                         |
 
 Each platform first builds **`ys`**, the [command-line client](guide/cli.md), with
 `scripts/sidecar.mjs`, which puts it in `src-tauri/binaries/` under its target triple.
@@ -97,8 +98,30 @@ and `yardsort-host-<version>-linux-aarch64.tar.gz`: `yardsort-host`, `ys`, the s
 a README, made by `scripts/host-package.sh`. Its own job builds each on Ubuntu 22.04, the oldest
 runner there is, on that architecture's own runner, so the glibc it needs is 22.04's. The job runs
 both programs with an empty environment before attaching the tarball, and the release is published
-only once both are attached. Pull requests build the same tarballs, and the container image, in CI's
-**Host package** job. No image is published.
+only once both are attached. Pull requests build the same tarballs, and both container images, in CI's
+**Host package** job.
+
+**Its container images** go to the GitHub Container Registry, since a release cannot carry them:
+`ghcr.io/joaoh82/yardsort-host`, the slim one (`crates/host/Dockerfile`), and
+`ghcr.io/joaoh82/yardsort-host-full`, built on it (`crates/host/Dockerfile.full`). The **image** job
+builds both for each architecture on its own runner, with an SBOM and provenance, and pushes them by
+digest only. The **images** job then tags each with the version and, unless the tag is a pre-release,
+`latest`; signs each with Sigstore (`cosign sign`, keyless, as this workflow); and adds a
+**Container images** section to the release notes. The release is published only once that has run.
+Re-running the workflow for a tag pushes and tags the images again.
+
+The first release that pushes them creates the two packages, private. Once, after it: on GitHub, under
+the account's **Packages**, open each, make it public in its settings, and check that it is linked to the
+repository; the images' `org.opencontainers.image.source` label links them.
+
+**The full image's pins.** Its tools are pinned by version and checksum in `Dockerfile.full`, and the
+harnesses it ships with their whole dependency tree in `crates/host/agents/package-lock.json`. Each
+version is at least two weeks old when it is picked. To move one, change the version and both
+architectures' checksums together, from the publisher's own list that the line names; for the
+harnesses, change `crates/host/agents/package.json` and run `npm install --package-lock-only` there.
+`crates/host/tests/packaging.rs` refuses a package in that tree under a licence not known to allow
+redistribution, and `NOTICE.md` beside it lists the versions. Only a harness whose licence lets anyone
+redistribute it goes in; the others are `yardsort-host install-agent`'s.
 
 `scripts/notarization-ticket.py <file>…` asks the same question from any system, with nothing but
 Python: it prints each architecture's signer and whether Apple holds a ticket for it. Run it on

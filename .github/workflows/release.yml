@@ -297,9 +297,124 @@ jobs:
           gh release upload "$TAG" "$tarball" --clobber
           echo "attached $want"
 
+  # The headless host's two images, slim and full, built for each architecture on its own runner
+  # and pushed by digest only, with an SBOM and provenance attached. `images` below tags them once
+  # all four are there. The full one is built on the slim one just pushed, by its digest.
+  image:
+    name: Build the host images (${{ matrix.arch }})
+    needs: draft
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            os: ubuntu-24.04
+          - arch: arm64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    env:
+      SLIM: ghcr.io/${{ github.repository_owner }}/yardsort-host
+      FULL: ghcr.io/${{ github.repository_owner }}/yardsort-host-full
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Build and push both by digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker buildx create --use --name host-images
+          build() { # <dockerfile> <image> <metadata file> [more arguments]
+            docker buildx build -f "$1" --platform "linux/${{ matrix.arch }}" \
+              --sbom=true --provenance=mode=max \
+              --label "org.opencontainers.image.version=${TAG#v}" \
+              --output "type=image,name=$2,push-by-digest=true,name-canonical=true,push=true" \
+              --metadata-file "$3" "${@:4}" .
+          }
+          build crates/host/Dockerfile "$SLIM" slim.json
+          slim="$(jq -r '."containerimage.digest"' slim.json)"
+          build crates/host/Dockerfile.full "$FULL" full.json --build-arg "SLIM=$SLIM@$slim"
+          full="$(jq -r '."containerimage.digest"' full.json)"
+          mkdir digests && echo "$slim" > digests/slim && echo "$full" > digests/full
+          echo "slim $slim, full $full"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-image-digests-${{ matrix.arch }}
+          path: digests/
+          retention-days: 1
+
+  # Both architectures under one tag per image, the version's and, for a release that is not a
+  # pre-release, `latest`; each signed with Sigstore, keyless, as this workflow; and the release
+  # notes name them. The release is published only once this has run.
+  images:
+    name: Tag and sign the host images
+    needs: [draft, image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    env:
+      SLIM: ghcr.io/${{ github.repository_owner }}/yardsort-host
+      FULL: ghcr.io/${{ github.repository_owner }}/yardsort-host-full
+      # https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign_checksums.txt
+      COSIGN_VERSION: v3.1.4
+      COSIGN_SHA256: 424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: host-image-digests-*
+
+      - name: Install cosign
+        run: |
+          curl -fsSL --proto =https -o cosign \
+            "https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-amd64"
+          echo "$COSIGN_SHA256  cosign" | sha256sum -c -
+          install -m 755 cosign /usr/local/bin/cosign && rm cosign
+
+      - name: Tag, sign, and name them in the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          version="${TAG#v}"
+          for kind in slim full; do
+            case "$kind" in slim) image="$SLIM" ;; full) image="$FULL" ;; esac
+            tags=(-t "$image:$version")
+            case "$TAG" in *-*) ;; *) tags+=(-t "$image:latest") ;; esac
+            docker buildx imagetools create "${tags[@]}" \
+              "$image@$(cat host-image-digests-amd64/$kind)" "$image@$(cat host-image-digests-arm64/$kind)"
+            digest="$(docker buildx imagetools inspect "$image:$version" --format '{{json .Manifest}}' | jq -r .digest)"
+            cosign sign --yes "$image@$digest"
+            echo "$image:$version  $digest"
+          done
+          gh release view "$TAG" --json body -q .body > notes.md
+          if ! grep -q '^## Container images' notes.md; then
+            {
+              echo
+              echo "## Container images"
+              echo
+              echo "For the headless host, for amd64 and arm64, signed with Sigstore:"
+              echo
+              echo "- \`$FULL:$version\`, with the tools agents use and the harnesses that may be redistributed"
+              echo "- \`$SLIM:$version\`, the host alone, to build your own on"
+              echo
+              echo "See [In a container](https://yardsort.sh/docs/guide/headless-host#in-a-container)."
+            } >> notes.md
+            gh release edit "$TAG" --notes-file notes.md
+          fi
+
   publish:
     name: Publish release
-    needs: [draft, build, host]
+    needs: [draft, build, host, images]
     runs-on: ubuntu-24.04
     steps:
       # An installed copy that finds no `latest.json` cannot update, silently. Refuse to publish
