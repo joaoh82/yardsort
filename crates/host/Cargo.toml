@@ -32,4 +32,6 @@ serde_json = "1"
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 
 [dev-dependencies]
+# For tests/packaging.rs, which runs on Windows too.
+serde_json = "1"
 tempfile = "3"
