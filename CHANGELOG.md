@@ -3,6 +3,17 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Container images for a computer with no screen.** Each release now publishes
+  `ghcr.io/joaoh82/yardsort-host-full` and `ghcr.io/joaoh82/yardsort-host`, for amd64 and arm64,
+  signed. The full one has Node.js, Bun, Go, Rust, Python, the GitHub CLI and the build tools, and
+  the agents that may be handed on: Codex CLI, OpenCode, Pi and Oh My Pi. The compose example now
+  runs it. See [In a container](docs/guide/headless-host.md#in-a-container).
+- **`yardsort-host install-agent`** installs Claude Code, Cursor's CLI or Grok with the vendor's own
+  installer, naming whose terms you accept first, or brings Codex, OpenCode, Pi or Oh My Pi up to
+  date from npm, into `~/.local`. See [Installing an agent](docs/guide/headless-host.md#installing-an-agent).
+
 ## 0.29.0
 
 - **An agent that needs you reaches your phone.** When Claude Code, OpenCode or Pi asks for a

@@ -1,7 +1,8 @@
 # A computer with no screen
 
-> **Still under development, like the rest of [Remote](remote.md).** Expect it to change. From the
-> next release, each one carries a tarball of it for Linux; until then, build it from source, as below.
+> **Still under development, like the rest of [Remote](remote.md).** Expect it to change. Each release
+> since 0.23.0 carries a tarball of it for Linux. From the next release, each also publishes two container
+> images of it; see [In a container](#in-a-container).
 
 `yardsort-host` runs Yardsort on a computer with no display, such as a server you reach over SSH, as a
 host your phone reaches through a Yardsort server. You start agents there with [`ys`](cli.md), or from
@@ -19,8 +20,9 @@ GTK. Nothing it runs listens on the network: it reaches out to the server, as th
   one of your own, see the
   [self-host recipe](https://github.com/joaoh82/yardsort/tree/main/crates/server/self-host).
 - **`git`**, and the agents you want to run, installed and signed in on that computer as the user who
-  runs `yardsort-host`. Installing them, their sign-ins and their licences are yours to see to: none
-  comes with Yardsort.
+  runs `yardsort-host`. Their sign-ins and their licences are yours to see to.
+  [`yardsort-host install-agent`](#installing-an-agent) installs one for you. The full container image
+  comes with the agents whose licences allow it.
 
 ## Installing
 
@@ -131,43 +133,94 @@ server stands, how many devices are let in, and how many terminals are running.
 
 ## In a container
 
-The repository has an image for the host, [`crates/host/Dockerfile`](../../crates/host/Dockerfile),
-and an example of running it, [`crates/host/compose.yaml`](../../crates/host/compose.yaml). Build it
-from the repository's root; no image is published yet.
+Each release publishes two images, for x86_64 (amd64) and arm64, in the GitHub Container Registry. Each
+is tagged with the release's version and with `latest`:
+
+- **`ghcr.io/joaoh82/yardsort-host-full`**, the one to start from. It has the tools agents use: Node.js,
+  Bun, Go, Rust, Python, the GitHub CLI, `git`, `ripgrep`, `jq` and the build basics. It also has the
+  agents whose licences let anyone hand them on: Codex CLI, OpenCode, Pi and Oh My Pi. Claude Code,
+  Cursor's CLI and Grok are not in it: [`install-agent`](#installing-an-agent) installs those from each
+  vendor, into the home volume, where a new container finds them.
+  `/usr/share/doc/yardsort-host-full/NOTICE.md` in the image lists what is in it, and under which licence.
+- **`ghcr.io/joaoh82/yardsort-host`**, the host alone, with `git`, to build an image of your own on.
+
+The example [`crates/host/compose.yaml`](../../crates/host/compose.yaml) runs the full image. Copy it, and
+from its folder:
 
 ```sh
-docker build -f crates/host/Dockerfile --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" -t yardsort-host .
-```
-
-- **It runs as an ordinary user**, `yardsort`, under `tini`, which reaps what the agents leave behind.
-  The two build arguments give that user your own ids, so the repositories you mount are its, and what
-  the agents write in them is yours. Without them, its ids are 1000.
-- **No agent is in it**, and none of their sign-ins. Build an image of your own `FROM yardsort-host`
-  that installs the agents you use, under their licences, and mount their sign-ins into
-  `/home/yardsort`.
-- **Its volumes**: `/data` the profile, with `settings.toml` in it; `/credentials` the host's sign-in;
-  `/worktrees` the workspaces; and your repositories wherever you mount them, at the path you add them
-  by. Keep each its own volume.
-- **It publishes no port**: the host only reaches out. Never give it the Docker socket, which is root
-  on the computer it runs on.
-
-With the compose example, from `crates/host/`:
-
-```sh
-HOST_UID="$(id -u)" HOST_GID="$(id -g)" docker compose build
+docker compose pull
 docker compose run --rm host sign-in https://remote.example.com --name "Build box"
+docker compose run --rm host install-agent claude
 docker compose up -d
+docker compose exec host claude          # sign Claude Code in, once
 docker compose exec host yardsort-host pair
 docker compose exec host ys project add /repos/my-service
 docker compose exec host ys workspace new my-service "Fix the flaky login test"
 ```
 
-Sign in by pasting the address back, as above: forwarding the port does not reach into the container.
-`pair` from `docker compose exec` is a terminal of your own, as an SSH login is.
+`YARDSORT_VERSION=0.30.0 docker compose pull` takes a given release rather than `latest`. Sign in by
+pasting the address back, as above: forwarding the port does not reach into the container. `pair` from
+`docker compose exec` is a terminal of your own, as an SSH login is.
+
+- **It runs as an ordinary user**, `yardsort`, under `tini`, which reaps what the agents leave behind.
+  In the published images its ids are 1000. If your repositories' owner has other ids, build the images
+  yourself, as below, so that what the agents write in them is yours.
+- **Its volumes**: `/data` the profile, with `settings.toml` in it; `/credentials` the host's sign-in;
+  `/worktrees` the workspaces; `/home/yardsort` the agents' home, with what `install-agent` installed,
+  their sign-ins and their conversations; and your repositories wherever you mount them, at the path
+  you add them by. Keep each its own volume. The home volume holds the agents' sign-ins: guard it as
+  you would `/credentials`.
+- **It publishes no port**: the host only reaches out. Never give it the Docker socket, which is root
+  on the computer it runs on.
 
 **Stopping or restarting the container ends the agents**, since the terminal daemon lives inside it.
 Their workspaces, worktrees and records stay in the volumes, and so do their conversations, which
 the agents keep in the workspaces and your home: [resume them](#after-a-restart) with `ys`.
+
+**Checking an image.** Each is signed with Sigstore by the release workflow, with no key to keep, and
+carries an SBOM and the build's provenance. With [cosign](https://docs.sigstore.dev/cosign/), name the
+release's tag in both places:
+
+```sh
+cosign verify ghcr.io/joaoh82/yardsort-host-full:0.30.0 \
+  --certificate-identity https://github.com/joaoh82/yardsort/.github/workflows/release.yml@refs/tags/v0.30.0 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The identity is the release workflow at that tag: the workflow runs only from a version's tag, a rebuild
+too, so an image signed any other way is not one of these.
+
+**Building them yourself**, from the repository's root, the slim image first, with your own ids:
+
+```sh
+docker build -f crates/host/Dockerfile --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" -t yardsort-host .
+docker build -f crates/host/Dockerfile.full --build-arg SLIM=yardsort-host -t yardsort-host-full .
+```
+
+Then set `image: yardsort-host-full` in the compose file. To add something of your own, build `FROM`
+either image.
+
+## Installing an agent
+
+```sh
+yardsort-host install-agent claude      # or cursor, grok, codex, opencode, pi, omp
+```
+
+It installs an agent into `~/.local`, as you, or brings one up to date. Run it as the user that runs
+`serve`, since that is where the agents it starts look; it refuses to run as root.
+
+- **Claude Code, Cursor's CLI and Grok** come from each vendor's own installer: `https://claude.ai/install.sh`,
+  `https://cursor.com/install` and `https://x.ai/cli/install.sh`. It names the vendor and where their
+  terms are before it runs one. Installing one is accepting those terms; Yardsort hands on no copy of them.
+  `--installer <file>` runs an installer you downloaded and read yourself instead.
+- **Codex CLI, OpenCode, Pi and Oh My Pi** come from npm, as their newest release. The full image has
+  them already, at the versions its release pinned; this is how to take a newer one between releases.
+  It needs `npm`, from Node.js 22 or later. Oh My Pi also needs Bun.
+
+`~/.local/bin` comes first on the full image's `PATH`, so what you install there is what the agents run.
+On a computer of your own it must be on your login shell's `PATH`, as Ubuntu and Debian put it once the
+folder exists; `install-agent` says when it is not. Sign the agent in as its own guide says, as the same
+user, before starting it with `ys`.
 
 ## Projects and agents
 
@@ -259,8 +312,9 @@ systemctl --user restart yardsort-host
 
 The agents keep running. A terminal daemon of the same kind is kept and reused; one from an earlier
 release keeps its agents running until they end, while new ones start in a new daemon, and
-`yardsort-host status` counts both. In a container, build the image again and recreate the container,
-which ends the agents.
+`yardsort-host status` counts both. In a container, pull the new image, or build it again, and recreate
+the container, which ends the agents: `docker compose pull && docker compose up -d`. What
+`install-agent` installed stays in the home volume.
 
 ## Backing up
 
@@ -272,6 +326,9 @@ What to keep:
   with `--data-dir` or `YARDSORT_DATA_DIR`, when it is in the profile. See
   [Where things are](#where-things-are).
 - **Your repositories and the worktree root**, as you would anyway.
+- **In a container, the home volume**, `/home/yardsort`, if you want the agents' conversations back. It
+  also holds their sign-ins, so a backup of it is a copy of those: keep it as you would keep them.
+  What `install-agent` put there can be installed again instead.
 
 **Leave the sign-in out**, or at least do not count on it. It changes each time the host renews it,
 and a restored copy older than the last renewal looks stolen to the server, which then signs this

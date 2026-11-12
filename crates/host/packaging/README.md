@@ -23,3 +23,6 @@ yardsort-host pair
 ```
 
 `~/.local/bin` must be on your `PATH`, in your login shell's profile: you and the agents find `ys` by it.
+
+`yardsort-host install-agent claude` (or `cursor`, `grok`, `codex`, `opencode`, `pi`, `omp`) installs an
+agent into `~/.local`, as you, from its vendor's own installer or from npm.

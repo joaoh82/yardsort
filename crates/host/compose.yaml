@@ -1,33 +1,36 @@
 # yardsort-host in a container: Yardsort on this computer, for your phone to reach. An example to
 # copy and change; docs/guide/headless-host.md, "In a container", walks through it.
 #
-#   HOST_UID="$(id -u)" HOST_GID="$(id -g)" docker compose build
+#   docker compose pull
 #   docker compose run --rm host sign-in https://remote.example.com --name "Build box"
+#   docker compose run --rm host install-agent claude      # Anthropic's installer, its terms
 #   docker compose up -d
+#   docker compose exec host claude                         # sign Claude Code in, once
 #   docker compose exec host yardsort-host pair
 #   docker compose exec host ys project add /repos/my-service
 #
-# The image has no agent in it. Build your own `FROM yardsort-host` that installs the ones you use,
-# point `image:` at it, and mount their sign-ins into /home/yardsort.
+# The full image has Codex, OpenCode, Pi and Oh My Pi already, and the tools agents use. Its user's
+# ids are 1000; if your repositories' owner has others, build the images yourself (`build:` below)
+# so that what the agents write is yours.
 
 name: yardsort-host
 
 services:
   host:
-    build:
-      context: ../..
-      dockerfile: crates/host/Dockerfile
-      args:
-        # The repositories' owner, so what the agents write is yours.
-        UID: ${HOST_UID:-1000}
-        GID: ${HOST_GID:-1000}
-    image: yardsort-host
+    # A release's version, or latest. Signed: docs/guide/headless-host.md says how to check.
+    image: ghcr.io/joaoh82/yardsort-host-full:${YARDSORT_VERSION:-latest}
+    # Or build both from this checkout, the slim image first:
+    #   docker build -f crates/host/Dockerfile --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" -t yardsort-host ../..
+    #   docker build -f crates/host/Dockerfile.full --build-arg SLIM=yardsort-host -t yardsort-host-full ../..
+    # and set `image: yardsort-host-full`.
     restart: unless-stopped
     # Nothing to publish: the host only reaches out to the server. And never the Docker socket.
     volumes:
       - data:/data
       - credentials:/credentials
       - worktrees:/worktrees
+      # The agents' home: what install-agent installs, and their sign-ins and conversations.
+      - home:/home/yardsort
       # Your repositories, at the path you add them by.
       - ${REPOS:-./repos}:/repos
     # Stopping it ends the agents: the terminal daemon lives in the container. Give `serve` time to
@@ -38,3 +41,4 @@ volumes:
   data:
   credentials:
   worktrees:
+  home:

@@ -2,7 +2,7 @@
 
 **Status:** planned on 2026-11-06. The first slice, the host's account moved out of the app, was
 built the same day (§10); its local smoke tests and the owner's phone check against staging passed.
-The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. The sixth, resume and fork in the core and the host after its restarts, was built the same day (§15); its local smoke test, and the owner's run on the box, R5's gate check 3, passed. The seventh, starting and resuming from a client, was built the same day (§16), under `terminal:control` rather than a scope of its own, as the owner chose; its local smoke test and the owner's run on the box passed. The eighth, R4's first, the phone reconnecting on a network change and the time budgets measured, was built on 2026-11-10 (§17); its local smoke test passed, at p95 105 ms through 100 ms of round trip. The ninth, a keyboard paired with the phone, was built on 2026-11-11 (§18); its tests and its run on the Android emulator passed. The tenth, honest offline, no leaks and diagnostics, was built the same day (§19); its tests, the server's end-to-end run, and its smoke test's steps run by hand passed. The eleventh, generic push, was built on 2026-11-12 (§20), on what YARD-4 had already built for the phone's notifications: it adds the notice of an agent that needs you, opening its terminal; its tests and its smoke test's steps run by hand passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
+The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. The sixth, resume and fork in the core and the host after its restarts, was built the same day (§15); its local smoke test, and the owner's run on the box, R5's gate check 3, passed. The seventh, starting and resuming from a client, was built the same day (§16), under `terminal:control` rather than a scope of its own, as the owner chose; its local smoke test and the owner's run on the box passed. The eighth, R4's first, the phone reconnecting on a network change and the time budgets measured, was built on 2026-11-10 (§17); its local smoke test passed, at p95 105 ms through 100 ms of round trip. The ninth, a keyboard paired with the phone, was built on 2026-11-11 (§18); its tests and its run on the Android emulator passed. The tenth, honest offline, no leaks and diagnostics, was built the same day (§19); its tests, the server's end-to-end run, and its smoke test's steps run by hand passed. The eleventh, generic push, was built on 2026-11-12 (§20), on what YARD-4 had already built for the phone's notifications: it adds the notice of an agent that needs you, opening its terminal; its tests and its smoke test's steps run by hand passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4), and built on 2026-11-12 (§21): the slim and full images for amd64 and arm64, signed, published to the GitHub Container Registry on each release, and `yardsort-host install-agent`; its tests and its smoke test's steps run by hand passed, and publishing waits for the owner's go-ahead. Checked on
 2026-11-08 against where Remote is going, several machines an account owns and the desktop choosing
 where a task runs (§3, "Where agents run"); what comes after R5 is in §9. This is the plan for the last two
 phases before sync: what each has to show, what it starts from, the decisions taken before any
@@ -1210,3 +1210,132 @@ only), so it needs only a deploy of this slice, which needs your go-ahead.
 4. Ask for two more commands without answering the first: one notification, not three.
 5. Android only once there is an FCM project and a phone (§5); until then R4's push check is
    iPhone-only, and the record says so.
+
+## 21 · What the twelfth slice adds
+
+Built on 2026-11-12, on Linux. Each release now publishes the headless host as two container images
+beside its tarballs.
+
+**The two images.** The **slim** one is slice 3's image (`crates/host/Dockerfile`), unchanged but for
+its OCI labels: the source label links the published package to the repository. The **full** one
+(`crates/host/Dockerfile.full`) is built `FROM` it, by digest in the release, with:
+
+- **Debian's own packages**: build-essential, `pkg-config`, `libssl-dev`, Python 3 with `pip` and `venv`,
+  `curl`, `jq`, `ripgrep`, `unzip`, `xz-utils`, `file`, `less`, `procps`.
+- **Toolchains**, each pinned by version and checked against the checksum its publisher prints, for
+  both architectures: Node.js 26.13.0 (LTS), Bun 1.4.4 (Oh My Pi runs on it), Go 1.27.3, Rust 1.98.1
+  through rustup 1.29.2 (into folders every user may write, as the official Rust images do), and the
+  GitHub CLI 2.103.3. Each version was at least two weeks old when it was picked.
+- **The harnesses whose licence lets anyone hand them on**, checked on 2026-11-12 from each package's
+  published licence: Codex CLI 0.166.0 (Apache-2.0), OpenCode 2.2.2, Pi 1.4.0 and Oh My Pi 18.14.0
+  (MIT). They are installed with `npm ci` from `crates/host/agents/package-lock.json`, which pins all
+  303 packages of their tree with integrity hashes. Every package in it is under MIT, Apache-2.0, BSD,
+  ISC, BlueOak, MPL-2.0, Unlicense, 0BSD or CC0, except libvips (LGPL-3.0-or-later), a shared library
+  used unmodified. `NOTICE.md`, copied into the image, lists what is in it and under which licence.
+- **Not in it**: Claude Code (Anthropic's terms), Cursor's CLI and Grok (xAI's), whose licences do not
+  let anyone hand a copy on.
+
+**Found on the way.** OpenCode's install script picks the build for the CPU it runs on, the build
+machine's, and npm installs all four of its Linux builds for the architecture. An image built on a
+runner with AVX2 would have carried a binary that fails on a host without it. The image keeps the build
+that runs on any CPU of the architecture (on x64, the baseline one) and drops the others, about 700 MB.
+
+**A login shell's `PATH`.** Agents are started from the login shell's environment, and Debian's
+`/etc/profile` sets `PATH` afresh, so `ENV` alone would not reach them. `/etc/profile.d/yardsort-full.sh`
+puts `~/.local/bin` first, then Cargo's and Go's folders. `NPM_CONFIG_PREFIX` is `~/.local`, so an
+agent's own `npm install -g` goes to the home volume and not into the image.
+
+**`yardsort-host install-agent <harness>`** (`crates/host/src/install_agent.rs`) installs an agent into
+`~/.local` as the operator, or brings one up to date:
+
+- **Claude Code, Cursor's CLI and Grok**: it downloads the vendor's own installer, `https://claude.ai/install.sh`,
+  `https://cursor.com/install` or `https://x.ai/cli/install.sh`, over HTTPS only, and runs it with
+  `bash`, as an argument list and not a shell string. Before that, it names the vendor and where their
+  terms are. Grok's installer is told `GROK_BIN_DIR=~/.local/bin`, since it would otherwise try
+  `/usr/local/bin`. `--installer <file>` runs a file the operator fetched and read instead.
+- **Codex, OpenCode, Pi and Oh My Pi**: `npm install --global --prefix ~/.local <package>@latest`.
+- It refuses root, since the agents look in the home of the user that runs `serve`. It needs no profile.
+  Afterwards it runs the program's `--version` and says whether `~/.local/bin` is on `PATH`.
+
+In the compose example, the home is now a volume of its own, so what `install-agent` installed, and the
+agents' sign-ins and conversations, survive a new image. The guide says to guard it as the sign-in.
+
+**Publishing** (`.github/workflows/release.yml`):
+
+- **The `image` job**, for amd64 and arm64 each on its own runner, builds both images with an SBOM and
+  provenance (`--sbom=true --provenance=mode=max`) and pushes them by digest. The full one is built on
+  the slim one's digest.
+- **The `images` job** tags each `:<version>`, and `:latest` unless the tag is a pre-release. It signs
+  each with cosign 3.1.4, keyless through the workflow's identity; cosign is downloaded and checked
+  against its checksum. It then adds a **Container images** section to the release notes.
+- **`publish`** now waits for `images` too.
+- **CI's Host package job**, on every pull request, builds both images on x86_64 and runs
+  `scripts/host-image-check.sh` on them. It then signs the full image in to the stand-in, links it, and
+  stops it with status 0.
+
+**Tests that fail without it.**
+
+- **The full image** (`crates/host/tests/packaging.rs`): it is built `FROM` the slim one, with no entry
+  point, command or port of its own, and its last `USER` is `yardsort`. Nothing is piped into a shell.
+  Every download goes through `fetch` with a 64-hex checksum, and the harnesses come from `npm ci`.
+- **What it ships**: every package in the lockfile has a licence from the list above and an integrity
+  hash, and the four harnesses are pinned.
+- **The login shell and the home volume**: the profile script puts `~/.local/bin` first, and the compose
+  example has the home volume.
+- **`install-agent`** (`crates/host/src/install_agent.rs`, `crates/host/tests/install_agent.rs`):
+  - each harness is one Yardsort knows, with its command;
+  - each installer is the vendor's own, over HTTPS;
+  - npm's harnesses are exactly the image's;
+  - a stand-in installer's program lands in `~/.local/bin` and is reported;
+  - an unknown harness is refused, naming the known ones, and nothing is made for it.
+
+**Its smoke test**, `.yardsort/tests/host-images.yaml`, needs Docker and runs these steps:
+
+1. It builds both images as the release does.
+2. `host-image-check.sh` checks them:
+   - both run their programs;
+   - the full one runs as `yardsort`, and has every tool and bundled harness on a login shell's `PATH`;
+   - `install-agent` takes Claude Code from the stand-in installer, into a home volume where a second
+     container finds it first on `PATH`.
+3. The full image signs in to the stand-in by pasting, serves until its link is connected, and stops with
+   status 0.
+
+Nothing is pushed, and no vendor's installer is downloaded.
+Run on 2026-11-12 by hand, step by step, since `ys test run` waits for the file to be approved in
+Yardsort, and it passed:
+
+- The full image is 5.6 GB unpacked; most of it is Rust, the harnesses and Go.
+- Every tool and harness printed its pinned version.
+- `install-agent` put the stand-in's `claude` first on `PATH` in a new container.
+- The image linked to the stand-in 1 second after it started, and `docker stop` ended it with status 0.
+
+**Review.** Three fixes:
+
+- **`--installer` for an agent from npm** was ignored, and npm ran instead: the network in place of
+  the file the operator had read. Now it is refused, as is an installer that is not there, before
+  anything is made or fetched. Tested with a logging `npm` that must not run.
+- **The image check passed a harness that failed**, since a version was printed through `head`
+  inside a command substitution. Now each program's whole output is captured and its status
+  checked. The script also checks itself: a `pi` that exits 42, mounted first on `PATH`, must fail
+  the check on `pi`.
+- **A rebuild run by hand from a branch** would have signed the version's images as that branch,
+  which the guide's `cosign verify` refuses. The release workflow now refuses a run by hand that is
+  not from the tag it rebuilds. The guide checks the exact identity, the workflow at
+  `refs/tags/v<version>`, and `releasing.md` says how to run it from the tag.
+
+**Still to do, by the owner.**
+
+1. **Confirm the harness list**: the four shipped and the three left to `install-agent`, on the
+   licences above. Also confirm the terms page each vendor's installer is named with. Grok's is
+   `https://x.ai/cli`, xAI's CLI page: xAI's terms page could not be fetched from here to check.
+2. Approve `host-images` in Yardsort, and run it (`ys test run host-images`).
+3. **The go-ahead to publish to the GitHub Container Registry**: the next release's tag pushes the two
+   images. After it, once: under the account's **Packages**, make `yardsort-host` and
+   `yardsort-host-full` public, and check that each is linked to the repository.
+4. On release, on the box:
+   - `docker pull ghcr.io/joaoh82/yardsort-host-full:<version>` and the slim tag, and check the
+     signature with the guide's `cosign verify`.
+   - Start the full image with the compose example, and install Claude Code with
+     `docker compose run --rm host install-agent claude`.
+   - Sign Claude Code in with `docker compose exec host claude`, sign the host in to staging, and pair.
+   - Start Claude Code with `ys`; the phone watches it and types into it.

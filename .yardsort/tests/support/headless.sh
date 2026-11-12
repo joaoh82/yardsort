@@ -9,12 +9,13 @@
 # folder and the system's, and the run's profile, nothing else. What they need beyond that, they
 # would not find on a server either.
 if [ "$YS_INPUT_BUILD" = image ]; then
-  # CI's, for the container image: its entry point is the host, on this run's profile and
-  # sign-in, reaching the stand-in on this computer's loopback.
+  # CI's and host-images.yaml's, for a container image ($YS_IMAGE, the slim one by default): its
+  # entry point is the host, on this run's profile and sign-in, reaching the stand-in on this
+  # computer's loopback.
   [ "$1" = yardsort-host ] || { echo "The image runs yardsort-host, not $1." >&2; exit 2; }
   shift
   exec docker run -i --rm --network host -v "$YS_RUN_DIR/profile:/data" \
-    -v "$YS_RUN_DIR/credentials:/credentials" yardsort-host "$@"
+    -v "$YS_RUN_DIR/credentials:/credentials" "${YS_IMAGE:-yardsort-host}" "$@"
 fi
 bin="$(cat "$YS_RUN_DIR/bin")"
 program="$bin/$1"

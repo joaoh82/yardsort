@@ -198,7 +198,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   can see what passes through it, and the phone app is not in the app stores yet. Expect it to
   change until the whole plan is finished. See [Remote](docs/guide/remote.md). A Linux computer with
   no screen, such as a server you reach over SSH, can be one your phone reaches too, with
-  `yardsort-host`: see [A computer with no screen](docs/guide/headless-host.md). Its agents keep
+  `yardsort-host`, from a tarball or a container image that comes with the tools agents use: see
+  [A computer with no screen](docs/guide/headless-host.md). Its agents keep
   running when the host restarts, and when a reboot ends them, `ys session resume` brings their
   conversations back. The desktop app can
   reach another computer the same way: its workspaces, agents and activity, its terminals to

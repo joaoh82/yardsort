@@ -1,0 +1,81 @@
+id: host-images
+name: The published images run the host, its tools and its agents
+description: >-
+  Builds the headless host's two images as the release does, the full one on the slim one, and
+  checks them: both run their programs; the full one has every tool and bundled harness on the PATH
+  an agent gets, runs as yardsort, and takes an agent from a stand-in installer with install-agent,
+  into a home volume a new container finds it in. Then the full image signs in to the stand-in
+  server by pasting, serves until its link is connected, and stops with status 0. Nothing is
+  pushed and no vendor's installer is downloaded. Needs Docker. Linux only. No window opens.
+version: 1
+timeout: 75m
+
+setup:
+  - id: build
+    action: shell
+    # The slim image's user is this one, as an operator makes it the repositories' owner.
+    line: >-
+      cargo build -q -p yardsort-server --example stand-in &&
+      docker build -q -f crates/host/Dockerfile --build-arg UID="$(id -u)" --build-arg GID="$(id -g)"
+      -t yardsort-host:smoke . &&
+      docker build -q -f crates/host/Dockerfile.full --build-arg SLIM=yardsort-host:smoke
+      -t yardsort-host-full:smoke .
+    timeout: 60m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: a_profile_and_a_sign_in_folder
+    action: shell
+    line: mkdir -p "$YS_RUN_DIR/profile" && mkdir -m 700 "$YS_RUN_DIR/credentials"
+
+steps:
+  - id: tools_harnesses_and_install_agent
+    action: run
+    program: scripts/host-image-check.sh
+    args: [yardsort-host:smoke, yardsort-host-full:smoke]
+    timeout: 5m
+    expect:
+      stdout_contains: "install-agent: ok"
+  - id: sign_in_by_pasting
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", sign-in, Smoke box]
+    env:
+      YS_INPUT_BUILD: image
+      YS_IMAGE: yardsort-host-full:smoke
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: serve
+    action: shell
+    line: >-
+      docker run -d --name "ys-host-images-$(basename "$YS_RUN_DIR")" --network host
+      -v "$YS_RUN_DIR/profile:/data" -v "$YS_RUN_DIR/credentials:/credentials"
+      yardsort-host-full:smoke
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'docker exec "ys-host-images-$(basename "$YS_RUN_DIR")" yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: stops_cleanly
+    action: shell
+    line: >-
+      name="ys-host-images-$(basename "$YS_RUN_DIR")"; docker stop "$name" > /dev/null &&
+      echo "exited $(docker wait "$name")"
+    expect:
+      stdout_contains: exited 0
+
+teardown:
+  - id: remove_the_container
+    action: shell
+    line: docker rm -f "ys-host-images-$(basename "$YS_RUN_DIR")" > /dev/null 2>&1; true

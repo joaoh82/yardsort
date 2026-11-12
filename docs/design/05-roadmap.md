@@ -1067,6 +1067,12 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       toolchains, `gh` and the harnesses whose licence allows it, published to the GitHub Container
       Registry on each release beside the tarballs; the other harnesses installed by the operator
       with `yardsort-host install-agent`.
+      Slice 12 was built on 2026-11-12 ([35 §21](35-remote-r4-r5.md#21--what-the-twelfth-slice-adds)):
+      the full image ships Codex, OpenCode, Pi and Oh My Pi, pinned with their whole tree; every
+      toolchain pinned and checked by its checksum; both images signed with Sigstore and carrying an
+      SBOM. `install-agent` runs Anthropic's, Cursor's or xAI's own installer, naming whose terms
+      they are, or brings the npm harnesses up to date. Its smoke test passed; the first push to the
+      registry waits for the owner's go-ahead.
 - [ ] R6–R7: sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
