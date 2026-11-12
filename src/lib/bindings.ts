@@ -618,14 +618,15 @@ export const commands = {
 	workflowShowApprovalCode: (runId: string, stepId: string) => typedError<string, IpcError>(__TAURI_INVOKE("workflow_show_approval_code", { runId, stepId })),
 	/**
 	 *  Have a model write a workflow from `description`, through Drafting: the agent the user has
-	 *  in its non-interactive mode, or their Anthropic key. The answer is checked as a typed file
-	 *  is, and sent back once with its problems when it has any.
+	 *  in its non-interactive mode, or their Anthropic key. With `current`, the description is a
+	 *  change to that workflow's text, and the answer must keep its id. The answer is checked as a
+	 *  typed file is, and sent back once with its problems when it has any.
 	 * 
 	 *  The agent runs in an empty git repository of the profile's own, not in any project of the
 	 *  user's: a description is not a change to describe, and nothing here should read or touch
 	 *  their work. A repository, not a bare folder, because Codex refuses to run outside one.
 	 */
-	workflowDescribe: (description: string) => typedError<Described, IpcError>(__TAURI_INVOKE("workflow_describe", { description })),
+	workflowDescribe: (description: string, current: string | null) => typedError<Described, IpcError>(__TAURI_INVOKE("workflow_describe", { description, current })),
 	/**  A workspace's smoke tests: every file in its worktree's `.yardsort/tests`. */
 	testList: (workspaceId: string) => typedError<TestItem[], IpcError>(__TAURI_INVOKE("test_list", { workspaceId })),
 	/**

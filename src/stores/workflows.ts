@@ -36,10 +36,11 @@ interface WorkflowsState {
   /** Text being edited and not saved, by workflow id. Kept while the app runs, so going to
    *  another workflow and back loses nothing. */
   drafts: Record<string, string | undefined>;
-  /** Goes up with every change to the new workflow's text. A generation remembers the number
-   *  it started under, and its answer is kept only if nothing changed meanwhile: a slower answer
-   *  never replaces a newer one, or what was typed, or a discard. */
-  newSerial: number;
+  /** Goes up with every change to a workflow's unsaved text, by workflow id. A generation
+   *  remembers the number it started under, and its answer is kept only if nothing changed
+   *  meanwhile: a slower answer never replaces a newer one, or what was typed, a save, or a
+   *  discard. */
+  serials: Record<string, number | undefined>;
   /** A run to show when its workflow's view next opens, by workflow id: asked for from outside
    *  the view, as Open run on a trigger's history does. The view takes it and clears it. */
   shownRun: Record<string, string | undefined>;
@@ -52,10 +53,11 @@ interface WorkflowsState {
   refresh: () => Promise<void>;
   /** Keep `text` as `workflowId`'s unsaved text; `null` drops it (saved, or reverted). */
   setDraft: (workflowId: string, text: string | null) => void;
-  /** A generation of the new workflow begins; the number its answer must present. */
-  beginDescribe: () => number;
-  /** A generation's answer, kept only if `serial` is still current. Says whether it was. */
-  finishDescribe: (serial: number, text: string) => boolean;
+  /** A generation of `workflowId`'s text begins; the number its answer must present. */
+  beginDescribe: (workflowId: string) => number;
+  /** A generation's answer, kept as `workflowId`'s unsaved text only if `serial` is still
+   *  current. Says whether it was. */
+  finishDescribe: (workflowId: string, serial: number, text: string) => boolean;
   /** Show `runId` in `workflowId`'s view; `null` once the view has it. */
   showRun: (workflowId: string, runId: string | null) => void;
   dismissError: () => void;
@@ -68,7 +70,7 @@ export const useWorkflowStore = create<WorkflowsState>((set, get) => ({
   runs: {},
   steps: {},
   drafts: {},
-  newSerial: 0,
+  serials: {},
   shownRun: {},
   error: null,
 
@@ -114,18 +116,18 @@ export const useWorkflowStore = create<WorkflowsState>((set, get) => ({
   setDraft: (workflowId, text) =>
     set((state) => ({
       drafts: { ...state.drafts, [workflowId]: text ?? undefined },
-      newSerial: workflowId === NEW_WORKFLOW ? state.newSerial + 1 : state.newSerial,
+      serials: { ...state.serials, [workflowId]: (state.serials[workflowId] ?? 0) + 1 },
     })),
 
-  beginDescribe() {
-    const serial = get().newSerial + 1;
-    set({ newSerial: serial });
+  beginDescribe(workflowId) {
+    const serial = (get().serials[workflowId] ?? 0) + 1;
+    set((state) => ({ serials: { ...state.serials, [workflowId]: serial } }));
     return serial;
   },
 
-  finishDescribe(serial, text) {
-    if (get().newSerial !== serial) return false;
-    set((state) => ({ drafts: { ...state.drafts, [NEW_WORKFLOW]: text } }));
+  finishDescribe(workflowId, serial, text) {
+    if (get().serials[workflowId] !== serial) return false;
+    set((state) => ({ drafts: { ...state.drafts, [workflowId]: text } }));
     return true;
   },
 

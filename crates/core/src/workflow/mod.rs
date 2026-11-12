@@ -513,6 +513,30 @@ pub fn user_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("workflows")
 }
 
+/// What the user's folder holds, cheaply: each entry's name, size and time of last change,
+/// sorted. Two stamps that differ mean a workflow was added, changed or removed — by `ys
+/// workflow save`, by an agent, or by hand — and a window showing the list should read it again.
+pub fn folder_stamp(
+    data_dir: &Path,
+) -> Vec<(std::ffi::OsString, u64, Option<std::time::SystemTime>)> {
+    let Ok(entries) = std::fs::read_dir(user_dir(data_dir)) else {
+        return Vec::new();
+    };
+    let mut stamp: Vec<_> = entries
+        .filter_map(Result::ok)
+        .map(|entry| {
+            let meta = entry.metadata().ok();
+            (
+                entry.file_name(),
+                meta.as_ref().map_or(0, std::fs::Metadata::len),
+                meta.and_then(|m| m.modified().ok()),
+            )
+        })
+        .collect();
+    stamp.sort();
+    stamp
+}
+
 /// Every workflow: the built-ins, and the user's files, which replace a built-in with the same
 /// id. Sorted by name.
 ///

@@ -1620,3 +1620,25 @@ steps:
     let high = problem(&source.replace("clarify: true", "clarify: true\n    max_rounds: 11"));
     assert!(high.contains("`max_rounds` must be from 1 to 10"), "{high}");
 }
+
+#[test]
+fn the_folder_stamp_moves_when_a_workflow_file_is_added_changed_or_removed() {
+    let data = tempfile::tempdir().unwrap();
+    assert!(folder_stamp(data.path()).is_empty(), "no folder yet");
+    let folder = user_dir(data.path());
+    std::fs::create_dir_all(&folder).unwrap();
+    let file = folder.join("ping.yaml");
+    std::fs::write(&file, "id: ping\n").unwrap();
+    let added = folder_stamp(data.path());
+    assert_eq!(added.len(), 1);
+    assert_eq!(
+        folder_stamp(data.path()),
+        added,
+        "the same when nothing moved"
+    );
+    std::fs::write(&file, "id: ping\nname: Ping\n").unwrap();
+    let changed = folder_stamp(data.path());
+    assert_ne!(changed, added);
+    std::fs::remove_file(&file).unwrap();
+    assert!(folder_stamp(data.path()).is_empty());
+}

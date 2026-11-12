@@ -94,6 +94,19 @@ back goes into the editor unsaved, with anything still wrong marked where it is.
 wrote is a workflow until you save it. The agent runs in an empty repository of the profile's
 own, never in one of your projects; a repository because some agents will not run outside one.
 
+**Describe a change.** **Customize** on a built-in opens the same kind of box on your new copy,
+headed **Describe a change**: say what should be different, in your own words, and press
+**Change it**. Your own workflows have a **Describe a change** button that opens it, and closes it
+again. The writer is the one chosen for new workflows, in **Settings → Assist → Workflow writer**.
+It is shown the whole file as it is in the editor, unsaved changes included, and told to change
+only what you asked and to keep the workflow's `id`. An answer with another `id` counts as a
+problem and is sent back with the others, because a copy with another `id` would stop replacing
+the built-in. What comes back is your unsaved text, with **Revert** to go back and **Save** to
+keep it. If you type in the editor, save, or revert while it is being written, the answer is set
+aside and the box says so.
+
+You can also ask the [Floor Manager](floor-manager.md#changing-a-workflow) to change a workflow.
+
 ## Where workflows come from
 
 - **Built in.** Yardsort ships with eight. **Request code review** (`code-review`): a second

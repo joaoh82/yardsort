@@ -2457,6 +2457,114 @@ fn copying_the_built_in_review_gives_a_file_that_is_used_instead() {
     fx.ys(&["workflow", "show", "quick-review"]).ok();
 }
 
+/// `ys workflow save`: a checked file into the folder, over the user's own file with its id, as
+/// the copy of a built-in with its id, or as a new workflow.
+#[test]
+fn save_writes_a_checked_file_over_yours_as_a_built_ins_copy_or_as_a_new_one() {
+    let fx = Fixture::new();
+    let folder = fx.data_dir.join("workflows");
+    let draft = fx.data_dir.join("draft.yaml");
+
+    // A new workflow.
+    let fixed = WORKFLOW_WITH_A_TYPO.replace("nubmer", "number");
+    std::fs::write(&draft, &fixed).unwrap();
+    let said = fx.ys(&["workflow", "save", &draft.to_string_lossy()]).ok();
+    assert!(said.contains("Saved new `fix-ci`"), "{said}");
+    assert_eq!(
+        std::fs::read_to_string(folder.join("fix-ci.yaml")).unwrap(),
+        fixed
+    );
+
+    // Your own file with that id is replaced where it is, whatever it is called.
+    std::fs::rename(folder.join("fix-ci.yaml"), folder.join("mine.yml")).unwrap();
+    let changed = fixed.replace("name: Fix CI", "name: Fix CI carefully");
+    std::fs::write(&draft, &changed).unwrap();
+    let json = fx
+        .ys(&["--json", "workflow", "save", &draft.to_string_lossy()])
+        .ok();
+    let saved: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(saved["replaced"], true, "{json}");
+    assert_eq!(saved["replacesBuiltIn"], false, "{json}");
+    assert_eq!(
+        std::fs::read_to_string(folder.join("mine.yml")).unwrap(),
+        changed
+    );
+    assert!(!folder.join("fix-ci.yaml").exists(), "not a second file");
+
+    // A built-in's id: your copy, used instead of it.
+    let built_in = fx.ys(&["workflow", "show", "code-review"]).ok();
+    let body = built_in
+        .lines()
+        .skip_while(|line| line.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let customized = body.replacen("name: ", "name: Careful ", 1) + "\n";
+    std::fs::write(&draft, &customized).unwrap();
+    let said = fx.ys(&["workflow", "save", &draft.to_string_lossy()]).ok();
+    assert!(said.contains("used instead of the built-in"), "{said}");
+    assert_eq!(fx.ys(&["workflow", "show", "code-review"]).ok(), customized);
+
+    // A file with problems is refused, each problem named, and nothing changes.
+    std::fs::write(&draft, WORKFLOW_WITH_A_TYPO).unwrap();
+    let error = fx
+        .ys(&["workflow", "save", &draft.to_string_lossy()])
+        .failed();
+    assert!(error.contains("draft.yaml:10:26:"), "{error}");
+    assert!(error.contains("Nothing was saved."), "{error}");
+    assert_eq!(
+        std::fs::read_to_string(folder.join("mine.yml")).unwrap(),
+        changed
+    );
+}
+
+/// The Floor Manager changes a workflow through `ys workflow save`, which is a write: ask first
+/// shows the whole file it would save, a no leaves the file alone, and read only refuses.
+#[test]
+fn the_floor_manager_saves_a_workflow_only_as_its_permission_allows() {
+    let fx = Fixture::new();
+    let mine = write_workflow(
+        &fx,
+        "fix-ci.yaml",
+        &WORKFLOW_WITH_A_TYPO.replace("nubmer", "number"),
+    );
+    let before = std::fs::read_to_string(&mine).unwrap();
+    let draft = fx.data_dir.join("draft.yaml");
+    let changed = before.replace("name: Fix CI", "name: Fix CI \u{202e}carefully");
+    std::fs::write(&draft, &changed).unwrap();
+    let args = ["workflow", "save", &*draft.to_string_lossy()].map(str::to_owned);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+
+    // Ask first, with the app closed: the dialog would have shown the file, and nobody can allow it.
+    let shown = fx.ys_floor(&args, None).failed();
+    assert!(
+        shown.contains("The workflow that would be saved:"),
+        "{shown}"
+    );
+    assert!(shown.contains("action: start_session"), "{shown}");
+    assert!(!shown.contains('\u{202e}'), "{shown}");
+    assert_eq!(std::fs::read_to_string(&mine).unwrap(), before);
+
+    // A no is respected.
+    fx.ys_floor(&args, Some("no")).failed();
+    assert_eq!(std::fs::read_to_string(&mine).unwrap(), before);
+
+    // Standard input is refused, since the dialog could not show it.
+    let stdin = fx.ys_floor(&["workflow", "save", "-"], None).failed();
+    assert!(stdin.contains("standard input"), "{stdin}");
+    assert!(!stdin.contains("not open"), "{stdin}");
+
+    // Allowed, it is saved.
+    fx.ys_floor(&args, Some("yes")).ok();
+    assert_eq!(std::fs::read_to_string(&mine).unwrap(), changed);
+
+    fx.set_floor("read-only");
+    std::fs::write(&draft, &before).unwrap();
+    let refused = fx.ys_floor(&args, None).failed();
+    assert!(!refused.contains("could not be read"), "{refused}");
+    assert!(refused.contains("read only"), "{refused}");
+    assert_eq!(std::fs::read_to_string(&mine).unwrap(), changed);
+}
+
 /// Works with the workspace's pull request; needs no agent.
 const PR_NOTE: &str = "id: pr-note
 name: PR note

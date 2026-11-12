@@ -549,22 +549,34 @@ pub struct Described {
 }
 
 /// Have a model write a workflow from `description`, through Drafting: the agent the user has
-/// in its non-interactive mode, or their Anthropic key. The answer is checked as a typed file
-/// is, and sent back once with its problems when it has any.
+/// in its non-interactive mode, or their Anthropic key. With `current`, the description is a
+/// change to that workflow's text, and the answer must keep its id. The answer is checked as a
+/// typed file is, and sent back once with its problems when it has any.
 ///
 /// The agent runs in an empty git repository of the profile's own, not in any project of the
 /// user's: a description is not a change to describe, and nothing here should read or touch
 /// their work. A repository, not a bare folder, because Codex refuses to run outside one.
 #[tauri::command]
 #[specta::specta]
-pub async fn workflow_describe(app: AppHandle, description: String) -> IpcResult<Described> {
+pub async fn workflow_describe(
+    app: AppHandle,
+    description: String,
+    current: Option<String>,
+) -> IpcResult<Described> {
     use yardsort_core::workflow::describe;
     if description.trim().is_empty() {
         return Err(IpcError::new(
             "workflow_no_description",
-            "Say what the workflow should do first.",
+            match current {
+                Some(_) => "Say what to change first.",
+                None => "Say what the workflow should do first.",
+            },
         ));
     }
+    let ask = match current.as_deref() {
+        Some(current) => describe::Ask::change(&description, current),
+        None => describe::Ask::new(&description),
+    };
     let handle = app.clone();
     let (agent, key, root, writer) = blocking(app, |state| {
         let (agent, key) = crate::draft::commands::workflow_writers(state)?;
@@ -576,7 +588,7 @@ pub async fn workflow_describe(app: AppHandle, description: String) -> IpcResult
     .await?;
 
     let mut so_far: Option<describe::Described> = None;
-    while let Some(prompt) = describe::next_prompt(&description, so_far.as_ref()) {
+    while let Some(prompt) = describe::next_prompt(ask, so_far.as_ref()) {
         // An agent in its non-interactive mode gets one prompt, so the standing instruction —
         // the file format, without which it cannot answer — goes in front of the question. The
         // key's path is given it as the system prompt, as Drafting does.
@@ -593,7 +605,7 @@ pub async fn workflow_describe(app: AppHandle, description: String) -> IpcResult
         };
         let answer = crate::draft::commands::run(handle.clone(), prepared).await?;
         let tries = so_far.as_ref().map_or(0, |d| d.tries) + 1;
-        so_far = Some(describe::finish(&answer, tries));
+        so_far = Some(describe::finish(ask, &answer, tries));
     }
     let done = so_far.expect("the first prompt is always asked");
     Ok(Described {
@@ -948,7 +960,7 @@ mod tests {
 
         let scratch = describe::scratch_dir(dir.path(), &git()).unwrap();
         let written = crate::draft::ask_agent(&program, &def, &scratch, "write").unwrap();
-        let done = describe::finish(&written, 1);
+        let done = describe::finish(describe::Ask::new("write"), &written, 1);
         assert!(done.problems.is_empty(), "{:?}", done.problems);
         assert_eq!(
             std::fs::read_dir(&scratch).unwrap().count(),

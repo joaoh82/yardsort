@@ -34,6 +34,17 @@ pub enum Command {
         #[arg(long = "as", value_name = "NEW_ID")]
         as_id: Option<String>,
     },
+    /// Save a workflow file into your folder, after checking it. A file of yours with the same
+    /// id is replaced; a built-in's id makes your copy, used instead of the built-in; any other
+    /// id is a new workflow. A file with problems is refused, with each one.
+    Save {
+        /// The file to save, or `-` to read it from standard input.
+        file: PathBuf,
+        /// The text the Floor Manager's confirmation showed, read once there, so what is saved
+        /// is what was allowed even if the file changes meanwhile. Never a flag.
+        #[arg(skip)]
+        allowed: Option<String>,
+    },
     /// Run a workflow in a workspace. Yardsort must be open: the app carries runs out. Prints
     /// the run's id and returns at once; `ys workflow runs --run <id>` follows it.
     Run {
@@ -284,6 +295,10 @@ pub fn run(data_dir: Option<PathBuf>, command: Command, out: &Output) -> Result<
         Command::Copy { id, as_id } => {
             let ys = Yardsort::open(data_dir)?;
             copy(&ys.data_dir, &id, as_id.as_deref(), out)
+        }
+        Command::Save { file, allowed } => {
+            let ys = Yardsort::open(data_dir)?;
+            save(&ys.data_dir, &file, allowed, out)
         }
     }
 }
@@ -1185,22 +1200,83 @@ fn copy(data_dir: &Path, id: &str, as_id: Option<&str>, out: &Output) -> Result<
     })
 }
 
-fn validate(file: &Path, out: &Output) -> Result<(), Failure> {
-    let stdin = file == Path::new("-");
-    let name = if stdin {
-        "<stdin>".to_owned()
-    } else {
-        file.display().to_string()
-    };
-    let text = if stdin {
+/// A file named on the command line, or standard input for `-`, with the name to report it by.
+fn read_named(file: &Path) -> Result<(String, String), Failure> {
+    if file == Path::new("-") {
         let mut text = String::new();
         std::io::stdin()
             .read_to_string(&mut text)
             .map_err(|e| Failure::new(format!("Cannot read standard input: {e}")))?;
-        text
-    } else {
-        workflow::read(file).map_err(|problem| Failure::new(problem.message))?
+        return Ok(("<stdin>".to_owned(), text));
+    }
+    let text = workflow::read(file).map_err(|problem| Failure::new(problem.message))?;
+    Ok((file.display().to_string(), text))
+}
+
+/// Check a file and write it into the folder, replacing the user's own file with its id when
+/// there is one. Refused with its problems when it has any: a broken copy of a built-in would
+/// stop that built-in running, and `ys` has no editor to leave it open in.
+fn save(
+    data_dir: &Path,
+    file: &Path,
+    allowed: Option<String>,
+    out: &Output,
+) -> Result<(), Failure> {
+    let (name, text) = match allowed {
+        Some(text) => (file.display().to_string(), text),
+        None => read_named(file)?,
     };
+    let id = match workflow::parse(&text) {
+        Ok(workflow) => workflow.id,
+        Err(invalid) => {
+            let lines: Vec<String> = invalid.problems.iter().map(|p| located(&name, p)).collect();
+            return Err(Failure::new(format!(
+                "{}\nNothing was saved.",
+                lines.join("\n")
+            )));
+        }
+    };
+    // The file the window would edit for this id: the first of the user's to claim it.
+    let existing = workflow::catalog(data_dir)
+        .into_iter()
+        .find_map(|entry| match entry.source {
+            Source::File { path, .. } if entry.id == id => Some(PathBuf::from(path)),
+            _ => None,
+        });
+    let replaced = existing.is_some();
+    let path = workflow::save(data_dir, existing.as_deref(), &text)?;
+    let replaces_built_in = workflow::BUILT_IN.iter().any(|(builtin, _)| *builtin == id);
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Saved {
+        id: String,
+        path: String,
+        /// An existing file of the user's was replaced, rather than a new one written.
+        replaced: bool,
+        replaces_built_in: bool,
+    }
+    let saved = Saved {
+        id,
+        path: path.display().to_string(),
+        replaced,
+        replaces_built_in,
+    };
+    out.emit(&saved, || {
+        sayln!(
+            "{} `{}` to {}",
+            if saved.replaced { "Saved" } else { "Saved new" },
+            saved.id,
+            saved.path
+        );
+        if saved.replaces_built_in {
+            sayln!("It is used instead of the built-in. Delete it to go back.");
+        }
+    })
+}
+
+fn validate(file: &Path, out: &Output) -> Result<(), Failure> {
+    let (name, text) = read_named(file)?;
 
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]

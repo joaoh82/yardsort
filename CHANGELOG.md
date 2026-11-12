@@ -3,6 +3,19 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Describe a change to a workflow.** **Customize** on a built-in now opens a box on your copy:
+  say what should be different, and the workflow writer changes the file. Your own workflows
+  have a **Describe a change** button that does the same. The answer keeps the workflow's id and
+  stays unsaved until you save it. See [Describe a change](docs/guide/workflows.md#the-workflows-list).
+- **The Floor Manager can change a workflow.** Ask it to, and it saves the changed file with
+  the new `ys workflow save`, which checks the file first and refuses one with problems. Saving
+  follows the Floor Manager permission, and at ask first the confirmation shows the whole file.
+  See [Changing a workflow](docs/guide/floor-manager.md#changing-a-workflow).
+- An open window now shows a workflow file changed outside it, such as by `ys`, within a
+  second or two.
+
 ## 0.28.0
 
 - **Software factory.** A built-in workflow, `software-factory`, takes a task from a brief the

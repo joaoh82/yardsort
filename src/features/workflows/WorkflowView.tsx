@@ -68,6 +68,10 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
   const [scheduling, setScheduling] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The workflow whose "describe a change" box is open. By id, so going to another workflow
+  // closes it without an effect.
+  const [describing, setDescribing] = useState<string | null>(null);
+  const changing = describing === workflowId;
 
   useEffect(() => {
     if (!loaded) void useWorkflowStore.getState().load();
@@ -144,10 +148,12 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
 
   const revert = () => useWorkflowStore.getState().setDraft(workflowId, null);
 
+  // The copy is the person's file at once, and the box for saying how to change it opens on it.
   const customize = () =>
     act(async () => {
       await ipc.workflowCopy(workflowId);
       await useWorkflowStore.getState().load();
+      setDescribing(workflowId);
     });
 
   const duplicate = () =>
@@ -218,6 +224,15 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
             </>
           ) : (
             <>
+              <button
+                type="button"
+                className={quiet}
+                aria-pressed={changing}
+                title="Say what to change, and have an agent change it"
+                onClick={() => setDescribing(changing ? null : workflowId)}
+              >
+                Describe a change
+              </button>
               <button type="button" className={quiet} disabled={busy} onClick={remove}>
                 {replacesBuiltIn ? "Reset to built-in" : "Delete"}
               </button>
@@ -305,6 +320,9 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
             </Suspense>
           </div>
           {isNew && <DescribeWorkflow />}
+          {changing && !isNew && !builtIn && (
+            <DescribeWorkflow key={workflowId} workflowId={workflowId} current={text} />
+          )}
           <div className="min-h-0 flex-1">
             <Suspense fallback={null}>
               <WorkflowEditor
