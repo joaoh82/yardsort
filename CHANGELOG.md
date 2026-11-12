@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.28.1
 
 - **Describe a change to a workflow.** **Customize** on a built-in now opens a box on your copy:
   say what should be different, and the workflow writer changes the file. Your own workflows
