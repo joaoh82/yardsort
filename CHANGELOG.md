@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.29.0
 
 - **An agent that needs you reaches your phone.** When Claude Code, OpenCode or Pi asks for a
   permission, on this computer or on one with no screen running `yardsort-host`, a phone with
