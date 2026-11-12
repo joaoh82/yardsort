@@ -261,11 +261,12 @@ export function Ideas() {
             passed on.
           </p>
           <p>
-            <strong className={strong}>Workflows</strong>, above Projects, lists the built-in ones
-            and yours: the steps as a chart, the file in an editor with every problem marked where
-            it is, and the runs. Rather not write the file? Say what it should do and press{" "}
-            <strong className={strong}>Write it</strong> — the agent you already have, or your
-            Anthropic key, writes it, checked like any other and never saved until you say so.
+            <strong className={strong}>Workflows</strong>, in the sidebar, lists the built-in ones
+            and yours, each marked built in or custom: the steps as a chart, the file in an editor
+            with every problem marked where it is, and the runs. Rather not write the file? Say what
+            it should do and press <strong className={strong}>Write it</strong> — the agent you
+            already have, or your Anthropic key, writes it, checked like any other and never saved
+            until you say so.
           </p>
           <p>
             The built-in <strong className={strong}>Request code review</strong> is in every

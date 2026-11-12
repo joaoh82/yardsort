@@ -3,6 +3,7 @@ import { clockTime } from "@/features/schedules/words";
 import { timeAgo } from "@/features/terminal/sessionText";
 import type { TriggerFire, TriggerItem } from "@/lib/ipc";
 import { useProjectsStore } from "@/stores/projects";
+import { usePublishStore } from "@/stores/publish";
 import { useSmokeTestsStore } from "@/stores/smokeTests";
 import { useTriggersStore } from "@/stores/triggers";
 import { useWorkflowStore } from "@/stores/workflows";
@@ -215,6 +216,12 @@ function TriggerDetail({
   onClose: () => void;
 }) {
   const history = useTriggersStore((s) => s.history[trigger.id]) ?? EMPTY;
+  // Pull requests the workspace tracks in other repositories, which a trigger about its own
+  // pull request never hears. The project's whole entry, counted outside the selector.
+  const pullRequests = usePublishStore((s) => s.byProject[trigger.projectId]);
+  const trackedElsewhere = (pullRequests?.tracked ?? []).filter(
+    (tracked) => tracked.workspaceId === trigger.workspaceId,
+  ).length;
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState(false);
 
@@ -354,6 +361,15 @@ function TriggerDetail({
         <p role="status" className="text-amber-300">
           A run of the same {trigger.target === "test" ? "test" : "workflow"} is going in{" "}
           {trigger.workspaceName}; what it gathered is decided when that run ends.
+        </p>
+      )}
+      {trigger.watch && !trigger.filters.elsewhere && trackedElsewhere > 0 && (
+        <p role="status" className="text-amber-300">
+          {trigger.workspaceName} tracks {trackedElsewhere}{" "}
+          {trackedElsewhere === 1 ? "pull request" : "pull requests"} in other repositories, and
+          this trigger hears only the pull request from the workspace&apos;s own branch. To have{" "}
+          {trackedElsewhere === 1 ? "that one" : "those"} start it, press <strong>Edit…</strong> and
+          choose a workflow on a pull request it tracks elsewhere.
         </p>
       )}
       {trigger.sessionId && !trigger.sessionRunning && trigger.standing !== "no_workspace" && (

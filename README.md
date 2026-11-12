@@ -400,7 +400,8 @@ The next agent receives that text, and the run keeps it so you can read what was
 
 ![Workflows: the built-in code review as a chart, with its file and its runs beside it](docs/images/workflows.png)
 
-**Workflows**, above _Projects_ in the sidebar, lists the built-in ones and yours. Open one to see
+**Workflows** in the sidebar lists the built-in ones and yours, each marked built in or custom,
+and deletes yours. Open one to see
 its steps as a chart, its file in an editor with every problem marked where it is, and its runs.
 Rather not write the file? Say what it should do and press **Write it**: the agent you already
 have, or your Anthropic key, writes it — checked like any other, and never saved until you say so.

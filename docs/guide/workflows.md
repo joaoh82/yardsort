@@ -5,16 +5,36 @@ agent review this workspace's pull request, then tell me and the agent that wrot
 one as a short YAML file. Yardsort checks every name and every `{{ variable }}` in it before it
 runs anything, and names the line and column of each mistake.
 
-Workflows have their own section at the top of the sidebar. Open one to see its steps as a chart,
-edit its file, and follow its runs; **Run…** starts it. `ys workflow run` starts one from a
+**Workflows** in the sidebar opens the list of every workflow. Open one to see its steps as a
+chart, edit its file, and follow its runs; **Run…** starts it. `ys workflow run` starts one from a
 terminal, with Yardsort open, because the app is what carries runs out.
 
-## The Workflows section
+## The Workflows list
 
-**Workflows**, above **Projects** in the sidebar, lists every workflow: the built-in ones and
-yours, by name. A number on a row is how many of its runs are going now; a red **!** means the file
-has problems and cannot run; an orange dot means unsaved changes. Click a row to open it in the
-center panel. **+** starts a new one.
+Click **Workflows** in the sidebar, under **Tasks**, and the center panel lists every workflow:
+the built-in ones and yours, by name, with the description under each. The row stays lit while
+the list or one of its workflows is open; click it again from the list to close it. A number
+beside it is how many runs are waiting on you.
+
+Each row says where the workflow comes from:
+
+- **Built in** — part of Yardsort. It cannot be changed or deleted, only customized or
+  duplicated (see below).
+- **Custom** — a file in your workflows folder.
+- **Custom, replaces the built-in** — your copy of a built-in, under the same id, used instead of
+  it.
+
+A row also says how many of its runs are going now, how many problems its file has (a workflow
+with problems cannot run), and shows an orange dot for unsaved changes. The header counts how many
+are built in and how many are custom. Runs waiting on you are listed above the workflows; click
+one to open that run in its workflow.
+
+Click a row to open the workflow. **←** in its header comes back to the list. **New workflow…**
+starts a new one.
+
+**Delete…** on a custom row deletes that workflow's file, after asking; the file is gone for
+good. A copy that replaces a built-in has **Reset…** instead, which deletes your copy and brings
+the built-in back. Built-in rows have neither.
 
 ![The built-in code review with a selected step and its YAML source highlighted](../images/workflows.png)
 
@@ -31,7 +51,8 @@ The center panel shows three things:
   your folder under the same id, so your copy is used instead of it, and **Duplicate** copies it
   under a new id, as a second workflow. Your own file has **Save**, **Revert** while there are
   unsaved changes, **Duplicate**, and **Delete**, or **Reset to built-in** for a copy that
-  replaces one, which deletes your copy and brings the built-in back. Deleting asks first.
+  replaces one, which deletes your copy and brings the built-in back. Deleting asks first, and
+  goes back to the list.
   Unsaved changes are kept while Yardsort is open, so you can look at another workflow and come
   back; they are gone when it quits.
 - **Runs.** This workflow's runs, newest first, with the workspace and when each was asked for.
@@ -52,7 +73,8 @@ press **Run**, and appears at the top of the runs at once.
 A workspace's menu has **Run workflow…**, which opens the same dialog for that workspace, and
 **Request code review…**, which opens it on the built-in review.
 
-**+** in the sidebar starts a new workflow from a short example, with every part a file needs.
+**New workflow…** in the list starts a new workflow from a short example, with every part a file
+needs.
 Give it an `id` and **Save**: it is written as `<id>.yaml` in your folder, and never over a file
 already there.
 
@@ -364,7 +386,7 @@ that writes the database directly is not stopped.
 
 A decision is recorded once. A second one is refused, and so is one on a run that has
 already ended. The run says `Blocked: waiting for your approval.` and what to do.
-The sidebar lists every run waiting on you. `ys workflow runs` has a WAITING ON
+The Workflows list shows every run waiting on you, and the sidebar counts them. `ys workflow runs` has a WAITING ON
 column. `ys workflow runs --run <id>` shows a step that is still waiting and the
 artifacts it reads. It does not print a command that includes the code. It also
 shows a decision once it is recorded: who, when, and the note. `--json` includes

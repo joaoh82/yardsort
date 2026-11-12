@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { native } from "@/lib/native";
 import {
   errorMessage,
   hasCore,
@@ -11,6 +12,16 @@ import {
 
 /** The id the view uses for a workflow not saved yet. */
 export const NEW_WORKFLOW = ":new";
+
+/** What the center panel holds for the list of every workflow, opened from the sidebar. Never a
+ *  workflow's id, which is lowercase letters, digits and `-`. */
+export const WORKFLOW_LIST = ":list";
+
+/** Where a workflow comes from, in a word, for the list and the view's header. */
+export function originWords(item: Pick<WorkflowItem, "source">): string {
+  if (item.source.kind === "builtIn") return "Built in";
+  return item.source.replacesBuiltIn ? "Custom, replaces the built-in" : "Custom";
+}
 
 interface WorkflowsState {
   /** Every workflow, built in and the user's, as the core lists them. */
@@ -179,3 +190,28 @@ steps:
     needs: [done]
     title: "{{ workspace.name }}: done"
 `;
+
+/**
+ * Delete one of the user's workflow files, after asking. A copy that replaces a built-in is
+ * reset instead: the built-in is used again. A built-in has no file, and is never removed.
+ * Says whether it was; throws what the core said when it could not be.
+ */
+export async function removeWorkflow(item: WorkflowItem): Promise<boolean> {
+  if (item.source.kind !== "file") return false;
+  const { path, replacesBuiltIn } = item.source;
+  const sure = await native.confirm(
+    replacesBuiltIn
+      ? `Delete your copy of “${item.name}”? The built-in is used again. Your file is gone for good: ${path}`
+      : `Delete “${item.name}”? The file is gone for good: ${path}`,
+    {
+      title: replacesBuiltIn ? "Reset to the built-in" : "Delete workflow",
+      okLabel: replacesBuiltIn ? "Reset" : "Delete",
+    },
+  );
+  if (!sure) return false;
+  await ipc.workflowRemove(path);
+  const store = useWorkflowStore.getState();
+  store.setDraft(item.id, null);
+  await store.load();
+  return true;
+}

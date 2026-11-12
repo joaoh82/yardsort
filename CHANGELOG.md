@@ -29,6 +29,19 @@ has the downloads and the full commit lists.
   [When a computer cannot be reached](docs/guide/remote.md#when-a-computer-cannot-be-reached).
 - **The server's log no longer quotes a database row.** An error from PostgreSQL is logged by its
   code and the table, column or constraint, not its message, which could include a device's name.
+- **Workflows open as a list in the center panel.** The sidebar's Workflows section is now one
+  **Workflows** row, under Tasks, like Tests and Triggers. Clicking it lists every workflow in
+  the center panel, each marked **Built in**, **Custom**, or **Custom, replaces the built-in**,
+  with its description, its problems, its runs going now, and the runs waiting on you at the top.
+  A custom workflow can be deleted from its row, and a copy that replaces a built-in reset, after
+  a confirmation. A workflow's view has **←** back to the list. See
+  [The Workflows list](docs/guide/workflows.md#the-workflows-list).
+- **A trigger that could never fire says so.** A trigger on a pull request's events whose
+  workflow is about the workspace's own pull request, such as the **Review the pull request when
+  it opens** preset, never hears the pull requests the workspace tracks in other repositories.
+  In such a workspace the trigger dialog now says how many it tracks and offers **Use “Request
+  code review elsewhere”**, and the Triggers view says the same of a saved one. See
+  [Pull requests elsewhere](docs/guide/triggers.md#pull-requests-elsewhere).
 
 ## 0.27.0
 

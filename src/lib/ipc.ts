@@ -434,8 +434,9 @@ export type Schedule = Finite<RawSchedule, "nextAt" | "day">;
 export type ScheduleRun = Finite<RawScheduleRun, never>;
 export type SchedulePreview = Finite<RawSchedulePreview, never>;
 export type ScheduleDraft = Omit<RawScheduleDraft, "spec"> & { spec: ScheduleSpec };
-/** A trigger; `decidedAt` on its last line is null while it is gathering. */
-export type TriggerItem = Finite<RawTriggerItem, "decidedAt">;
+/** A trigger; `decidedAt` on its last line is null while it is gathering, and its watch's
+ *  `number` until the branch has a pull request. */
+export type TriggerItem = Finite<RawTriggerItem, "decidedAt" | "number">;
 export type TriggerFire = Finite<RawTriggerFire, "decidedAt">;
 export type TriggerDraft = RawTriggerDraft;
 export type SavedTrigger = Finite<RawSavedTrigger, "decidedAt">;

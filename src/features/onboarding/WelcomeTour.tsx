@@ -23,7 +23,7 @@ const STEPS = [
   {
     title: "Repeat work with workflows",
     target: "Projects",
-    text: "The Workflows section above Projects holds reusable sequences of agent work. Open one to inspect its steps, edit it or run it. You can come back to workflows after your first workspace.",
+    text: "Workflows, above Projects, lists reusable sequences of agent work, built in and your own. Open one to inspect its steps, edit it or run it. You can come back to workflows after your first workspace.",
   },
   {
     title: "Make Yardsort yours",

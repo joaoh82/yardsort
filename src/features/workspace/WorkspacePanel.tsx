@@ -3,6 +3,7 @@ import { PullRequestToolbar } from "@/features/pull-requests/PullRequestToolbar"
 import { ActivityPanel } from "@/features/activity/ActivityPanel";
 import { Composer } from "@/features/composer/Composer";
 import { WorkflowView } from "@/features/workflows/WorkflowView";
+import { WorkflowsView } from "@/features/workflows/WorkflowsView";
 import { UsageView } from "@/features/usage/UsageView";
 import { PullRequestsView } from "@/features/pull-requests/PullRequestsView";
 import { TasksView } from "@/features/tasks/TasksView";
@@ -26,6 +27,7 @@ import { ProjectSettingsDialog } from "@/features/sidebar/ProjectSettingsDialog"
 import { ApprovalCard } from "@/features/smoke/ApprovalCard";
 import { TestRunTab } from "@/features/smoke/TestRunTab";
 import { useSmokeTestsStore } from "@/stores/smokeTests";
+import { WORKFLOW_LIST } from "@/stores/workflows";
 import { useAppStore } from "@/stores/app";
 import { launchable, useHarnessStore } from "@/stores/harnesses";
 import { useShortcutLabel } from "@/stores/preferences";
@@ -87,6 +89,8 @@ export function WorkspacePanel() {
         <SchedulesView />
       ) : triggersOpen ? (
         <TriggersView />
+      ) : workflowId === WORKFLOW_LIST ? (
+        <WorkflowsView />
       ) : workflowId ? (
         <WorkflowView key={workflowId} workflowId={workflowId} />
       ) : composingFor ? (
