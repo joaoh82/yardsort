@@ -208,6 +208,9 @@ resume picks up the conversation where the agent left it, as **Resume** does in 
 only for an agent that can resume one by its id or the most recent one in its folder; `ys` says why
 when one cannot.
 
+When an agent there asks for a permission, a phone that allows notifications gets **An agent needs
+you**, and opening it opens that agent's terminal; see [Notifications](remote.md#notifications).
+
 **Workflows, smoke tests, schedules and triggers do not run on a headless host yet.**
 `ys workflow run`, `ys test run` and `ys schedule run` say so and queue nothing, rather than queue work
 nobody would carry out, and `ys trigger` says its triggers will not fire.

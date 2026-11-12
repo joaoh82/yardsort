@@ -64,6 +64,8 @@ for_each_store!(
     sent_notices_do_not_fill_the_cap,
     a_revoked_phone_is_not_sent,
     a_gone_token_is_deleted,
+    an_agent_notice_names_only_its_terminal,
+    an_older_phone_keeps_the_agent_preference,
 );
 
 struct World {
@@ -173,6 +175,12 @@ async fn each_category_is_a_fixed_sentence(records: impl Records + Clone + 'stat
             "workflow",
             "approval",
             "A workflow is waiting for approval",
+        ),
+        (
+            "agent:run-1:approval:12",
+            "agent",
+            "approval",
+            "An agent needs you",
         ),
     ];
     for (key, category, kind, title) in cases {
@@ -816,6 +824,8 @@ fn incoming(key: &str) -> IncomingNotice {
         suppressed: false,
         run_id: None,
         step_id: None,
+        workspace_id: None,
+        terminal_id: None,
         host_id: None,
     }
 }
@@ -899,6 +909,8 @@ async fn an_expired_notice_is_not_delivered(records: impl Records + Clone + 'sta
                 suppressed: false,
                 run_id: None,
                 step_id: None,
+                workspace_id: None,
+                terminal_id: None,
                 host_id: None,
             },
             1_000,
@@ -925,4 +937,127 @@ impl Served {
     async fn post_as_public(&self, path: &str) -> reqwest::Response {
         self.client.post(self.url(path)).send().await.unwrap()
     }
+}
+
+async fn an_agent_notice_names_only_its_terminal(records: impl Records + Clone + 'static) {
+    let world = world(records, PushOutcome::Sent).await;
+    let host = signed(&world, "ada", "Workstation", DeviceKind::Host).await;
+    let phone = signed(&world, "ada", "Phone", DeviceKind::Phone).await;
+    world
+        .served
+        .post_as(
+            &phone,
+            "v1/notifications/token",
+            Some(&json!({ "platform": "apns", "token": "phone-token" })),
+        )
+        .await;
+    let mut body = notice("agent:run-7:approval:1", "agent", "approval");
+    body["workspaceId"] = json!("ws-1");
+    body["terminalId"] = json!("pty-1");
+    let receipt: Value = submit(&world, &host, &body).await.json().await.unwrap();
+    let view: Value = world
+        .served
+        .get_as(
+            &phone,
+            &format!("v1/notifications/{}", receipt["id"].as_str().unwrap()),
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(view["category"], "agent");
+    assert_eq!(view["title"], "An agent needs you");
+    assert_eq!(view["workspaceId"], "ws-1");
+    assert_eq!(view["terminalId"], "pty-1");
+    assert!(view.get("runId").is_none());
+
+    // The push itself carries the fixed words and the link, and neither id.
+    await_sent(&world.push, 1).await;
+    let alert = &world.push.sent()[0].json;
+    assert!(alert.contains("An agent needs you"), "{alert}");
+    assert!(
+        !alert.contains("ws-1") && !alert.contains("pty-1"),
+        "{alert}"
+    );
+
+    // Another category may not name a terminal, and what looks like a one-time code is no id.
+    let mut task = notice("task:example.widgets:3:complete", "task", "complete");
+    task["workspaceId"] = json!("ws-1");
+    task["terminalId"] = json!("pty-1");
+    let mut coded = notice("agent:run-7:approval:2", "agent", "approval");
+    coded["workspaceId"] = json!("ws-1");
+    coded["terminalId"] = json!("ABCDEFGH");
+    for body in [task, coded] {
+        let receipt: Value = submit(&world, &host, &body).await.json().await.unwrap();
+        let view: Value = world
+            .served
+            .get_as(
+                &phone,
+                &format!("v1/notifications/{}", receipt["id"].as_str().unwrap()),
+            )
+            .await
+            .json()
+            .await
+            .unwrap();
+        assert!(view.get("workspaceId").is_none(), "{view}");
+        assert!(view.get("terminalId").is_none(), "{view}");
+    }
+}
+
+async fn an_older_phone_keeps_the_agent_preference(records: impl Records + Clone + 'static) {
+    let world = world(records, PushOutcome::Sent).await;
+    let host = signed(&world, "ada", "Workstation", DeviceKind::Host).await;
+    let phone = signed(&world, "ada", "Phone", DeviceKind::Phone).await;
+    world
+        .served
+        .post_as(
+            &phone,
+            "v1/notifications/token",
+            Some(&json!({ "platform": "apns", "token": "phone-token" })),
+        )
+        .await;
+    let read = || async {
+        world
+            .served
+            .get_as(&phone, "v1/notifications/preferences")
+            .await
+            .json::<Value>()
+            .await
+            .unwrap()
+    };
+    assert_eq!(read().await["agent"], true, "on until turned off");
+    let off = json!({
+        "muted": false, "task": true, "review": true, "failure": true,
+        "desktopUpdate": true, "workflow": true, "agent": false
+    });
+    let saved = world
+        .served
+        .post_as(&phone, "v1/notifications/preferences", Some(&off))
+        .await;
+    assert_eq!(saved.status(), StatusCode::NO_CONTENT);
+    // A phone from before agent notices saves what it knows, and the switch it never showed
+    // stays where it was.
+    let older = json!({
+        "muted": false, "task": false, "review": true, "failure": true,
+        "desktopUpdate": true, "workflow": true
+    });
+    world
+        .served
+        .post_as(&phone, "v1/notifications/preferences", Some(&older))
+        .await;
+    let now = read().await;
+    assert_eq!(now["task"], false);
+    assert_eq!(now["agent"], false);
+    assert!(submit(
+        &world,
+        &host,
+        &notice("agent:run-8:approval:1", "agent", "approval")
+    )
+    .await
+    .status()
+    .is_success());
+    assert!(
+        world.push.sent().is_empty(),
+        "agents that are off send nothing"
+    );
 }

@@ -18,6 +18,8 @@ pub enum NoticeCategory {
     Failure,
     DesktopUpdate,
     Workflow,
+    /// An agent asked for something only a person can give it: a permission, so far.
+    Agent,
 }
 
 impl NoticeCategory {
@@ -29,6 +31,7 @@ impl NoticeCategory {
             Self::Failure => "failure",
             Self::DesktopUpdate => "desktop-update",
             Self::Workflow => "workflow",
+            Self::Agent => "agent",
         }
     }
 
@@ -40,6 +43,7 @@ impl NoticeCategory {
             Self::Failure => "failure:",
             Self::DesktopUpdate => "desktop-update:",
             Self::Workflow => "workflow:",
+            Self::Agent => "agent:",
         }
     }
 
@@ -52,6 +56,7 @@ impl NoticeCategory {
                 | (Self::Failure, "failed")
                 | (Self::DesktopUpdate, "available")
                 | (Self::Workflow, "question" | "approval")
+                | (Self::Agent, "approval")
         )
     }
 }
@@ -70,6 +75,12 @@ pub struct NoticeSubmission {
     /// The step that notice is about.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step_id: Option<String>,
+    /// The workspace and the terminal an agent notice is about, as the computer's own ids.
+    /// Absent for every other category, and omitted when an older server would refuse them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_id: Option<String>,
 }
 
 /// Whether `key` may name an event of `category`. Upper case is refused, so a one-time code
@@ -119,6 +130,10 @@ pub struct NotificationPreferences {
     pub failure: bool,
     pub desktop_update: bool,
     pub workflow: bool,
+    /// Agents that need a person. Absent from an older phone, which does not know it: saving
+    /// without it keeps what was stored. An older server never sends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<bool>,
 }
 
 impl Default for NotificationPreferences {
@@ -130,6 +145,7 @@ impl Default for NotificationPreferences {
             failure: true,
             desktop_update: true,
             workflow: true,
+            agent: Some(true),
         }
     }
 }
@@ -146,6 +162,7 @@ impl NotificationPreferences {
             NoticeCategory::Failure => self.failure,
             NoticeCategory::DesktopUpdate => self.desktop_update,
             NoticeCategory::Workflow => self.workflow,
+            NoticeCategory::Agent => self.agent.unwrap_or(true),
         }
     }
 }
@@ -173,6 +190,11 @@ pub struct NoticeView {
     pub run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step_id: Option<String>,
+    /// Set for an agent notice, so the phone can open that terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_id: Option<String>,
     /// The computer that submitted it, as the server knows that computer. A client cannot set this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_id: Option<String>,

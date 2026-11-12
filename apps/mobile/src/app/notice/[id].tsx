@@ -2,8 +2,8 @@
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 /**
- * One notification. A workflow question or approval opens the decision.
- * Installing a desktop update stays on the computer. The read tries every
+ * One notification. A workflow question or approval opens the decision, and an agent that
+ * needs you opens its terminal. Installing a desktop update stays on the computer. The read tries every
  * account this phone is signed in to, not only the one on screen.
  */
 
@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 
 import { messageOf } from "../../lib/accounts";
 import { useApp, useSnapshot } from "../../lib/context";
+import { terminalTarget } from "../../lib/notice-link";
 import { workflowTarget } from "../../lib/workflows";
 import { Body, Problem, Screen, Waiting } from "../../ui/parts";
 
@@ -43,7 +44,8 @@ export default function Notice() {
     };
   }, [accounts, id, signedIn]);
 
-  const target = notice ? workflowTarget(notice) : null;
+  const decision = notice ? workflowTarget(notice) : null;
+  const target = decision ?? (notice ? terminalTarget(notice) : null);
   useEffect(() => {
     if (target) router.replace(target);
   }, [router, target]);
@@ -54,7 +56,7 @@ export default function Notice() {
       {!signedIn ? (
         <Body muted>Sign in to open this notification.</Body>
       ) : target ? (
-        <Waiting label="Opening the decision" />
+        <Waiting label={decision ? "Opening the decision" : "Opening the terminal"} />
       ) : notice ? (
         <>
           <Body>{notice.title}</Body>

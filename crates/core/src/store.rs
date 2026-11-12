@@ -48,6 +48,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0036_mobile_notices.sql"),
     include_str!("../migrations/0037_workflow_remote_decisions.sql"),
     include_str!("../migrations/0038_remote_grant_kind.sql"),
+    include_str!("../migrations/0039_agent_notices.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -6384,8 +6385,9 @@ steps:
         {
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[30].contains("CREATE TABLE workflow_approval_decisions"));
-            // 0037 adds nullable device columns and an empty actions table.
-            assert_eq!(MIGRATIONS.len(), 38);
+            // 0037 adds nullable device columns and an empty actions table, and 0039 two
+            // nullable columns to the notice outbox.
+            assert_eq!(MIGRATIONS.len(), 39);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -6452,8 +6454,9 @@ steps:
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[31].contains("CREATE TABLE workflow_waits"));
             assert!(MIGRATIONS[31].contains("code_rounds"));
-            // 0037 adds nullable device columns and an empty actions table.
-            assert_eq!(MIGRATIONS.len(), 38);
+            // 0037 adds nullable device columns and an empty actions table, and 0039 two
+            // nullable columns to the notice outbox.
+            assert_eq!(MIGRATIONS.len(), 39);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs

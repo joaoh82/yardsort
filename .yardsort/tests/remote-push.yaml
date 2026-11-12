@@ -1,0 +1,141 @@
+id: remote-push
+name: An agent that asks for a permission reaches the phone once, and opens its terminal
+description: >-
+  Runs yardsort-host against the stand-in server, whose push provider only records what it would
+  have sent. A pretend phone pairs and registers a push token. In a shell on the host it then runs
+  what Claude Code's hook runs when it asks for a permission: one push, with fixed words and a
+  link, that opens the terminal of the session that asked. Asked again before anyone answered, it
+  is the same wait and sends nothing more; once the tool ran, the next request is a second push.
+  Linux only. No window opens (35 §20).
+version: 1
+timeout: 45m
+
+setup:
+  - id: build
+    action: shell
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes. Each push it would have sent is a line in pushes.jsonl.
+      - >-
+        tail -f /dev/null | YARDSORT_STAND_IN_PUSHES="{{ run.dir }}/pushes.jsonl"
+        target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: a_repository
+    action: shell
+    line: >-
+      mkdir -p "$YS_RUN_DIR/repo" "$YS_RUN_DIR/profile" && git -C "$YS_RUN_DIR/repo" init -q && git -C
+      "$YS_RUN_DIR/repo" -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false
+      commit -q --allow-empty -m first && cp .yardsort/tests/support/headless-settings.toml
+      "$YS_RUN_DIR/profile/settings.toml"
+
+steps:
+  - id: sign_in_by_pasting
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", sign-in, Smoke box]
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: serve
+    action: shell
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: add_the_project
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, project, add, "{{ run.dir }}/repo"]
+    expect:
+      stdout_contains: Added repo
+  - id: start_a_shell
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, workspace, new, repo, smoke, --harness, sh]
+    expect:
+      stdout_contains: agent  sh
+  - id: pair_at_the_operators_terminal
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair]
+    timeout: 90s
+    expect:
+      stdout_contains: Let in.
+  - id: phone_registers
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", registers]
+    expect:
+      stdout_contains: registered for notifications
+  - id: the_agent_asks
+    action: shell
+    # Only what the shell prints holds asked-42, never what was typed.
+    line: >-
+      bun .yardsort/tests/support/phone.ts "$YS_RUN_DIR" type "Smoke box"
+      "sh $PWD/.yardsort/tests/support/agent-asks.sh $(cat "$YS_RUN_DIR/bin")/ys asks; echo asked-\$((6*7))"
+      asked-42
+    expect:
+      stdout_contains: read back
+  - id: one_push
+    action: wait_for
+    program: grep
+    # The host hands its outbox to the server every 20 seconds.
+    args: [-q, An agent needs you, "{{ run.dir }}/pushes.jsonl"]
+    timeout: 90s
+  - id: it_opens_the_terminal_that_asked
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/phone.ts,
+        "{{ run.dir }}",
+        opens-notice,
+        Smoke box,
+        "{{ run.dir }}/pushes.jsonl",
+      ]
+    expect:
+      stdout_contains: the notice opens the terminal that asked
+  - id: asked_again_then_answered_then_asked
+    action: shell
+    # The second request is the same wait as the first. The tool then runs, and the third is new.
+    line: >-
+      ask() { bun .yardsort/tests/support/phone.ts "$YS_RUN_DIR" type "Smoke box"
+      "sh $PWD/.yardsort/tests/support/agent-asks.sh $(cat "$YS_RUN_DIR/bin")/ys $1; echo $1-\$((6*7))"
+      "$1-42" || exit 1; }; ask asks && ask ran && ask asks && echo asked three times
+    timeout: 3m
+    expect:
+      stdout_contains: asked three times
+  - id: two_pushes_in_all
+    action: shell
+    # Waits for the second push, then a little longer, for a third that must not come.
+    line: >-
+      pushes="$YS_RUN_DIR/pushes.jsonl"; n=0; while [ "$n" -lt 90 ]; do
+      [ "$(grep -c "An agent needs you" "$pushes")" -ge 2 ] && break; n=$((n + 1)); sleep 1; done;
+      sleep 5; count=$(grep -c "An agent needs you" "$pushes");
+      if [ "$count" -ne 2 ]; then echo "$count pushes, not two"; cat "$pushes"; exit 1; fi;
+      if grep -q -e Bash -e smoke-agent -e repo "$pushes"; then echo "a push says more"; exit 1; fi;
+      echo two pushes in all
+    timeout: 3m
+    expect:
+      stdout_contains: two pushes in all
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      kill "$(cat "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

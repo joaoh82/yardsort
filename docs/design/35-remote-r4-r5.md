@@ -2,7 +2,7 @@
 
 **Status:** planned on 2026-11-06. The first slice, the host's account moved out of the app, was
 built the same day (§10); its local smoke tests and the owner's phone check against staging passed.
-The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. The sixth, resume and fork in the core and the host after its restarts, was built the same day (§15); its local smoke test, and the owner's run on the box, R5's gate check 3, passed. The seventh, starting and resuming from a client, was built the same day (§16), under `terminal:control` rather than a scope of its own, as the owner chose; its local smoke test and the owner's run on the box passed. The eighth, R4's first, the phone reconnecting on a network change and the time budgets measured, was built on 2026-11-10 (§17); its local smoke test passed, at p95 105 ms through 100 ms of round trip. The ninth, a keyboard paired with the phone, was built on 2026-11-11 (§18); its tests and its run on the Android emulator passed. The tenth, honest offline, no leaks and diagnostics, was built the same day (§19); its tests, the server's end-to-end run, and its smoke test's steps run by hand passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
+The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. The sixth, resume and fork in the core and the host after its restarts, was built the same day (§15); its local smoke test, and the owner's run on the box, R5's gate check 3, passed. The seventh, starting and resuming from a client, was built the same day (§16), under `terminal:control` rather than a scope of its own, as the owner chose; its local smoke test and the owner's run on the box passed. The eighth, R4's first, the phone reconnecting on a network change and the time budgets measured, was built on 2026-11-10 (§17); its local smoke test passed, at p95 105 ms through 100 ms of round trip. The ninth, a keyboard paired with the phone, was built on 2026-11-11 (§18); its tests and its run on the Android emulator passed. The tenth, honest offline, no leaks and diagnostics, was built the same day (§19); its tests, the server's end-to-end run, and its smoke test's steps run by hand passed. The eleventh, generic push, was built on 2026-11-12 (§20), on what YARD-4 had already built for the phone's notifications: it adds the notice of an agent that needs you, opening its terminal; its tests and its smoke test's steps run by hand passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
 2026-11-08 against where Remote is going, several machines an account owns and the desktop choosing
 where a task runs (§3, "Where agents run"); what comes after R5 is in §9. This is the plan for the last two
 phases before sync: what each has to show, what it starts from, the decisions taken before any
@@ -370,7 +370,7 @@ last, not because they wait on R4: they need only slice 3.
 | 8   | Lifecycle, networks and the time budgets | R4    | The phone reconnects at once on a network change (`expo-network`) rather than waiting out its backoff; the development build's timing readout; `echo-time.ts` and the delay proxy. Budgets measured and recorded with how                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Locally: p95 through the proxy at 100 ms. On staging: from here and from the box. On the iPhone (owner): 31 §17's parts N and W, and the two budgets with the Network Link Conditioner                                                                                                                                                                                                                                                    |
 | 9   | External keyboard                        | R4    | A small native module in `apps/mobile/modules/` for hardware keys (`UIKeyCommand` on iOS, key events on Android): Esc, Tab, the arrows, Ctrl and Alt combinations, typed into the controlled terminal; Cmd shortcuts left to the system                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Unit tests of the key mapping; the Android emulator with its hardware keyboard. On the iPhone (owner), a Bluetooth keyboard: `vim`, `Ctrl-C`, arrows in Claude's menu. A new TestFlight build                                                                                                                                                                                                                                             |
 | 10  | Honest offline, no leaks, diagnostics    | R4    | A leak audit with tests: a marker typed into a terminal and printed by it, and a marker title, must appear in no server log, no host log, no phone cache or diagnostics. Offline states reviewed against 31 §5. **Diagnostics** in the app's Settings: versions, server id, states and error codes with times, shown in full before sharing through the share sheet. The server's logs checked under load for the same markers                                                                                                                                                                                                                                                                                                                                                                                                                                    | The marker tests in `just check`; the stand-in and staging logs grepped after a session; on the iPhone, a diagnostics export read before it is shared                                                                                                                                                                                                                                                                                     |
-| 11  | Generic push                             | R4    | Migration `0006_push_routes.sql`; the provider trait with APNs and FCM; the host's notification intents over the link; deduplication, coalescing, preferences; the app's permission, token and **Notifications** settings; the self-host notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | A fake provider in server tests; the stand-in with a recording provider. On staging, with the owner's APNs key: a locked iPhone gets "Yardsort: an agent needs you" when Claude asks for permission on the headless host, and opening it shows that session. Android only once there is an FCM project and a phone                                                                                                                        |
+| 11  | Generic push                             | R4    | Migration `0006_push_routes.sql`; the provider trait with APNs and FCM; the host's notification intents over the link; deduplication, coalescing, preferences; the app's permission, token and **Notifications** settings; the self-host notes. All but one of these came with YARD-4 ([40](40-mobile-notifications.md)) before this slice was built; what it adds is the notice of an agent that needs you, coalesced per wait, opening its terminal (§20)                                                                                                                                                                                                                                                                                                                                                                                                       | A fake provider in server tests; the stand-in with a recording provider. On staging, with the owner's APNs key: a locked iPhone gets "Yardsort: an agent needs you" when Claude asks for permission on the headless host, and opening it shows that session. Android only once there is an FCM project and a phone                                                                                                                        |
 | 12  | Published images                         | R5    | The slim image, published on each release. A **full** image `FROM` it: Node, Python, Go and Rust toolchains, `gh`, `ripgrep`, `jq`, the build basics, and the harnesses whose licence allows redistribution (checked and recorded per harness when the slice is built; Codex CLI, Apache-2.0, and OpenCode, MIT, as of 2026-11-08). `yardsort-host install-agent <harness>` runs a vendor's own installer, as the operator, into a volume, for those that cannot be shipped (Claude Code and Cursor's CLI, as of 2026-11-08); it also updates any harness between releases. Both images for amd64 and arm64 on `ghcr.io/joaoh82/yardsort-host` and `ghcr.io/joaoh82/yardsort-host-full`, tagged with the version and `latest`, signed, with an SBOM; the release is published only once both are pushed. The guide's container section starts from the full image | CI builds both images on every pull request and runs, in the full one, each bundled harness's `--version`, `gh --version` and each toolchain's, then the stand-in sign-in and link as slice 3's job does. `install-agent` is tried against a stand-in installer. On release, the owner pulls both tags on the box, starts the full image, installs Claude Code with `install-agent`, signs it in, and the phone watches and types into it |
 
 Slice 12 depends only on slice 3. Slices 8 to 10 do not depend on slices 4 to 7 and can move earlier if the owner wants R4 sooner; slice
@@ -1138,3 +1138,75 @@ typed or printed.
    says **Offline, last seen**, and a terminal does not say its program keeps running. Then **Settings →
    Diagnostics**: read it, **Share** it to Notes, and check that it names no computer, workspace or
    person.
+
+## 20 · What the eleventh slice adds
+
+Built on 2026-11-12, on Linux. **Most of the slice was already there.** YARD-4 (#225), the phone's
+notifications, had built the push routes and preferences (server migrations `0006` and `0007`), the
+provider behind a trait with APNs and FCM, the host's outbox posted every 20 seconds, deduplication
+by event key and collapse id, a day's queue each way, the phone's permission, token and
+**Settings → Notifications**, and the self-host notes. It is written up in
+[40](40-mobile-notifications.md). Its notices were for tasks, reviews, failures, desktop updates and
+workflow decisions, and not for the one R4's gate names: an agent that asks for a permission. That is
+what this slice adds.
+
+**An agent that needs you.** An agent that asks for a permission says so from its own hook, as
+`approval.requested` (Claude Code's `PermissionRequest`, OpenCode's `permission.asked`, Pi's
+`tool_approval_requested`), never from what its terminal shows. When the inbox drain records one for
+the first time, on a computer signed in as a host, and its run still has a terminal, the core queues a
+notice in a new category, `agent`, kind `approval` (`notify::agent_approval`, called from
+`activity::import_inbox`). The phone reads **An agent needs you**, "Open its terminal on this phone. It
+waits for you there." The notice carries the workspace's and the terminal's ids, kept by the server only
+for this category and only when they are ids (core migration `0039`, server migration `0009`); the push
+itself carries neither. Opening it opens that terminal on the phone (`terminalTarget`), where taking
+control and answering are what they already were. Both clients run the same drain, so the desktop app
+with Remote on sends it as `yardsort-host` does.
+
+**Coalescing.** One notice is one wait. A request in a run that has had no answer since its last notice
+sends nothing: an answer is an event that only follows one (the tool ran or failed, the request was
+settled, a prompt, the end of a turn or of the session). A tool or a settled request counts only when
+it names a request of that wait by its tool call or permission id, so another tool running beside it
+finishing is not an answer ([40](40-mobile-notifications.md)). Claude Code asks for each tool call on its own,
+so an agent left waiting does not fill the phone. The server's own deduplication and collapse id, from
+YARD-4, cover a retry and a second computer.
+
+**Preferences.** A new switch, **Agents that need you**, on unless turned off. An older phone saves its
+preferences without it, and the server keeps what was stored; an older server never sends it, and the
+phone then hides the switch. A computer on an older server has its `agent` notices refused, and drops
+them, as it drops any notice refused for good.
+
+**The stand-in** now has a push provider that records each alert, and with
+`YARDSORT_STAND_IN_PUSHES` writes each to a file; its `agentAsks` and `pushes` commands are for the
+TypeScript side.
+
+**Tests that fail without it.** The core: a request queues one notice naming the workspace and the
+terminal, and not the run; a second before an answer is coalesced, and still is after another tool call finished; after the
+asking call ran a new one queues;
+the same file drained twice is one; nothing on a computer not signed in, or for a run that ended
+(`activity.rs`). The server, against memory and PostgreSQL: the sentence; the subject kept for `agent`
+only, never one that looks like a one-time code, and never in the push; agents turned off send nothing;
+an older phone's save keeps the switch (`tests/notifications.rs`). The phone: the route, and the notice
+screen opening the terminal (`notice-link.test.ts`, `app.test.tsx`).
+
+**Its smoke test**, `.yardsort/tests/remote-push.yaml`: the real `yardsort-host` on the stand-in; a
+pretend phone pairs and registers a token, then types into a shell on the host what Claude Code's hook
+runs when it asks (`support/agent-asks.sh`, through `ys --yardsort-hook claude`). One push; its notice
+opens the terminal that asked; a second request before an answer sends nothing; after the tool ran, a
+third is the second push; no push names the tool, the session or the project. Run on 2026-11-12 step
+by step by hand, as `ys test run` waits for the file to be approved in Yardsort: it passed, the first
+push 3 seconds after the request.
+
+**Still to do, by the owner.** Staging has the APNs key (`YARDSORT_APNS_*` are set; checked by name
+only), so it needs only a deploy of this slice, which needs your go-ahead.
+
+1. Approve `remote-push` in Yardsort, and run it (`ys test run remote-push`).
+2. After the deploy, on the iPhone with a TestFlight build of this slice: open **Settings →
+   Notifications**, allow notifications, and check **Agents that need you** is there and on.
+3. On the box, start Claude Code in a workspace with `ys` (`ys workspace new <project> push-check
+--harness claude`), and from the phone ask it to run a command it must ask about, such as
+   `touch push-check`. Lock the iPhone. Within about 20 seconds: **Yardsort: An agent needs you**, with
+   nothing of the command in it. Tap it: the phone opens that session's terminal, with Claude's question
+   on it. Take control and answer.
+4. Ask for two more commands without answering the first: one notification, not three.
+5. Android only once there is an FCM project and a phone (§5); until then R4's push check is
+   iPhone-only, and the record says so.

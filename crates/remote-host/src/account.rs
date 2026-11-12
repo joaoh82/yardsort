@@ -294,18 +294,23 @@ async fn flush_notices(home: &impl Home) {
             kind: notice.kind,
             run_id: notice.run_id.clone(),
             step_id: notice.step_id.clone(),
+            workspace_id: notice.workspace_id.clone(),
+            terminal_id: notice.terminal_id.clone(),
         };
         match client.submit_notice(&access, &submission).await {
             Ok(_) => {
                 let _ = yardsort_core::notify::settle(home.store(), &notice.event_key, true);
             }
             Err(ClientError::Remote(error))
-                if error.code == ErrorCode::InvalidRequest && submission.run_id.is_some() =>
+                if error.code == ErrorCode::InvalidRequest
+                    && (submission.run_id.is_some() || submission.workspace_id.is_some()) =>
             {
                 // An older server refuses the subject fields. Send the notice without them.
                 let bare = remote_proto::notify::NoticeSubmission {
                     run_id: None,
                     step_id: None,
+                    workspace_id: None,
+                    terminal_id: None,
                     ..submission
                 };
                 match client.submit_notice(&access, &bare).await {

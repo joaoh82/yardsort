@@ -29,6 +29,14 @@ export interface Offered {
   link: string;
 }
 
+/** What a phone would have been shown: fixed words and a link, nothing else. */
+export interface PushAlert {
+  title: string;
+  body: string;
+  deepLink: string;
+  category: string;
+}
+
 export interface StartOptions {
   /** Keep what the server and the host log, every level of Yardsort's own crates, for {@link StandIn.logs}. */
   logs?: boolean;
@@ -109,6 +117,10 @@ export class StandIn {
   conversation = (title: string) => this.#ask<null>({ op: "conversation", title });
   hostOffline = () => this.#ask<null>({ op: "hostOffline" });
   hostOnline = () => this.#ask<null>({ op: "hostOnline" });
+  /** The host says an agent on its program's terminal asked for a permission: the notice's id. */
+  agentAsks = () => this.#ask<string>({ op: "agentAsks" });
+  /** Each alert the server handed to the push provider, as the provider was given it. */
+  pushes = () => this.#ask<PushAlert[]>({ op: "pushes" });
 
   async stop(): Promise<void> {
     this.#process.stdin.end();

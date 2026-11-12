@@ -83,6 +83,18 @@ impl Served {
         Self::open(records, options, relay, redirects, None).await
     }
 
+    /// [`Self::start_allowing`], with `push` handed what would be sent to a phone.
+    #[allow(dead_code)]
+    pub async fn start_allowing_notifying(
+        records: impl Records + Clone + 'static,
+        options: http::Options,
+        relay: Relay,
+        redirects: Vec<String>,
+        push: Arc<dyn PushProvider>,
+    ) -> Self {
+        Self::open(records, options, relay, redirects, Some(push)).await
+    }
+
     async fn open(
         records: impl Records + Clone + 'static,
         options: http::Options,

@@ -47,6 +47,10 @@ pub fn copy(category: NoticeCategory, kind: &str) -> Option<(&'static str, &'sta
             "A workflow is waiting for approval",
             "Open it on this phone to approve.",
         ),
+        (NoticeCategory::Agent, "approval") => (
+            "An agent needs you",
+            "Open its terminal on this phone. It waits for you there.",
+        ),
         _ => return None,
     })
 }
@@ -58,6 +62,7 @@ pub fn wire_name(category: NoticeCategory) -> &'static str {
         NoticeCategory::Failure => "failure",
         NoticeCategory::DesktopUpdate => "desktopUpdate",
         NoticeCategory::Workflow => "workflow",
+        NoticeCategory::Agent => "agent",
     }
 }
 
@@ -68,6 +73,7 @@ fn category_of(name: &str) -> Option<NoticeCategory> {
         "failure" => NoticeCategory::Failure,
         "desktopUpdate" => NoticeCategory::DesktopUpdate,
         "workflow" => NoticeCategory::Workflow,
+        "agent" => NoticeCategory::Agent,
         _ => return None,
     })
 }
@@ -106,6 +112,7 @@ impl<R: Records + Clone + 'static> ControlService<R> {
             .map_err(unreadable)?;
         let id = uuid::Uuid::new_v4().to_string();
         let (run_id, step_id) = workflow_subject(&submission);
+        let (workspace_id, terminal_id) = agent_subject(&submission);
         let host_id = self
             .records
             .hosts(&caller.account)
@@ -129,6 +136,8 @@ impl<R: Records + Clone + 'static> ControlService<R> {
                     suppressed: !preferences.allows(submission.category),
                     run_id,
                     step_id,
+                    workspace_id,
+                    terminal_id,
                     host_id,
                 },
                 now,
@@ -254,6 +263,8 @@ impl<R: Records> ControlService<R> {
             body: page.body,
             run_id: page.run_id,
             step_id: page.step_id,
+            workspace_id: page.workspace_id,
+            terminal_id: page.terminal_id,
             host_id: page.host_id,
         })
     }
@@ -273,6 +284,24 @@ fn workflow_subject(submission: &NoticeSubmission) -> (Option<String>, Option<St
         return (None, None);
     }
     (Some(run.to_owned()), Some(step.to_owned()))
+}
+
+/// An agent notice may name its workspace and terminal, the computer's own ids, on the same
+/// terms as a workflow's run and step.
+fn agent_subject(submission: &NoticeSubmission) -> (Option<String>, Option<String>) {
+    if submission.category != NoticeCategory::Agent {
+        return (None, None);
+    }
+    let (Some(workspace), Some(terminal)) = (
+        submission.workspace_id.as_deref(),
+        submission.terminal_id.as_deref(),
+    ) else {
+        return (None, None);
+    };
+    if !subject_ok(workspace) || !subject_ok(terminal) {
+        return (None, None);
+    }
+    (Some(workspace.to_owned()), Some(terminal.to_owned()))
 }
 
 fn subject_ok(text: &str) -> bool {

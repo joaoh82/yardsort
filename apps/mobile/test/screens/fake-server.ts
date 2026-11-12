@@ -76,6 +76,8 @@ export class FakeServer {
   ];
   /** Every grant and request. */
   grants: Grant[] = [];
+  /** The notices a phone may open, by id, as the server's read answers them. */
+  notices = new Map<string, Record<string, unknown>>();
   /** What a pairing may redeem, by what it presents. Each goes once. */
   offers = new Set<string>(["ABCD2345"]);
   /** Every offer presented to this server, as it was presented. */
@@ -229,6 +231,16 @@ export class FakeServer {
       return Response.json({
         devices: this.devices.map((d) => ({ ...d, current: d.id === signedIn.id })),
       });
+    }
+    const notice = /^\/v1\/notifications\/([0-9a-f-]{36})$/.exec(url.pathname)?.[1];
+    if (method === "GET" && notice) {
+      const view = this.notices.get(notice);
+      return view
+        ? Response.json(view)
+        : Response.json(
+            { code: "not_found", message: "Not found.", retryable: false },
+            { status: 404 },
+          );
     }
     if (method === "GET" && url.pathname === "/v1/hosts") {
       return Response.json({ hosts: this.hosts });

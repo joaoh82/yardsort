@@ -239,6 +239,11 @@ With Remote on, this computer can tell your phone when something needs a look.
 - A workflow is waiting for a question or an approval. Open it on the phone to answer or
   approve, while this computer is online. The action is not sent, and is not sent later, when
   this computer is offline.
+- An agent needs you: it asked for a permission, such as Claude Code wanting to run a command.
+  Open it on the phone and it opens that agent's terminal, where you can take control and answer.
+  If the agent asks again before anyone answers, that is the same notification, not a new one.
+  Claude Code, OpenCode and Pi say when they ask; the notification says nothing of what was
+  asked. A computer with no screen, running `yardsort-host`, sends it too.
 
 The notification opens that item in the phone app. A workflow question or approval opens the
 decision. Installing a desktop update stays on this computer. A one-time code can still appear
@@ -257,7 +262,8 @@ workflow permissions until it states that it speaks them.
 On the phone, Settings → Notifications asks once for permission to send notifications. After
 that, the token is registered for every account this phone is signed in to, when the app starts
 and after a sign-in. The screen can
-mute everything for this account, or turn one of those categories off. A tap opens the item,
+mute everything for this account, or turn one of those categories off. **Agents that need
+you** shows only once the server knows that kind of notification. A tap opens the item,
 including when the app was not running. A notice that was skipped while a category was off is not
 sent later if you turn it back on. A new event after that is.
 

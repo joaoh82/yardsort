@@ -82,6 +82,11 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         "host_protocol",
         include_str!("../migrations/0008_host_protocol.sql"),
     ),
+    (
+        9,
+        "agent_notices",
+        include_str!("../migrations/0009_agent_notices.sql"),
+    ),
 ];
 
 /// Held while migrating, so instances starting together take turns. Any constant will do, as
@@ -1295,7 +1300,7 @@ impl Records for PgRecords {
             .client()
             .await?
             .query_opt(
-                "SELECT muted, task, review, failure, desktop_update, workflow
+                "SELECT muted, task, review, failure, desktop_update, workflow, agent
                  FROM notification_preferences WHERE account = $1",
                 &[&account.0],
             )
@@ -1309,6 +1314,7 @@ impl Records for PgRecords {
                 failure: row.get(3),
                 desktop_update: row.get(4),
                 workflow: row.get(5),
+                agent: Some(row.get(6)),
             },
             None => NotificationPreferences::default(),
         })
@@ -1323,15 +1329,16 @@ impl Records for PgRecords {
             .await?
             .execute(
                 "INSERT INTO notification_preferences
-                     (account, muted, task, review, failure, desktop_update, workflow)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                     (account, muted, task, review, failure, desktop_update, workflow, agent)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, TRUE))
                  ON CONFLICT (account) DO UPDATE SET
                      muted = EXCLUDED.muted,
                      task = EXCLUDED.task,
                      review = EXCLUDED.review,
                      failure = EXCLUDED.failure,
                      desktop_update = EXCLUDED.desktop_update,
-                     workflow = EXCLUDED.workflow",
+                     workflow = EXCLUDED.workflow,
+                     agent = COALESCE($8, notification_preferences.agent)",
                 &[
                     &account.0,
                     &preferences.muted,
@@ -1340,6 +1347,7 @@ impl Records for PgRecords {
                     &preferences.failure,
                     &preferences.desktop_update,
                     &preferences.workflow,
+                    &preferences.agent,
                 ],
             )
             .await
@@ -1377,8 +1385,8 @@ impl Records for PgRecords {
             .query_opt(
                 "INSERT INTO mobile_notices
                      (id, account, event_key, category, kind, title, body, created_at, expires_at, suppressed,
-                      run_id, step_id, host_id)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                      run_id, step_id, host_id, workspace_id, terminal_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                  ON CONFLICT (account, event_key) DO NOTHING
                  RETURNING id, suppressed",
                 &[
@@ -1395,6 +1403,8 @@ impl Records for PgRecords {
                     &notice.run_id,
                     &notice.step_id,
                     &notice.host_id,
+                    &notice.workspace_id,
+                    &notice.terminal_id,
                 ],
             )
             .await
@@ -1615,8 +1625,9 @@ impl Records for PgRecords {
             .client()
             .await?
             .query_opt(
-                "SELECT id, category, kind, title, body, run_id, step_id, host_id FROM mobile_notices
-                 WHERE id = $1 AND account = $2",
+                "SELECT id, category, kind, title, body, run_id, step_id, host_id, workspace_id,
+                        terminal_id
+                 FROM mobile_notices WHERE id = $1 AND account = $2",
                 &[&id, &account.0],
             )
             .await
@@ -1630,6 +1641,8 @@ impl Records for PgRecords {
             run_id: row.get(5),
             step_id: row.get(6),
             host_id: row.get(7),
+            workspace_id: row.get(8),
+            terminal_id: row.get(9),
         }))
     }
 }

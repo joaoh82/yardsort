@@ -39,6 +39,13 @@
 //! - `{"op":"removeHost"}`: take the host off the account.
 //! - `{"op":"hostOffline"}` and `{"op":"hostOnline"}`: the host drops its link to the relay, and
 //!   makes it again, as a computer asleep and awake does.
+//! - `{"op":"agentAsks"}`: the host tells the phone an agent on the program's terminal asked for a
+//!   permission, as the core does when an agent's hook says so. Answers with the notice's id.
+//! - `{"op":"pushes"}`: what the server handed to the push provider so far, each the alert's JSON
+//!   as APNs or FCM would have been given it. No phone is reached: the provider only records.
+//!
+//! With `YARDSORT_STAND_IN_PUSHES` naming a file, each of those alerts is also appended to it, one
+//! JSON line each, for a test that cannot send commands (35 §20).
 //!
 //! With `YARDSORT_STAND_IN_LOGS=1`, what the server and the host log goes to stderr: every level
 //! of Yardsort's own crates, and the server's default for the rest. The leak tests read it for what
@@ -63,6 +70,7 @@ use yardsort_core::git::Git;
 use yardsort_core::remote::serve::Context;
 use yardsort_core::remote::HostIdentity;
 use yardsort_core::store::Store;
+use yardsort_server::push::{alert_json, BoxFuture, PushMessage, PushOutcome, PushProvider};
 use yardsort_server::records::MemoryRecords;
 
 #[allow(dead_code)]
@@ -91,7 +99,8 @@ async fn main() -> Result<(), String> {
     // Every client of the stand-in comes from this machine's one address, so the limits per
     // address are raised past what a test run asks. The server's own tests hold it to them.
     let generous = 10_000;
-    let served = served::Served::start_allowing(
+    let pushes = Arc::new(Pushes::default());
+    let served = served::Served::start_allowing_notifying(
         MemoryRecords::default(),
         yardsort_server::http::Options {
             client_ip_header: None,
@@ -107,6 +116,7 @@ async fn main() -> Result<(), String> {
             .iter()
             .map(|r| (*r).to_owned())
             .collect(),
+        Arc::clone(&pushes) as Arc<dyn PushProvider>,
     )
     .await;
     let credentials = served
@@ -166,6 +176,7 @@ async fn main() -> Result<(), String> {
                     Ok(Value::Null)
                 }
             }
+            Ok(command) if command["op"] == "pushes" => Ok(json!(pushes.sent())),
             Ok(command) => obey(&served, &client, &shared, &host, &here, &command).await,
             Err(e) => Err(format!("not a command: {e}")),
         };
@@ -203,6 +214,36 @@ async fn connect(
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     Ok(connector)
+}
+
+/// The push provider: it records each alert and sends nothing anywhere.
+#[derive(Default)]
+struct Pushes(Mutex<Vec<Value>>);
+
+impl Pushes {
+    fn sent(&self) -> Vec<Value> {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+}
+
+impl PushProvider for Pushes {
+    fn send(&self, message: PushMessage) -> BoxFuture<'_, PushOutcome> {
+        let alert = alert_json(&message);
+        if let Ok(path) = std::env::var("YARDSORT_STAND_IN_PUSHES") {
+            use std::io::Write;
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+            {
+                let _ = writeln!(file, "{alert}");
+            }
+        }
+        if let Ok(value) = serde_json::from_str(&alert) {
+            self.0.lock().unwrap_or_else(|p| p.into_inner()).push(value);
+        }
+        Box::pin(async { PushOutcome::Sent })
+    }
 }
 
 fn say(line: Value) {
@@ -331,6 +372,26 @@ async fn obey(
                 .to_owned();
             served.idp.with(|s| s.subject = subject);
             Ok(Value::Null)
+        }
+        "agentAsks" => {
+            static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let receipt = client
+                .submit_notice(
+                    &shared.now().await?,
+                    &remote_proto::notify::NoticeSubmission {
+                        event_key: format!("agent:stand-in:{n}"),
+                        category: remote_proto::notify::NoticeCategory::Agent,
+                        kind: "approval".into(),
+                        run_id: None,
+                        step_id: None,
+                        workspace_id: Some(here.workspace.clone()),
+                        terminal_id: Some(here.program.0.clone()),
+                    },
+                )
+                .await
+                .map_err(fail)?;
+            Ok(json!(receipt.id))
         }
         "removeHost" => {
             client
