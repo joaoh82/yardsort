@@ -29,7 +29,7 @@ import { Body, Button, Card, Dot, Group, Problem, Row, Section, Waiting } from "
 const WAITING_POLL_MS = 2_000;
 
 export function Computers({ asked }: { asked: number }) {
-  const { accounts } = useApp();
+  const { accounts, diagnostics } = useApp();
   const { lost } = useSnapshot();
   const router = useRouter();
   const presence = useMemo(
@@ -37,8 +37,9 @@ export function Computers({ asked }: { asked: number }) {
       new Presence({
         open: (host) => accounts.openChannel(host),
         explain: (host) => accounts.explain(host),
+        diagnostics,
       }),
-    [accounts],
+    [accounts, diagnostics],
   );
   const reach = useSyncExternalStore(presence.subscribe, presence.getSnapshot);
   useNetworkChanges(presence);

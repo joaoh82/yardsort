@@ -4759,6 +4759,15 @@ impl Store {
         )? > 0)
     }
 
+    /// Replace a running run's context. A pull request found after the run was queued is written
+    /// here, so a restart still knows it. False when the run is no longer running.
+    pub fn set_workflow_run_context(&self, id: &str, context: &str) -> StoreResult<bool> {
+        Ok(self.conn().execute(
+            "UPDATE workflow_runs SET context = ?1 WHERE id = ?2 AND status = 'running'",
+            params![context, id],
+        )? > 0)
+    }
+
     /// Move a step on, only if its run is still running and the step is in one of `from`. False
     /// otherwise, and nothing changes: the run was cancelled, or someone else moved it first.
     /// `outputs` and `note`, when given, replace those columns. `clear_outcome` sets the

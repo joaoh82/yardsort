@@ -815,6 +815,7 @@ describe("a pull request a workspace tracks in another repository", () => {
         elsewhere: { repo: "demo/lib", clone: "/code/alpha/lib" },
       },
       pullRequestProblem: null,
+      pullRequestNote: null,
       needsOrigin: true,
       empty: [],
     });

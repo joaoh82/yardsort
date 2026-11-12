@@ -22,7 +22,7 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_specta::Event;
 use yardsort_core::forge::Gh;
 use yardsort_core::launch::{HarnessRequest, Launch};
-use yardsort_core::workflow::driver::{self, Conversation, Hands, PrAsk};
+use yardsort_core::workflow::driver::{self, Conversation, Hands, OpenPr, PrAsk};
 
 use crate::state::AppState;
 
@@ -425,6 +425,36 @@ impl Hands for AppHands<'_> {
             let (gh, root) = found?;
             gh.pr_posts_of(&root, &selector, driver::FORGE_LIMIT)
                 .map_err(|error| error.to_string())
+        })
+    }
+
+    fn open_pull_request(&self, workspace_id: &str) -> OpenPr {
+        let workspace = match self.state.store.workspace(workspace_id) {
+            Ok(Some(workspace)) => workspace,
+            Ok(None) => {
+                return Box::new(|| Err("The workspace is gone.".to_owned()));
+            }
+            Err(error) => {
+                let message = error.to_string();
+                return Box::new(move || Err(message));
+            }
+        };
+        let env = self.state.env();
+        Box::new(move || {
+            let git = yardsort_core::git::Git::new(&env).map_err(|error| error.to_string())?;
+            let found = yardsort_core::workflow::runs::pull_request_of(
+                Gh::find(&env).as_ref(),
+                &git,
+                &workspace,
+            )?;
+            Ok(found
+                .filter(|pr| pr.state == yardsort_core::forge::PullRequestState::Open)
+                .map(|pr| yardsort_core::workflow::runs::PrFacts {
+                    number: pr.number,
+                    url: pr.url,
+                    title: pr.title,
+                    elsewhere: None,
+                }))
         })
     }
 }

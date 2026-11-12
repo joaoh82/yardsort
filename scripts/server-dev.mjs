@@ -40,6 +40,8 @@ const docker = (args, options = {}) =>
 const IMAGE = "yardsort-server:dev";
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 const E2E_CONTAINER = "yardsort-server-e2e";
+/** What the end-to-end run types into the host's terminal through the relay, which no log may hold. */
+const TYPED = "e2e-typed-zz-marker";
 
 async function zitadel(token, method, path, body) {
   const response = await fetch(`${ISSUER}${path}`, {
@@ -227,6 +229,8 @@ async function e2e() {
       ["a bearer credential", "Bearer "],
       // Every credential, sign-in code and pairing secret the server issues starts so.
       ["a credential or pairing secret", "ys1."],
+      // What the pretend phone typed through the relay, and the host printed back (35 §19).
+      ["what was typed into a terminal", TYPED],
     ]) {
       if (secret && text.includes(secret)) {
         console.error(`The server's log holds ${what}.`);
@@ -344,7 +348,7 @@ async function pairAndRevoke(token) {
         phone = run(
           [
             ...["phone", PUBLIC_URL, code, "--zitadel-api", "--wait-for-revoke"],
-            ...["--relay", "--type", "e2e-typed"],
+            ...["--relay", "--type", TYPED],
           ],
           "[phone]",
         );
@@ -357,13 +361,13 @@ async function pairAndRevoke(token) {
     hosted.code === 0 &&
     phoned.code === 0 &&
     phoned.output.includes("watch and type on every project") &&
-    phoned.output.includes('Typed "e2e-typed"') &&
+    phoned.output.includes(`Typed "${TYPED}"`) &&
     phoned.output.includes("resumed from there") &&
     phoned.output.includes("numbered without a gap") &&
     phoned.output.includes("Activity: process.exited") &&
     phoned.output.includes("access was revoked") &&
     hosted.output.includes("The relay says a device asks to pair.") &&
-    hosted.output.includes('"got:e2e-typed"') &&
+    hosted.output.includes(`"got:${TYPED}"`) &&
     hosted.output.includes("still running when the link closed")
   );
 }

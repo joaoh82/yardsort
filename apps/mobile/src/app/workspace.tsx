@@ -53,7 +53,7 @@ export default function WorkspaceScreen() {
 function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }) {
   const { accounts } = useApp();
   const router = useRouter();
-  const { reach, channel } = useChannelTo(host);
+  const { reach, channel, lastSeenAt } = useChannelTo(host);
   const [seen, setSeen] = useState<ObservedWorkspace | null>(null);
   const [asked, setAsked] = useState(0);
   const [ended, setEnded] = useState(false);
@@ -136,7 +136,11 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
   return (
     <Screen refreshing={false} onRefresh={() => setAsked((n) => n + 1)}>
       {title}
-      <ReachLine reach={reach} lastSeenAt={null} also={detail.answer?.workspace.branch?.label} />
+      <ReachLine
+        reach={reach}
+        lastSeenAt={lastSeenAt}
+        also={detail.answer?.workspace.branch?.label}
+      />
       {!channel && !page && (
         <Body muted>Conversations and activity show when the computer can be reached.</Body>
       )}

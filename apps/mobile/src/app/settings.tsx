@@ -1,7 +1,10 @@
 // This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/** Appearance stays on this phone. Notification choices live on the account, on their own screen. */
+/**
+ * Appearance stays on this phone. Notification choices live on the account, on their own screen.
+ * Diagnostics are read here, then shared from their own screen.
+ */
 
 import { useRouter } from "expo-router";
 import { useSyncExternalStore } from "react";
@@ -43,6 +46,15 @@ export default function Settings() {
           ))}
         </Group>
         <Body muted>A terminal stays dark in all of them.</Body>
+      </Section>
+      <Section title="Diagnostics">
+        <Group>
+          <Row title="Diagnostics" onPress={() => router.push("/diagnostics")} />
+        </Group>
+        <Body muted>
+          What happened to this phone’s connections, to read and then share when something goes
+          wrong.
+        </Body>
       </Section>
     </Screen>
   );

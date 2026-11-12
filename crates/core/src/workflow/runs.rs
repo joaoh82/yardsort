@@ -2,9 +2,12 @@
 //!
 //! [`queue`] is the one door for a run, whoever asks — `ys` today, the app's Run dialog later.
 //! Everything that can be checked before anything happens is checked here, and a refusal writes
-//! nothing: the workflow must be ready, the workspace must be there, every input must be given
-//! and make sense, and a workflow that works with the pull request needs the workspace to have
-//! one open.
+//! nothing: the workflow must be ready, the workspace must be there, and every input must be
+//! given and make sense. A workflow about the workspace's own pull request asks `gh` before it
+//! is queued. A step that names `{{ pr.* }}` with no `wait_pr_activity` before it in the file
+//! still needs an open pull request then. One that only names the pull request after that wait
+//! can start without one: the run looks again. `gh` not answering is a refusal either way. A
+//! workflow about a pull request elsewhere still needs that pull request.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -60,7 +63,8 @@ pub trait Look {
 /// `{{ pr.… }}` and `session: origin` mean these for as long as it runs.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Facts {
-    /// The workspace's open pull request when the run was queued.
+    /// The workspace's open pull request, when one was known. Empty until a later look finds
+    /// one, for a run that started before the branch had one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr: Option<PrFacts>,
     /// The terminal id of the workspace's own agent when the run started: the session
@@ -264,27 +268,30 @@ pub fn queue(
         (false, None) => {}
     }
     if needs_pull_request(workflow) && !elsewhere {
+        // Ask now, so a forge that cannot be queried refuses before a row is written. A step
+        // that names the pull request before any wait for it still needs one open. A workflow
+        // whose `{{ pr.* }}` steps all come after a `wait_pr_activity` can start without one:
+        // the driver looks again when that wait runs.
         let found = look
             .pull_request(&workspace)
             .map_err(|why| IpcError::new("pull_request_unknown", why))?;
-        let pr = found
-            .filter(|pr| pr.state == crate::forge::PullRequestState::Open)
-            .ok_or_else(|| {
-                IpcError::new(
-                    "pull_request_missing",
-                    format!(
-                        "`{}` works with the workspace's pull request, and `{}` has no open one. \
-                         Open one first.",
-                        workflow.id, workspace.name
-                    ),
-                )
-            })?;
-        facts.pr = Some(PrFacts {
-            number: pr.number,
-            url: pr.url,
-            title: pr.title,
-            elsewhere: None,
-        });
+        if let Some(pr) = found.filter(|pr| pr.state == crate::forge::PullRequestState::Open) {
+            facts.pr = Some(PrFacts {
+                number: pr.number,
+                url: pr.url,
+                title: pr.title,
+                elsewhere: None,
+            });
+        } else if !defers_pull_request(workflow) {
+            return Err(IpcError::new(
+                "pull_request_missing",
+                format!(
+                    "`{}` works with the workspace's pull request, and `{}` has no open one. \
+                     Open one first.",
+                    workflow.id, workspace.name
+                ),
+            ));
+        }
     }
 
     let id = uuid::Uuid::new_v4().to_string();
@@ -427,7 +434,7 @@ pub fn variables(workflow: &Workflow) -> std::collections::BTreeSet<String> {
     workflow
         .steps
         .iter()
-        .flat_map(|step| texts(&step.action))
+        .flat_map(|step| action_texts(&step.action))
         .flat_map(template::placeholders)
         .map(|var| var.path.join("."))
         .collect()
@@ -439,7 +446,7 @@ pub fn variables(workflow: &Workflow) -> std::collections::BTreeSet<String> {
 /// whose steps use `pr.clone` works in the project's nested clone of it, and there is none.
 pub fn tracked_problem(workflow: &Workflow, pr: &PrFacts) -> Option<IpcError> {
     let uses_clone = workflow.steps.iter().any(|step| {
-        texts(&step.action)
+        action_texts(&step.action)
             .iter()
             .flat_map(|text| template::placeholders(text))
             .any(|var| var.path.iter().map(String::as_str).eq(["pr", "clone"]))
@@ -458,13 +465,54 @@ pub fn tracked_problem(workflow: &Workflow, pr: &PrFacts) -> Option<IpcError> {
 }
 
 pub fn needs_pull_request(workflow: &Workflow) -> bool {
-    workflow.steps.iter().any(|step| {
-        matches!(step.action, Action::WaitPrActivity { .. })
-            || texts(&step.action)
-                .iter()
-                .flat_map(|text| template::placeholders(text))
-                .any(|var| var.path.first().is_some_and(|n| n == "pr"))
-    })
+    workflow
+        .steps
+        .iter()
+        .any(|step| waits_for_pull_request(&step.action) || names_pull_request(&step.action))
+}
+
+/// The run can start before the branch has a pull request. Every step that renders `{{ pr.* }}`
+/// has a [`Action::WaitPrActivity`] before it in the file, and that wait looks the pull request
+/// up. A step that names the pull request with no such wait before it does not defer: the run
+/// needs an open one when it is queued.
+pub fn defers_pull_request(workflow: &Workflow) -> bool {
+    let mut seen_wait = false;
+    for step in &workflow.steps {
+        if names_pull_request(&step.action) && !seen_wait {
+            return false;
+        }
+        if waits_for_pull_request(&step.action) {
+            seen_wait = true;
+        }
+    }
+    true
+}
+
+/// What the Run dialog shows when the branch has no open pull request: a note when the run can
+/// open one later, or the problem that blocks Run when a step names `{{ pr.* }}` first.
+pub fn missing_pull_request_preview(
+    workflow: &Workflow,
+    workspace_name: &str,
+) -> (Option<String>, Option<String>) {
+    if defers_pull_request(workflow) {
+        (None, Some("Will use the PR the run opens.".to_owned()))
+    } else {
+        (
+            Some(format!("`{workspace_name}` has no open pull request.")),
+            None,
+        )
+    }
+}
+
+fn waits_for_pull_request(action: &Action) -> bool {
+    matches!(action, Action::WaitPrActivity { .. })
+}
+
+fn names_pull_request(action: &Action) -> bool {
+    action_texts(action)
+        .iter()
+        .flat_map(|text| template::placeholders(text))
+        .any(|var| var.path.first().is_some_and(|name| name == "pr"))
 }
 
 /// Whether a run of `workflow` talks to the workspace's own agent (`session: origin`).
@@ -484,7 +532,7 @@ pub fn needs_origin(workflow: &Workflow) -> bool {
 }
 
 /// Every piece of template text a step has.
-fn texts(action: &Action) -> Vec<&str> {
+pub(crate) fn action_texts(action: &Action) -> Vec<&str> {
     match action {
         Action::StartSession {
             harness,

@@ -1052,6 +1052,13 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       into the field; Esc, Ctrl and Alt combinations, Shift-Tab and the arrows go to the terminal,
       the arrows, Tab and Backspace on their own only while the field is empty. Its run on the
       Android emulator passed, and found a hardware Return sending the field twice, fixed.
+      Slice 10 was built the same day ([35 §19](35-remote-r4-r5.md#19--what-the-tenth-slice-adds)):
+      a leak test in `just check` that types, prints, titles and notes markers through three phones
+      on the stand-in and finds none in its logs, the phones' caches or diagnostics; the server's
+      end-to-end run checking its log for what was typed; a database error no longer logging the row
+      it was about, the one leak found. Every screen inside a computer now says when an offline one
+      was last seen, and a terminal no longer says its program runs on. **Settings → Diagnostics**
+      on the phone, read in full before it is shared.
       Slice 12 was added on 2026-11-08 at the owner's request: the slim image and a full one, with
       toolchains, `gh` and the harnesses whose licence allows it, published to the GitHub Container
       Registry on each release beside the tarballs; the other harnesses installed by the operator
