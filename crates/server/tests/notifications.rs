@@ -93,6 +93,29 @@ async fn await_attempts(push: &RecordingProvider, n: usize) {
     panic!("attempts {} of {n}", push.attempts());
 }
 
+/// Wait until every delivery started in the background has finished: at least `n` attempts, and
+/// then none for a while. Each submission starts its own delivery, which tries every queued notice,
+/// so the `n`th attempt can come while others are still running — and one of them still holding a
+/// notice, or sending it, when the test goes on.
+async fn await_quiet(push: &RecordingProvider, n: usize) {
+    await_attempts(push, n).await;
+    let mut last = push.attempts();
+    let mut still = 0;
+    for _ in 0..200 {
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        let now = push.attempts();
+        if now == last {
+            still += 1;
+            if still == 20 {
+                return;
+            }
+        } else {
+            (last, still) = (now, 0);
+        }
+    }
+    panic!("deliveries still running after {last} attempts");
+}
+
 async fn world(records: impl Records + Clone + 'static, outcome: PushOutcome) -> World {
     let push = Arc::new(RecordingProvider::new(outcome));
     let served = Served::start_notifying(records, Arc::clone(&push) as Arc<dyn PushProvider>).await;
@@ -402,8 +425,7 @@ async fn a_reconnect_sends_the_cap_and_drops_the_rest(records: impl Records + Cl
         receipts.push(receipt["id"].as_str().unwrap().to_owned());
         tokio::time::sleep(std::time::Duration::from_millis(2)).await;
     }
-    await_attempts(&world.push, 20).await;
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    await_quiet(&world.push, 20).await;
     assert!(world.push.sent().is_empty());
     world.push.set_outcome(PushOutcome::Sent);
     let flushed = world
