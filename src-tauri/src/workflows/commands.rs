@@ -68,6 +68,8 @@ pub struct WorkflowRun {
     pub ended_at: Option<f64>,
     /// Why this run is blocked on a person, as in `your approval`. Absent when it is not.
     pub blocked_on: Option<String>,
+    /// The pull requests it opened, its own repository's first. See `workflow::made`.
+    pub pull_requests_made: Vec<yardsort_core::workflow::made::MadePullRequest>,
 }
 
 /// One step of a run.
@@ -150,6 +152,7 @@ fn run_from(row: WorkflowRunRow) -> WorkflowRun {
         started_at: row.started_at.map(|t| t as f64),
         ended_at: row.ended_at.map(|t| t as f64),
         blocked_on: None,
+        pull_requests_made: Vec::new(),
     }
 }
 
@@ -376,8 +379,11 @@ pub async fn workflow_runs(
                 let blocked_on = workflow::waits::label_for(&state.store, &row.id, &open)
                     .ok()
                     .flatten();
+                let made =
+                    workflow::made::pull_requests_made(&state.store, &row).unwrap_or_default();
                 let mut run = run_from(row);
                 run.blocked_on = blocked_on;
+                run.pull_requests_made = made;
                 run
             })
             .collect())

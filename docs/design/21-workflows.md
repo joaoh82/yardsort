@@ -998,3 +998,27 @@ the prompt.
 
 A workflow file from before this has no `produces` or `consumes`, and still parses. A run
 saved before the table still opens, and lists no artifacts. The schema version stays 1.
+
+## What a run made
+
+_Built 2026-11-13._ A run that opened pull requests did not say so: the owner's software-factory
+run opened two, in two repositories, and they had to be found on GitHub. A run now lists them
+(`workflow::made`), without reading anything an agent printed.
+
+- **The project's own repository.** Each time the app reads a project's pull requests
+  (`publish::commands::look`, the same place `outcomes::observe` is called), every run asked
+  for in that project in the last week is matched: a pull request on its workspace's branch
+  opened within its life counts. The life is `created_at − 2 min` to `ended_at + 15 min`, open
+  while the run is going; the slack before is clock skew, the slack after is an agent still
+  pushing as the last wait ends. A match is kept in `workflow_run_pull_requests` (migration
+  `0040`), so `ys` and the window read it without the network, and its title and state follow
+  the forge at each later look. A pull request with no opening time is not matched.
+- **Other repositories.** The workspace's tracked pull requests (doc 38) whose tracking time
+  falls within the same life, read at the time of asking. Not copied: untracking one removes it
+  from the run too, and their titles are the Pull requests view's to fetch.
+- A continued run keeps one life, from when it was asked for to when it last ended.
+
+`WorkflowRun.pullRequestsMade` carries them to the window: counted on the run's row and the
+Summary row, listed on the summary. `ys workflow runs` has a `PRS` column and `pullRequests` in
+`--json`; `--run` prints them under **Pull requests**. The phone's notices are left as they
+are: they carry no run content, by design, and the phone's run view is not changed here.

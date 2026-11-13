@@ -79,7 +79,8 @@ A dot on **Runs** says the newest run failed (red) or is going (amber). **Schedu
 - **The detail**, across the rest of the window: the run's summary, or the step you picked. A
   run opens on the step waiting for you, else on the step that failed, else on its summary. The
   summary has the workflow, the workspace, where the run was asked from, its times, how many steps
-  ended each way, its id, and the inputs it was given. A step has its times, its note — what it
+  ended each way, its id, the pull requests it opened, and the inputs it was given. See
+  [What a run opened](#what-a-run-opened). A step has its times, its note — what it
   did, or why it failed or was skipped — the approval or the question it is waiting on, the
   decision made on it, and each artifact it left, formatted when it is Markdown.
 
@@ -317,6 +318,33 @@ What each step does while it runs:
 A step runs only when every step in its `needs` succeeded. When one fails, the steps that need it
 are skipped, and the run fails with that step's reason. A gate that fails also skips the steps
 that do not need it. See [A test that must pass](#a-test-that-must-pass).
+
+### What a run opened
+
+A run that opens pull requests lists them, so you do not have to look for them on GitHub. They
+are on the run's **Summary**, each with its state, **Open on GitHub**, and for one in the
+project's own repository **Pull requests view**. The run's row in the list says how many, such
+as **2 PRs**. `ys workflow runs` has a **PRS** column, and `ys workflow runs --run <id>` lists
+each one under **Pull requests**; `--json` has them as `pullRequests`, with `repo`, `number`,
+`url`, `title`, `state`, `draft` and `openedAt`.
+
+A pull request counts as the run's when its workspace has it and it was opened while the run
+was going — from two minutes before the run was asked for to fifteen minutes after it last
+ended, so one an agent is still opening as the last step ends counts too. Nothing is read from
+what an agent printed. Two kinds:
+
+- **In the project's own repository**, opened on the workspace's branch. Yardsort notices these
+  when it reads the project's pull requests, which it does about once a minute while it is open,
+  and as its window comes into focus. A run's list can take up to a minute to show a new one.
+  Its title and state follow GitHub's from then on. A pull request GitHub gives no opening time
+  for is not counted.
+- **In another repository**, one the workspace [tracks](commits-and-pull-requests.md#pull-requests-in-other-repositories) — opened in a nested
+  clone, and tracked by the agent's hook, by `ys pr track`, or by **Track pull request…** — while
+  the run was going. These are listed by repository and number, without a title or a state;
+  the Pull requests view and `ys pr tracked` have those.
+
+A run that is continued has one life, from when it was asked for to when it last ended: a pull
+request opened between the failure and the continue is the run's too.
 
 ### Continuing a failed run
 

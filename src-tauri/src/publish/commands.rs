@@ -47,6 +47,15 @@ fn look(state: &AppState, project_id: &str, refresh: bool, full: bool) -> Projec
         });
     // Every look at the forge is also a look at what became of the project's attempts.
     crate::outcomes::observe(state, project_id, &found.pull_requests);
+    // And at which of its workflow runs opened which. Bookkeeping: never an error here.
+    if let Err(error) = yardsort_core::workflow::made::observe_pull_requests(
+        &state.store,
+        project_id,
+        &found.pull_requests,
+        crate::store::now_ms(),
+    ) {
+        eprintln!("workflows: could not match pull requests to runs in {project_id}: {error}");
+    }
     found
 }
 

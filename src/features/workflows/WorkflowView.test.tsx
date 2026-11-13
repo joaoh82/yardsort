@@ -358,6 +358,7 @@ describe("WorkflowView", () => {
         error: "Step `tell` failed: no way",
         inputs: {},
         pullRequest: null,
+        pullRequestsMade: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -425,6 +426,7 @@ describe("WorkflowView", () => {
       error: "Step `verify` failed: The test run did not end within 30m.",
       inputs: {},
       pullRequest: null,
+      pullRequestsMade: [],
       createdAt: Date.now(),
       startedAt: null,
       endedAt: null,
@@ -473,6 +475,7 @@ describe("WorkflowView", () => {
       error: null,
       inputs: { task: "Fix the login" },
       pullRequest: null,
+      pullRequestsMade: [],
       createdAt: Date.now(),
       startedAt: null,
       endedAt: null,
@@ -500,6 +503,60 @@ describe("WorkflowView", () => {
     expect(screen.queryByLabelText("Workflow file")).toBeNull();
   });
 
+  it("lists the pull requests a run opened on its summary, and counts them on its row", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    core.workflowRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "demo",
+        workflowName: "Demo",
+        workspaceId: "w",
+        workspaceName: "fix-login",
+        status: "running",
+        requestedBy: "app",
+        error: null,
+        inputs: {},
+        pullRequest: null,
+        pullRequestsMade: [
+          {
+            repo: null,
+            number: 12,
+            url: "https://github.com/o/app/pull/12",
+            title: "Analytics on the public site",
+            state: "open",
+            draft: false,
+            openedAt: Date.now(),
+          },
+          {
+            repo: "o/cloud",
+            number: 41,
+            url: "https://github.com/o/cloud/pull/41",
+            title: null,
+            state: null,
+            draft: false,
+            openedAt: Date.now(),
+          },
+        ],
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+      },
+    ]);
+    core.workflowRunSteps.mockResolvedValue([]);
+    render(<WorkflowView workflowId="demo" />);
+    const runs = await screen.findByRole("region", { name: "Runs" });
+    expect(
+      await within(runs).findByRole("button", { name: "Run in fix-login, running" }),
+    ).toHaveTextContent("2 PRs");
+    const made = within(runs).getByRole("region", { name: "Pull requests" });
+    expect(within(made).getByText("Analytics on the public site")).toBeInTheDocument();
+    expect(within(made).getByText("#12")).toBeInTheDocument();
+    expect(within(made).getByText("o/cloud#41")).toBeInTheDocument();
+    expect(within(made).getAllByRole("button", { name: "Open on GitHub" })).toHaveLength(2);
+    // Only the project's own can be found in the Pull requests view.
+    expect(within(made).getAllByRole("button", { name: "Pull requests view" })).toHaveLength(1);
+  });
+
   it("folds a long run's succeeded steps until asked to show them", async () => {
     useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
     core.workflowRuns.mockResolvedValue([
@@ -514,6 +571,7 @@ describe("WorkflowView", () => {
         error: "Step `verify` failed: it did not end.",
         inputs: {},
         pullRequest: null,
+        pullRequestsMade: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -561,6 +619,7 @@ describe("WorkflowView", () => {
         error: "Step `tell` failed: no way",
         inputs: {},
         pullRequest: null,
+        pullRequestsMade: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -617,6 +676,7 @@ describe("WorkflowView", () => {
         error: null,
         inputs: {},
         pullRequest: null,
+        pullRequestsMade: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -664,6 +724,7 @@ describe("WorkflowView", () => {
         error: null,
         inputs: {},
         pullRequest: null,
+        pullRequestsMade: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -737,6 +798,7 @@ describe("WorkflowView", () => {
         error: null,
         inputs: {},
         pullRequest: null,
+        pullRequestsMade: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -823,6 +885,7 @@ describe("WorkflowView", () => {
         error: null,
         inputs: {},
         pullRequest: null,
+        pullRequestsMade: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -891,6 +954,7 @@ describe("WorkflowView", () => {
         error: null,
         inputs: {},
         pullRequest: null,
+        pullRequestsMade: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -968,6 +1032,7 @@ describe("WorkflowView", () => {
         error: null,
         inputs: {},
         pullRequest: null,
+        pullRequestsMade: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
