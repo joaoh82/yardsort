@@ -596,6 +596,11 @@ export const commands = {
 	/**  Cancel a run. Agents it started keep running. */
 	workflowCancel: (runId: string) => typedError<boolean, IpcError>(__TAURI_INVOKE("workflow_cancel", { runId })),
 	/**
+	 *  Take a failed run up again from the step that failed. The driver starts that step on its
+	 *  next tick, and the steps that had succeeded are kept.
+	 */
+	workflowContinue: (runId: string) => typedError<null, IpcError>(__TAURI_INVOKE("workflow_continue", { runId })),
+	/**
 	 *  Record an approval. The driver applies it on its next tick. Only the person at this
 	 *  window calls this. The Floor Manager's `ys` is refused before it can.
 	 */

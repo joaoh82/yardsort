@@ -592,6 +592,7 @@ ys workflow ask --question "What should the timeout be?"   # from the workflow's
 ys workflow summary --text "The timeout should be 30 seconds."
 ys workflow answer 3f2a9c1e discover --text "30 seconds"    # you, not the agent; asks for the code
 ys workflow cancel 3f2a9c1e      # stop a run; agents it started keep running
+ys workflow continue 3f2a9c1e    # take a failed run up again from the step that failed
 ```
 
 `ask` and `summary` are how an agent in a clarifying step talks to you. They find the
@@ -626,6 +627,12 @@ GitHub CLI (`gh`), logged in, and an open pull request for the workspace's branc
 looks again. `gh` not answering refuses either, and a workflow about a pull request elsewhere
 still needs that one. A run id can be shortened to its first characters, as `runs` prints it.
 `--json` works as everywhere.
+
+`continue` takes a failed run up again: the step that failed and the steps skipped after it
+run again, and the steps that succeeded are kept. It prints the step it continues from, and
+with `--json` the run and every step that will run again. Like `run`, it needs Yardsort open.
+Any run that has not failed is refused, and so is one whose workflow is already running in
+that workspace. See [Continuing a failed run](workflows.md#continuing-a-failed-run).
 
 `approve`, `reject` and `request-changes` record your decision on a step that is waiting
 for approval. Leave `--code` out and `ys` asks at the terminal without echoing, when both

@@ -19,7 +19,7 @@ use super::{find, template, Action, InputKind, SessionRef, Workflow};
 use crate::error::{IpcError, IpcResult};
 use crate::forge::PullRequest;
 use crate::git::Git;
-use crate::store::{NewWorkflowRun, ProjectRow, Queued, Store, WorkspaceRow};
+use crate::store::{Continued, NewWorkflowRun, ProjectRow, Queued, Store, WorkspaceRow};
 
 /// What queuing has to find out from outside: whoever asks for a run answers these.
 pub trait Look {
@@ -326,6 +326,74 @@ pub fn queue(
             ),
         )),
     }
+}
+
+/// Take a failed run up again from the step that failed, and return the steps that will run
+/// again, in file order.
+///
+/// The run keeps its id, its inputs, the file as it was when it was asked for, and everything
+/// its finished steps left: their outputs, their artifacts, the sessions they started. The
+/// step that failed and the steps skipped after it go back to pending, and the driver starts
+/// them as it would have. A refusal changes nothing: only a failed run continues, its
+/// workspace must still be there, and the same workflow must not be running in it already.
+///
+/// Whoever asks is there to watch it, so a run a schedule started stops being unattended: a
+/// smoke test that waits for a person waits now, where it failed at once before.
+pub fn continue_failed(store: &Store, run_id: &str) -> IpcResult<Vec<String>> {
+    let missing = || IpcError::new("workflow_run_not_found", "That run is not there.");
+    let run = store.workflow_run(run_id)?.ok_or_else(missing)?;
+    let short = crate::memory::short_id(&run.id);
+    if run.status != "failed" {
+        return Err(not_failed(short, &run.status));
+    }
+    let workspace = match run.workspace_id.as_deref() {
+        Some(id) => store.workspace(id)?.filter(|w| !w.forgotten),
+        None => None,
+    };
+    let Some(workspace) = workspace else {
+        return Err(IpcError::new(
+            "workspace_not_found",
+            format!(
+                "`{}`, the workspace run {short} ran in, is gone, so it cannot continue.",
+                run.workspace_name
+            ),
+        ));
+    };
+    if workspace.archived {
+        return Err(IpcError::new(
+            "workspace_archived",
+            format!(
+                "`{}` is archived. Restore it before continuing a run in it.",
+                workspace.name
+            ),
+        ));
+    }
+    let mut facts = Facts::parse(&run.context);
+    let context = facts.unattended.then(|| {
+        facts.unattended = false;
+        facts.to_json()
+    });
+    match store.continue_workflow_run(&run.id, context.as_deref())? {
+        Continued::Continued(steps) => Ok(steps),
+        Continued::Missing => Err(missing()),
+        Continued::NotFailed(status) => Err(not_failed(short, &status)),
+        Continued::AlreadyRunning(other) => Err(IpcError::new(
+            "workflow_already_running",
+            format!(
+                "`{}` is already running in `{}` (run {}). Wait for it, or cancel it.",
+                run.workflow_id,
+                workspace.name,
+                crate::memory::short_id(&other)
+            ),
+        )),
+    }
+}
+
+fn not_failed(short: &str, status: &str) -> IpcError {
+    IpcError::new(
+        "workflow_run_not_failed",
+        format!("Run {short} is {status}. Only a failed run can be continued."),
+    )
 }
 
 /// The open pull request for the branch `workspace` has checked out: the branch as git says,

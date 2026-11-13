@@ -244,6 +244,7 @@ fn effect(command: &Command) -> Action {
             | workflow::Command::Save { .. }
             | workflow::Command::Run { .. }
             | workflow::Command::Cancel { .. }
+            | workflow::Command::Continue { .. }
             | workflow::Command::Ask { .. }
             | workflow::Command::Summary { .. } => Action::Act,
             workflow::Command::Approve { .. }

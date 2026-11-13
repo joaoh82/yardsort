@@ -612,6 +612,19 @@ pub enum Queued {
     AlreadyRunning(String),
 }
 
+/// Whether a failed run was taken up again, or why not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Continued {
+    /// It is running again. The steps that went back to pending, in file order.
+    Continued(Vec<String>),
+    /// There is no such run.
+    Missing,
+    /// It is not a failed run. Its status.
+    NotFailed(String),
+    /// The same workflow is queued or running in that workspace. That run's id.
+    AlreadyRunning(String),
+}
+
 /// What a step moves to. Terminal states set its end time; the others its start time, once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepStatus {
@@ -5245,6 +5258,105 @@ impl Store {
         }
         tx.commit()?;
         Ok(changed)
+    }
+
+    /// Take a failed run up again from where it stopped. The run goes back to `running`, and
+    /// every step that did not succeed goes back to `pending`: the one that failed, and the
+    /// ones skipped or cancelled because of it. Steps that succeeded keep what they left.
+    ///
+    /// A step that goes back is a new attempt, as after a rewind: its decision, its question
+    /// and its `changes-*` and `failure-*` notes are archived and removed, its attempt count
+    /// stays, and a smoke test it was still waiting on is cancelled. `context`, when given,
+    /// replaces what the run knew. One transaction, so the run is never running with its
+    /// failed step still failed, and "one at a time" holds as it does for a new run.
+    pub fn continue_workflow_run(&self, id: &str, context: Option<&str>) -> StoreResult<Continued> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let now = now_ms();
+        let run: Option<(String, String, Option<String>)> = tx
+            .query_row(
+                "SELECT status, workflow_id, workspace_id FROM workflow_runs WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        let Some((status, workflow_id, workspace_id)) = run else {
+            return Ok(Continued::Missing);
+        };
+        if status != "failed" {
+            return Ok(Continued::NotFailed(status));
+        }
+        let other: Option<String> = tx
+            .query_row(
+                "SELECT id FROM workflow_runs WHERE workflow_id = ?1 AND workspace_id IS ?2
+                   AND status IN ('queued', 'running')",
+                params![workflow_id, workspace_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(other) = other {
+            return Ok(Continued::AlreadyRunning(other));
+        }
+        let steps: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT step_id FROM workflow_step_runs
+                 WHERE run_id = ?1 AND status IN ('failed', 'skipped', 'cancelled')
+                 ORDER BY position",
+            )?;
+            let rows = stmt.query_map([id], |row| row.get(0))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        // Read before the updates below clear the outputs that name the test.
+        let tests = test_runs_a_rewind_clears(&tx, id, &steps)?;
+        for step in &steps {
+            tx.execute(
+                "UPDATE workflow_step_runs
+                 SET status = 'pending',
+                     started_at = NULL,
+                     ended_at = NULL,
+                     outputs = '{}',
+                     note = NULL,
+                     outcome = NULL
+                 WHERE run_id = ?1 AND step_id = ?2",
+                params![id, step],
+            )?;
+            retire_step_feedback(&tx, id, step)?;
+            archive_approval(&tx, id, step, now)?;
+            tx.execute(
+                "DELETE FROM workflow_approval_decisions WHERE run_id = ?1 AND step_id = ?2",
+                params![id, step],
+            )?;
+            tx.execute(
+                "DELETE FROM workflow_waits WHERE run_id = ?1 AND step_id = ?2",
+                params![id, step],
+            )?;
+            archive_clarification(&tx, id, step, now)?;
+            tx.execute(
+                "DELETE FROM workflow_clarification_rounds WHERE run_id = ?1 AND step_id = ?2",
+                params![id, step],
+            )?;
+            tx.execute(
+                "DELETE FROM workflow_clarification_summaries WHERE run_id = ?1 AND step_id = ?2",
+                params![id, step],
+            )?;
+        }
+        for test_run in &tests {
+            smoke::cancel_test_in(
+                &tx,
+                test_run,
+                "The workflow is running this step again.",
+                now,
+            )?;
+        }
+        tx.execute(
+            "UPDATE workflow_runs
+             SET status = 'running', error = NULL, ended_at = NULL,
+                 context = COALESCE(?2, context)
+             WHERE id = ?1 AND status = 'failed'",
+            params![id, context],
+        )?;
+        tx.commit()?;
+        Ok(Continued::Continued(steps))
     }
 
     /// This machine as a host, when Remote is on.
