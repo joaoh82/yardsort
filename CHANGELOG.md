@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.32.0
 
 - **Continue a failed workflow run from the step that failed.** A run that failed part of the
   way through no longer has to start over: **Continue from the failed step** on the run, or
