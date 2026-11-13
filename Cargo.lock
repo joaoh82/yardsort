@@ -4429,7 +4429,7 @@ dependencies = [
 
 [[package]]
 name = "pty-host"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "portable-pty",
  "serde",
@@ -4441,7 +4441,7 @@ dependencies = [
 
 [[package]]
 name = "pty-ipc"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "interprocess",
  "libc",
@@ -4667,7 +4667,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "remote-client"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -4688,7 +4688,7 @@ dependencies = [
 
 [[package]]
 name = "remote-host"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "axum",
  "futures-util",
@@ -4704,7 +4704,7 @@ dependencies = [
 
 [[package]]
 name = "remote-proto"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -8092,7 +8092,7 @@ dependencies = [
 
 [[package]]
 name = "yardsort"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "dunce",
  "ignore",
@@ -8135,7 +8135,7 @@ dependencies = [
 
 [[package]]
 name = "yardsort-cli"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "clap",
  "crossterm",
@@ -8150,7 +8150,7 @@ dependencies = [
 
 [[package]]
 name = "yardsort-core"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -8185,7 +8185,7 @@ dependencies = [
 
 [[package]]
 name = "yardsort-host"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "clap",
  "libc",
@@ -8204,7 +8204,7 @@ dependencies = [
 
 [[package]]
 name = "yardsort-server"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
