@@ -303,6 +303,21 @@ pub fn queue_in_new_workspace(
     workspaces: &crate::workspaces::Workspaces<'_>,
     new: &NewWorkspace<'_>,
 ) -> IpcResult<(String, WorkspaceRow)> {
+    queue_in_new_workspace_noting(store, data_dir, request, look, workspaces, new, &|_| {})
+}
+
+/// [`queue_in_new_workspace`], telling `made` about the workspace the moment it has a row.
+/// That is before the project's setup runs in it, so the caller knows which workspace this
+/// call made even when it returns an error with the workspace kept.
+pub fn queue_in_new_workspace_noting(
+    store: &Store,
+    data_dir: &Path,
+    request: &Request<'_>,
+    look: &dyn Look,
+    workspaces: &crate::workspaces::Workspaces<'_>,
+    new: &NewWorkspace<'_>,
+    made: &dyn Fn(&WorkspaceRow),
+) -> IpcResult<(String, WorkspaceRow)> {
     let entry = runnable(data_dir, request.workflow_id)?;
     let workflow = entry.workflow.as_ref().expect("runnable has a workflow");
     if request.tracked.is_some() {
@@ -325,7 +340,7 @@ pub fn queue_in_new_workspace(
         None => crate::workspaces::naming::slugify_name(&workflow.id)
             .unwrap_or_else(|| workflow.id.clone()),
     };
-    let workspace = workspaces.create_named(new.project_id, new.base, &name)?;
+    let workspace = workspaces.create_named_noting(new.project_id, new.base, &name, made)?;
     let facts = Facts {
         unattended: request.unattended,
         origin_record: request.origin_record.map(str::to_owned),

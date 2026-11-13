@@ -323,19 +323,6 @@ fn ask_in_new_workspace(
             "Only a workflow can run in a workspace made for it.",
         ));
     }
-    let there = store.schedule_workspaces(&schedule.id)?;
-    if there.len() as i64 >= schedule.keep {
-        let names: Vec<String> = there.iter().map(|name| format!("`{name}`")).collect();
-        return Err(IpcError::new(
-            "schedule_workspaces_full",
-            format!(
-                "{} of the workspaces it made are still there, the most it keeps: {}. Archive \
-                 or delete one and it runs again.",
-                there.len(),
-                names.join(", ")
-            ),
-        ));
-    }
     if !attended {
         let workflow = crate::workflow::find(data_dir, &schedule.target_id);
         let workflow = workflow.as_ref().and_then(|entry| entry.workflow.as_ref());
@@ -350,16 +337,15 @@ fn ask_in_new_workspace(
     }
     let inputs: BTreeMap<String, String> =
         serde_json::from_str(&schedule.inputs).unwrap_or_default();
-    let of_project = |store: &Store| -> IpcResult<Vec<String>> {
-        Ok(store
-            .workspaces()?
-            .into_iter()
-            .filter(|w| w.project_id == schedule.project_id)
-            .map(|w| w.id)
-            .collect())
+    // A slot is taken before anything is made, in one statement that also counts: two runs
+    // asked for at once cannot both find the last one free.
+    let stale_before = crate::store::now_ms() - SLOT_STALE_AFTER_MS;
+    let Some(slot) = store.reserve_schedule_workspace(&schedule.id, schedule.keep, stale_before)?
+    else {
+        return Err(workspaces_full(store, schedule)?);
     };
-    let before = of_project(store)?;
-    let asked = crate::workflow::runs::queue_in_new_workspace(
+    let filled = std::cell::Cell::new(false);
+    let asked = crate::workflow::runs::queue_in_new_workspace_noting(
         store,
         data_dir,
         &crate::workflow::runs::Request {
@@ -380,23 +366,48 @@ fn ask_in_new_workspace(
             base: schedule.base_branch.as_deref(),
             name: Some(schedule.workspace_name.as_str()).filter(|name| !name.is_empty()),
         },
+        // The workspace this call made, and no other: said before its setup runs, so one
+        // whose setup fails is still this schedule's, and nothing else in the project is.
+        &|workspace| {
+            filled.set(store.fill_schedule_workspace(&slot, &workspace.id).is_ok());
+        },
     );
-    match asked {
-        Ok((run_id, workspace)) => {
-            store.add_schedule_workspace(&schedule.id, &workspace.id)?;
-            Ok(run_id)
-        }
-        Err(error) => {
-            // A workspace whose setup failed is kept with no run. It counts as one this
-            // schedule made, or a setup that fails every day would leave one every day.
-            for id in of_project(store)? {
-                if !before.contains(&id) {
-                    store.add_schedule_workspace(&schedule.id, &id)?;
-                }
-            }
-            Err(error)
-        }
+    if !filled.get() {
+        // Nothing was made, so nothing holds the slot.
+        store.release_schedule_workspace(&slot)?;
     }
+    asked.map(|(run_id, _)| run_id)
+}
+
+/// How long a slot may be held with no workspace before it is taken to be left by a process
+/// that died. Between taking it and filling it there is only `git worktree add`.
+const SLOT_STALE_AFTER_MS: i64 = 60 * 60_000;
+
+/// Why a schedule that keeps `keep` workspaces cannot make another now.
+fn workspaces_full(store: &Store, schedule: &ScheduleRow) -> IpcResult<IpcError> {
+    let there = store.schedule_workspaces(&schedule.id)?;
+    let names: Vec<String> = there.iter().map(|name| format!("`{name}`")).collect();
+    let message = if there.len() as i64 >= schedule.keep {
+        format!(
+            "{} of the workspaces it made are still there, the most it keeps: {}. Archive or \
+             delete one and it runs again.",
+            there.len(),
+            names.join(", ")
+        )
+    } else {
+        // The rest of what it keeps is being made by another run of it, right now.
+        format!(
+            "It keeps {} workspaces, and another run of it is making one now{}. Archive or \
+             delete one, or try again when that run has its workspace.",
+            schedule.keep,
+            if names.is_empty() {
+                String::new()
+            } else {
+                format!(", beside {}", names.join(", "))
+            }
+        )
+    };
+    Ok(IpcError::new("schedule_workspaces_full", message))
 }
 
 /// What [`settle`] found.

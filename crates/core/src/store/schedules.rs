@@ -336,12 +336,56 @@ impl Store {
 
     // --- the workspaces a schedule made ---------------------------------------------------
 
-    /// Note that a schedule made this workspace.
-    pub fn add_schedule_workspace(&self, schedule_id: &str, workspace_id: &str) -> StoreResult<()> {
+    /// Take one of a schedule's `keep` slots for a workspace about to be made, and return the
+    /// slot's id; `None` when none is free. Counting and taking are one statement, so two
+    /// callers, in one process or two, cannot both take the last.
+    ///
+    /// A slot counts while its workspace is there (not deleted, archived or forgotten) or
+    /// while it is still being made. One taken before `stale_before` and never filled was left
+    /// by a process that died, and is dropped first.
+    pub fn reserve_schedule_workspace(
+        &self,
+        schedule_id: &str,
+        keep: i64,
+        stale_before: i64,
+    ) -> StoreResult<Option<String>> {
+        let id = new_id();
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute(
+            "DELETE FROM schedule_workspaces
+             WHERE schedule_id = ? AND workspace_id IS NULL AND created_at < ?",
+            params![schedule_id, stale_before],
+        )?;
+        let taken = tx.execute(
+            "INSERT INTO schedule_workspaces (id, schedule_id, workspace_id, created_at)
+             SELECT ?1, ?2, NULL, ?3
+             WHERE (SELECT count(*)
+                    FROM schedule_workspaces AS made
+                    LEFT JOIN workspaces AS workspace ON workspace.id = made.workspace_id
+                    WHERE made.schedule_id = ?2
+                      AND (made.workspace_id IS NULL
+                           OR (workspace.status = 'active' AND workspace.forgotten = 0))) < ?4",
+            params![id, schedule_id, now_ms(), keep],
+        )?;
+        tx.commit()?;
+        Ok((taken > 0).then_some(id))
+    }
+
+    /// Say which workspace a taken slot is for, once it has a row.
+    pub fn fill_schedule_workspace(&self, slot: &str, workspace_id: &str) -> StoreResult<()> {
         self.conn().execute(
-            "INSERT OR IGNORE INTO schedule_workspaces (schedule_id, workspace_id, created_at)
-             VALUES (?, ?, ?)",
-            params![schedule_id, workspace_id, now_ms()],
+            "UPDATE schedule_workspaces SET workspace_id = ? WHERE id = ? AND workspace_id IS NULL",
+            params![workspace_id, slot],
+        )?;
+        Ok(())
+    }
+
+    /// Give back a slot nothing was made for. One that was filled is left alone.
+    pub fn release_schedule_workspace(&self, slot: &str) -> StoreResult<()> {
+        self.conn().execute(
+            "DELETE FROM schedule_workspaces WHERE id = ? AND workspace_id IS NULL",
+            [slot],
         )?;
         Ok(())
     }

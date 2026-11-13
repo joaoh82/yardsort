@@ -1016,3 +1016,155 @@ fn a_notice_about_a_run_in_a_made_workspace_names_that_workspace() {
     assert_eq!(settled.notices.len(), 1);
     assert_eq!(settled.notices[0].body, "The workflow `ping` in `ping`.");
 }
+
+#[test]
+fn a_run_that_is_still_making_its_workspace_holds_a_slot_against_a_second() {
+    let fx = Fx::with_repository();
+    let schedule = add_each_run(&fx, Some(1)).unwrap();
+    // Another run of it, in this process or another, has taken the one slot and is in the
+    // project's setup: its workspace is not there to be counted yet.
+    let far_past = 0;
+    let slot = fx
+        .store
+        .reserve_schedule_workspace(&schedule.id, schedule.keep, far_past)
+        .unwrap()
+        .expect("the one slot is free");
+    assert_eq!(
+        fx.store
+            .reserve_schedule_workspace(&schedule.id, schedule.keep, far_past)
+            .unwrap(),
+        None,
+        "taking the last slot twice"
+    );
+
+    let pressed = run_now(
+        &fx.store,
+        &fx.data_dir,
+        &Accepting::default(),
+        &fx.workspaces(),
+        &schedule.id,
+        nov(5, 10, 5).timestamp_millis(),
+    )
+    .unwrap_err();
+    assert_eq!(pressed.code, "schedule_workspaces_full");
+    assert!(pressed.message.contains("is making one now"), "{pressed:?}");
+    assert!(made(&fx).is_empty(), "no second workspace beside the first");
+
+    // That run made nothing after all and gave its slot back: the next has room.
+    fx.store.release_schedule_workspace(&slot).unwrap();
+    assert_eq!(only(fire(&fx, &nov(5, 10, 10))).outcome, "started");
+    assert_eq!(made(&fx).len(), 1);
+
+    // A refusal that makes nothing holds no slot: the workflow is gone, twice, and the slot
+    // the first workspace holds is the only one counted.
+    fx.store
+        .set_workspace_archived(&made(&fx)[0].id, true)
+        .unwrap();
+    std::fs::remove_file(crate::workflow::user_dir(&fx.data_dir).join("ping.yaml")).unwrap();
+    assert_eq!(only(fire(&fx, &nov(5, 10, 20))).outcome, "refused");
+    assert_eq!(only(fire(&fx, &nov(5, 10, 30))).outcome, "refused");
+    assert!(fx
+        .store
+        .reserve_schedule_workspace(&schedule.id, schedule.keep, far_past)
+        .unwrap()
+        .is_some());
+}
+
+#[test]
+fn a_slot_left_by_a_process_that_died_is_dropped_and_a_filled_one_is_not() {
+    let fx = Fx::with_repository();
+    let schedule = add_each_run(&fx, Some(1)).unwrap();
+    let slot = fx
+        .store
+        .reserve_schedule_workspace(&schedule.id, 1, 0)
+        .unwrap()
+        .unwrap();
+    // Not stale yet: it was taken after the line.
+    assert!(fx
+        .store
+        .reserve_schedule_workspace(&schedule.id, 1, 0)
+        .unwrap()
+        .is_none());
+    // Taken before the line and never filled: dropped, and its place taken.
+    let later = crate::store::now_ms() + 1;
+    let second = fx
+        .store
+        .reserve_schedule_workspace(&schedule.id, 1, later)
+        .unwrap()
+        .expect("the stale slot is dropped");
+    assert_ne!(slot, second);
+
+    // Filled, it is a workspace, however old: it holds its place until archived or deleted.
+    fx.store
+        .fill_schedule_workspace(&second, &fx.workspace.id)
+        .unwrap();
+    fx.store.release_schedule_workspace(&second).unwrap();
+    let much_later = crate::store::now_ms() + 10_000;
+    assert!(fx
+        .store
+        .reserve_schedule_workspace(&schedule.id, 1, much_later)
+        .unwrap()
+        .is_none());
+    assert_eq!(fx.store.schedule_workspaces(&schedule.id).unwrap(), ["fix"]);
+}
+
+#[test]
+fn a_failed_setup_claims_its_own_workspace_and_no_other_made_meanwhile() {
+    let fx = Fx::with_repository();
+    fx.store
+        .set_project_automation(
+            &fx.project_id,
+            r#"{"copyFiles":[],"setup":{"program":"yardsort-no-such-program","args":[]},"run":null}"#,
+        )
+        .unwrap();
+    let schedule = add_each_run(&fx, Some(2)).unwrap();
+
+    // The workspace a call made is said even when its setup fails and the call is an error.
+    let seen = std::cell::RefCell::new(Vec::new());
+    let other =
+        fx.workspaces()
+            .create_named_noting(&fx.project_id, None, "personal-work", &|workspace| {
+                seen.borrow_mut().push(workspace.name.clone())
+            });
+    assert_eq!(other.unwrap_err().code, "workspace_setup_failed");
+    assert_eq!(*seen.borrow(), ["personal-work"]);
+
+    // While the schedule's attempt is under way, someone else goes on adding workspaces to
+    // the same project, from another connection as `ys` would. A look at the whole project
+    // before and after the attempt would take those for the schedule's.
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let adding = {
+        let (stop, database, project) = (stop.clone(), fx.database.clone(), fx.project_id.clone());
+        std::thread::spawn(move || {
+            let elsewhere = Store::open(&database).unwrap();
+            let mut added = 0;
+            let mut tried = 0;
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) && tried < 2_000 {
+                tried += 1;
+                let name = format!("theirs-{tried}");
+                // A busy database is not what this is about: try the next.
+                let path = format!("/nowhere/{name}");
+                if elsewhere
+                    .add_worktree(&project, &name, &path, None, None)
+                    .is_ok()
+                {
+                    added += 1;
+                }
+            }
+            added
+        })
+    };
+    // Let it get going, so some are added before the attempt and some during it.
+    while fx.store.workspaces().unwrap().len() < 5 {
+        std::thread::yield_now();
+    }
+    let line = only(fire(&fx, &nov(5, 10, 10)));
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(adding.join().unwrap() > 0);
+    assert_eq!(line.outcome, "refused");
+    assert_eq!(
+        fx.store.schedule_workspaces(&schedule.id).unwrap(),
+        ["ping"],
+        "only the workspace this schedule made"
+    );
+}

@@ -63,7 +63,9 @@ nobody has looked at yet. So that they do not pile up without end, the schedule 
 it made that are still there, and at **Keep** it stops: that time is **refused**, the history
 names the workspaces in the way, and you are told once. Archive or delete one, from its menu in
 the sidebar as for any workspace, and the next time goes ahead. Archived and deleted ones are
-not counted. The schedule's details say how many it keeps and which are there now.
+not counted. The schedule's details say how many it keeps and which are there now. A run that is
+still making its workspace counts as one too, so two runs started at the same moment cannot go
+past **Keep**.
 
 What is different from a schedule in a workspace that is there:
 

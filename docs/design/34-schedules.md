@@ -398,11 +398,21 @@ with none, archive the old ones — the user chose the first.
   user is told once, as for any refusal. Archiving or deleting one is all it takes. No schedule
   archives, deletes or reuses a workspace, so the rule against destroying work silently has
   nothing to make an exception for.
-- **What it made is its own table.** `schedule_workspaces (schedule_id, workspace_id)`, both
-  cascading. Not a column of `schedule_runs`: that history is pruned at 200 lines, and a
-  workspace kept after its setup failed has no run to hang on. Such a workspace is found by
-  comparing the project's workspaces before and after the door was asked, and is counted, or a
-  setup that fails every night would leave a worktree every night with no cap at all.
+- **What it made is its own table.** `schedule_workspaces (id, schedule_id, workspace_id)`,
+  both references cascading. Not a column of `schedule_runs`: that history is pruned at 200
+  lines, and a workspace kept after its setup failed has no run to hang on.
+- **A slot is taken before the workspace is made.** Review found that counting first and
+  writing the row after the setup had run let two runs asked for at once — two `ys schedule run`,
+  or one and the clock — both find the last slot free. So a row is written first, with no
+  workspace, by one statement that also counts (`reserve_schedule_workspace`); a slot being
+  filled counts like a workspace that is there. It is given back when nothing was made. One
+  held for an hour with no workspace was left by a process that died, and is dropped.
+- **The workspace is the one this attempt made.** `Workspaces::create_named_noting` says which
+  workspace it made the moment that has a row, before the setup runs, and the slot is filled
+  then. So a workspace whose setup failed is counted, or a setup that fails every night would
+  leave a worktree every night with no cap at all; and nothing else made in the project
+  meanwhile is. The first version compared the project's workspaces before and after, and
+  review showed it claiming a workspace the user made during the setup.
 - **The schedule's own row.** `new_workspace`, `base_branch` (NULL follows the repository's
   default branch at each run), `keep`; `workspace_id` is NULL and `workspace_name` holds what
   the workspaces are called, empty for "after the workflow". `NoWorkspace`, and the switching
