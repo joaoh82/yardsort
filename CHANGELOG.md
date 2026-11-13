@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.31.0
 
 - **Answer a workflow's questions one at a time.** When an agent in a workflow asks several
   questions, **Answer** in the run view opens a wide dialog with one question at a time, then all
