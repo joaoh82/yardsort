@@ -36,7 +36,7 @@ starts a new one.
 good. A copy that replaces a built-in has **Reset…** instead, which deletes your copy and brings
 the built-in back. Built-in rows have neither.
 
-![The built-in code review with a selected step and its YAML source highlighted](../images/workflows.png)
+![A finished Software factory run in the Runs view: the run list, the run's steps, and its summary with the result its report step wrote and the pull request it opened](../images/workflows.png)
 
 A workflow's page has two views, switched in its header: **Runs** and **Definition**. It opens
 on **Runs** when the newest run failed or is still going, or when you opened a run from
