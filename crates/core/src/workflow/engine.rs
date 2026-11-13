@@ -154,6 +154,14 @@ pub trait World {
     fn pr_known(&self) -> Option<bool> {
         Some(true)
     }
+    /// Whether `{{ run.pull_requests }}` is current for the report `step_id`: the forge has
+    /// been asked about the workspace's branch since that step became ready. A report is saved
+    /// once, so it waits for that answer rather than freezing a list the app's poll has not
+    /// caught up with. `false` while the question is out. The default is current, for a world
+    /// with no forge to ask.
+    fn pull_requests_current(&self, _step_id: &str) -> bool {
+        true
+    }
     /// A smoke test run by id: its status and the summary `ys test wait` prints. `None` when the
     /// row is gone.
     fn test_run(&self, run_id: &str) -> Option<TestRun>;
@@ -1052,6 +1060,14 @@ fn begin(
             Some(true) => {}
         }
     }
+    // A report that lists the run's pull requests waits until the forge has been asked about
+    // the branch: one opened since the app last looked would be missing for good otherwise.
+    if matches!(step.action, Action::Report { .. })
+        && names_run_pull_requests(&step.action)
+        && !world.pull_requests_current(id)
+    {
+        return None;
+    }
     let render = |text: &str| template::render(text, lookup);
     let mut change = match &step.action {
         Action::StartSession {
@@ -1189,6 +1205,15 @@ fn begin(
 }
 
 /// `pr.*` fields this step's text names, in the order they are written.
+/// Whether the action's text places `{{ run.pull_requests }}`.
+fn names_run_pull_requests(action: &Action) -> bool {
+    super::runs::action_texts(action).into_iter().any(|text| {
+        template::placeholders(text)
+            .iter()
+            .any(|var| var.path == ["run", "pull_requests"])
+    })
+}
+
 fn pull_request_fields(action: &Action) -> Vec<String> {
     let mut fields = Vec::new();
     for text in super::runs::action_texts(action) {

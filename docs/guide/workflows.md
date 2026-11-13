@@ -368,7 +368,11 @@ On its own step in the run, a report shows what it said.
     Merging and deploying are still yours to do.
 ```
 
-The body takes every [variable](#variables), including `{{ run.pull_requests }}`. A report that
+The body takes every [variable](#variables), including `{{ run.pull_requests }}`. A report
+saves its words once, so one that places `{{ run.pull_requests }}` first asks GitHub about the
+workspace's branch itself instead of relying on the app's once-a-minute look: a pull request
+opened a moment before still makes the list. It waits for that answer, which takes a few seconds;
+if GitHub cannot be reached, it lists what is already known. A report that
 `consumes` an artifact and does not place `{{ artifacts.<name> }}` in its body has the artifact
 added at the end, under **Artifact: <name>**, as a prompt does. A body is kept to 32000
 characters. A `report` leaves `title` and `body` for later steps, so a `notify` after it can say

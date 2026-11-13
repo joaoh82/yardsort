@@ -1036,7 +1036,14 @@ again after a continue is not part of the result until it succeeds again.
 
 `run` is a new variable namespace, always available: `run.id`, and `run.pull_requests`, the
 lines of `workflow::made::pull_requests_text`, read when the step renders. A run's own-repository
-pull requests are only as current as the app's last look at GitHub, about a minute.
+pull requests are otherwise only as current as the app's last look at GitHub, about a minute, and
+a report is saved once, so a stale list would stay wrong. A `report` that places
+`run.pull_requests` therefore stays pending until `World::pull_requests_current` says the forge
+has been asked about the branch since the step became ready: the driver runs
+`Hands::branch_pull_requests` (`gh pr list --head <branch> --state all`) once per report step on a
+thread of its own, and feeds the answer through `made::observe_pull_requests`, the same matching
+the app's look does. An error counts as an answer, so an unreachable forge delays a report by one
+attempt, not forever. Other steps reading `run.pull_requests` read the table as it is.
 
 The workflow writer's standing instruction (`describe::SYSTEM`) and the Floor Manager's
 `AGENTS.md` say both, so an agent writing or changing a workflow, or answering about a run, knows
