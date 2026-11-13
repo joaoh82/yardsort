@@ -113,9 +113,10 @@ digest only. The **images** job then tags each with the version and, unless the 
 **Container images** section to the release notes. The release is published only once that has run.
 Re-running the workflow for a tag pushes and tags the images again.
 
-The first release that pushes them creates the two packages, private. Once, after it: on GitHub, under
-the account's **Packages**, open each, make it public in its settings, and check that it is linked to the
-repository; the images' `org.opencontainers.image.source` label links them.
+The first release that pushed them, 0.30.0, created the two packages. Their
+`org.opencontainers.image.source` label linked each to the repository, and each came out public, as
+the repository is. Each package's settings, under the account's **Packages**, are where that would be
+changed.
 
 **The full image's pins.** Its tools are pinned by version and checksum in `Dockerfile.full`, and the
 harnesses it ships with their whole dependency tree in `crates/host/agents/package-lock.json`. Each

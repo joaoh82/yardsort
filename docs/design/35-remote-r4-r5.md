@@ -1330,10 +1330,21 @@ Yardsort, and it passed:
    licences above. Also confirm the terms page each vendor's installer is named with. Grok's is
    `https://x.ai/cli`, xAI's CLI page: xAI's terms page could not be fetched from here to check.
 2. Approve `host-images` in Yardsort, and run it (`ys test run host-images`).
-3. **The go-ahead to publish to the GitHub Container Registry**: the next release's tag pushes the two
-   images. After it, once: under the account's **Packages**, make `yardsort-host` and
-   `yardsort-host-full` public, and check that each is linked to the repository.
-4. On release, on the box:
+3. ~~**The go-ahead to publish to the GitHub Container Registry**~~: given on 2026-11-12. 0.30.0
+   pushed both images. On its first run, the amd64 build failed when Docker Hub answered 502 for
+   BuildKit's own image; the rerun passed. Both packages came out linked to the repository and
+   already public, as the repository is, so there was nothing to change.
+4. On release, on the box. Done on 2026-11-13:
+   - Docker 29.1 was installed from Ubuntu's packages and is run as root; `yardsort` is not in the
+     `docker` group, which would be root by another name for its agents.
+   - Both 0.30.0 tags were pulled with no sign-in, and `cosign verify` with the tag's identity passed
+     for each; the same check with `refs/heads/main` was refused.
+   - `install-agent claude` ran Anthropic's installer into the compose example's home volume:
+     Claude Code 2.1.323, first on a login shell's `PATH`.
+   - Left to the owner, since each sign-in is theirs: signing the container in to staging as a host of
+     its own, signing Claude Code in, pairing, and the phone watching and typing.
+
+   The steps as planned:
    - `docker pull ghcr.io/joaoh82/yardsort-host-full:<version>` and the slim tag, and check the
      signature with the guide's `cosign verify`.
    - Start the full image with the compose example, and install Claude Code with
