@@ -4182,6 +4182,11 @@ export type WorkflowStepRun = {
 	approvalLocked: boolean,
 	/**  The questions a clarifying step is waiting on. Absent when it is not. */
 	clarificationPrompt: string | null,
+	/**
+	 *  The same questions one by one, as the agent asked them, for the window to take one
+	 *  at a time. Empty when nothing is waiting.
+	 */
+	clarificationQuestions: string[],
 };
 
 /**  A run waiting on a person, as the sidebar lists it. The same rows a later phone reads. */

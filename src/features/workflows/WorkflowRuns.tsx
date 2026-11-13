@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { timeAgo } from "@/features/terminal/sessionText";
 import { errorMessage, ipc, type WorkflowRun, type WorkflowStepRun } from "@/lib/ipc";
 import { scheduleOf, useSchedulesStore } from "@/stores/schedules";
 import { triggerOf, useTriggersStore } from "@/stores/triggers";
 import { statusColour, useWorkflowStore } from "@/stores/workflows";
+import { AnswerDialog } from "./AnswerDialog";
+import { ApprovalDialog, type Decision } from "./ApprovalDialog";
+import { joinAnswers } from "./answers";
 import { ACTION_WORDS } from "./words";
 
 const EMPTY: WorkflowRun[] = [];
@@ -156,6 +160,7 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                           {step.action === "approve" && step.status === "waiting" && active && (
                             <ApprovalBox
                               runId={run.id}
+                              workspaceName={run.workspaceName}
                               step={step}
                               onError={setError}
                               onDone={() => useWorkflowStore.getState().refresh()}
@@ -163,7 +168,9 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                           )}
                           {step.clarificationPrompt && step.status === "waiting" && active && (
                             <AnswerBox
+                              key={step.clarificationPrompt}
                               runId={run.id}
+                              workspaceName={run.workspaceName}
                               step={step}
                               onError={setError}
                               onDone={() => useWorkflowStore.getState().refresh()}
@@ -220,20 +227,32 @@ function decisionWord(decision: string): string {
   return decision;
 }
 
-/** A clarifying step: the questions, and one answer for the round. */
+/**
+ * A clarifying step: the questions, and a dialog that takes them one at a time and sends one
+ * answer for the round. What is typed survives closing the dialog until the round changes.
+ */
 function AnswerBox({
   runId,
+  workspaceName,
   step,
   onError,
   onDone,
 }: {
   runId: string;
+  workspaceName: string;
   step: WorkflowStepRun;
   onError: (message: string | null) => void;
   onDone: () => Promise<void>;
 }) {
-  const [text, setText] = useState("");
+  const questions =
+    step.clarificationQuestions.length > 0
+      ? step.clarificationQuestions
+      : [step.clarificationPrompt ?? ""];
+  const [answers, setAnswers] = useState<string[]>(() => questions.map(() => ""));
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const answered = answers.filter((answer) => answer.trim() !== "").length;
 
   async function showCode() {
     onError(null);
@@ -249,19 +268,21 @@ function AnswerBox({
   }
 
   async function send() {
-    onError(null);
+    setProblem(null);
     setBusy(true);
     try {
-      await ipc.workflowAnswer(runId, step.stepId, text.trim());
-      setText("");
+      await ipc.workflowAnswer(runId, step.stepId, joinAnswers(questions, answers));
+      setOpen(false);
+      setAnswers(questions.map(() => ""));
       await onDone();
     } catch (failed) {
-      onError(errorMessage(failed));
+      setProblem(errorMessage(failed));
     } finally {
       setBusy(false);
     }
   }
 
+  const count = questions.length === 1 ? "the question" : `${questions.length} questions`;
   return (
     <div className="mt-1 flex flex-col gap-1 pl-1">
       <span className="text-small text-amber-300">Blocked: waiting for your answer.</span>
@@ -282,61 +303,83 @@ function AnswerBox({
       <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-small text-ink select-text">
         {step.clarificationPrompt}
       </pre>
-      <textarea
-        aria-label={`Answer for ${step.stepId}`}
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        rows={2}
-        className="rounded border border-line bg-canvas px-1.5 py-1 text-small text-ink"
-        placeholder="Your answer"
-      />
-      <span>
+      <span className="flex flex-wrap items-center gap-1">
         <button
           type="button"
-          disabled={busy || text.trim() === ""}
-          className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
-          onClick={() => void send()}
+          disabled={busy}
+          className="rounded bg-accent px-2 py-0.5 text-small font-medium text-canvas disabled:opacity-50"
+          onClick={() => setOpen(true)}
         >
-          Answer
+          {answered > 0 ? `Continue answering` : `Answer ${count}`}
         </button>
         <button
           type="button"
           disabled={busy}
-          className="ml-1 rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+          className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
           onClick={() => void showCode()}
         >
           Show a new code
         </button>
+        {answered > 0 && questions.length > 1 && (
+          <span className="text-small text-ink-faint">
+            {answered} of {questions.length} answered, not sent
+          </span>
+        )}
       </span>
+      {open &&
+        createPortal(
+          <AnswerDialog
+            stepId={step.stepId}
+            workspaceName={workspaceName}
+            questions={questions}
+            answers={answers}
+            onAnswers={setAnswers}
+            busy={busy}
+            error={problem}
+            onSend={() => void send()}
+            onClose={() => setOpen(false)}
+          />,
+          document.body,
+        )}
     </div>
   );
 }
 
-/** The pending approval: the documents it reads, and the three decisions. */
+/**
+ * The pending approval: the documents it reads, and a dialog the size of the window to read
+ * them in and decide. A gate that reads nothing can be approved or rejected here at once; a
+ * note, and so a request for changes, still goes through the dialog. The note survives closing
+ * the dialog, and a quick decision sends it too.
+ */
 function ApprovalBox({
   runId,
+  workspaceName,
   step,
   onError,
   onDone,
 }: {
   runId: string;
+  workspaceName: string;
   step: WorkflowStepRun;
   onError: (message: string | null) => void;
   onDone: () => Promise<void>;
 }) {
   const [feedback, setFeedback] = useState("");
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
   const consumed = step.consumed ?? [];
 
-  async function decide(decision: "approved" | "rejected" | "changes_requested") {
-    onError(null);
+  async function decide(decision: Decision) {
+    setProblem(null);
     setBusy(true);
     try {
       await ipc.workflowDecide(runId, step.stepId, decision, feedback.trim() || null);
       setFeedback("");
+      setOpen(false);
       await onDone();
     } catch (failed) {
-      onError(errorMessage(failed));
+      setProblem(errorMessage(failed));
     } finally {
       setBusy(false);
     }
@@ -355,6 +398,7 @@ function ApprovalBox({
     }
   }
 
+  const names = consumed.map((artifact) => artifact.name);
   return (
     <div className="mt-1 flex flex-col gap-1 pl-1">
       <span className="text-small text-amber-300">Blocked: waiting for your approval.</span>
@@ -373,50 +417,42 @@ function ApprovalBox({
           Too many wrong codes. Show a new code to use a terminal again.
         </span>
       ) : null}
-      {consumed.map((artifact) => (
-        <span key={artifact.name} className="flex flex-col gap-0.5">
-          <span className="text-small text-ink-muted">
-            To review {artifact.name}
-            {artifact.truncated ? " (cut short)" : ""}
-          </span>
-          <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-line px-1.5 py-1 text-small text-ink select-text">
-            {artifact.body}
-          </pre>
-        </span>
-      ))}
-      <textarea
-        aria-label={`Feedback for ${step.stepId}`}
-        value={feedback}
-        onChange={(event) => setFeedback(event.target.value)}
-        rows={2}
-        className="rounded border border-line bg-canvas px-1.5 py-1 text-small text-ink"
-        placeholder="A note, if you have one. Required when you request changes."
-      />
-      <span className="flex gap-1">
+      {names.length > 0 && (
+        <span className="text-small text-ink-muted">To review: {names.join(", ")}</span>
+      )}
+      <span className="flex flex-wrap items-center gap-1">
         <button
           type="button"
           disabled={busy}
-          className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
-          onClick={() => void decide("approved")}
+          className="rounded bg-accent px-2 py-0.5 text-small font-medium text-canvas disabled:opacity-50"
+          onClick={() => (names.length === 0 ? void decide("approved") : setOpen(true))}
         >
-          Approve
+          {names.length === 0
+            ? "Approve"
+            : names.length === 1
+              ? `Review ${names[0]} and decide`
+              : "Review and decide"}
         </button>
-        <button
-          type="button"
-          disabled={busy}
-          className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
-          onClick={() => void decide("rejected")}
-        >
-          Reject
-        </button>
-        <button
-          type="button"
-          disabled={busy || feedback.trim() === ""}
-          className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
-          onClick={() => void decide("changes_requested")}
-        >
-          Request changes
-        </button>
+        {names.length === 0 && (
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+              onClick={() => void decide("rejected")}
+            >
+              Reject
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              className="rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink disabled:opacity-50"
+              onClick={() => setOpen(true)}
+            >
+              Add a note…
+            </button>
+          </>
+        )}
         <button
           type="button"
           disabled={busy}
@@ -425,7 +461,31 @@ function ApprovalBox({
         >
           Show a new code
         </button>
+        {feedback.trim() !== "" && !open && (
+          <span className="text-small text-ink-faint">Note written, not sent</span>
+        )}
       </span>
+      {problem && !open && (
+        <span role="alert" className="text-small text-red-400 select-text">
+          {problem}
+        </span>
+      )}
+      {open &&
+        createPortal(
+          <ApprovalDialog
+            stepId={step.stepId}
+            workspaceName={workspaceName}
+            instructions={step.note}
+            documents={consumed}
+            feedback={feedback}
+            onFeedback={setFeedback}
+            busy={busy}
+            error={problem}
+            onDecide={(decision) => void decide(decision)}
+            onClose={() => setOpen(false)}
+          />,
+          document.body,
+        )}
     </div>
   );
 }
