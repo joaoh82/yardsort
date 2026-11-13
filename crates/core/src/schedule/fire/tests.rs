@@ -1129,39 +1129,59 @@ fn a_failed_setup_claims_its_own_workspace_and_no_other_made_meanwhile() {
     assert_eq!(other.unwrap_err().code, "workspace_setup_failed");
     assert_eq!(*seen.borrow(), ["personal-work"]);
 
-    // While the schedule's attempt is under way, someone else goes on adding workspaces to
-    // the same project, from another connection as `ys` would. A look at the whole project
-    // before and after the attempt would take those for the schedule's.
-    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let adding = {
-        let (stop, database, project) = (stop.clone(), fx.database.clone(), fx.project_id.clone());
-        std::thread::spawn(move || {
-            let elsewhere = Store::open(&database).unwrap();
-            let mut added = 0;
-            let mut tried = 0;
-            while !stop.load(std::sync::atomic::Ordering::Relaxed) && tried < 2_000 {
-                tried += 1;
-                let name = format!("theirs-{tried}");
-                // A busy database is not what this is about: try the next.
-                let path = format!("/nowhere/{name}");
-                if elsewhere
-                    .add_worktree(&project, &name, &path, None, None)
-                    .is_ok()
-                {
-                    added += 1;
-                }
-            }
-            added
-        })
-    };
-    // Let it get going, so some are added before the attempt and some during it.
-    while fx.store.workspaces().unwrap().len() < 5 {
-        std::thread::yield_now();
+    // While the schedule's attempt is under way, someone else adds a workspace to the same
+    // project: here, at the moment the door asks whether the workflow's agent is installed.
+    // A look at the whole project before and after the attempt would take it for the
+    // schedule's.
+    struct AddsAWorkspace<'a> {
+        store: &'a Store,
+        project_id: &'a str,
+        added: std::cell::Cell<u32>,
     }
-    let line = only(fire(&fx, &nov(5, 10, 10)));
-    stop.store(true, std::sync::atomic::Ordering::Relaxed);
-    assert!(adding.join().unwrap() > 0);
-    assert_eq!(line.outcome, "refused");
+    impl Look for AddsAWorkspace<'_> {
+        fn harness(&self, wanted: &str) -> Result<String, String> {
+            let n = self.added.get() + 1;
+            self.added.set(n);
+            self.store
+                .add_worktree(
+                    self.project_id,
+                    &format!("theirs-{n}"),
+                    &format!("/nowhere/theirs-{n}"),
+                    None,
+                    None,
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(wanted.to_owned())
+        }
+        fn pull_request(
+            &self,
+            _workspace: &WorkspaceRow,
+        ) -> Result<Option<crate::forge::PullRequest>, String> {
+            Ok(None)
+        }
+    }
+    fx.write_workflow(
+        "ping",
+        "id: ping\nname: Ping\nversion: 1\ntrigger:\n  kind: manual\ninputs:\n  - id: who\n    kind: harness\n    default: claude\nsteps:\n  - id: tell\n    action: notify\n    title: hello\n",
+    );
+    let look = AddsAWorkspace {
+        store: &fx.store,
+        project_id: &fx.project_id,
+        added: std::cell::Cell::new(0),
+    };
+    let fired = tick(
+        &fx.store,
+        &fx.data_dir,
+        &look,
+        &fx.workspaces(),
+        &nov(5, 10, 10),
+    )
+    .unwrap();
+    assert!(
+        look.added.get() > 0,
+        "a workspace was added during the attempt"
+    );
+    assert_eq!(only(fired).outcome, "refused");
     assert_eq!(
         fx.store.schedule_workspaces(&schedule.id).unwrap(),
         ["ping"],
