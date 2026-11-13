@@ -585,7 +585,8 @@ ys workflow validate -           # the same, reading the file from standard inpu
 ys workflow save fix-ci.yaml     # check it, then write it into your folder; refused with problems
 ys workflow run ping --workspace fix-login --input note=hi   # queue a run; Yardsort must be open
 ys workflow run ping --project app --name nightly-ping       # the same, in a new workspace made for it
-ys workflow runs                 # runs, newest first, with a WAITING ON column
+ys workflow runs                 # runs, newest first, with WAITING ON and PRS columns
+ys workflow runs --run 3f2a9c1e  # one run: its pull requests, steps, artifacts and approvals
 ys workflow approve 3f2a9c1e sign-off --feedback "ship it"
 ys workflow reject 3f2a9c1e sign-off
 ys workflow request-changes 3f2a9c1e sign-off --feedback "split the migration"

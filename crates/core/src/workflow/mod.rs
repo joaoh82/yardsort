@@ -15,6 +15,7 @@ pub mod code;
 pub mod describe;
 pub mod driver;
 pub mod engine;
+pub mod made;
 mod parse;
 pub mod runs;
 pub mod waits;

@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { clockTime } from "@/features/schedules/words";
 import { timeAgo } from "@/features/terminal/sessionText";
 import { Markdown } from "@/lib/Markdown";
 import { errorMessage, ipc, type WorkflowRun, type WorkflowStepRun } from "@/lib/ipc";
 import { scheduleOf, useSchedulesStore } from "@/stores/schedules";
 import { triggerOf, useTriggersStore } from "@/stores/triggers";
+import { useProjectsStore } from "@/stores/projects";
 import { statusColour, useWorkflowStore } from "@/stores/workflows";
 import { AnswerDialog } from "./AnswerDialog";
 import { ApprovalDialog, looksLikeMarkdown, type Decision } from "./ApprovalDialog";
@@ -104,6 +106,13 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                       )}
                       {triggerOf(triggered, each.id) && (
                         <span className="shrink-0 text-small text-ink-faint">triggered</span>
+                      )}
+                      {each.pullRequestsMade.length > 0 && (
+                        <span className="shrink-0 text-small text-ink-muted">
+                          {each.pullRequestsMade.length === 1
+                            ? "1 PR"
+                            : `${each.pullRequestsMade.length} PRs`}
+                        </span>
                       )}
                     </span>
                     <span className={`truncate ${picked ? "text-ink" : "text-ink-muted"}`}>
@@ -284,6 +293,11 @@ function RunPanes({
           onClick={() => setChosen(SUMMARY)}
         >
           <span className="flex-1 font-medium">Summary</span>
+          {run.pullRequestsMade.length > 0 && (
+            <span className="text-small text-ink-faint">
+              {run.pullRequestsMade.length === 1 ? "1 PR" : `${run.pullRequestsMade.length} PRs`}
+            </span>
+          )}
           <span className={`rounded-full px-1.5 text-micro ${statusColour(run.status)}`}>
             {run.status}
           </span>
@@ -455,6 +469,7 @@ function RunSummary({ run, steps }: { run: WorkflowRun; steps: WorkflowStepRun[]
         <dt className="text-ink-faint">Run id</dt>
         <dd className="font-mono text-small select-text">{run.id}</dd>
       </dl>
+      <PullRequestsMade run={run} />
       {inputs.length > 0 && (
         <section aria-label="Inputs" className="flex flex-col gap-1.5">
           <h4 className="text-small font-semibold tracking-wider text-ink-faint uppercase">
@@ -472,6 +487,70 @@ function RunSummary({ run, steps }: { run: WorkflowRun; steps: WorkflowStepRun[]
       )}
     </div>
   );
+}
+
+/** The pull requests a run opened, here and in repositories its workspace tracks. */
+function PullRequestsMade({ run }: { run: WorkflowRun }) {
+  const made = run.pullRequestsMade;
+  return (
+    <section aria-label="Pull requests" className="flex flex-col gap-2">
+      <h4 className="text-small font-semibold tracking-wider text-ink-faint uppercase">
+        Pull requests
+      </h4>
+      {made.length === 0 ? (
+        <p className="text-ink-faint">
+          {run.status === "queued" || run.status === "running"
+            ? "None opened yet. One opened on this workspace's branch, or tracked in another repository, shows here."
+            : "This run opened no pull requests."}
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {made.map((pr) => (
+            <li
+              key={pr.url}
+              className="flex items-center gap-3 rounded border border-line bg-surface px-3 py-2"
+            >
+              <span
+                className={`shrink-0 rounded-full px-1.5 text-micro ${prColour(pr.state, pr.draft)}`}
+              >
+                {pr.draft && (pr.state ?? "open") === "open" ? "draft" : (pr.state ?? "tracked")}
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="font-mono text-small text-ink-muted">
+                  {pr.repo ? `${pr.repo}#${pr.number}` : `#${pr.number}`}
+                </span>
+                {pr.title && <span className="truncate font-medium">{pr.title}</span>}
+              </span>
+              {!pr.repo && (
+                <button
+                  type="button"
+                  className={`shrink-0 ${quietButton}`}
+                  onClick={() => useProjectsStore.getState().openPullRequests(true)}
+                >
+                  Pull requests view
+                </button>
+              )}
+              <button
+                type="button"
+                className={`shrink-0 ${quietButton}`}
+                onClick={() => void openUrl(pr.url).catch(console.error)}
+              >
+                Open on GitHub
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function prColour(state: string | null, draft: boolean): string {
+  if (draft && (state ?? "open") === "open") return "bg-raised text-ink-faint";
+  if (state === "open") return "bg-green-500/20 text-green-400";
+  if (state === "merged") return "bg-purple-500/20 text-purple-300";
+  if (state === "closed") return "bg-red-500/20 text-red-400";
+  return "bg-raised text-ink-muted";
 }
 
 /** One step at the width of the window: what it noted, what it waits for, what it left. */

@@ -646,6 +646,9 @@ struct RunListed {
     /// Why the run is blocked on a person, as in "your approval". Absent when it is not.
     #[serde(skip_serializing_if = "Option::is_none")]
     waiting_on: Option<String>,
+    /// The pull requests the run opened: on its workspace's branch, as the app last saw them,
+    /// and the ones its workspace tracks in other repositories. See `workflow::made`.
+    pull_requests: Vec<workflow::made::MadePullRequest>,
 }
 
 impl From<&WorkflowRunRow> for RunListed {
@@ -661,6 +664,7 @@ impl From<&WorkflowRunRow> for RunListed {
             ended_at: run.ended_at,
             error: run.error.clone(),
             waiting_on: None,
+            pull_requests: Vec::new(),
         }
     }
 }
@@ -679,6 +683,8 @@ fn runs(ys: &Yardsort, workspace: Option<&str>, limit: usize, out: &Output) -> R
             listed.waiting_on = workflow::waits::label_for(&ys.store, &run.id, &open)
                 .ok()
                 .flatten();
+            listed.pull_requests =
+                workflow::made::pull_requests_made(&ys.store, run).unwrap_or_default();
             listed
         })
         .collect();
@@ -693,6 +699,7 @@ fn runs(ys: &Yardsort, workspace: Option<&str>, limit: usize, out: &Output) -> R
             "WORKSPACE".to_owned(),
             "STATUS".to_owned(),
             "WAITING ON".to_owned(),
+            "PRS".to_owned(),
             "ASKED".to_owned(),
         ]];
         lines.extend(listed.iter().map(|run| {
@@ -702,6 +709,10 @@ fn runs(ys: &Yardsort, workspace: Option<&str>, limit: usize, out: &Output) -> R
                 run.workspace.clone(),
                 run.status.clone(),
                 run.waiting_on.clone().unwrap_or_default(),
+                match run.pull_requests.len() {
+                    0 => String::new(),
+                    n => n.to_string(),
+                },
                 when(run.created_at),
             ]
         }));
@@ -833,6 +844,8 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
     listed.waiting_on = workflow::waits::waiting_on(&ys.store, &run.id)
         .ok()
         .flatten();
+    listed.pull_requests = workflow::made::pull_requests_made(&ys.store, &run)?;
+    let made = listed.pull_requests.clone();
     let shown = Shown {
         run: listed,
         inputs: serde_json::from_str(&run.inputs).unwrap_or_default(),
@@ -890,6 +903,13 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
         );
         if let Some(error) = &run.error {
             sayln!("{error}");
+        }
+        if !made.is_empty() {
+            sayln!();
+            sayln!("Pull requests");
+            for pr in &made {
+                sayln!("  {}", pr.line());
+            }
         }
         sayln!();
         let mut lines = vec![vec![

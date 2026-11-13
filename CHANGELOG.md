@@ -17,6 +17,11 @@ has the downloads and the full commit lists.
   `ys workflow run <id> --project <name>`. The branch and worktree are made once everything else
   has been checked, so a refused run leaves nothing behind. See
   [In a new workspace](docs/guide/workflows.md#in-a-new-workspace).
+- **A workflow run lists the pull requests it opened.** The run's summary shows each one with its
+  state and a link, in the project's own repository and in the repositories its workspace tracks,
+  and the run's row says how many. `ys workflow runs` has a **PRS** column, and
+  `ys workflow runs --run` lists them. See
+  [What a run opened](docs/guide/workflows.md#what-a-run-opened).
 
 ## 0.32.0
 

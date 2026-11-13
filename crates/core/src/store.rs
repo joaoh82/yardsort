@@ -49,6 +49,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0037_workflow_remote_decisions.sql"),
     include_str!("../migrations/0038_remote_grant_kind.sql"),
     include_str!("../migrations/0039_agent_notices.sql"),
+    include_str!("../migrations/0040_workflow_run_pull_requests.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -449,6 +450,20 @@ impl WorkflowRunRow {
     pub fn active(&self) -> bool {
         matches!(self.status.as_str(), "queued" | "running")
     }
+}
+
+/// A pull request a run made in its own repository. See
+/// `migrations/0040_workflow_run_pull_requests.sql`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunPullRequestRow {
+    pub run_id: String,
+    pub number: u32,
+    pub url: String,
+    pub title: String,
+    /// `open`, `merged` or `closed`, as the forge said at the last look.
+    pub state: String,
+    pub draft: bool,
+    pub opened_at: i64,
 }
 
 /// One step of a workflow run.
@@ -1652,6 +1667,21 @@ impl Store {
         )?;
         let rows = stmt.query_map([project_id], tracked_from_row)?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// When a run was asked for and ended, for tests that keep a made-up clock.
+    #[cfg(test)]
+    pub(crate) fn set_workflow_run_times(
+        &self,
+        id: &str,
+        created_at: i64,
+        ended_at: Option<i64>,
+    ) -> StoreResult<()> {
+        self.conn().execute(
+            "UPDATE workflow_runs SET created_at = ?, ended_at = ? WHERE id = ?",
+            params![created_at, ended_at, id],
+        )?;
+        Ok(())
     }
 
     /// When a tracked pull request was tracked, for tests that keep a made-up clock.
@@ -2958,6 +2988,65 @@ impl Store {
             params![workflow_id, i64::try_from(limit).unwrap_or(i64::MAX)],
             workflow_run_from_row,
         )?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Every run in a project asked for at or after `since`, newest first.
+    pub fn workflow_runs_in_project_since(
+        &self,
+        project_id: &str,
+        since: i64,
+    ) -> StoreResult<Vec<WorkflowRunRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {WORKFLOW_RUN_COLUMNS} FROM workflow_runs
+             WHERE project_id = ?1 AND created_at >= ?2
+             ORDER BY created_at DESC, rowid DESC"
+        ))?;
+        let rows = stmt.query_map(params![project_id, since], workflow_run_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Record, or bring up to date, a pull request a run made in its own repository.
+    pub fn record_run_pull_request(&self, row: &RunPullRequestRow) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT INTO workflow_run_pull_requests
+                 (run_id, number, url, title, state, draft, opened_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT (run_id, number) DO UPDATE SET
+                 url = excluded.url, title = excluded.title, state = excluded.state,
+                 draft = excluded.draft",
+            params![
+                row.run_id,
+                row.number,
+                row.url,
+                row.title,
+                row.state,
+                row.draft,
+                row.opened_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The pull requests a run made in its own repository, oldest first.
+    pub fn run_pull_requests(&self, run_id: &str) -> StoreResult<Vec<RunPullRequestRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT run_id, number, url, title, state, draft, opened_at
+             FROM workflow_run_pull_requests WHERE run_id = ? ORDER BY opened_at, number",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            Ok(RunPullRequestRow {
+                run_id: row.get(0)?,
+                number: row.get(1)?,
+                url: row.get(2)?,
+                title: row.get(3)?,
+                state: row.get(4)?,
+                draft: row.get(5)?,
+                opened_at: row.get(6)?,
+            })
+        })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
@@ -6497,9 +6586,10 @@ steps:
         {
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[30].contains("CREATE TABLE workflow_approval_decisions"));
-            // 0037 adds nullable device columns and an empty actions table, and 0039 two
-            // nullable columns to the notice outbox.
-            assert_eq!(MIGRATIONS.len(), 39);
+            // 0037 adds nullable device columns and an empty actions table, 0039 two
+            // nullable columns to the notice outbox, and 0040 an empty table of the pull
+            // requests runs made.
+            assert_eq!(MIGRATIONS.len(), 40);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -6566,9 +6656,10 @@ steps:
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[31].contains("CREATE TABLE workflow_waits"));
             assert!(MIGRATIONS[31].contains("code_rounds"));
-            // 0037 adds nullable device columns and an empty actions table, and 0039 two
-            // nullable columns to the notice outbox.
-            assert_eq!(MIGRATIONS.len(), 39);
+            // 0037 adds nullable device columns and an empty actions table, 0039 two
+            // nullable columns to the notice outbox, and 0040 an empty table of the pull
+            // requests runs made.
+            assert_eq!(MIGRATIONS.len(), 40);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs

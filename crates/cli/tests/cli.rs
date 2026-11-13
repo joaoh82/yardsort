@@ -2872,6 +2872,72 @@ fn a_run_shows_the_artifacts_it_handed_on() {
     assert_eq!(shown["artifacts"][0]["truncated"], false);
 }
 
+#[test]
+fn a_run_lists_the_pull_requests_it_opened_here_and_elsewhere() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .expect("nobody else holds it");
+    let json = fx
+        .ys(&["workflow", "run", "ping", "--workspace", name, "--json"])
+        .ok();
+    let queued: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let run = queued["run"].as_str().unwrap();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let row = store.workflow_run(run).unwrap().unwrap();
+    // What the app records when it reads the project's pull requests.
+    store
+        .record_run_pull_request(&yardsort_core::store::RunPullRequestRow {
+            run_id: run.to_owned(),
+            number: 12,
+            url: "https://github.com/o/app/pull/12".into(),
+            title: "Analytics on the public site".into(),
+            state: "open".into(),
+            draft: false,
+            opened_at: row.created_at,
+        })
+        .unwrap();
+    // And one an agent opened in a nested clone, which the hook tracked.
+    store
+        .track_pull_request(&yardsort_core::store::NewTrackedPullRequest {
+            workspace_id: row.workspace_id.as_deref().unwrap(),
+            session_id: None,
+            repo: "github.com/o/cloud",
+            number: 41,
+            url: "https://github.com/o/cloud/pull/41",
+            tracked_by: "hook",
+        })
+        .unwrap();
+    drop(store);
+
+    let text = fx.ys(&["workflow", "runs", "--run", &run[..8]]).ok();
+    assert!(text.contains("Pull requests"), "{text}");
+    assert!(
+        text.contains("#12 Analytics on the public site — https://github.com/o/app/pull/12"),
+        "{text}"
+    );
+    assert!(
+        text.contains("o/cloud#41 — https://github.com/o/cloud/pull/41"),
+        "{text}"
+    );
+    let shown: serde_json::Value = serde_json::from_str(
+        &fx.ys(&["workflow", "runs", "--run", &run[..8], "--json"])
+            .ok(),
+    )
+    .unwrap();
+    assert_eq!(shown["pullRequests"][0]["number"], 12);
+    assert_eq!(shown["pullRequests"][0]["repo"], serde_json::Value::Null);
+    assert_eq!(shown["pullRequests"][1]["repo"], "o/cloud");
+    let listed = fx.ys(&["workflow", "runs"]).ok();
+    assert!(listed.contains("PRS"), "{listed}");
+    let listed: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workflow", "runs", "--json"]).ok()).unwrap();
+    assert_eq!(listed[0]["pullRequests"].as_array().unwrap().len(), 2);
+}
+
 const SIGN_OFF: &str = "id: sign-off
 name: Sign off
 version: 1
