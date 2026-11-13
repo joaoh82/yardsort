@@ -16,6 +16,10 @@ has the downloads and the full commit lists.
   and the run's row says how many. `ys workflow runs` has a **PRS** column, and
   `ys workflow runs --run` lists them. See
   [What a run opened](docs/guide/workflows.md#what-a-run-opened).
+- **A `report` step says what a workflow run came to.** Its body, in Markdown, is the run's
+  result: first on the run's summary, and printed by `ys workflow runs --run`. It can list
+  `{{ run.pull_requests }}`, and the built-in software factory now ends with one. See
+  [A run's result](docs/guide/workflows.md#a-runs-result).
 
 ## 0.32.0
 

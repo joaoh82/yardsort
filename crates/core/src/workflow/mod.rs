@@ -349,6 +349,11 @@ pub enum Action {
     },
     /// Tell the person who started the run.
     Notify { title: String, body: Option<String> },
+    /// Say what the run came to: a title and a Markdown body, rendered from variables and the
+    /// artifacts the step consumes. Its only job is to output that text. The run's result is
+    /// what its succeeded report steps said, in file order; the window shows it first on the
+    /// run's summary and `ys workflow runs --run` prints it. Leaves `title` and `body`.
+    Report { title: Option<String>, body: String },
     /// Wait until a person approves, rejects, or requests changes. Always a gate. Waiting for
     /// a GitHub review is [`Action::WaitPrActivity`], not this. Leaves `decision` and `feedback`.
     Approve {
@@ -367,6 +372,7 @@ impl Action {
             Action::WaitPrActivity { .. } => "wait_pr_activity",
             Action::RunTest { .. } => "run_test",
             Action::Notify { .. } => "notify",
+            Action::Report { .. } => "report",
             Action::Approve { .. } => "approve",
         }
     }
@@ -379,6 +385,7 @@ impl Action {
             "wait_pr_activity" => &["count", "latest_url"],
             "run_test" => &["run", "verdict", "summary"],
             "approve" => &["decision", "feedback"],
+            "report" => &["title", "body"],
             _ => &[],
         }
     }

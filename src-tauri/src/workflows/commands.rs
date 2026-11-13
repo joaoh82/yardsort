@@ -70,6 +70,8 @@ pub struct WorkflowRun {
     pub blocked_on: Option<String>,
     /// The pull requests it opened, its own repository's first. See `workflow::made`.
     pub pull_requests_made: Vec<yardsort_core::workflow::made::MadePullRequest>,
+    /// What its succeeded `report` steps said, in file order. Empty when it has none.
+    pub reports: Vec<yardsort_core::workflow::made::Report>,
 }
 
 /// One step of a run.
@@ -153,6 +155,7 @@ fn run_from(row: WorkflowRunRow) -> WorkflowRun {
         ended_at: row.ended_at.map(|t| t as f64),
         blocked_on: None,
         pull_requests_made: Vec::new(),
+        reports: Vec::new(),
     }
 }
 
@@ -381,9 +384,11 @@ pub async fn workflow_runs(
                     .flatten();
                 let made =
                     workflow::made::pull_requests_made(&state.store, &row).unwrap_or_default();
+                let reports = workflow::made::reports(&state.store, &row.id).unwrap_or_default();
                 let mut run = run_from(row);
                 run.blocked_on = blocked_on;
                 run.pull_requests_made = made;
+                run.reports = reports;
                 run
             })
             .collect())

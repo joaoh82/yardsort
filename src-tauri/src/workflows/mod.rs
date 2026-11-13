@@ -22,7 +22,7 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_specta::Event;
 use yardsort_core::forge::Gh;
 use yardsort_core::launch::{HarnessRequest, Launch};
-use yardsort_core::workflow::driver::{self, Conversation, Hands, OpenPr, PrAsk};
+use yardsort_core::workflow::driver::{self, BranchPr, Conversation, Hands, OpenPr, PrAsk};
 
 use crate::state::AppState;
 
@@ -433,6 +433,26 @@ impl Hands for AppHands<'_> {
             let (gh, root) = found?;
             gh.pr_posts_of(&root, &selector, driver::FORGE_LIMIT)
                 .map_err(|error| error.to_string())
+        })
+    }
+
+    fn branch_pull_requests(&self, workspace_id: &str) -> BranchPr {
+        let workspace = match self.state.store.workspace(workspace_id) {
+            Ok(Some(workspace)) => workspace,
+            Ok(None) => return Box::new(|| Err("The workspace is gone.".to_owned())),
+            Err(error) => {
+                let message = error.to_string();
+                return Box::new(move || Err(message));
+            }
+        };
+        let env = self.state.env();
+        Box::new(move || {
+            let git = yardsort_core::git::Git::new(&env).map_err(|error| error.to_string())?;
+            yardsort_core::workflow::runs::branch_pull_requests(
+                Gh::find(&env).as_ref(),
+                &git,
+                &workspace,
+            )
         })
     }
 

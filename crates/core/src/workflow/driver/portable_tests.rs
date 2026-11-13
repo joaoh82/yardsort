@@ -219,7 +219,7 @@ impl Profile {
                 &project.id,
                 "fix-login",
                 "/code/app-wt/fix-login",
-                None,
+                Some("fix-login"),
                 None,
             )
             .unwrap();
@@ -3619,4 +3619,154 @@ fn a_continued_run_that_fails_again_tells_the_phone_again() {
         2,
         "the same run failing a second time is not a retry of the first notice"
     );
+}
+
+const REPORTS: &str = "id: reports
+name: Reports
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: decide
+    action: report
+    body: Decided on a plan.
+    produces:
+      - name: plan
+        text: Ship the login fix first.
+  - id: result
+    action: report
+    needs: [decide]
+    consumes: [plan]
+    title: \"{{ workspace.name }} is done\"
+    body: |
+      Run {{ run.id }}.
+
+      ## Pull requests
+      {{ run.pull_requests }}
+";
+
+#[test]
+fn a_report_step_says_what_the_run_came_to_with_its_pull_requests_and_what_it_consumes() {
+    let profile = Profile::new(&[("reports", REPORTS)]);
+    let run = profile.queue("reports");
+    // An agent in the run opened one in a nested clone, and the hook tracked it.
+    profile
+        .store
+        .track_pull_request(&crate::store::NewTrackedPullRequest {
+            workspace_id: &profile.workspace,
+            session_id: None,
+            repo: "github.com/o/cloud",
+            number: 41,
+            url: "https://github.com/o/cloud/pull/41",
+            tracked_by: "hook",
+        })
+        .unwrap();
+    let driver = Driver::default();
+    profile.until(&driver, &NoHands, || {
+        !matches!(profile.status(&run).as_str(), "queued" | "running")
+    });
+    assert_eq!(profile.status(&run), "succeeded");
+    let reports = crate::workflow::made::reports(&profile.store, &run).unwrap();
+    // Every report the run gave, in file order.
+    assert_eq!(reports.len(), 2);
+    assert_eq!(reports[0].step, "decide");
+    assert_eq!(reports[0].title, None);
+    assert_eq!(reports[0].body, "Decided on a plan.");
+    assert_eq!(reports[1].step, "result");
+    assert_eq!(reports[1].title.as_deref(), Some("fix-login is done"));
+    let body = &reports[1].body;
+    assert!(body.starts_with(&format!("Run {run}.")), "{body}");
+    assert!(
+        body.contains("- o/cloud#41 — https://github.com/o/cloud/pull/41"),
+        "{body}"
+    );
+    // A consumed artifact the body does not place is appended under its name.
+    assert!(
+        body.contains("## Artifact: plan\n\nShip the login fix first."),
+        "{body}"
+    );
+    let step = profile.step(&run, "result");
+    let outputs = engine::parse_outputs(&step.outputs);
+    assert_eq!(
+        outputs.get("title").map(String::as_str),
+        Some("fix-login is done")
+    );
+}
+
+/// Hands whose forge has a pull request the app's own look has not seen yet.
+struct Unpolled {
+    asked: std::sync::atomic::AtomicUsize,
+}
+impl Hands for Unpolled {
+    fn start(&self, _: &str, _: HarnessRequest) -> Result<SessionInfo, String> {
+        unreachable!("no agent")
+    }
+    fn notify(&self, _: &str, _: Option<&str>) -> Result<(), String> {
+        unreachable!("no notify")
+    }
+    fn handoff(&self, _: &str) -> Option<String> {
+        None
+    }
+    fn pr_posts(&self, _: &str, _: &crate::workflow::runs::PrFacts) -> PrAsk {
+        unreachable!("no pull request posts")
+    }
+    fn branch_pull_requests(&self, _: &str) -> super::BranchPr {
+        use crate::forge::{Checks, PullRequest, PullRequestState};
+        self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Box::new(|| {
+            // Slow enough that the report is seen waiting for the answer.
+            std::thread::sleep(Duration::from_millis(50));
+            let opened = |number: u32, at: i64, state| PullRequest {
+                number,
+                url: format!("https://github.com/o/app/pull/{number}"),
+                title: format!("Change {number}"),
+                branch: "fix-login".into(),
+                state,
+                draft: false,
+                checks: Checks::None,
+                details: None,
+                author: None,
+                created_at: Some(at),
+            };
+            Ok(vec![
+                // Opened during the run, and already merged.
+                opened(52, now_ms() - 1_000, PullRequestState::Merged),
+                // From the same branch long before the run: not this run's.
+                opened(12, now_ms() - 86_400_000, PullRequestState::Closed),
+            ])
+        })
+    }
+}
+
+#[test]
+fn a_report_asks_the_forge_first_so_a_pull_request_the_app_has_not_seen_is_listed() {
+    let profile = Profile::new(&[("reports", REPORTS)]);
+    let run = profile.queue("reports");
+    let hands = Unpolled {
+        asked: std::sync::atomic::AtomicUsize::new(0),
+    };
+    let driver = Driver::default();
+    profile.until(&driver, &hands, || {
+        !matches!(profile.status(&run).as_str(), "queued" | "running")
+    });
+    assert_eq!(profile.status(&run), "succeeded");
+    let reports = crate::workflow::made::reports(&profile.store, &run).unwrap();
+    let body = &reports[1].body;
+    assert!(
+        body.contains("- #52 Change 52 (merged) — https://github.com/o/app/pull/52"),
+        "{body}"
+    );
+    assert!(!body.contains("#12"), "{body}");
+    assert!(!body.contains("opened no pull requests"), "{body}");
+    // Only the report that lists them asked, and only once.
+    assert_eq!(hands.asked.load(std::sync::atomic::Ordering::SeqCst), 1);
+    // And the run's own list has it too.
+    let numbers: Vec<u32> = profile
+        .store
+        .run_pull_requests(&run)
+        .unwrap()
+        .iter()
+        .map(|row| row.number)
+        .collect();
+    assert_eq!(numbers, vec![52]);
 }

@@ -776,6 +776,17 @@ impl Gh {
         branch: &str,
         limit: Duration,
     ) -> ForgeResult<Vec<PullRequest>> {
+        self.pull_requests_for(root, branch, "open", limit)
+    }
+
+    /// The pull requests from `branch` in `state` (`open`, or `all`), newest first.
+    pub fn pull_requests_for(
+        &self,
+        root: &Path,
+        branch: &str,
+        state: &str,
+        limit: Duration,
+    ) -> ForgeResult<Vec<PullRequest>> {
         let out = self.run_within(
             root,
             &[
@@ -784,7 +795,7 @@ impl Gh {
                 "--head",
                 branch,
                 "--state",
-                "open",
+                state,
                 "--limit",
                 "20",
                 "--json",

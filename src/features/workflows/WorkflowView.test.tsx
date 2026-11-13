@@ -359,6 +359,7 @@ describe("WorkflowView", () => {
         inputs: {},
         pullRequest: null,
         pullRequestsMade: [],
+        reports: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -427,6 +428,7 @@ describe("WorkflowView", () => {
       inputs: {},
       pullRequest: null,
       pullRequestsMade: [],
+      reports: [],
       createdAt: Date.now(),
       startedAt: null,
       endedAt: null,
@@ -476,6 +478,7 @@ describe("WorkflowView", () => {
       inputs: { task: "Fix the login" },
       pullRequest: null,
       pullRequestsMade: [],
+      reports: [],
       createdAt: Date.now(),
       startedAt: null,
       endedAt: null,
@@ -503,7 +506,7 @@ describe("WorkflowView", () => {
     expect(screen.queryByLabelText("Workflow file")).toBeNull();
   });
 
-  it("lists the pull requests a run opened on its summary, and counts them on its row", async () => {
+  it("shows a run's result and the pull requests it opened on its summary", async () => {
     useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
     core.workflowRuns.mockResolvedValue([
       {
@@ -537,6 +540,13 @@ describe("WorkflowView", () => {
             openedAt: Date.now(),
           },
         ],
+        reports: [
+          {
+            step: "result",
+            title: "fix-login is ready",
+            body: "## What changed\n\nThe login redirects home.",
+          },
+        ],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -555,6 +565,11 @@ describe("WorkflowView", () => {
     expect(within(made).getAllByRole("button", { name: "Open on GitHub" })).toHaveLength(2);
     // Only the project's own can be found in the Pull requests view.
     expect(within(made).getAllByRole("button", { name: "Pull requests view" })).toHaveLength(1);
+    // What the run's report step said comes first, formatted.
+    const result = within(runs).getByRole("region", { name: "Result" });
+    expect(within(result).getByRole("heading", { name: "fix-login is ready" })).toBeInTheDocument();
+    expect(within(result).getByRole("heading", { name: "What changed" })).toBeInTheDocument();
+    expect(within(result).getByText("The login redirects home.")).toBeInTheDocument();
   });
 
   it("folds a long run's succeeded steps until asked to show them", async () => {
@@ -572,6 +587,7 @@ describe("WorkflowView", () => {
         inputs: {},
         pullRequest: null,
         pullRequestsMade: [],
+        reports: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -620,6 +636,7 @@ describe("WorkflowView", () => {
         inputs: {},
         pullRequest: null,
         pullRequestsMade: [],
+        reports: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -677,6 +694,7 @@ describe("WorkflowView", () => {
         inputs: {},
         pullRequest: null,
         pullRequestsMade: [],
+        reports: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -725,6 +743,7 @@ describe("WorkflowView", () => {
         inputs: {},
         pullRequest: null,
         pullRequestsMade: [],
+        reports: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -799,6 +818,7 @@ describe("WorkflowView", () => {
         inputs: {},
         pullRequest: null,
         pullRequestsMade: [],
+        reports: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -886,6 +906,7 @@ describe("WorkflowView", () => {
         inputs: {},
         pullRequest: null,
         pullRequestsMade: [],
+        reports: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -955,6 +976,7 @@ describe("WorkflowView", () => {
         inputs: {},
         pullRequest: null,
         pullRequestsMade: [],
+        reports: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,
@@ -1033,6 +1055,7 @@ describe("WorkflowView", () => {
         inputs: {},
         pullRequest: null,
         pullRequestsMade: [],
+        reports: [],
         createdAt: Date.now(),
         startedAt: null,
         endedAt: null,

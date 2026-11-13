@@ -434,6 +434,23 @@ function RunSummary({ run, steps }: { run: WorkflowRun; steps: WorkflowStepRun[]
         </span>
         <h3 className="text-base font-semibold">Run summary</h3>
       </div>
+      {run.reports.length > 0 && (
+        <section aria-label="Result" className="flex flex-col gap-2">
+          <h4 className="text-small font-semibold tracking-wider text-ink-faint uppercase">
+            Result
+          </h4>
+          {run.reports.map((report) => (
+            <article
+              key={report.step}
+              aria-label={report.title ?? `Report ${report.step}`}
+              className="flex flex-col gap-2 rounded border border-line bg-surface px-4 py-3"
+            >
+              {report.title && <h5 className="text-base font-semibold">{report.title}</h5>}
+              <Markdown text={report.body} />
+            </article>
+          ))}
+        </section>
+      )}
       <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5">
         <dt className="text-ink-faint">Workflow</dt>
         <dd>{run.workflowName}</dd>
@@ -586,6 +603,12 @@ function StepDetail({
         <p className="leading-relaxed whitespace-pre-wrap text-ink-muted select-text">
           {step.note}
         </p>
+      )}
+      {step.action === "report" && step.outputs.body && (
+        <div className="flex flex-col gap-2 rounded border border-line bg-surface px-4 py-3">
+          {step.outputs.title && <h4 className="text-base font-semibold">{step.outputs.title}</h4>}
+          <Markdown text={step.outputs.body} />
+        </div>
       )}
       {step.action === "approve" && step.status === "waiting" && active && (
         <ApprovalBox

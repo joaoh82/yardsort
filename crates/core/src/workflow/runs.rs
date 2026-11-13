@@ -435,22 +435,41 @@ fn pull_request_within(
     };
     let listed = gh
         .open_pull_requests_for(root, &branch, limit)
-        .map_err(|error| {
-            let asked = format!(
-                "Could not ask GitHub for `{}`'s pull request",
-                workspace.name
-            );
-            match &error {
-                _ if error.is_logged_out() => {
-                    format!("{asked}: gh is not logged in. Run `gh auth login`.")
-                }
-                crate::forge::ForgeError::Failed { stderr, .. } => {
-                    format!("{asked}: gh says {stderr}")
-                }
-                other => format!("{asked}: {other}"),
-            }
-        })?;
+        .map_err(|error| asked_error(&error, &workspace.name))?;
     Ok(crate::forge::pull_request_for(&listed, &branch).cloned())
+}
+
+/// Every pull request from the workspace's branch, in any state: what a report asks before it
+/// lists the pull requests a run opened. Errors as [`pull_request_of`]'s.
+pub fn branch_pull_requests(
+    gh: Option<&crate::forge::Gh>,
+    git: &crate::git::Git,
+    workspace: &WorkspaceRow,
+) -> Result<Vec<PullRequest>, String> {
+    let gh = gh.ok_or_else(|| {
+        "Finding the workspace's pull requests needs the GitHub CLI (`gh`) on your PATH.".to_owned()
+    })?;
+    let root = Path::new(&workspace.path);
+    let crate::git::Head::Branch(branch) = git.head(root).map_err(|e| e.to_string())? else {
+        return Ok(Vec::new());
+    };
+    gh.pull_requests_for(root, &branch, "all", PULL_REQUEST_LIMIT)
+        .map(|listed| {
+            listed
+                .into_iter()
+                .filter(|pr| pr.branch == branch)
+                .collect()
+        })
+        .map_err(|error| asked_error(&error, &workspace.name))
+}
+
+fn asked_error(error: &crate::forge::ForgeError, workspace: &str) -> String {
+    let asked = format!("Could not ask GitHub for `{workspace}`'s pull request");
+    match error {
+        _ if error.is_logged_out() => format!("{asked}: gh is not logged in. Run `gh auth login`."),
+        crate::forge::ForgeError::Failed { stderr, .. } => format!("{asked}: gh says {stderr}"),
+        other => format!("{asked}: {other}"),
+    }
 }
 
 /// What a run of `workflow` in this place would render as nothing, and why: a variable the
@@ -624,6 +643,10 @@ pub(crate) fn action_texts(action: &Action) -> Vec<&str> {
             texts
         }
         Action::Notify { title, body } => [Some(title.as_str()), body.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect(),
+        Action::Report { title, body } => [title.as_deref(), Some(body.as_str())]
             .into_iter()
             .flatten()
             .collect(),

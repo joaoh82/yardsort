@@ -62,6 +62,14 @@ pub trait Hands {
         Box::new(|| Ok(None))
     }
 
+    /// A job that asks the forge for the workspace branch's pull requests in any state, with
+    /// when each was opened. A report that lists the run's pull requests asks this first, since
+    /// the app's own look at the forge comes about once a minute. Same threading rules as
+    /// [`Self::open_pull_request`]. The default is none.
+    fn branch_pull_requests(&self, _workspace_id: &str) -> BranchPr {
+        Box::new(|| Ok(Vec::new()))
+    }
+
     /// One session's conversation, for a step that asked for a transcript. `raw` asks for each
     /// turn's own text. Without it, the budgeted digest. [`Conversation::Ready`]`(None)` when
     /// that session has no conversation to copy. [`Conversation::Later`] when the read has not
@@ -126,6 +134,14 @@ pub type PrAsk = Box<dyn FnOnce() -> Result<Vec<PrPost>, String> + Send + 'stati
 /// Asking whether the workspace has an open pull request, as a job for a thread of its own.
 pub type OpenPr = Box<dyn FnOnce() -> Result<Option<PrFacts>, String> + Send + 'static>;
 
+/// Asking for the branch's pull requests in any state, as a job for a thread of its own.
+pub type BranchPr =
+    Box<dyn FnOnce() -> Result<Vec<crate::forge::PullRequest>, String> + Send + 'static>;
+
+/// What the forge said about the branch for each report step, by run and step: `None` while
+/// the question is out.
+type ReportLookups = HashMap<(String, String), Option<Vec<crate::forge::PullRequest>>>;
+
 /// How long one question to the forge may take before it is given up on.
 pub const FORGE_LIMIT: Duration = Duration::from_secs(60);
 
@@ -151,6 +167,9 @@ pub struct Driver {
     forge: std::sync::Arc<Mutex<HashMap<String, Asked>>>,
     /// A pull request looked up after the run was queued, because the branch had none then.
     pulls: std::sync::Arc<Mutex<HashMap<String, PullLookup>>>,
+    /// The forge asked about the branch for a report step, keyed by run and step. `None`
+    /// while the question is out; `Some` once answered, whatever the answer.
+    reporting: std::sync::Arc<Mutex<ReportLookups>>,
     /// Runs whose `factory/` directory was already kept out of commits.
     factory_excluded: Mutex<HashSet<String>>,
     forge_every_ms: i64,
@@ -182,6 +201,7 @@ impl Driver {
             recovered: Mutex::new(HashSet::new()),
             forge: std::sync::Arc::new(Mutex::new(HashMap::new())),
             pulls: std::sync::Arc::new(Mutex::new(HashMap::new())),
+            reporting: std::sync::Arc::new(Mutex::new(HashMap::new())),
             factory_excluded: Mutex::new(HashSet::new()),
             forge_every_ms: i64::try_from(forge_every.as_millis()).unwrap_or(i64::MAX),
             touched: std::sync::atomic::AtomicBool::new(false),
@@ -382,6 +402,10 @@ impl Driver {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .retain(|id, _| runs.iter().any(|run| &run.id == id));
+        self.reporting
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(id, _), _| runs.iter().any(|run| &run.id == id));
         self.factory_excluded
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -484,6 +508,49 @@ impl Driver {
             Some(None) => Open::Missing,
             Some(Some(pr)) => Open::Found(pr.clone()),
         }
+    }
+}
+
+impl Driver {
+    /// Ask the forge once about the branch for one report step. `None` while the question is
+    /// out. Once answered, what it found; an error counts as an answer of nothing, so
+    /// a forge that cannot be reached does not hold the report forever.
+    fn branch_pr_for_report(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        ask: impl FnOnce() -> BranchPr,
+    ) -> Option<Vec<crate::forge::PullRequest>> {
+        let key = (run_id.to_owned(), step_id.to_owned());
+        let mut asked = self
+            .reporting
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(answer) = asked.get(&key) {
+            return answer.clone();
+        }
+        asked.insert(key.clone(), None);
+        let job = ask();
+        let answers = std::sync::Arc::clone(&self.reporting);
+        let spawned = std::thread::Builder::new()
+            .name("workflow-report-pr".into())
+            .spawn(move || {
+                let answer = job().unwrap_or_else(|why| {
+                    eprintln!(
+                        "workflows: run {}: cannot ask about the pull request for `{}`: {why}",
+                        key.0, key.1
+                    );
+                    Vec::new()
+                });
+                answers
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(key, Some(answer));
+            });
+        if spawned.is_err() {
+            return Some(Vec::new());
+        }
+        None
     }
 }
 
@@ -1056,6 +1123,7 @@ fn step_of(effect: &Effect) -> &str {
         Effect::Start { step, .. }
         | Effect::Paste { step, .. }
         | Effect::Notify { step, .. }
+        | Effect::Report { step, .. }
         | Effect::RunTest { step, .. }
         | Effect::Capture { step, .. } => step,
     }
@@ -1127,6 +1195,14 @@ fn carry_out(
                 .notify(&title, body.as_deref())
                 .map(|()| Outputs::new()),
         ),
+        Effect::Report { title, body, .. } => {
+            let mut outputs = Outputs::new();
+            if let Some(title) = title {
+                outputs.insert("title".to_owned(), title);
+            }
+            outputs.insert("body".to_owned(), super::artifact::cap(&body).0);
+            done(Ok(outputs))
+        }
         Effect::RunTest { test, inputs, .. } => {
             // Queue the run in this workspace; the smoke runner, ticking on this same thread,
             // carries it out. The step then waits for the run's row to end. A run that needs the
@@ -1395,6 +1471,7 @@ impl Capture<'_> {
                         .and_then(|row| engine::parse_outputs(&row.outputs).get(field).cloned())
                 }
             }
+            [namespace, field] if namespace == "run" => run_var(self.store, self.run_id, field),
             [namespace, name] if namespace == "artifacts" => self
                 .store
                 .workflow_artifacts(self.run_id)
@@ -1419,6 +1496,19 @@ impl Capture<'_> {
                 .var(other)
                 .or_else(|| self.facts.borrow().var(other)),
         }
+    }
+}
+
+/// `{{ run.<field> }}`: the run's id, or the pull requests it has opened so far.
+fn run_var(store: &Store, run_id: &str, field: &str) -> Option<String> {
+    match field {
+        "id" => Some(run_id.to_owned()),
+        "pull_requests" => {
+            let run = store.workflow_run(run_id).ok().flatten()?;
+            let made = super::made::pull_requests_made(store, &run).ok()?;
+            Some(super::made::pull_requests_text(&made))
+        }
+        _ => None,
     }
 }
 
@@ -1478,6 +1568,7 @@ impl World for Seen<'_> {
                 }
                 self.facts.borrow().var(path)
             }
+            [namespace, field] if namespace == "run" => run_var(self.store, self.run_id, field),
             [namespace, name] if namespace == "artifacts" => self
                 .store
                 .workflow_artifacts(self.run_id)
@@ -1493,6 +1584,24 @@ impl World for Seen<'_> {
 
     fn origin(&self) -> Option<String> {
         self.facts.borrow().origin.clone()
+    }
+
+    fn pull_requests_current(&self, step_id: &str) -> bool {
+        let Some(found) = self.driver.branch_pr_for_report(self.run_id, step_id, || {
+            self.hands.branch_pull_requests(&self.place.workspace.id)
+        }) else {
+            return false;
+        };
+        // The same matching as the app's look: on the branch, opened during the run.
+        if let Err(error) =
+            super::made::observe_pull_requests(self.store, &self.place.project.id, &found, self.now)
+        {
+            eprintln!(
+                "workflows: run {}: could not record its pull requests: {error}",
+                self.run_id
+            );
+        }
+        true
     }
 
     fn pr_known(&self) -> Option<bool> {

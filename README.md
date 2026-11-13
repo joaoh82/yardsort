@@ -399,7 +399,7 @@ test fails, skips the steps still going, cancels a smoke test they were waiting 
 A step can also hand a named document, such as a spec or a test report, to the step after it.
 The next agent receives that text, and the run keeps it so you can read what was passed on.
 
-![Workflows: the built-in code review as a chart, with its file and its runs beside it](docs/images/workflows.png)
+![Workflows: a finished Software factory run, with its steps, the result it reported and the pull request it opened](docs/images/workflows.png)
 
 **Workflows** in the sidebar lists the built-in ones and yours, each marked built in or custom,
 and deletes yours. Open one to see

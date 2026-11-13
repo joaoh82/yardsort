@@ -146,13 +146,14 @@ branch, in the first built-in.
 
 ### Actions in v1
 
-| Action             | What it does                                                                                                                                       | Ends when                                                | Produces              |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | --------------------- |
-| `start_session`    | Starts a harness in the run's workspace through the shared launcher, with a first message. `harness`, optional `model`, `effort`, `skip_memory`    | The process has been spawned                             | `session`, `run`      |
-| `wait_session`     | Watches one session. `until: settled` is PTY quiet past the attention threshold or a `turn.completed` event; `until: exited` is the process ending | The condition holds, or `timeout` → step fails           | `outcome`             |
-| `send_to_session`  | Pastes a message into a live session — one this run started, or `origin` — once it is quiet. There is no key to change that                        | The paste was written, or the session was gone → skipped |                       |
-| `wait_pr_activity` | Polls the forge for a review or comment on the workspace's pull request newer than the run started. `kind: review \| comment \| any`               | Activity exists, or `timeout` → step fails               | `count`, `latest_url` |
-| `notify`           | An OS notification when the window is unfocused, a toast in the app otherwise; also a line in the run's log                                        | Immediately                                              |                       |
+| Action             | What it does                                                                                                                                        | Ends when                                                | Produces              |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | --------------------- |
+| `start_session`    | Starts a harness in the run's workspace through the shared launcher, with a first message. `harness`, optional `model`, `effort`, `skip_memory`     | The process has been spawned                             | `session`, `run`      |
+| `wait_session`     | Watches one session. `until: settled` is PTY quiet past the attention threshold or a `turn.completed` event; `until: exited` is the process ending  | The condition holds, or `timeout` → step fails           | `outcome`             |
+| `send_to_session`  | Pastes a message into a live session — one this run started, or `origin` — once it is quiet. There is no key to change that                         | The paste was written, or the session was gone → skipped |                       |
+| `wait_pr_activity` | Polls the forge for a review or comment on the workspace's pull request newer than the run started. `kind: review \| comment \| any`                | Activity exists, or `timeout` → step fails               | `count`, `latest_url` |
+| `notify`           | An OS notification when the window is unfocused, a toast in the app otherwise; also a line in the run's log                                         | Immediately                                              |                       |
+| `report`           | Says what the run came to: `body` (Markdown) and `title`, rendered, with consumed artifacts appended as a prompt's are. Nothing leaves the computer | Immediately                                              | `title`, `body`       |
 
 Every action is a plain description of intent. None takes a shell string; `start_session` goes
 through the same argv-building launcher as the composer and `ys workspace new`, so hooks are armed
@@ -1022,3 +1023,29 @@ run opened two, in two repositories, and they had to be found on GitHub. A run n
 Summary row, listed on the summary. `ys workflow runs` has a `PRS` column and `pullRequests` in
 `--json`; `--run` prints them under **Pull requests**. The phone's notices are left as they
 are: they carry no run content, by design, and the phone's run view is not changed here.
+
+### The `report` action
+
+_Built 2026-11-13._ The owner asked for a step whose job is only to output information. A
+`report` renders `body` and `title` like a `notify` (`handoff_prompt` appends consumed artifacts
+the body does not place) and keeps them as its outputs, cut at the artifact cap. It notifies no
+one. `workflow::made::reports` reads a run's succeeded report steps in file order; that is the
+run's result, carried to the window as `WorkflowRun.reports`, first on the summary, and printed
+by `ys workflow runs --run` under **Result** (`reports` in `--json`). A report waiting to run
+again after a continue is not part of the result until it succeeds again.
+
+`run` is a new variable namespace, always available: `run.id`, and `run.pull_requests`, the
+lines of `workflow::made::pull_requests_text`, read when the step renders. A run's own-repository
+pull requests are otherwise only as current as the app's last look at GitHub, about a minute, and
+a report is saved once, so a stale list would stay wrong. A `report` that places
+`run.pull_requests` therefore stays pending until `World::pull_requests_current` says the forge
+has been asked about the branch since the step became ready: the driver runs
+`Hands::branch_pull_requests` (`gh pr list --head <branch> --state all`) once per report step on a
+thread of its own, and feeds the answer through `made::observe_pull_requests`, the same matching
+the app's look does. An error counts as an answer, so an unreachable forge delays a report by one
+attempt, not forever. Other steps reading `run.pull_requests` read the table as it is.
+
+The workflow writer's standing instruction (`describe::SYSTEM`) and the Floor Manager's
+`AGENTS.md` say both, so an agent writing or changing a workflow, or answering about a run, knows
+them. The built-in software factory has a `result` report between `release` and `ready`, so the
+chart stays one column and the notification comes once the result is written.

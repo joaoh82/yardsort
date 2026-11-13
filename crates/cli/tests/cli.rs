@@ -2938,6 +2938,82 @@ fn a_run_lists_the_pull_requests_it_opened_here_and_elsewhere() {
     assert_eq!(listed[0]["pullRequests"].as_array().unwrap().len(), 2);
 }
 
+const REPORTED: &str = "id: reported
+name: Reported
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: result
+    action: report
+    title: Done
+    body: \"{{ run.pull_requests }}\"
+";
+
+#[test]
+fn a_run_shows_what_its_report_said_first() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "reported.yaml", REPORTED);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .expect("nobody else holds it");
+    let json = fx
+        .ys(&["workflow", "run", "reported", "--workspace", name, "--json"])
+        .ok();
+    let queued: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let run = queued["run"].as_str().unwrap();
+    // What the app's driver leaves once the step has run.
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    assert!(store.start_workflow_run(run, None).unwrap());
+    use yardsort_core::store::StepStatus;
+    assert!(store
+        .move_workflow_step(
+            run,
+            "result",
+            &[StepStatus::Pending],
+            StepStatus::Succeeded,
+            Some(r#"{"title":"Done","body":"This run opened no pull requests."}"#),
+            None,
+            None,
+            false,
+        )
+        .unwrap());
+    drop(store);
+
+    let text = fx.ys(&["workflow", "runs", "--run", &run[..8]]).ok();
+    let result = text.find("Result").expect(&text);
+    let steps = text.find("STEP").expect(&text);
+    assert!(result < steps, "the result comes before the steps: {text}");
+    assert!(
+        text.contains("Done\nThis run opened no pull requests."),
+        "{text}"
+    );
+    let shown: serde_json::Value = serde_json::from_str(
+        &fx.ys(&["workflow", "runs", "--run", &run[..8], "--json"])
+            .ok(),
+    )
+    .unwrap();
+    assert_eq!(shown["reports"][0]["step"], "result");
+    assert_eq!(shown["reports"][0]["title"], "Done");
+    assert_eq!(
+        shown["reports"][0]["body"],
+        "This run opened no pull requests."
+    );
+    // `validate` takes the action, and says what is wrong with one that says nothing.
+    let bad = fx.data_dir.join("bad.yaml");
+    std::fs::write(
+        &bad,
+        REPORTED.replace("    body: \"{{ run.pull_requests }}\"\n", ""),
+    )
+    .unwrap();
+    let refused = fx
+        .ys(&["workflow", "validate", bad.to_str().unwrap()])
+        .failed();
+    assert!(refused.contains("`body`"), "{refused}");
+}
+
 const SIGN_OFF: &str = "id: sign-off
 name: Sign off
 version: 1

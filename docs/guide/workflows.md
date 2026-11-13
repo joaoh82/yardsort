@@ -36,7 +36,7 @@ starts a new one.
 good. A copy that replaces a built-in has **Reset…** instead, which deletes your copy and brings
 the built-in back. Built-in rows have neither.
 
-![The built-in code review with a selected step and its YAML source highlighted](../images/workflows.png)
+![A finished Software factory run in the Runs view: the run list, the run's steps, and its summary with the result its report step wrote and the pull request it opened](../images/workflows.png)
 
 A workflow's page has two views, switched in its header: **Runs** and **Definition**. It opens
 on **Runs** when the newest run failed or is still going, or when you opened a run from
@@ -345,6 +345,38 @@ what an agent printed. Two kinds:
 
 A run that is continued has one life, from when it was asked for to when it last ended: a pull
 request opened between the failure and the continue is the run's too.
+
+### A run's result
+
+A `report` step says what the run came to. Its only job is to output text: a `body` in Markdown,
+and an optional `title`. It notifies nobody. What every `report` step in the run said, in the
+order of the file, is the run's **result**: it is the first thing on the run's **Summary**, and
+`ys workflow runs --run <id>` prints it under **Result** before the steps (`reports` in `--json`).
+On its own step in the run, a report shows what it said.
+
+```yaml
+- id: result
+  needs: [release]
+  action: report
+  consumes: [brief]
+  title: "{{ workspace.name }} is ready to release"
+  body: |
+    ## Pull requests
+
+    {{ run.pull_requests }}
+
+    Merging and deploying are still yours to do.
+```
+
+The body takes every [variable](#variables), including `{{ run.pull_requests }}`. A report
+saves its words once, so one that places `{{ run.pull_requests }}` first asks GitHub about the
+workspace's branch itself instead of relying on the app's once-a-minute look: a pull request
+opened a moment before still makes the list. It waits for that answer, which takes a few seconds;
+if GitHub cannot be reached, it lists what is already known. A report that
+`consumes` an artifact and does not place `{{ artifacts.<name> }}` in its body has the artifact
+added at the end, under **Artifact: <name>**, as a prompt does. A body is kept to 32000
+characters. A `report` leaves `title` and `body` for later steps, so a `notify` after it can say
+`{{ steps.result.title }}`. The built-in software factory ends with one.
 
 ### Continuing a failed run
 
@@ -825,8 +857,11 @@ What happens:
    this gate.
 
 The run ends at **release**. The prompt says the work is ready to release. **Approve** finishes
-the run, and `ready` notifies you. **Reject**, or **Request changes**, stops the run: this gate
-has no loop back. Nothing is merged, deployed, or rolled back.
+the run: `result`, a [report](#a-runs-result), leaves the run's result — the pull requests it
+opened and the brief agreed at the start — and then `ready` notifies you. **Reject**, or **Request
+changes**, stops the run: this gate has no loop back. Nothing is merged, deployed, or rolled
+back. A copy of the factory you made before this has no `result` step; **Describe a change**
+can add one.
 
 The chart's arrows back are the three loops: from the plan gate to planning, from the smoke
 test to implementation, and from the review gate to implementation. A route to `stop` is not a
@@ -884,6 +919,7 @@ circle are reported, because none of them could ever start.
 | `wait_pr_activity` | `kind`, `timeout`                                                 | Waits for a new review or comment on the workspace's pull request, since the run started. `kind` is `review`, `comment` or `any`, the default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `run_test`         | `test` (required), `inputs`, `timeout`, `gate`                    | Runs a smoke test in the workspace and waits for its verdict. The step succeeds whether the test passed or failed, so a later step can read `verdict` and act on either; it fails only on no verdict or a timeout. `gate: true` makes a failed verdict fail the step, skip the steps still going, and stop the run. `test` is a test id, or exactly `{{ inputs.<id> }}` for an input of kind `test`. `inputs` is a map of the test's own input ids to values.                                                                                                                                                                                                |
 | `notify`           | `title` (required), `body`                                        | Tells you, with a system notification.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `report`           | `body` (required), `title`                                        | Says what the run came to, as Markdown: the run's result. Its only job is to output that text. See [A run's result](#a-runs-result).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `approve`          | `prompt`, `timeout`, `gate`                                       | Waits for you to approve, reject, or request changes. Always a gate: a rejection or a request for changes stops the run. `prompt` is the question, and can use variables. `timeout`, when set, fails the step with no decision and does not stop a step that does not need it. `gate: false` is refused. Waiting for a GitHub review is `wait_pr_activity`, not this.                                                                                                                                                                                                                                                                                        |
 
 A key that belongs to another action is reported as misplaced. `title` on a `start_session` step
@@ -907,10 +943,11 @@ nothing else: no filters, no expressions. Anything else is reported where it is 
 | `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task`                                                                    | The workspace the run is about. `task` is the first message it was started with. In the project's own checkout, `branch` is whatever git has checked out, and `base_branch` the repository's default branch, unless that is the branch itself.                                                                                                                                                                                                                                                                                                                                                           |
 | `pr.number`, `pr.url`, `pr.title`, `pr.repo`, `pr.clone`                                                                                                             | The open pull request for the workspace's branch. Found when the run is queued when a step names it before any `wait_pr_activity`; that run needs one open. When every such step comes after a `wait_pr_activity`, the run can start without one and looks again, and a step that names it fails once that lookup finds there is still none. `wait_pr_activity` keeps waiting instead. For a `tracked_pull_request` workflow, the one it is about, read by its link, with `pr.repo` its repository (`owner/name`) and `pr.clone` the project's nested clone of it; both are empty for a workspace's own. |
 | `inputs.<id>`                                                                                                                                                        | What was given for that input.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `steps.<id>.<field>`                                                                                                                                                 | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`, `decision` and `feedback` from `approve`. The step must be among this step's `needs`.                                                                                                                                                                                                                                                                                                              |
+| `steps.<id>.<field>`                                                                                                                                                 | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`, `decision` and `feedback` from `approve`, `title` and `body` from `report`. The step must be among this step's `needs`.                                                                                                                                                                                                                                                                            |
 | `memory`                                                                                                                                                             | The project's [memory](memory.md): its approved entries, cited, when the project shares it and has any. Empty otherwise. It never carries the request to propose new entries that an agent you start yourself gets. An agent's first message gets the memory after it anyway; put `{{ memory }}` in a `start_session` prompt to have it there instead, not twice.                                                                                                                                                                                                                                        |
 | `handoff`                                                                                                                                                            | The workspace's [handoff](terminals-and-sessions.md#handing-work-to-another-agent) packet: what happened there so far.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `artifacts.<name>`                                                                                                                                                   | Text of an artifact this step consumes. See [Artifacts](#artifacts).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `run.id`, `run.pull_requests`                                                                                                                                        | The run itself: its id, and the pull requests it has opened so far, one line each as `#12 Title — link` or `owner/name#41 — link`, or a sentence saying there are none. See [What a run opened](#what-a-run-opened).                                                                                                                                                                                                                                                                                                                                                                                     |
 | `event.kind`, `event.count`, `event.note`, `event.head`, `event.summary`, `event.verdict`, `event.url`, `event.number`, `event.title`, `event.authors`, `event.name` | What set off a run a [trigger](triggers.md#what-the-workflow-is-told) started. Empty in a run you started yourself.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 To write `{{` literally, for example in a prompt about a template language, write `\{{`.

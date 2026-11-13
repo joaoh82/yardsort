@@ -135,6 +135,7 @@ fn the_built_in_software_factory_parses_with_its_phases_and_loops() {
             "await-review",
             "accept-review",
             "release",
+            "result",
             "ready",
         ]
     );
@@ -265,7 +266,11 @@ fn the_built_in_software_factory_parses_with_its_phases_and_loops() {
         "the release gate has no revision loop"
     );
     assert!(matches!(release.action, Action::Approve { .. }));
-    assert_eq!(step("ready").needs, ["release"]);
+    assert_eq!(step("result").needs, ["release"]);
+    assert!(matches!(step("result").action, Action::Report { .. }));
+    assert_eq!(step("result").consumes, ["brief"]);
+    // The notification comes once the result is written.
+    assert_eq!(step("ready").needs, ["result"]);
     assert!(matches!(step("ready").action, Action::Notify { .. }));
 }
 
@@ -1641,4 +1646,53 @@ fn the_folder_stamp_moves_when_a_workflow_file_is_added_changed_or_removed() {
     assert_ne!(changed, added);
     std::fs::remove_file(&file).unwrap();
     assert!(folder_stamp(data.path()).is_empty());
+}
+
+#[test]
+fn a_report_says_something_and_may_use_the_runs_own_variables() {
+    let workflow = parse(&with_steps(
+        "  - id: result
+    action: report
+    needs: [start]
+    title: Done
+    body: |
+      Run {{ run.id }} opened:
+      {{ run.pull_requests }}
+",
+    ))
+    .unwrap();
+    let step = workflow.steps.iter().find(|s| s.id == "result").unwrap();
+    assert!(matches!(&step.action, Action::Report { title: Some(t), .. } if t == "Done"));
+    assert_eq!(Action::produces("report"), ["title", "body"]);
+
+    let missing = problem(&with_steps(
+        "  - id: result
+    action: report
+    title: Done
+",
+    ));
+    assert!(missing.contains("`body`"), "{missing}");
+
+    let wrong = problem(&with_steps(
+        "  - id: result
+    action: report
+    body: \"{{ run.prs }}\"
+",
+    ));
+    assert!(
+        wrong.contains("`run` has no `prs`. It has `id`, `pull_requests`"),
+        "{wrong}"
+    );
+
+    let misplaced = problem(&with_steps(
+        "  - id: result
+    action: report
+    body: Hi
+    prompt: Hello
+",
+    ));
+    assert!(
+        misplaced.contains("`prompt` is not something a `report` step takes"),
+        "{misplaced}"
+    );
 }

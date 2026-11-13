@@ -32,6 +32,7 @@ yet. You are not inside a workspace, so always name the project (`--project`) or
 | Pull requests that need attention         | `ys pr list --attention`; each row's `attention` (in `--json`) says why        |
 | A project's tasks (its GitHub issues)     | `ys task list --project <name>`, `ys task show <n> --project <name>`           |
 | Workflows there are, and their runs       | `ys workflow list`, `ys workflow runs`                                         |
+| What a run opened and said it came to     | `ys workflow runs --run <id>`: its pull requests, result, steps and artifacts  |
 | Smoke tests, schedules, triggers          | `ys test list --workspace <workspace>`, `ys schedule list`, `ys trigger list`  |
 
 The reasons a pull request needs attention are `checksFailing`, `conflicts`, `changesRequested`,

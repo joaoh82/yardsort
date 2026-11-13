@@ -3064,6 +3064,21 @@ fn the_software_factory_walks_the_happy_path_to_ready() {
     );
     let effects = run.advance();
     assert_eq!(run.status("release"), "succeeded");
+    // The report comes first, and says what was agreed at the start.
+    let report = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Report { step, title, body } if step == "result" => Some((title, body)),
+            _ => None,
+        })
+        .expect("the report starts once the release is approved");
+    assert!(report
+        .0
+        .as_deref()
+        .is_some_and(|t| t.contains("ready to release")));
+    assert!(report.1.contains("## Artifact: brief"), "{}", report.1);
+    finish_notify(&mut run, "result");
+    let effects = run.advance();
     assert!(
         effects.iter().any(|effect| matches!(
             effect,
