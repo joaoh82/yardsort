@@ -1071,8 +1071,13 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       the full image ships Codex, OpenCode, Pi and Oh My Pi, pinned with their whole tree; every
       toolchain pinned and checked by its checksum; both images signed with Sigstore and carrying an
       SBOM. `install-agent` runs Anthropic's, Cursor's or xAI's own installer, naming whose terms
-      they are, or brings the npm harnesses up to date. Its smoke test passed; the first push to the
-      registry waits for the owner's go-ahead.
+      they are, or brings the npm harnesses up to date. Its smoke test passed; 0.30.0 published both
+      images on 2026-11-12, and the box pulled them, checked their signatures and installed Claude
+      Code with `install-agent`.
+      **R5's gate passed on 2026-11-13** ([35 §5](35-remote-r4-r5.md#5--what-each-gate-needs)): the
+      same session from both clients (slice 5), data across a service restart (slice 6), and the host
+      on a box with no desktop installed at all, checked on the box for every run since slice 2. R4
+      stays open for the iPhone checks of slices 8 to 11, and its Android checks need a phone.
 - [ ] R6–R7: sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
