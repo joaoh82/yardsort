@@ -1032,9 +1032,8 @@ workspace of its own.
 
 Not built, on purpose:
 
-- **Schedules and triggers.** Both still name a workspace that is there. A schedule that makes a
-  workspace per run is the "fresh worktree per run" [34](34-schedules.md) put off, and it still
-  needs its rule for the worktrees that pile up. A trigger belongs to a workspace by definition.
+- **Triggers.** A trigger belongs to a workspace by definition. (A schedule can make a workspace
+  per run since 2026-11-13: [34](34-schedules.md#a-new-workspace-per-run).)
 - **The phone.** A phone starts no workflow runs yet.
 - **A workflow that says it wants a new workspace.** A `context: project` in the file would let
   the dialog open on a new workspace for workflows written for one. Nothing needs it yet.

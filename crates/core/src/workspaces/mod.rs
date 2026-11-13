@@ -47,6 +47,19 @@ impl Workspaces<'_> {
         base: Option<&str>,
         wanted: &str,
     ) -> IpcResult<WorkspaceRow> {
+        self.create_named_noting(project_id, base, wanted, &|_| {})
+    }
+
+    /// [`Self::create_named`], telling `made` about the workspace the moment it has a row:
+    /// before the project's setup runs in it, so a caller knows exactly which workspace this
+    /// call made even when that setup fails and the workspace is kept.
+    pub fn create_named_noting(
+        &self,
+        project_id: &str,
+        base: Option<&str>,
+        wanted: &str,
+        made: &dyn Fn(&WorkspaceRow),
+    ) -> IpcResult<WorkspaceRow> {
         let (project, root) = self.usable_project(project_id)?;
         let base = match base {
             Some(base) => base.to_owned(),
@@ -81,6 +94,7 @@ impl Workspaces<'_> {
         self.ensure_dir(&project_dir)?;
         self.git.worktree_add(&root, &path, &branch, &base)?;
         let row = self.record(&project, &root, &name, &path, &branch, Some(&base))?;
+        made(&row);
         self.prepare(&root, row)
     }
 

@@ -4,6 +4,7 @@ import { InputField, type FieldInput } from "@/features/workflows/InputField";
 import {
   errorMessage,
   ipc,
+  type BranchList,
   type IfMissed,
   type Schedule,
   type ScheduleNotify,
@@ -28,6 +29,12 @@ const label = "text-small font-semibold tracking-wider text-ink-faint uppercase"
 /** An input of a workflow or of a smoke test, with what it starts on. */
 type Asked = FieldInput & { default: string | null };
 
+/** The start of a place that is a project to make a workspace in, not a workspace. */
+const NEW = "new:";
+/** How many of its own workspaces a schedule keeps when it does not say. */
+const KEEP_DEFAULT = 5;
+const KEEP_MOST = 50;
+
 /** How long after the last keystroke the core is asked what a spec comes to. */
 const PREVIEW_AFTER_MS = 200;
 
@@ -45,7 +52,8 @@ interface Props {
 /**
  * A schedule, new or being changed: what to run, where, its inputs, when, what to do with a
  * missed time, and when to be told. Everything is checked by the core when it is saved, exactly
- * as `ys schedule add` does; what shows here first — the next times, the test's steps — is so
+ * as `ys schedule add` does. A workflow can also be given a new workspace for each run, in a
+ * project, with how many of those the schedule keeps. What shows here first — the next times, the test's steps — is so
  * the person can see what they are asking for.
  *
  * For a smoke test the dialog shows the file's steps, and saving approves that file, as pressing
@@ -64,7 +72,16 @@ export function ScheduleDialog(props: Props) {
     schedule?.target ?? props.target ?? "workflow",
   );
   const [targetId, setTargetId] = useState(schedule?.targetId ?? props.targetId ?? "");
-  const [workspaceId, setWorkspaceId] = useState(schedule?.workspaceId ?? props.workspaceId ?? "");
+  // A workspace's id, or `new:<project id>` for a workspace made for each run in that project.
+  const [place, setPlace] = useState(
+    schedule?.newWorkspace
+      ? `${NEW}${schedule.projectId}`
+      : (schedule?.workspaceId ?? props.workspaceId ?? ""),
+  );
+  const [newName, setNewName] = useState(schedule?.newWorkspace ? schedule.workspaceName : "");
+  const [newBase, setNewBase] = useState(schedule?.baseBranch ?? "");
+  const [keep, setKeep] = useState(String(schedule?.newWorkspace ? schedule.keep : KEEP_DEFAULT));
+  const [branches, setBranches] = useState<{ project: string; list: BranchList } | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>(schedule?.inputs ?? {});
   const [when, setWhen] = useState<WhenFields>(() => fieldsOf(schedule?.spec ?? null));
   const [missed, setMissed] = useState<IfMissed>(schedule?.missed ?? "run_once");
@@ -94,11 +111,38 @@ export function ScheduleDialog(props: Props) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose, busy]);
 
-  const workspaces = projects.flatMap((project) =>
-    project.workspaces
+  // Only a workflow can run in a workspace made for it: a smoke test is a file in one.
+  const newIn = target === "workflow" && place.startsWith(NEW) ? place.slice(NEW.length) : null;
+  const workspaceId = place.startsWith(NEW) ? "" : place;
+  // Where the smoke tests are looked for: the workspace, or the project's own checkout while
+  // the workspace is still to be made.
+  const lookIn = newIn
+    ? (projects.find((p) => p.id === newIn)?.workspaces.find((w) => w.kind === "local")?.id ?? "")
+    : workspaceId;
+  const places = projects.flatMap((project) => [
+    ...(target === "workflow" && !project.missing
+      ? [{ id: `${NEW}${project.id}`, name: `${project.name} / new workspace each run` }]
+      : []),
+    ...project.workspaces
       .filter((w) => !w.archived && !w.missing)
       .map((w) => ({ id: w.id, name: `${project.name} / ${w.name}` })),
-  );
+  ]);
+
+  // The branches a new workspace can start from. Without them it starts from the default one.
+  useEffect(() => {
+    if (!newIn) return;
+    let current = true;
+    ipc.projectBranches(newIn).then(
+      (list) => current && setBranches({ project: newIn, list }),
+      () => current && setBranches(null),
+    );
+    return () => {
+      current = false;
+    };
+  }, [newIn]);
+  const branchList = branches && branches.project === newIn ? branches.list : null;
+  const keepCount = Number(keep);
+  const keepOk = Number.isInteger(keepCount) && keepCount >= 1 && keepCount <= KEEP_MOST;
 
   const workflow =
     target === "workflow"
@@ -114,17 +158,17 @@ export function ScheduleDialog(props: Props) {
   const wantsTests =
     target === "test" || (workflow?.inputs.some((input) => input.kind === "test") ?? false);
   useEffect(() => {
-    if (!wantsTests || !workspaceId) return;
+    if (!wantsTests || !lookIn) return;
     let current = true;
-    ipc.testList(workspaceId).then(
-      (found) => current && setTests({ workspace: workspaceId, items: found }),
-      () => current && setTests({ workspace: workspaceId, items: [] }),
+    ipc.testList(lookIn).then(
+      (found) => current && setTests({ workspace: lookIn, items: found }),
+      () => current && setTests({ workspace: lookIn, items: [] }),
     );
     return () => {
       current = false;
     };
-  }, [wantsTests, workspaceId]);
-  const testsHere = tests?.workspace === workspaceId ? tests.items : null;
+  }, [wantsTests, lookIn]);
+  const testsHere = tests?.workspace === lookIn ? tests.items : null;
   const runnableTests = useMemo(
     () => (testsHere ?? []).filter((test) => test.runnable && !test.browserMissing),
     [testsHere],
@@ -190,7 +234,7 @@ export function ScheduleDialog(props: Props) {
   const chosen = target === "workflow" ? !!workflow : !!test?.runnable && !!review;
   const ready =
     chosen &&
-    !!workspaceId &&
+    (newIn ? keepOk : !!workspaceId) &&
     !!spec &&
     preview !== null &&
     preview.problem === null &&
@@ -209,6 +253,14 @@ export function ScheduleDialog(props: Props) {
         target,
         targetId,
         workspaceId,
+        newWorkspace: newIn
+          ? {
+              projectId: newIn,
+              baseBranch: newBase.trim() || null,
+              name: newName.trim() || null,
+              keep: keepCount,
+            }
+          : null,
         inputs: Object.fromEntries(Object.entries(given).filter(([, value]) => value.trim())),
         spec,
         missed,
@@ -229,6 +281,8 @@ export function ScheduleDialog(props: Props) {
     setTarget(next);
     setTargetId("");
     setAnswers({});
+    // A smoke test has no new workspace to run in: the choice is made again.
+    if (next === "test" && place.startsWith(NEW)) setPlace("");
   };
   const patch = (next: Partial<WhenFields>) => setWhen((fields) => ({ ...fields, ...next }));
   const targetName = workflow?.name ?? test?.name ?? "";
@@ -275,17 +329,87 @@ export function ScheduleDialog(props: Props) {
             <select
               aria-label="Workspace"
               className={control}
-              value={workspaceId}
-              onChange={(event) => setWorkspaceId(event.target.value)}
+              value={place}
+              onChange={(event) => setPlace(event.target.value)}
             >
               <option value="">Choose…</option>
-              {workspaces.map((w) => (
+              {places.map((w) => (
                 <option key={w.id} value={w.id}>
                   {w.name}
                 </option>
               ))}
             </select>
           </label>
+
+          {newIn && (
+            <fieldset className="flex flex-col gap-3 rounded border border-line bg-canvas/40 p-3">
+              <legend className="sr-only">The workspace made for each run</legend>
+              <div className="flex flex-wrap gap-3">
+                <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <span className={label}>Workspace name (optional)</span>
+                  <input
+                    aria-label="New workspace name"
+                    className={`${control} select-text`}
+                    placeholder={targetId || "the workflow’s id"}
+                    value={newName}
+                    onChange={(event) => setNewName(event.target.value)}
+                  />
+                </label>
+                <label className="flex w-40 flex-col gap-1.5">
+                  <span className={label}>Start from</span>
+                  <select
+                    aria-label="Start from"
+                    className={control}
+                    value={newBase}
+                    onChange={(event) => setNewBase(event.target.value)}
+                  >
+                    <option value="">
+                      {branchList?.default
+                        ? `Default branch (${branchList.default})`
+                        : "Default branch"}
+                    </option>
+                    {/* One it was saved with stays offered while the list loads, or if it is gone. */}
+                    {newBase && !branchList?.branches.includes(newBase) && (
+                      <option value={newBase}>{newBase}</option>
+                    )}
+                    {branchList?.branches.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex w-20 flex-col gap-1.5">
+                  <span className={label}>Keep</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={KEEP_MOST}
+                    aria-label="Workspaces to keep"
+                    className={control}
+                    value={keep}
+                    onChange={(event) => setKeep(event.target.value)}
+                  />
+                </label>
+              </div>
+              {keepOk ? (
+                <p className="text-ink-muted">
+                  Each run gets a new branch and worktree, numbered after the first. Yardsort never
+                  removes them: once {keepCount === 1 ? "one is" : `${keepCount} are`} still there,
+                  a time is refused and you are told, until you archive or delete one.
+                </p>
+              ) : (
+                <p role="alert" className="text-red-400">
+                  Keep from 1 to {KEEP_MOST} workspaces.
+                </p>
+              )}
+              {schedule?.newWorkspace && schedule.made.length > 0 && (
+                <p className="text-ink-muted select-text">
+                  Still there: {schedule.made.join(", ")}.
+                </p>
+              )}
+            </fieldset>
+          )}
 
           {target === "workflow" ? (
             <label className="flex flex-col gap-1.5">
@@ -345,7 +469,7 @@ export function ScheduleDialog(props: Props) {
               value={given[input.id] ?? ""}
               onChange={(value) => setAnswers((all) => ({ ...all, [input.id]: value }))}
               tests={testsHere === null ? null : runnableTests}
-              hasWorkspace={!!workspaceId}
+              hasWorkspace={!!lookIn}
             />
           ))}
 

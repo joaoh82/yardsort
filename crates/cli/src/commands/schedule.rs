@@ -68,6 +68,21 @@ pub struct Add {
     /// Which workspace to run it in, by name or id. Default: the one this is run in.
     #[arg(long, value_name = "WORKSPACE")]
     pub workspace: Option<String>,
+    /// Make a new workspace in this project for each run, instead of running in one that is
+    /// there. Workflows only.
+    #[arg(long, value_name = "PROJECT", conflicts_with_all = ["workspace", "test"])]
+    pub project: Option<String>,
+    /// With --project: the branch each new workspace starts from. Default: the default branch.
+    #[arg(long, value_name = "BRANCH", requires = "project")]
+    pub base: Option<String>,
+    /// With --project: what the workspaces are called. Default: the workflow's id. A number is
+    /// added when the name is taken.
+    #[arg(long, value_name = "NAME", requires = "project")]
+    pub workspace_name: Option<String>,
+    /// With --project: the most of its workspaces that may be there at once. At that many, a
+    /// time is refused until you archive or delete one. Default: 5.
+    #[arg(long, value_name = "N", requires = "project")]
+    pub keep: Option<u32>,
     /// An answer to one of its inputs. Repeat for each.
     #[arg(long = "input", value_name = "ID=VALUE")]
     pub inputs: Vec<String>,
@@ -124,6 +139,10 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
                 workflow,
                 test,
                 workspace,
+                project,
+                base,
+                workspace_name,
+                keep,
                 inputs,
                 name,
                 at,
@@ -147,6 +166,12 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
                     target,
                     target_id,
                     workspace,
+                    each_run: project.map(|project| EachRunAsked {
+                        project,
+                        base,
+                        name: workspace_name,
+                        keep,
+                    }),
                     inputs,
                     name,
                     spec,
@@ -327,7 +352,7 @@ fn find(ys: &Yardsort, wanted: &str) -> Result<ScheduleRow, Failure> {
             "{} schedules match {wanted:?}. Use the id instead: {}.",
             many.len(),
             many.iter()
-                .map(|s| format!("{} ({})", memory::short_id(&s.id), s.workspace_name))
+                .map(|s| format!("{} ({})", memory::short_id(&s.id), place_words(ys, s)))
                 .collect::<Vec<_>>()
                 .join(", ")
         ))),
@@ -344,6 +369,18 @@ struct Listed {
     target_id: String,
     workspace: String,
     workspace_id: Option<String>,
+    /// It makes a workspace for each run; `workspace` then says so in words.
+    new_workspace: bool,
+    /// What its workspaces are called, when it says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspace_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    keep: Option<i64>,
+    /// The workspaces it made that are still there.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    made: Vec<String>,
     inputs: BTreeMap<String, String>,
     spec: Option<ScheduleSpec>,
     when: String,
@@ -382,7 +419,22 @@ impl From<&ScheduleRunRow> for Line {
     }
 }
 
+/// Where a schedule runs, in words: the workspace's name, or that it makes one in a project.
+fn place_words(ys: &Yardsort, row: &ScheduleRow) -> String {
+    if !row.new_workspace {
+        return row.workspace_name.clone();
+    }
+    let project = ys
+        .store
+        .project(&row.project_id)
+        .ok()
+        .flatten()
+        .map_or_else(|| "its project".to_owned(), |project| project.name);
+    format!("a new workspace in {project}")
+}
+
 fn listed(
+    ys: &Yardsort,
     row: &ScheduleRow,
     last: Option<&ScheduleRunRow>,
     going: Option<&ScheduleRunRow>,
@@ -393,8 +445,20 @@ fn listed(
         name: row.name.clone(),
         target: row.target_kind.clone(),
         target_id: row.target_id.clone(),
-        workspace: row.workspace_name.clone(),
+        workspace: place_words(ys, row),
         workspace_id: row.workspace_id.clone(),
+        new_workspace: row.new_workspace,
+        workspace_name: row
+            .new_workspace
+            .then(|| row.workspace_name.clone())
+            .filter(|name| !name.is_empty()),
+        base_branch: row.base_branch.clone(),
+        keep: row.new_workspace.then_some(row.keep),
+        made: if row.new_workspace {
+            ys.store.schedule_workspaces(&row.id).unwrap_or_default()
+        } else {
+            Vec::new()
+        },
         inputs: serde_json::from_str(&row.inputs).unwrap_or_default(),
         when: words(spec.as_ref()),
         spec,
@@ -411,7 +475,7 @@ fn listed(
 fn listed_one(ys: &Yardsort, row: &ScheduleRow) -> Result<Listed, Failure> {
     let last = ys.store.schedule_runs(&row.id, 1)?.into_iter().next();
     let going = schedule::going_runs(&ys.store)?;
-    Ok(listed(row, last.as_ref(), going.get(&row.id)))
+    Ok(listed(ys, row, last.as_ref(), going.get(&row.id)))
 }
 
 fn words(spec: Option<&ScheduleSpec>) -> String {
@@ -456,7 +520,7 @@ fn list(ys: &Yardsort, out: &Output) -> Result<(), Failure> {
     let going = schedule::going_runs(&ys.store)?;
     let all: Vec<Listed> = rows
         .iter()
-        .map(|row| listed(row, latest.get(&row.id), going.get(&row.id)))
+        .map(|row| listed(ys, row, latest.get(&row.id), going.get(&row.id)))
         .collect();
     out.emit(&all, || {
         if rows.is_empty() {
@@ -478,7 +542,7 @@ fn list(ys: &Yardsort, out: &Output) -> Result<(), Failure> {
                 memory::short_id(&row.id).to_owned(),
                 row.name.clone(),
                 format!("{} {}", row.target_kind, row.target_id),
-                row.workspace_name.clone(),
+                item.workspace.clone(),
                 item.when.clone(),
                 item.next_at.map_or_else(|| "-".to_owned(), clock::show),
                 latest
@@ -513,7 +577,7 @@ fn show(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
     let row = find(ys, wanted)?;
     let last = ys.store.schedule_runs(&row.id, 1)?.into_iter().next();
     let going = schedule::going_runs(&ys.store)?;
-    let item = listed(&row, last.as_ref(), going.get(&row.id));
+    let item = listed(ys, &row, last.as_ref(), going.get(&row.id));
     let upcoming: Vec<i64> = match (&item.spec, row.enabled) {
         (Some(spec), true) => when::upcoming(spec, &clock::now(), UPCOMING)
             .unwrap_or_default()
@@ -540,8 +604,19 @@ fn show(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                 "Runs the {} `{}` in {}.",
                 ScheduleTarget::parse(&row.target_kind).map_or("run", ScheduleTarget::words),
                 row.target_id,
-                row.workspace_name
+                item.workspace
             );
+            if row.new_workspace {
+                sayln!(
+                    "It keeps {} of them. Still there: {}.",
+                    row.keep,
+                    if item.made.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        item.made.join(", ")
+                    }
+                );
+            }
             for (id, value) in &item.inputs {
                 sayln!("  {id} = {value}");
             }
@@ -587,6 +662,7 @@ struct Asked {
     target: ScheduleTarget,
     target_id: String,
     workspace: Option<String>,
+    each_run: Option<EachRunAsked>,
     inputs: Vec<String>,
     name: Option<String>,
     spec: ScheduleSpec,
@@ -594,10 +670,24 @@ struct Asked {
     notify: ScheduleNotify,
 }
 
+/// What `add --project` was given.
+struct EachRunAsked {
+    project: String,
+    base: Option<String>,
+    name: Option<String>,
+    keep: Option<u32>,
+}
+
 fn add(ys: &Yardsort, asked: Asked, out: &Output) -> Result<(), Failure> {
-    let workspace = match asked.workspace.as_deref() {
-        Some(wanted) => super::workspace::find_workspace(ys, wanted)?,
-        None => super::workflow::here(ys)?,
+    // In a workspace that is there, or in one made for each run in a project.
+    let project = match &asked.each_run {
+        Some(each) => Some(ys.project(&each.project)?),
+        None => None,
+    };
+    let workspace = match (&project, asked.workspace.as_deref()) {
+        (Some(_), _) => None,
+        (None, Some(wanted)) => Some(super::workspace::find_workspace(ys, wanted)?),
+        (None, None) => Some(super::workflow::here(ys)?),
     };
     let mut inputs = BTreeMap::new();
     for pair in &asked.inputs {
@@ -616,7 +706,16 @@ fn add(ys: &Yardsort, asked: Asked, out: &Output) -> Result<(), Failure> {
             name: asked.name.as_deref(),
             target: asked.target,
             target_id: &asked.target_id,
-            workspace_id: &workspace.id,
+            workspace_id: workspace.as_ref().map_or("", |w| w.id.as_str()),
+            new_workspace: match (&project, &asked.each_run) {
+                (Some(project), Some(each)) => Some(schedule::EachRun {
+                    project_id: &project.id,
+                    base: each.base.as_deref(),
+                    name: each.name.as_deref(),
+                    keep: each.keep,
+                }),
+                _ => None,
+            },
             inputs: &inputs,
             spec: &asked.spec,
             missed: asked.missed,
@@ -626,19 +725,22 @@ fn add(ys: &Yardsort, asked: Asked, out: &Output) -> Result<(), Failure> {
         &clock::now(),
     )?;
     // `ys` approves nothing. A test file nobody has approved in the app waits there, once.
-    let unapproved = asked.target == ScheduleTarget::Test && {
-        let hash =
-            yardsort_core::smoke::find(std::path::Path::new(&workspace.path), &asked.target_id)
-                .map(|entry| yardsort_core::smoke::runs::content_hash(&entry.text));
-        match hash {
-            Some(hash) => {
-                !ys.store
-                    .test_approved(&workspace.project_id, &asked.target_id, &hash)?
+    let unapproved = match &workspace {
+        Some(workspace) if asked.target == ScheduleTarget::Test => {
+            let hash =
+                yardsort_core::smoke::find(std::path::Path::new(&workspace.path), &asked.target_id)
+                    .map(|entry| yardsort_core::smoke::runs::content_hash(&entry.text));
+            match hash {
+                Some(hash) => {
+                    !ys.store
+                        .test_approved(&workspace.project_id, &asked.target_id, &hash)?
+                }
+                None => false,
             }
-            None => false,
         }
+        _ => false,
     };
-    let item = listed(&row, None, None);
+    let item = listed(ys, &row, None, None);
     out.emit(&item, || {
         sayln!(
             "Added `{}` ({}): {}.",
@@ -648,6 +750,14 @@ fn add(ys: &Yardsort, asked: Asked, out: &Output) -> Result<(), Failure> {
         );
         if let Some(next) = row.next_at {
             sayln!("Next: {}", clock::show(next));
+        }
+        if row.new_workspace {
+            sayln!(
+                "Each run gets {}. It keeps {} of them: at that many, a time is refused until \
+                 you archive or delete one.",
+                item.workspace,
+                row.keep
+            );
         }
         if unapproved {
             sayln!(
@@ -687,10 +797,19 @@ fn run_now(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
         "Yardsort is not running. Runs are carried out in the app: open it, then run this \
              again. Nothing was queued.",
     )?;
+    let git = ys.git()?;
+    let worktree_root = ys.worktree_root()?;
     let fired = fire::run_now(
         &ys.store,
         &ys.data_dir,
         &Looking(ys),
+        &yardsort_core::workspaces::Workspaces {
+            env: ys.env(),
+            store: &ys.store,
+            git: &git,
+            worktree_root: &worktree_root,
+            settings: &ys.settings.workspaces,
+        },
         &found.id,
         clock::now().timestamp_millis(),
     )?;

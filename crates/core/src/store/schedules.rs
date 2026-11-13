@@ -39,6 +39,13 @@ pub struct ScheduleRow {
     pub created_by: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// It makes a new workspace in the project for each run, and `workspace_id` is `None`.
+    /// `workspace_name` is then what those are called; empty names them after the workflow.
+    pub new_workspace: bool,
+    /// The branch a new workspace starts from; `None` is the repository's default.
+    pub base_branch: Option<String>,
+    /// The most of its own workspaces that may be there at once.
+    pub keep: i64,
 }
 
 /// What a schedule is made of, for adding one and for changing one.
@@ -48,8 +55,12 @@ pub struct ScheduleFields<'a> {
     pub target_kind: &'a str,
     pub target_id: &'a str,
     pub project_id: &'a str,
-    pub workspace_id: &'a str,
+    /// `None` for a schedule that makes its own workspaces.
+    pub workspace_id: Option<&'a str>,
     pub workspace_name: &'a str,
+    pub new_workspace: bool,
+    pub base_branch: Option<&'a str>,
+    pub keep: i64,
     pub inputs: &'a str,
     pub spec: &'a str,
     pub missed: &'a str,
@@ -89,7 +100,7 @@ pub struct NewScheduleRun<'a> {
 
 const SCHEDULE_COLUMNS: &str = "id, name, target_kind, target_id, project_id, workspace_id, \
      workspace_name, inputs, spec, missed, notify, enabled, next_at, created_by, created_at, \
-     updated_at";
+     updated_at, new_workspace, base_branch, keep";
 
 fn schedule_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduleRow> {
     Ok(ScheduleRow {
@@ -109,6 +120,9 @@ fn schedule_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduleRow> {
         created_by: row.get(13)?,
         created_at: row.get(14)?,
         updated_at: row.get(15)?,
+        new_workspace: row.get(16)?,
+        base_branch: row.get(17)?,
+        keep: row.get(18)?,
     })
 }
 
@@ -147,8 +161,9 @@ impl Store {
         self.conn().execute(
             "INSERT INTO schedules (id, name, target_kind, target_id, project_id, workspace_id,
                                     workspace_name, inputs, spec, missed, notify, enabled, next_at,
-                                    created_by, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
+                                    created_by, created_at, updated_at, new_workspace,
+                                    base_branch, keep)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 id,
                 fields.name,
@@ -165,6 +180,9 @@ impl Store {
                 created_by,
                 now,
                 now,
+                fields.new_workspace,
+                fields.base_branch,
+                fields.keep,
             ],
         )?;
         Ok(self.schedule(&id)?.expect("the schedule just added"))
@@ -176,7 +194,7 @@ impl Store {
             "UPDATE schedules
              SET name = ?, target_kind = ?, target_id = ?, project_id = ?, workspace_id = ?,
                  workspace_name = ?, inputs = ?, spec = ?, missed = ?, notify = ?, next_at = ?,
-                 updated_at = ?
+                 new_workspace = ?, base_branch = ?, keep = ?, updated_at = ?
              WHERE id = ?",
             params![
                 fields.name,
@@ -190,6 +208,9 @@ impl Store {
                 fields.missed,
                 fields.notify,
                 fields.next_at,
+                fields.new_workspace,
+                fields.base_branch,
+                fields.keep,
                 now_ms(),
                 id,
             ],
@@ -311,6 +332,78 @@ impl Store {
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?)
+    }
+
+    // --- the workspaces a schedule made ---------------------------------------------------
+
+    /// Take one of a schedule's `keep` slots for a workspace about to be made, and return the
+    /// slot's id; `None` when none is free. Counting and taking are one statement, so two
+    /// callers, in one process or two, cannot both take the last.
+    ///
+    /// A slot counts while its workspace is there (not deleted, archived or forgotten) or
+    /// while it is still being made. One taken before `stale_before` and never filled was left
+    /// by a process that died, and is dropped first.
+    pub fn reserve_schedule_workspace(
+        &self,
+        schedule_id: &str,
+        keep: i64,
+        stale_before: i64,
+    ) -> StoreResult<Option<String>> {
+        let id = new_id();
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute(
+            "DELETE FROM schedule_workspaces
+             WHERE schedule_id = ? AND workspace_id IS NULL AND created_at < ?",
+            params![schedule_id, stale_before],
+        )?;
+        let taken = tx.execute(
+            "INSERT INTO schedule_workspaces (id, schedule_id, workspace_id, created_at)
+             SELECT ?1, ?2, NULL, ?3
+             WHERE (SELECT count(*)
+                    FROM schedule_workspaces AS made
+                    LEFT JOIN workspaces AS workspace ON workspace.id = made.workspace_id
+                    WHERE made.schedule_id = ?2
+                      AND (made.workspace_id IS NULL
+                           OR (workspace.status = 'active' AND workspace.forgotten = 0))) < ?4",
+            params![id, schedule_id, now_ms(), keep],
+        )?;
+        tx.commit()?;
+        Ok((taken > 0).then_some(id))
+    }
+
+    /// Say which workspace a taken slot is for, once it has a row.
+    pub fn fill_schedule_workspace(&self, slot: &str, workspace_id: &str) -> StoreResult<()> {
+        self.conn().execute(
+            "UPDATE schedule_workspaces SET workspace_id = ? WHERE id = ? AND workspace_id IS NULL",
+            params![workspace_id, slot],
+        )?;
+        Ok(())
+    }
+
+    /// Give back a slot nothing was made for. One that was filled is left alone.
+    pub fn release_schedule_workspace(&self, slot: &str) -> StoreResult<()> {
+        self.conn().execute(
+            "DELETE FROM schedule_workspaces WHERE id = ? AND workspace_id IS NULL",
+            [slot],
+        )?;
+        Ok(())
+    }
+
+    /// The names of the workspaces a schedule made that are still there, oldest first: not
+    /// deleted, not archived, not forgotten.
+    pub fn schedule_workspaces(&self, schedule_id: &str) -> StoreResult<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT workspace.name
+             FROM schedule_workspaces AS made
+             JOIN workspaces AS workspace ON workspace.id = made.workspace_id
+             WHERE made.schedule_id = ? AND workspace.status = 'active'
+               AND workspace.forgotten = 0
+             ORDER BY made.created_at, made.rowid",
+        )?;
+        let rows = stmt.query_map([schedule_id], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     // --- the times a schedule came due ----------------------------------------------------
@@ -448,8 +541,11 @@ mod tests {
             target_kind: "test",
             target_id: "health",
             project_id: project,
-            workspace_id: workspace,
+            workspace_id: Some(workspace),
             workspace_name: "fix",
+            new_workspace: false,
+            base_branch: None,
+            keep: 5,
             inputs: "{}",
             spec: r#"{"kind":"every","minutes":60}"#,
             missed: "run_once",

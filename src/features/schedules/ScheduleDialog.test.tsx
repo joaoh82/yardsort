@@ -12,6 +12,7 @@ const core = vi.hoisted(() => ({
   scheduleSave: vi.fn(),
   scheduleList: vi.fn(),
   scheduleStartedRuns: vi.fn(),
+  projectBranches: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -83,6 +84,7 @@ beforeEach(() => {
   core.schedulePreview.mockResolvedValue(fine("Daily at 09:00"));
   core.scheduleList.mockResolvedValue([]);
   core.scheduleStartedRuns.mockResolvedValue([]);
+  core.projectBranches.mockResolvedValue({ branches: ["main", "release"], default: "main" });
 });
 
 describe("ScheduleDialog", () => {
@@ -123,6 +125,7 @@ describe("ScheduleDialog", () => {
       target: "workflow",
       targetId: "ping",
       workspaceId: fixLogin.id,
+      newWorkspace: null,
       inputs: { who: "claude", note: "hello" },
       spec: { kind: "daily", time: { hour: 9, minute: 0 } },
       missed: "skip",
@@ -131,6 +134,88 @@ describe("ScheduleDialog", () => {
     });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(onSaved).toHaveBeenCalledWith(saved);
+  });
+
+  it("adds a workflow schedule that makes a new workspace for each run", async () => {
+    core.scheduleSave.mockResolvedValue(schedule("s-new", { newWorkspace: true }));
+    const user = userEvent.setup();
+    render(<ScheduleDialog onClose={vi.fn()} />);
+    const add = screen.getByRole("button", { name: "Add schedule" });
+    // Nothing about a new workspace is asked until one is chosen.
+    expect(screen.queryByRole("spinbutton", { name: "Workspaces to keep" })).toBeNull();
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Workspace" }),
+      "app / new workspace each run",
+    );
+    await user.selectOptions(screen.getByRole("combobox", { name: "Workflow" }), "ping");
+    // It says what piles up and that nothing is removed, with the number it keeps.
+    const keep = screen.getByRole("spinbutton", { name: "Workspaces to keep" });
+    expect(keep).toHaveValue(5);
+    expect(screen.getByText(/never removes them: once 5 are still there/)).toBeVisible();
+    expect(
+      await screen.findByRole("option", { name: "Default branch (main)" }),
+    ).toBeInTheDocument();
+
+    // A number it cannot keep stops the save, and says why.
+    await user.clear(keep);
+    await user.type(keep, "0");
+    expect(screen.getByRole("alert")).toHaveTextContent("Keep from 1 to 50 workspaces.");
+    expect(add).toBeDisabled();
+    await user.clear(keep);
+    await user.type(keep, "3");
+
+    await user.type(screen.getByRole("textbox", { name: "New workspace name" }), "nightly");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Start from" }), "release");
+    await waitFor(() => expect(add).toBeEnabled());
+    await user.click(add);
+
+    expect(core.scheduleSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "workflow",
+        targetId: "ping",
+        workspaceId: "",
+        newWorkspace: { projectId: "p-app", baseBranch: "release", name: "nightly", keep: 3 },
+      }),
+    );
+  });
+
+  it("offers a new workspace to a workflow only, and asks again when the target changes", async () => {
+    const user = userEvent.setup();
+    render(<ScheduleDialog onClose={vi.fn()} />);
+    const place = screen.getByRole("combobox", { name: "Workspace" });
+    await user.selectOptions(place, "app / new workspace each run");
+    expect(screen.getByRole("spinbutton", { name: "Workspaces to keep" })).toBeVisible();
+
+    // A smoke test is a file in a workspace that is there.
+    await user.selectOptions(screen.getByRole("combobox", { name: "What to run" }), "test");
+    expect(place).toHaveValue("");
+    expect(
+      within(place).queryByRole("option", { name: "app / new workspace each run" }),
+    ).toBeNull();
+    expect(screen.queryByRole("spinbutton", { name: "Workspaces to keep" })).toBeNull();
+  });
+
+  it("opens a schedule that makes its workspaces on what it was saved with", async () => {
+    render(
+      <ScheduleDialog
+        schedule={schedule("s-1", {
+          newWorkspace: true,
+          workspaceId: null,
+          workspaceName: "nightly",
+          baseBranch: "release",
+          keep: 2,
+          made: ["nightly", "nightly-2"],
+          inputs: { who: "codex" },
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "Workspace" })).toHaveValue("new:p-app");
+    expect(screen.getByRole("textbox", { name: "New workspace name" })).toHaveValue("nightly");
+    expect(screen.getByRole("combobox", { name: "Start from" })).toHaveValue("release");
+    expect(screen.getByRole("spinbutton", { name: "Workspaces to keep" })).toHaveValue(2);
+    expect(screen.getByText("Still there: nightly, nightly-2.")).toBeVisible();
   });
 
   it("shows what is wrong with a cron expression and will not save it", async () => {

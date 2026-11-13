@@ -7,6 +7,11 @@
 //! when a run a schedule started has ended, its ending is copied onto that line, and the user
 //! is told if the schedule says to.
 //!
+//! A schedule that makes a workspace for each run ([`ScheduleRow::new_workspace`]) asks at the
+//! other door, [`crate::workflow::runs::queue_in_new_workspace`], and keeps count of what it
+//! made: at as many as it keeps, a time is refused until the user archives or deletes one.
+//! Nothing here removes a workspace.
+//!
 //! Neither reads the clock, starts a thread or shows anything. The app calls them from its
 //! schedules thread and does the showing.
 
@@ -21,6 +26,7 @@ use super::{not_found, when, IfMissed, ScheduleNotify, ScheduleSpec, ScheduleTar
 use crate::error::{IpcError, IpcResult};
 use crate::store::{NewScheduleRun, ScheduleRow, ScheduleRunRow, Store};
 use crate::workflow::runs::Look;
+use crate::workspaces::Workspaces;
 
 /// How late a time can be acted on and still count as on time. Later than this, the app was
 /// closed or the machine asleep, and the schedule's own rule for a missed time decides.
@@ -85,6 +91,7 @@ pub fn tick<Tz: TimeZone>(
     store: &Store,
     data_dir: &Path,
     look: &dyn Look,
+    workspaces: &Workspaces<'_>,
     now: &DateTime<Tz>,
 ) -> IpcResult<Vec<Fired>> {
     let now_ms = now.timestamp_millis();
@@ -122,7 +129,7 @@ pub fn tick<Tz: TimeZone>(
         } else if late && IfMissed::parse(&schedule.missed) == Some(IfMissed::Skip) {
             (ScheduleOutcome::Missed, None, None)
         } else {
-            match ask_for_run(store, data_dir, look, &schedule, false) {
+            match ask_for_run(store, data_dir, look, workspaces, &schedule, false) {
                 Ok(run_id) => (ScheduleOutcome::Started, Some(run_id), None),
                 Err(error) if error.code.ends_with("_already_running") => (
                     ScheduleOutcome::Skipped,
@@ -131,7 +138,7 @@ pub fn tick<Tz: TimeZone>(
                 ),
                 Err(error) => {
                     // No later time can do better with no workspace, so it stops asking.
-                    if schedule.workspace_id.is_none() {
+                    if schedule.workspace_id.is_none() && !schedule.new_workspace {
                         store.set_schedule_enabled(&schedule.id, false, None)?;
                     }
                     (ScheduleOutcome::Refused, None, Some(error.message))
@@ -181,12 +188,13 @@ pub fn run_now(
     store: &Store,
     data_dir: &Path,
     look: &dyn Look,
+    workspaces: &Workspaces<'_>,
     id: &str,
     now_ms: i64,
 ) -> IpcResult<Fired> {
     let schedule = store.schedule(id)?.ok_or_else(not_found)?;
     // A person asked, so a person is there: a smoke test the workflow runs may wait for them.
-    let run_id = ask_for_run(store, data_dir, look, &schedule, true)?;
+    let run_id = ask_for_run(store, data_dir, look, workspaces, &schedule, true)?;
     let run = store.record_schedule_run(&NewScheduleRun {
         schedule_id: &schedule.id,
         due_at: now_ms,
@@ -209,9 +217,13 @@ fn ask_for_run(
     store: &Store,
     data_dir: &Path,
     look: &dyn Look,
+    workspaces: &Workspaces<'_>,
     schedule: &ScheduleRow,
     attended: bool,
 ) -> IpcResult<String> {
+    if schedule.new_workspace {
+        return ask_in_new_workspace(store, data_dir, look, workspaces, schedule, attended);
+    }
     let Some(workspace_id) = schedule.workspace_id.as_deref() else {
         return Err(IpcError::new(
             "workspace_not_found",
@@ -292,6 +304,110 @@ fn ask_for_run(
             ),
         )),
     }
+}
+
+/// Ask for the run of a schedule that makes a workspace for each one. Refused when as many of
+/// its workspaces are still there as it keeps, so that nothing piles up and nothing is removed
+/// to make room.
+fn ask_in_new_workspace(
+    store: &Store,
+    data_dir: &Path,
+    look: &dyn Look,
+    workspaces: &Workspaces<'_>,
+    schedule: &ScheduleRow,
+    attended: bool,
+) -> IpcResult<String> {
+    if ScheduleTarget::parse(&schedule.target_kind) != Some(ScheduleTarget::Workflow) {
+        return Err(IpcError::new(
+            "schedule_target",
+            "Only a workflow can run in a workspace made for it.",
+        ));
+    }
+    if !attended {
+        let workflow = crate::workflow::find(data_dir, &schedule.target_id);
+        let workflow = workflow.as_ref().and_then(|entry| entry.workflow.as_ref());
+        if let (Some(workflow), Some(local)) = (
+            workflow,
+            super::local_workspace(store, &schedule.project_id)?,
+        ) {
+            if let Some(why) = super::workflow_needs_a_person(store, &local, workflow)? {
+                return Err(IpcError::new("schedule_needs_person", why));
+            }
+        }
+    }
+    let inputs: BTreeMap<String, String> =
+        serde_json::from_str(&schedule.inputs).unwrap_or_default();
+    // A slot is taken before anything is made, in one statement that also counts: two runs
+    // asked for at once cannot both find the last one free.
+    let stale_before = crate::store::now_ms() - SLOT_STALE_AFTER_MS;
+    let Some(slot) = store.reserve_schedule_workspace(&schedule.id, schedule.keep, stale_before)?
+    else {
+        return Err(workspaces_full(store, schedule)?);
+    };
+    let filled = std::cell::Cell::new(false);
+    let asked = crate::workflow::runs::queue_in_new_workspace_noting(
+        store,
+        data_dir,
+        &crate::workflow::runs::Request {
+            workflow_id: &schedule.target_id,
+            workspace_id: "",
+            inputs: &inputs,
+            requested_by: "app",
+            unattended: !attended,
+            origin_record: None,
+            depth: 0,
+            event: None,
+            tracked: None,
+        },
+        look,
+        workspaces,
+        &crate::workflow::runs::NewWorkspace {
+            project_id: &schedule.project_id,
+            base: schedule.base_branch.as_deref(),
+            name: Some(schedule.workspace_name.as_str()).filter(|name| !name.is_empty()),
+        },
+        // The workspace this call made, and no other: said before its setup runs, so one
+        // whose setup fails is still this schedule's, and nothing else in the project is.
+        &|workspace| {
+            filled.set(store.fill_schedule_workspace(&slot, &workspace.id).is_ok());
+        },
+    );
+    if !filled.get() {
+        // Nothing was made, so nothing holds the slot.
+        store.release_schedule_workspace(&slot)?;
+    }
+    asked.map(|(run_id, _)| run_id)
+}
+
+/// How long a slot may be held with no workspace before it is taken to be left by a process
+/// that died. Between taking it and filling it there is only `git worktree add`.
+const SLOT_STALE_AFTER_MS: i64 = 60 * 60_000;
+
+/// Why a schedule that keeps `keep` workspaces cannot make another now.
+fn workspaces_full(store: &Store, schedule: &ScheduleRow) -> IpcResult<IpcError> {
+    let there = store.schedule_workspaces(&schedule.id)?;
+    let names: Vec<String> = there.iter().map(|name| format!("`{name}`")).collect();
+    let message = if there.len() as i64 >= schedule.keep {
+        format!(
+            "{} of the workspaces it made are still there, the most it keeps: {}. Archive or \
+             delete one and it runs again.",
+            there.len(),
+            names.join(", ")
+        )
+    } else {
+        // The rest of what it keeps is being made by another run of it, right now.
+        format!(
+            "It keeps {} workspaces, and another run of it is making one now{}. Archive or \
+             delete one, or try again when that run has its workspace.",
+            schedule.keep,
+            if names.is_empty() {
+                String::new()
+            } else {
+                format!(", beside {}", names.join(", "))
+            }
+        )
+    };
+    Ok(IpcError::new("schedule_workspaces_full", message))
 }
 
 /// What [`settle`] found.
@@ -380,10 +496,24 @@ pub fn settle(store: &Store) -> IpcResult<Settled> {
         if tell {
             let what =
                 ScheduleTarget::parse(&schedule.target_kind).map_or("run", ScheduleTarget::words);
-            let place = format!(
-                "The {what} `{}` in `{}`.",
-                schedule.target_id, schedule.workspace_name
-            );
+            // A schedule that makes its workspaces names the one this run was in.
+            let made = if schedule.new_workspace {
+                store
+                    .workflow_run(run_id)?
+                    .and_then(|run| run.workspace_id)
+                    .and_then(|id| store.workspace(&id).ok().flatten())
+                    .map(|workspace| workspace.name)
+            } else {
+                None
+            };
+            let place = match (&made, schedule.new_workspace) {
+                (Some(name), _) => format!("The {what} `{}` in `{name}`.", schedule.target_id),
+                (None, true) => format!("The {what} `{}`.", schedule.target_id),
+                (None, false) => format!(
+                    "The {what} `{}` in `{}`.",
+                    schedule.target_id, schedule.workspace_name
+                ),
+            };
             settled.notices.push(Notice {
                 schedule_id: schedule.id.clone(),
                 title: format!("{} {}", schedule.name, ending(&status)),

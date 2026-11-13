@@ -39,9 +39,9 @@ Three questions were put to the user on 2026-11-05. The answers, and what follow
    [A missed time](#a-missed-time).
 2. **A scheduled run happens in a workspace that already exists**, which includes the project's
    own checkout (the workspace called `local`). It runs whatever is checked out there. A fresh
-   worktree per run is what recurring agent chores will want, and it waits for an answer to what
-   becomes of yesterday's worktree, since Yardsort never deletes work silently. See
-   [Not in version one](#not-in-version-one-on-purpose).
+   worktree per run is what recurring agent chores will want, and it waited for an answer to
+   what becomes of yesterday's worktree, since Yardsort never deletes work silently. That answer
+   came on 2026-11-13: see [A new workspace per run](#a-new-workspace-per-run).
 3. **A repeating schedule is written as a preset or as cron.** The dialog offers every N minutes
    or hours, daily at a time, chosen weekdays at a time and monthly on a day; an **Advanced**
    choice takes a five-field cron expression. `ys schedule add` takes either.
@@ -370,9 +370,11 @@ rows, so an app left open fires them.
 
 ## Not in version one, on purpose
 
-- **A fresh worktree per run.** The thing recurring agent chores want: fetch, branch from the
+- ~~**A fresh worktree per run.** The thing recurring agent chores want: fetch, branch from the
   base, run there. It needs a rule for the worktrees that pile up — keep the last N, archive on
-  success, never touch one with uncommitted changes — and that rule deserves its own decision.
+  success, never touch one with uncommitted changes — and that rule deserves its own decision.~~
+  Built on 2026-11-13, with the rule the user chose: see
+  [A new workspace per run](#a-new-workspace-per-run).
 - **Running while Yardsort is closed.** Two ways there: the app stays in the background (a tray
   icon, launch at login), or the drivers move into the daemon. The first is smaller and probably
   first. Until then a missed time is handled, not prevented.
@@ -382,6 +384,56 @@ rows, so an app left open fires them.
   follow them, not lead.
 - **Schedules in a file.** A schedule names a workspace on this machine, so it is the profile's.
 - **Time zones other than the machine's.**
+
+## A new workspace per run
+
+_Built 2026-11-13, after [a run from a project](21-workflows.md#a-run-from-a-project) gave runs
+a door that makes their workspace._ The question that had put this off was put to the user:
+what becomes of the worktrees that pile up. Of three answers — keep all with a cap, keep all
+with none, archive the old ones — the user chose the first.
+
+- **Nothing is removed, and there is a cap.** A schedule that makes its workspaces has `keep`,
+  5 unless said, 1 to 50. When that many of the workspaces it made are still there — not
+  deleted, not archived, not forgotten — its time is **refused**, with their names, and the
+  user is told once, as for any refusal. Archiving or deleting one is all it takes. No schedule
+  archives, deletes or reuses a workspace, so the rule against destroying work silently has
+  nothing to make an exception for.
+- **What it made is its own table.** `schedule_workspaces (id, schedule_id, workspace_id)`,
+  both references cascading. Not a column of `schedule_runs`: that history is pruned at 200
+  lines, and a workspace kept after its setup failed has no run to hang on.
+- **A slot is taken before the workspace is made.** Review found that counting first and
+  writing the row after the setup had run let two runs asked for at once — two `ys schedule run`,
+  or one and the clock — both find the last slot free. So a row is written first, with no
+  workspace, by one statement that also counts (`reserve_schedule_workspace`); a slot being
+  filled counts like a workspace that is there. It is given back when nothing was made. One
+  held for an hour with no workspace was left by a process that died, and is dropped.
+- **The workspace is the one this attempt made.** `Workspaces::create_named_noting` says which
+  workspace it made the moment that has a row, before the setup runs, and the slot is filled
+  then. So a workspace whose setup failed is counted, or a setup that fails every night would
+  leave a worktree every night with no cap at all; and nothing else made in the project
+  meanwhile is. The first version compared the project's workspaces before and after, and
+  review showed it claiming a workspace the user made during the setup.
+- **The schedule's own row.** `new_workspace`, `base_branch` (NULL follows the repository's
+  default branch at each run), `keep`; `workspace_id` is NULL and `workspace_name` holds what
+  the workspaces are called, empty for "after the workflow". `NoWorkspace`, and the switching
+  off that goes with a deleted workspace, apply only to a schedule that names one.
+- **Workflows only.** A smoke test is a file in a workspace. A workflow the door would refuse
+  whatever its inputs — about a tracked pull request, or needing an open one at the start — is
+  refused when the schedule is saved (`runs::refused_in_new_workspace`).
+- **Decision 6 does not apply.** "One run per workspace" never skips a time here, since each
+  run has its own. The cap is what keeps things from piling up.
+- **Who waits for a person** is asked of the project's own checkout, the only place the smoke
+  test file can be read before the workspace is there.
+- **`fire::tick` and `run_now` take what makes workspaces** (`Workspaces`: git, the worktree
+  root, the settings). Making one runs the project's setup on the schedules thread, so other
+  schedules wait for it. The time was already claimed, so nothing fires twice; a slow setup
+  delays the others and the telling of endings. Moving it off the thread is the fix if that
+  hurts in use.
+- **The sidebar** reads the projects again when schedules change, since a run in a made
+  workspace may start no agent, and an agent starting was what told it before.
+
+Not built: archiving on success, a cap by age, cleaning up from the schedule's page, triggers
+and the phone.
 
 ## Open questions
 

@@ -31,7 +31,14 @@ fn daily() -> ScheduleSpec {
 }
 
 fn fire(fx: &Fx, now: &chrono::DateTime<chrono_tz::Tz>) -> Vec<Fired> {
-    tick(&fx.store, &fx.data_dir, &Accepting::default(), now).unwrap()
+    tick(
+        &fx.store,
+        &fx.data_dir,
+        &Accepting::default(),
+        &fx.workspaces(),
+        now,
+    )
+    .unwrap()
 }
 
 /// The one line a tick wrote.
@@ -84,9 +91,15 @@ fn a_time_is_acted_on_once_by_a_second_tick_or_a_second_store() {
     assert!(fire(&fx, &now).is_empty());
 
     let elsewhere = Store::open(&fx.database).unwrap();
-    assert!(tick(&elsewhere, &fx.data_dir, &Accepting::default(), &now)
-        .unwrap()
-        .is_empty());
+    assert!(tick(
+        &elsewhere,
+        &fx.data_dir,
+        &Accepting::default(),
+        &fx.workspaces(),
+        &now
+    )
+    .unwrap()
+    .is_empty());
     assert_eq!(fx.store.active_workflow_runs().unwrap().len(), 1);
 }
 
@@ -362,6 +375,7 @@ fn run_now_is_attended_so_its_workflow_may_wait_for_the_person_who_asked() {
         &fx.store,
         &fx.data_dir,
         &Accepting::default(),
+        &fx.workspaces(),
         &schedule.id,
         now,
     )
@@ -409,7 +423,10 @@ fn a_refusal_is_told_once_while_it_lasts_and_never_when_the_schedule_says_never(
                 target_kind: &row.target_kind,
                 target_id: &row.target_id,
                 project_id: &row.project_id,
-                workspace_id: row.workspace_id.as_deref().unwrap(),
+                workspace_id: row.workspace_id.as_deref(),
+                new_workspace: false,
+                base_branch: None,
+                keep: 5,
                 workspace_name: &row.workspace_name,
                 inputs: &row.inputs,
                 spec: &row.spec,
@@ -444,7 +461,10 @@ fn a_schedule_whose_next_time_cannot_be_worked_out_stays_on_and_says_it_was_refu
                 target_kind: &row.target_kind,
                 target_id: &row.target_id,
                 project_id: &row.project_id,
-                workspace_id: row.workspace_id.as_deref().unwrap(),
+                workspace_id: row.workspace_id.as_deref(),
+                new_workspace: false,
+                base_branch: None,
+                keep: 5,
                 workspace_name: &row.workspace_name,
                 inputs: &row.inputs,
                 spec: r#"{"kind":"cron","expr":"every so often"}"#,
@@ -599,7 +619,10 @@ fn ended(notify: &str, status: &str, error: Option<&str>) -> Settled {
         target_kind: &schedule.target_kind,
         target_id: &schedule.target_id,
         project_id: &schedule.project_id,
-        workspace_id: &fx.workspace.id,
+        workspace_id: Some(&fx.workspace.id),
+        new_workspace: false,
+        base_branch: None,
+        keep: 5,
         workspace_name: &schedule.workspace_name,
         inputs: &schedule.inputs,
         spec: &schedule.spec,
@@ -676,6 +699,7 @@ fn run_now_starts_a_run_and_leaves_the_next_time_alone() {
         &fx.store,
         &fx.data_dir,
         &Accepting::default(),
+        &fx.workspaces(),
         &schedule.id,
         now,
     )
@@ -690,6 +714,7 @@ fn run_now_starts_a_run_and_leaves_the_next_time_alone() {
         &fx.store,
         &fx.data_dir,
         &Accepting::default(),
+        &fx.workspaces(),
         &schedule.id,
         now,
     )
@@ -697,7 +722,15 @@ fn run_now_starts_a_run_and_leaves_the_next_time_alone() {
     assert_eq!(again.code, "workflow_already_running");
     assert_eq!(fx.store.schedule_runs(&schedule.id, 10).unwrap().len(), 1);
 
-    let missing = run_now(&fx.store, &fx.data_dir, &Accepting::default(), "nope", now).unwrap_err();
+    let missing = run_now(
+        &fx.store,
+        &fx.data_dir,
+        &Accepting::default(),
+        &fx.workspaces(),
+        "nope",
+        now,
+    )
+    .unwrap_err();
     assert_eq!(missing.code, "schedule_not_found");
 }
 
@@ -755,4 +788,403 @@ fn a_test_approved_where_it_was_scheduled_runs_without_waiting_unless_it_changed
         .unwrap();
     assert_eq!(run.status, "awaiting_approval");
     assert!(!approve_seen(&fx.store, &fx.workspace.id, "no-such-test", &shown).unwrap());
+}
+
+// --- a new workspace for each run ------------------------------------------------------------
+
+/// A schedule of `ping` every ten minutes that makes its own workspaces, keeping `keep`.
+fn add_each_run(fx: &Fx, keep: Option<u32>) -> IpcResult<ScheduleRow> {
+    add_each_run_of(fx, ScheduleTarget::Workflow, "ping", keep)
+}
+
+fn add_each_run_of(
+    fx: &Fx,
+    target: ScheduleTarget,
+    target_id: &str,
+    keep: Option<u32>,
+) -> IpcResult<ScheduleRow> {
+    crate::schedule::add(
+        &fx.store,
+        &fx.data_dir,
+        &Accepting::default(),
+        &crate::schedule::Draft {
+            name: None,
+            target,
+            target_id,
+            workspace_id: "",
+            new_workspace: Some(crate::schedule::EachRun {
+                project_id: &fx.project_id,
+                base: None,
+                name: None,
+                keep,
+            }),
+            inputs: &std::collections::BTreeMap::new(),
+            spec: &ScheduleSpec::Every { minutes: 10 },
+            missed: IfMissed::default(),
+            notify: crate::schedule::ScheduleNotify::default(),
+        },
+        "app",
+        &nov(5, 10, 0),
+    )
+}
+
+/// The workspaces made in the fixture's project: every one with a branch.
+fn made(fx: &Fx) -> Vec<WorkspaceRow> {
+    fx.store
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .filter(|w| w.branch.is_some())
+        .collect()
+}
+
+use crate::store::WorkspaceRow;
+
+#[test]
+fn a_schedule_for_a_new_workspace_makes_one_each_time_it_fires() {
+    let fx = Fx::with_repository();
+    let schedule = add_each_run(&fx, None).unwrap();
+    assert!(schedule.new_workspace);
+    assert_eq!(schedule.workspace_id, None);
+    assert_eq!(schedule.keep, 5);
+    assert_eq!(fx.stands(&schedule.id), ScheduleStanding::Waiting);
+    assert!(made(&fx).is_empty(), "saving it makes nothing");
+
+    let first = only(fire(&fx, &nov(5, 10, 10)));
+    assert_eq!(first.outcome, "started", "{:?}", first.note);
+    // Nobody carries the first run out, and the second time starts all the same: its run is
+    // in a workspace of its own.
+    let second = only(fire(&fx, &nov(5, 10, 20)));
+    assert_eq!(second.outcome, "started", "{:?}", second.note);
+
+    let names: Vec<String> = made(&fx).into_iter().map(|w| w.name).collect();
+    assert_eq!(names, ["ping", "ping-2"]);
+    let runs = fx.store.active_workflow_runs().unwrap();
+    assert_eq!(runs.len(), 2);
+    let made_ids: Vec<String> = made(&fx).into_iter().map(|w| w.id).collect();
+    for run in &runs {
+        assert!(made_ids.contains(run.workspace_id.as_ref().unwrap()));
+    }
+    assert_ne!(runs[0].workspace_id, runs[1].workspace_id);
+    assert_eq!(
+        fx.store.schedule_workspaces(&schedule.id).unwrap(),
+        ["ping", "ping-2"]
+    );
+    assert!(fx.schedule(&schedule.id).enabled);
+}
+
+#[test]
+fn a_schedule_makes_no_more_workspaces_than_it_keeps_and_removes_none() {
+    let fx = Fx::with_repository();
+    let schedule = add_each_run(&fx, Some(2)).unwrap();
+    assert_eq!(only(fire(&fx, &nov(5, 10, 10))).outcome, "started");
+    assert_eq!(only(fire(&fx, &nov(5, 10, 20))).outcome, "started");
+
+    // Both runs end. Their workspaces stay: ending a run removes nothing.
+    for run in fx.store.active_workflow_runs().unwrap() {
+        fx.store
+            .finish_workflow_run(&run.id, "succeeded", None)
+            .unwrap();
+    }
+    settle(&fx.store).unwrap();
+
+    // The third time finds both still there.
+    let fired = fire(&fx, &nov(5, 10, 30));
+    let notice = fired[0].notice.clone().expect("told once");
+    let line = only(fired);
+    assert_eq!(line.outcome, "refused");
+    let note = line.note.unwrap();
+    assert!(
+        note.contains("`ping`") && note.contains("`ping-2`"),
+        "{note}"
+    );
+    assert_eq!(notice.body, note);
+    assert_eq!(made(&fx).len(), 2, "nothing made, nothing removed");
+    for workspace in made(&fx) {
+        assert!(std::path::Path::new(&workspace.path).is_dir());
+    }
+    assert_eq!(fx.stands(&schedule.id), ScheduleStanding::Refused);
+    // It goes on asking: the user making room is all it waits for.
+    assert!(fx.schedule(&schedule.id).enabled);
+
+    // Refused again, and not told again.
+    let fired = fire(&fx, &nov(5, 10, 40));
+    assert!(fired[0].notice.is_none());
+    assert_eq!(only(fired).outcome, "refused");
+
+    // Run now is refused to the person the same way.
+    let pressed = run_now(
+        &fx.store,
+        &fx.data_dir,
+        &Accepting::default(),
+        &fx.workspaces(),
+        &schedule.id,
+        nov(5, 10, 41).timestamp_millis(),
+    )
+    .unwrap_err();
+    assert_eq!(pressed.code, "schedule_workspaces_full");
+
+    // One archived, the next time has room.
+    let first = made(&fx).remove(0);
+    fx.store.set_workspace_archived(&first.id, true).unwrap();
+    let line = only(fire(&fx, &nov(5, 10, 50)));
+    assert_eq!(line.outcome, "started", "{:?}", line.note);
+    assert_eq!(fx.store.schedule_workspaces(&schedule.id).unwrap().len(), 2);
+}
+
+#[test]
+fn a_workspace_kept_after_its_setup_failed_counts_as_one_the_schedule_made() {
+    let fx = Fx::with_repository();
+    fx.store
+        .set_project_automation(
+            &fx.project_id,
+            r#"{"copyFiles":[],"setup":{"program":"yardsort-no-such-program","args":[]},"run":null}"#,
+        )
+        .unwrap();
+    let schedule = add_each_run(&fx, Some(1)).unwrap();
+
+    let line = only(fire(&fx, &nov(5, 10, 10)));
+    assert_eq!(line.outcome, "refused");
+    assert!(line.note.unwrap().starts_with("Workspace kept at "));
+    assert_eq!(made(&fx).len(), 1, "kept, as the composer keeps it");
+    assert!(fx.store.active_workflow_runs().unwrap().is_empty());
+
+    // It is the one this schedule keeps, so the next time makes no second.
+    let line = only(fire(&fx, &nov(5, 10, 20)));
+    assert_eq!(line.outcome, "refused");
+    assert!(line.note.unwrap().contains("still there"));
+    assert_eq!(made(&fx).len(), 1);
+    assert_eq!(fx.store.schedule_workspaces(&schedule.id).unwrap().len(), 1);
+}
+
+#[test]
+fn what_cannot_run_in_a_workspace_made_for_it_is_refused_when_the_schedule_is_saved() {
+    let fx = Fx::with_repository();
+    // A smoke test is a file in a workspace that is there.
+    let test = add_each_run_of(&fx, ScheduleTarget::Test, "demo", None).unwrap_err();
+    assert_eq!(test.code, "schedule_target");
+
+    // A workflow that needs an open pull request when it starts would be refused every time.
+    fx.write_workflow(
+        "review",
+        "id: review\nname: Review\nversion: 1\ntrigger:\n  kind: manual\nsteps:\n  - id: tell\n    action: notify\n    title: \"{{ pr.number }}\"\n",
+    );
+    let review = add_each_run_of(&fx, ScheduleTarget::Workflow, "review", None).unwrap_err();
+    assert_eq!(review.code, "pull_request_missing");
+
+    for keep in [0, 51] {
+        assert_eq!(
+            add_each_run(&fx, Some(keep)).unwrap_err().code,
+            "schedule_keep"
+        );
+    }
+    assert!(fx.store.schedules().unwrap().is_empty());
+    assert!(made(&fx).is_empty());
+}
+
+#[test]
+fn a_notice_about_a_run_in_a_made_workspace_names_that_workspace() {
+    let fx = Fx::with_repository();
+    let schedule = add_each_run(&fx, None).unwrap();
+    fx.store
+        .update_schedule(
+            &schedule.id,
+            &crate::store::ScheduleFields {
+                name: &schedule.name,
+                target_kind: &schedule.target_kind,
+                target_id: &schedule.target_id,
+                project_id: &schedule.project_id,
+                workspace_id: None,
+                workspace_name: "",
+                new_workspace: true,
+                base_branch: None,
+                keep: 5,
+                inputs: &schedule.inputs,
+                spec: &schedule.spec,
+                missed: &schedule.missed,
+                notify: "always",
+                next_at: schedule.next_at,
+            },
+        )
+        .unwrap();
+    let line = only(fire(&fx, &nov(5, 10, 10)));
+    let run_id = line.run_id.unwrap();
+    fx.store
+        .finish_workflow_run(&run_id, "succeeded", None)
+        .unwrap();
+    let settled = settle(&fx.store).unwrap();
+    assert_eq!(settled.notices.len(), 1);
+    assert_eq!(settled.notices[0].body, "The workflow `ping` in `ping`.");
+}
+
+#[test]
+fn a_run_that_is_still_making_its_workspace_holds_a_slot_against_a_second() {
+    let fx = Fx::with_repository();
+    let schedule = add_each_run(&fx, Some(1)).unwrap();
+    // Another run of it, in this process or another, has taken the one slot and is in the
+    // project's setup: its workspace is not there to be counted yet.
+    let far_past = 0;
+    let slot = fx
+        .store
+        .reserve_schedule_workspace(&schedule.id, schedule.keep, far_past)
+        .unwrap()
+        .expect("the one slot is free");
+    assert_eq!(
+        fx.store
+            .reserve_schedule_workspace(&schedule.id, schedule.keep, far_past)
+            .unwrap(),
+        None,
+        "taking the last slot twice"
+    );
+
+    let pressed = run_now(
+        &fx.store,
+        &fx.data_dir,
+        &Accepting::default(),
+        &fx.workspaces(),
+        &schedule.id,
+        nov(5, 10, 5).timestamp_millis(),
+    )
+    .unwrap_err();
+    assert_eq!(pressed.code, "schedule_workspaces_full");
+    assert!(pressed.message.contains("is making one now"), "{pressed:?}");
+    assert!(made(&fx).is_empty(), "no second workspace beside the first");
+
+    // That run made nothing after all and gave its slot back: the next has room.
+    fx.store.release_schedule_workspace(&slot).unwrap();
+    assert_eq!(only(fire(&fx, &nov(5, 10, 10))).outcome, "started");
+    assert_eq!(made(&fx).len(), 1);
+
+    // A refusal that makes nothing holds no slot: the workflow is gone, twice, and the slot
+    // the first workspace holds is the only one counted.
+    fx.store
+        .set_workspace_archived(&made(&fx)[0].id, true)
+        .unwrap();
+    std::fs::remove_file(crate::workflow::user_dir(&fx.data_dir).join("ping.yaml")).unwrap();
+    assert_eq!(only(fire(&fx, &nov(5, 10, 20))).outcome, "refused");
+    assert_eq!(only(fire(&fx, &nov(5, 10, 30))).outcome, "refused");
+    assert!(fx
+        .store
+        .reserve_schedule_workspace(&schedule.id, schedule.keep, far_past)
+        .unwrap()
+        .is_some());
+}
+
+#[test]
+fn a_slot_left_by_a_process_that_died_is_dropped_and_a_filled_one_is_not() {
+    let fx = Fx::with_repository();
+    let schedule = add_each_run(&fx, Some(1)).unwrap();
+    let slot = fx
+        .store
+        .reserve_schedule_workspace(&schedule.id, 1, 0)
+        .unwrap()
+        .unwrap();
+    // Not stale yet: it was taken after the line.
+    assert!(fx
+        .store
+        .reserve_schedule_workspace(&schedule.id, 1, 0)
+        .unwrap()
+        .is_none());
+    // Taken before the line and never filled: dropped, and its place taken.
+    let later = crate::store::now_ms() + 1;
+    let second = fx
+        .store
+        .reserve_schedule_workspace(&schedule.id, 1, later)
+        .unwrap()
+        .expect("the stale slot is dropped");
+    assert_ne!(slot, second);
+
+    // Filled, it is a workspace, however old: it holds its place until archived or deleted.
+    fx.store
+        .fill_schedule_workspace(&second, &fx.workspace.id)
+        .unwrap();
+    fx.store.release_schedule_workspace(&second).unwrap();
+    let much_later = crate::store::now_ms() + 10_000;
+    assert!(fx
+        .store
+        .reserve_schedule_workspace(&schedule.id, 1, much_later)
+        .unwrap()
+        .is_none());
+    assert_eq!(fx.store.schedule_workspaces(&schedule.id).unwrap(), ["fix"]);
+}
+
+#[test]
+fn a_failed_setup_claims_its_own_workspace_and_no_other_made_meanwhile() {
+    let fx = Fx::with_repository();
+    fx.store
+        .set_project_automation(
+            &fx.project_id,
+            r#"{"copyFiles":[],"setup":{"program":"yardsort-no-such-program","args":[]},"run":null}"#,
+        )
+        .unwrap();
+    let schedule = add_each_run(&fx, Some(2)).unwrap();
+
+    // The workspace a call made is said even when its setup fails and the call is an error.
+    let seen = std::cell::RefCell::new(Vec::new());
+    let other =
+        fx.workspaces()
+            .create_named_noting(&fx.project_id, None, "personal-work", &|workspace| {
+                seen.borrow_mut().push(workspace.name.clone())
+            });
+    assert_eq!(other.unwrap_err().code, "workspace_setup_failed");
+    assert_eq!(*seen.borrow(), ["personal-work"]);
+
+    // While the schedule's attempt is under way, someone else adds a workspace to the same
+    // project: here, at the moment the door asks whether the workflow's agent is installed.
+    // A look at the whole project before and after the attempt would take it for the
+    // schedule's.
+    struct AddsAWorkspace<'a> {
+        store: &'a Store,
+        project_id: &'a str,
+        added: std::cell::Cell<u32>,
+    }
+    impl Look for AddsAWorkspace<'_> {
+        fn harness(&self, wanted: &str) -> Result<String, String> {
+            let n = self.added.get() + 1;
+            self.added.set(n);
+            self.store
+                .add_worktree(
+                    self.project_id,
+                    &format!("theirs-{n}"),
+                    &format!("/nowhere/theirs-{n}"),
+                    None,
+                    None,
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(wanted.to_owned())
+        }
+        fn pull_request(
+            &self,
+            _workspace: &WorkspaceRow,
+        ) -> Result<Option<crate::forge::PullRequest>, String> {
+            Ok(None)
+        }
+    }
+    fx.write_workflow(
+        "ping",
+        "id: ping\nname: Ping\nversion: 1\ntrigger:\n  kind: manual\ninputs:\n  - id: who\n    kind: harness\n    default: claude\nsteps:\n  - id: tell\n    action: notify\n    title: hello\n",
+    );
+    let look = AddsAWorkspace {
+        store: &fx.store,
+        project_id: &fx.project_id,
+        added: std::cell::Cell::new(0),
+    };
+    let fired = tick(
+        &fx.store,
+        &fx.data_dir,
+        &look,
+        &fx.workspaces(),
+        &nov(5, 10, 10),
+    )
+    .unwrap();
+    assert!(
+        look.added.get() > 0,
+        "a workspace was added during the attempt"
+    );
+    assert_eq!(only(fired).outcome, "refused");
+    assert_eq!(
+        fx.store.schedule_workspaces(&schedule.id).unwrap(),
+        ["ping"],
+        "only the workspace this schedule made"
+    );
 }

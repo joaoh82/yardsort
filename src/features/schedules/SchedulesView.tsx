@@ -11,6 +11,7 @@ import {
   lineWords,
   standingColour,
   standingWords,
+  placeWords,
   targetWords,
 } from "./words";
 
@@ -116,7 +117,7 @@ export function SchedulesView() {
                     </div>
                     <div className="flex items-center gap-2 text-detail text-ink-faint">
                       <span className="truncate">
-                        {targetWords(item)} · {projectName(item.projectId)} / {item.workspaceName}
+                        {targetWords(item)} · {placeWords(item, projectName(item.projectId))}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-detail text-ink-muted">
@@ -210,7 +211,7 @@ function ScheduleDetail({
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-base font-semibold">{schedule.name}</h2>
           <p className="text-ink-muted">
-            Runs the {targetWords(schedule)} in {projectName} / {schedule.workspaceName}
+            Runs the {targetWords(schedule)} in {placeWords(schedule, projectName)}
           </p>
         </div>
         <button
@@ -239,7 +240,7 @@ function ScheduleDetail({
         <button
           type="button"
           className={quiet}
-          disabled={busy || schedule.workspaceId === null}
+          disabled={busy || (schedule.workspaceId === null && !schedule.newWorkspace)}
           title="Start its run now. Its next time stays where it is."
           onClick={() => void act(() => runNow(schedule.id))}
         >
@@ -303,6 +304,18 @@ function ScheduleDetail({
         ))}
       </dl>
 
+      {schedule.newWorkspace && (
+        <p className="text-ink-muted select-text">
+          Each run gets a new workspace
+          {schedule.workspaceName ? ` named ${schedule.workspaceName}` : ""}, from{" "}
+          {schedule.baseBranch ?? "the default branch"}. It keeps {schedule.keep}, and{" "}
+          {schedule.made.length === 0
+            ? "none is there now."
+            : `${schedule.made.length} ${schedule.made.length === 1 ? "is" : "are"} there now: ${schedule.made.join(", ")}.`}{" "}
+          Yardsort removes none of them: at {schedule.keep}, a time is refused until you archive or
+          delete one.
+        </p>
+      )}
       {schedule.standing === "no_workspace" && (
         <p role="status" className="text-red-400">
           Its workspace, {schedule.workspaceName}, was deleted, so it has nowhere to run. Edit it to

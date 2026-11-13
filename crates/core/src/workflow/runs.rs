@@ -303,22 +303,32 @@ pub fn queue_in_new_workspace(
     workspaces: &crate::workspaces::Workspaces<'_>,
     new: &NewWorkspace<'_>,
 ) -> IpcResult<(String, WorkspaceRow)> {
+    queue_in_new_workspace_noting(store, data_dir, request, look, workspaces, new, &|_| {})
+}
+
+/// [`queue_in_new_workspace`], telling `made` about the workspace the moment it has a row.
+/// That is before the project's setup runs in it, so the caller knows which workspace this
+/// call made even when it returns an error with the workspace kept.
+pub fn queue_in_new_workspace_noting(
+    store: &Store,
+    data_dir: &Path,
+    request: &Request<'_>,
+    look: &dyn Look,
+    workspaces: &crate::workspaces::Workspaces<'_>,
+    new: &NewWorkspace<'_>,
+    made: &dyn Fn(&WorkspaceRow),
+) -> IpcResult<(String, WorkspaceRow)> {
     let entry = runnable(data_dir, request.workflow_id)?;
     let workflow = entry.workflow.as_ref().expect("runnable has a workflow");
-    if workflow.trigger.context == super::RunContext::TrackedPullRequest
-        || request.tracked.is_some()
-    {
+    if request.tracked.is_some() {
         return Err(started_without_its_pull_request(workflow));
     }
+    if let Some(error) = tracked_only(workflow) {
+        return Err(error);
+    }
     let inputs = answered(workflow, request, look)?;
-    if let Some(problem) = new_workspace_pull_request(workflow).0 {
-        return Err(IpcError::new(
-            "pull_request_missing",
-            format!(
-                "`{}` works with the workspace's pull request. {problem}",
-                workflow.id
-            ),
-        ));
+    if let Some(error) = needs_a_pull_request_now(workflow) {
+        return Err(error);
     }
     let name = match new.name.map(str::trim).filter(|name| !name.is_empty()) {
         Some(given) => crate::workspaces::naming::slugify_name(given).ok_or_else(|| {
@@ -330,7 +340,7 @@ pub fn queue_in_new_workspace(
         None => crate::workspaces::naming::slugify_name(&workflow.id)
             .unwrap_or_else(|| workflow.id.clone()),
     };
-    let workspace = workspaces.create_named(new.project_id, new.base, &name)?;
+    let workspace = workspaces.create_named_noting(new.project_id, new.base, &name, made)?;
     let facts = Facts {
         unattended: request.unattended,
         origin_record: request.origin_record.map(str::to_owned),
@@ -352,6 +362,32 @@ pub fn queue_in_new_workspace(
             ),
         )),
     }
+}
+
+/// A workflow that is about a pull request elsewhere cannot start in a workspace made now.
+fn tracked_only(workflow: &Workflow) -> Option<IpcError> {
+    (workflow.trigger.context == super::RunContext::TrackedPullRequest)
+        .then(|| started_without_its_pull_request(workflow))
+}
+
+/// A workflow that needs an open pull request when it is queued cannot start in a workspace
+/// made now: a branch made now has none.
+fn needs_a_pull_request_now(workflow: &Workflow) -> Option<IpcError> {
+    let problem = new_workspace_pull_request(workflow).0?;
+    Some(IpcError::new(
+        "pull_request_missing",
+        format!(
+            "`{}` works with the workspace's pull request. {problem}",
+            workflow.id
+        ),
+    ))
+}
+
+/// Why this workflow can never start in a workspace made for its run, when it cannot. What
+/// [`queue_in_new_workspace`] refuses whatever the inputs are, for a schedule to say when it
+/// is saved.
+pub fn refused_in_new_workspace(workflow: &Workflow) -> Option<IpcError> {
+    tracked_only(workflow).or_else(|| needs_a_pull_request_now(workflow))
 }
 
 /// What the Run dialog shows about the pull request of a workspace that is not made yet: the

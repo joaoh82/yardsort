@@ -57,9 +57,12 @@ export function Sidebar() {
     window.addEventListener("focus", onFocus);
     // A phone can start a workspace while nobody is at the window.
     const unlisten = ipc.onSessionStarted(() => void refresh());
+    // A schedule can make a workspace for its run, and that run may start no agent.
+    const unlistenSchedules = ipc.onSchedulesChanged(() => void refresh());
     return () => {
       window.removeEventListener("focus", onFocus);
       void unlisten.then((stop) => stop());
+      void unlistenSchedules.then((stop) => stop());
     };
   }, []);
 

@@ -709,6 +709,7 @@ ys schedule add --test login --at "2026-11-06 18:00"       # once
 ys schedule add --workflow ping --every 2h                 # 15m, 2h, 1d
 ys schedule add --test login --monthly last 06:00          # a day from 1 to 28, or last
 ys schedule add --workflow nightly --cron "0 3 * * *" --if-missed skip --notify always
+ys schedule add --workflow fix-tests --project app --keep 3 --daily 02:00   # a new workspace each run
 ys schedule show Nightly          # its inputs, its rules, and its next five times
 ys schedule pause Nightly         # off: keeps its place and its history, fires nothing
 ys schedule resume Nightly        # on again, from now
@@ -720,7 +721,12 @@ ys schedule remove Nightly        # the schedule and its history; the runs it st
 `add` takes what to run, `--workflow <id>` or `--test <id>`, and exactly one way of saying when:
 `--at`, `--every`, `--daily`, `--weekly`, `--monthly` or `--cron`. Times are this computer's
 local time. `--workspace` takes a workspace's name or id, and can be left out inside a
-workspace's folder or in an agent's terminal there. Give each input as `--input id=value`.
+workspace's folder or in an agent's terminal there. `--project <name>` takes its place for a
+workflow that should get a [new workspace for each run](schedules.md#a-new-workspace-for-each-run):
+`--workspace-name` says what they are called (the workflow's id otherwise), `--base` the branch
+each starts from (the default branch otherwise), and `--keep` how many of them may be there at
+once, 5 unless you say. At that many, a time is refused until you archive or delete one; `show`
+lists the ones still there. Give each input as `--input id=value`.
 `--name` names it; otherwise it takes the workflow's or the test's own name. `--if-missed` is
 `run-once` (the default) or `skip`, and `--notify` is `failure` (the default), `always` or
 `never`. Everything a run would be refused for is checked before anything is written, and `add`

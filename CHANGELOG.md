@@ -17,6 +17,11 @@ has the downloads and the full commit lists.
   `ys workflow run <id> --project <name>`. The branch and worktree are made once everything else
   has been checked, so a refused run leaves nothing behind. See
   [In a new workspace](docs/guide/workflows.md#in-a-new-workspace).
+- **A schedule can make a new workspace for each run.** In the schedule dialog, choose
+  **new workspace each run** under a project, or use `ys schedule add --project <name>`. Yardsort
+  never removes these workspaces: the schedule keeps up to a number you set (5 unless you say),
+  and at that many a time is refused, and you are told, until you archive or delete one. See
+  [A new workspace for each run](docs/guide/schedules.md#a-new-workspace-for-each-run).
 - **A workflow run lists the pull requests it opened.** The run's summary shows each one with its
   state and a link, in the project's own repository and in the repositories its workspace tracks,
   and the run's row says how many. `ys workflow runs` has a **PRS** column, and

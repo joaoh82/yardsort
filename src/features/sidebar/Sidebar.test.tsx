@@ -47,6 +47,7 @@ const core = vi.hoisted(() => ({
   onActivityChanged: vi.fn(),
   onTrackedPullRequestsChanged: vi.fn(),
   onSessionStarted: vi.fn(),
+  onSchedulesChanged: vi.fn(),
   workflowList: vi.fn(),
   workflowPreview: vi.fn(),
   workflowPreviewNew: vi.fn(),
@@ -138,6 +139,7 @@ describe("Sidebar", () => {
     core.onActivityChanged.mockResolvedValue(() => {});
     core.onTrackedPullRequestsChanged.mockResolvedValue(() => {});
     core.onSessionStarted.mockResolvedValue(() => {});
+    core.onSchedulesChanged.mockResolvedValue(() => {});
     useMemoryStore.setState({ waiting: {} });
     useOutcomesStore.setState({ asking: null, error: null });
     opener.openUrl.mockResolvedValue(undefined);
@@ -252,6 +254,17 @@ describe("Sidebar", () => {
     ]);
     act(() => started("w-alpha-from-phone"));
     expect(await screen.findByRole("treeitem", { name: "from-phone" })).toBeVisible();
+  });
+
+  it("shows a workspace a schedule made for its run, though no agent started there", async () => {
+    await renderSidebar("alpha");
+    const changed = core.onSchedulesChanged.mock.calls[0]?.[0] as () => void;
+    const alpha = project("alpha");
+    core.projectsList.mockResolvedValue([
+      { ...alpha, workspaces: [...alpha.workspaces, worktree("alpha", "nightly-2")] },
+    ]);
+    act(() => changed());
+    expect(await screen.findByRole("treeitem", { name: "nightly-2" })).toBeVisible();
   });
 
   it("reads tasks once at the start, then only while the Tasks view is open", async () => {
