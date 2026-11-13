@@ -1967,6 +1967,27 @@ export type MachineReport = {
 	history: HistoryPoint[],
 };
 
+/**  A pull request a run made. */
+export type MadePullRequest = {
+	/**  `owner/name` for one in another repository. `None` for the run's own repository. */
+	repo: string | null,
+	number: number,
+	url: string,
+	/**
+	 *  As the forge said. `None` for one in another repository, which `ys pr tracked` and the
+	 *  Pull requests view look up.
+	 */
+	title: string | null,
+	/**
+	 *  `open`, `merged` or `closed`, as the forge said at the app's last look. `None` for one in
+	 *  another repository.
+	 */
+	state: string | null,
+	draft: boolean,
+	/**  When it was opened (the run's own repository) or tracked (another one), in epoch ms. */
+	openedAt: number | null,
+};
+
 /**  What Jev said about one proposal. */
 export type MemoryCheck = {
 	id: string,
@@ -4133,6 +4154,8 @@ export type WorkflowRun_Deserialize = {
 	endedAt: number | null,
 	/**  Why this run is blocked on a person, as in `your approval`. Absent when it is not. */
 	blockedOn: string | null,
+	/**  The pull requests it opened, its own repository's first. See `workflow::made`. */
+	pullRequestsMade: MadePullRequest[],
 };
 
 /**  One run, as the view lists it. */
@@ -4154,6 +4177,8 @@ export type WorkflowRun_Serialize = {
 	endedAt: number | null,
 	/**  Why this run is blocked on a person, as in `your approval`. Absent when it is not. */
 	blockedOn: string | null,
+	/**  The pull requests it opened, its own repository's first. See `workflow::made`. */
+	pullRequestsMade: MadePullRequest[],
 };
 
 /**

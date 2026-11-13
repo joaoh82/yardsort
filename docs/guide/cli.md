@@ -584,7 +584,8 @@ ys workflow validate fix-ci.yaml # each problem as file:line:column: message; ex
 ys workflow validate -           # the same, reading the file from standard input
 ys workflow save fix-ci.yaml     # check it, then write it into your folder; refused with problems
 ys workflow run ping --workspace fix-login --input note=hi   # queue a run; Yardsort must be open
-ys workflow runs                 # runs, newest first, with a WAITING ON column
+ys workflow runs                 # runs, newest first, with WAITING ON and PRS columns
+ys workflow runs --run 3f2a9c1e  # one run: its pull requests, steps, artifacts and approvals
 ys workflow approve 3f2a9c1e sign-off --feedback "ship it"
 ys workflow reject 3f2a9c1e sign-off
 ys workflow request-changes 3f2a9c1e sign-off --feedback "split the migration"
