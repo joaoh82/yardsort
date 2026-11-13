@@ -28,9 +28,18 @@ const quiet =
   "rounded border border-line px-3 py-1.5 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40";
 const primary = "rounded bg-accent px-3 py-1.5 font-medium text-canvas disabled:opacity-40";
 
+/** The two halves of a workflow's page: following its runs, or reading and editing its file. */
+type View = "runs" | "definition";
+
+/** A run in one of these states is what the page opens on, when it is the newest. */
+const NEEDS_LOOKING_AT = new Set(["failed", "queued", "running"]);
+
 /**
- * One workflow in the center panel: its steps as a chart, its file in an editor, and its runs.
- * A built-in is read-only until it is customized; a file of the user's is edited in place.
+ * One workflow in the center panel, in two views. **Runs** lists its runs beside the picked
+ * run's steps and the step's detail. **Definition** has its steps as a chart beside its file in
+ * an editor. A built-in is read-only until it is customized; a file of the user's is edited in
+ * place. The page opens on Runs when the newest run failed or is still going, or a run was
+ * asked for from elsewhere, and on Definition otherwise.
  */
 export function WorkflowView({ workflowId }: { workflowId: string }) {
   const isNew = workflowId === NEW_WORKFLOW;
@@ -56,14 +65,34 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
   const askedRun = useWorkflowStore((s) => s.shownRun[workflowId]) ?? null;
   const [selectedRun, setSelectedRun] = useState<string | null>(askedRun);
   const [takenAsk, setTakenAsk] = useState<string | null>(askedRun);
+  // Which view each workflow is on, by id, so going to another workflow starts it afresh.
+  const [views, setViews] = useState<Record<string, View | undefined>>(() =>
+    askedRun ? { [workflowId]: "runs" } : {},
+  );
+  const showView = (next: View) => setViews((all) => ({ ...all, [workflowId]: next }));
   if (askedRun !== takenAsk) {
     setTakenAsk(askedRun);
-    if (askedRun) setSelectedRun(askedRun);
+    if (askedRun) {
+      setSelectedRun(askedRun);
+      showView("runs");
+    }
   }
   useEffect(() => {
     if (askedRun) useWorkflowStore.getState().showRun(workflowId, null);
   }, [askedRun, workflowId]);
-  const runSteps = useWorkflowStore((s) => (selectedRun ? s.steps[selectedRun] : undefined));
+  const runs = useWorkflowStore((s) => s.runs[workflowId]);
+  // Decided once, when the runs are first known: a run starting later does not move the page.
+  if (!isNew && views[workflowId] === undefined && runs !== undefined) {
+    const newest = runs[0];
+    showView(newest && NEEDS_LOOKING_AT.has(newest.status) ? "runs" : "definition");
+  }
+  const view: View = isNew ? "definition" : (views[workflowId] ?? "definition");
+  // The run on screen: the one picked, or else the newest.
+  const shownRun = selectedRun ?? runs?.[0]?.id ?? null;
+  const runSteps = useWorkflowStore((s) => (shownRun ? s.steps[shownRun] : undefined));
+  const shownRunName = runs?.find((r) => r.id === shownRun)?.workspaceName ?? null;
+  // The chart colours each step by how it went in the run on screen, unless asked not to.
+  const [colourByRun, setColourByRun] = useState(true);
   const [running, setRunning] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -76,6 +105,14 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
   useEffect(() => {
     if (!loaded) void useWorkflowStore.getState().load();
   }, [loaded]);
+
+  useEffect(() => {
+    if (!isNew) void useWorkflowStore.getState().loadRuns(workflowId);
+  }, [isNew, workflowId]);
+
+  useEffect(() => {
+    if (shownRun) void useWorkflowStore.getState().loadSteps(shownRun);
+  }, [shownRun]);
 
   useEffect(() => {
     let current = true;
@@ -203,8 +240,33 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
               ` · ${problems.length} ${problems.length === 1 ? "problem" : "problems"}`}
           </p>
         </div>
+        {!isNew && (
+          <div
+            role="group"
+            aria-label="View"
+            className="flex shrink-0 gap-0.5 rounded-md border border-line bg-surface p-0.5"
+          >
+            {(["runs", "definition"] as const).map((each) => (
+              <button
+                key={each}
+                type="button"
+                aria-pressed={view === each}
+                className={`flex items-center gap-1.5 rounded px-3 py-1 ${view === each ? "bg-raised font-medium text-ink" : "text-ink-muted hover:text-ink"}`}
+                onClick={() => showView(each)}
+              >
+                {each === "runs" ? "Runs" : "Definition"}
+                {each === "runs" && runs?.[0] && NEEDS_LOOKING_AT.has(runs[0].status) && (
+                  <span
+                    aria-hidden
+                    className={`size-1.5 rounded-full ${runs[0].status === "failed" ? "bg-red-400" : "bg-amber-300"}`}
+                  />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-          {builtIn ? (
+          {builtIn && view === "runs" ? null : builtIn ? (
             <>
               <button type="button" className={quiet} disabled={busy} onClick={customize}>
                 Customize
@@ -222,6 +284,18 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
                 Save
               </button>
             </>
+          ) : view === "runs" ? (
+            // Unsaved edits can still be saved or dropped from here; the rest is Definition's.
+            dirty && (
+              <>
+                <button type="button" className={quiet} disabled={busy} onClick={revert}>
+                  Revert
+                </button>
+                <button type="button" className={primary} disabled={busy} onClick={save}>
+                  Save
+                </button>
+              </>
+            )
           ) : (
             <>
               <button
@@ -305,61 +379,70 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="h-[42%] min-h-40 shrink-0 border-b border-line">
-            <Suspense fallback={null}>
-              {steps.length > 0 && (
-                <WorkflowChart
-                  steps={steps}
-                  run={runSteps}
-                  selectedStep={selection?.id ?? null}
-                  onSelect={selectStep}
-                />
-              )}
-            </Suspense>
-          </div>
-          {isNew && <DescribeWorkflow />}
-          {changing && !isNew && !builtIn && (
-            <DescribeWorkflow key={workflowId} workflowId={workflowId} current={text} />
-          )}
-          <div className="min-h-0 flex-1">
-            <Suspense fallback={null}>
-              <WorkflowEditor
-                key={`${workflowId}:${builtIn ? "built-in" : (path ?? "new")}`}
-                text={text}
-                onChange={builtIn ? undefined : setDraft}
-                problems={problems}
-                readOnly={builtIn}
-                selection={selection}
-                stepLines={checkedText === text ? check?.stepLines : undefined}
-              />
-            </Suspense>
-          </div>
-          {problems.length > 0 && (
-            <ul
-              aria-label="Problems"
-              className="max-h-28 shrink-0 overflow-y-auto border-t border-line px-4 py-2 text-detail"
-            >
-              {problems.map((problem, i) => (
-                <li key={i} className="text-red-400 select-text">
-                  {problem.line ? `${problem.line}:${problem.column ?? 1} ` : ""}
-                  {problem.message}
-                </li>
-              ))}
-            </ul>
-          )}
+      {view === "runs" ? (
+        <div className="flex min-h-0 flex-1">
+          <WorkflowRuns workflowId={workflowId} selected={shownRun} onSelect={setSelectedRun} />
         </div>
-        {!isNew && (
-          <aside className="flex w-80 shrink-0 flex-col border-l border-line">
-            <WorkflowRuns
-              workflowId={workflowId}
-              selected={selectedRun}
-              onSelect={setSelectedRun}
-            />
-          </aside>
-        )}
-      </div>
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          <div className="flex w-[26rem] shrink-0 flex-col border-r border-line bg-surface">
+            {shownRunName && (
+              <label className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2 text-small text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={colourByRun}
+                  onChange={(event) => setColourByRun(event.target.checked)}
+                />
+                Show how the run in {shownRunName} went
+              </label>
+            )}
+            <div className="min-h-0 flex-1">
+              <Suspense fallback={null}>
+                {steps.length > 0 && (
+                  <WorkflowChart
+                    steps={steps}
+                    run={colourByRun ? runSteps : undefined}
+                    selectedStep={selection?.id ?? null}
+                    onSelect={selectStep}
+                  />
+                )}
+              </Suspense>
+            </div>
+          </div>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {isNew && <DescribeWorkflow />}
+            {changing && !isNew && !builtIn && (
+              <DescribeWorkflow key={workflowId} workflowId={workflowId} current={text} />
+            )}
+            <div className="min-h-0 flex-1">
+              <Suspense fallback={null}>
+                <WorkflowEditor
+                  key={`${workflowId}:${builtIn ? "built-in" : (path ?? "new")}`}
+                  text={text}
+                  onChange={builtIn ? undefined : setDraft}
+                  problems={problems}
+                  readOnly={builtIn}
+                  selection={selection}
+                  stepLines={checkedText === text ? check?.stepLines : undefined}
+                />
+              </Suspense>
+            </div>
+            {problems.length > 0 && (
+              <ul
+                aria-label="Problems"
+                className="max-h-28 shrink-0 overflow-y-auto border-t border-line px-4 py-2 text-detail"
+              >
+                {problems.map((problem, i) => (
+                  <li key={i} className="text-red-400 select-text">
+                    {problem.line ? `${problem.line}:${problem.column ?? 1} ` : ""}
+                    {problem.message}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
 
       {scheduling && (
         <ScheduleDialog
@@ -376,6 +459,7 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
             void useWorkflowStore.getState().loadRuns(started);
             if (started === workflowId) {
               setSelectedRun(run);
+              showView("runs");
             } else {
               // Run as its twin on a pull request elsewhere: its runs are on that one's page.
               useWorkflowStore.getState().showRun(started, run);

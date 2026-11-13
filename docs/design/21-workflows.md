@@ -319,22 +319,36 @@ array; anything derived is derived outside the selector.
 **Center panel.** The open workflow lives in the projects store beside the composer's fields
 (`workflowId`), because one `set` must clear both: selecting a workspace or composing closes the
 workflow, opening a workflow closes the composer, and the selected workspace is kept to come back
-to. Three parts:
+to. Two views, switched in the header, held per workflow in the view's own state: **Runs** and
+**Definition** (since 2026-11-13; before, all three parts below were on one screen, and the run
+and its steps were squeezed into a 320px column). The page opens on Runs when the newest run is
+failed, queued or running, or a run was asked for from elsewhere (`shownRun`), and on Definition
+otherwise. That is decided once, when the runs are first known, so a run starting later does not
+move the page. The layouts are in the Figma file "Yardsort — Workflows UX" (frames A1–A3).
 
-- **Chart.** The steps as nodes, `needs` as edges, laid out top-down by `@dagrejs/dagre` and
-  drawn by `@xyflow/react`, read-only: the YAML is what runs and the chart is a view of it. With
-  a run open, each node shows that step's status. The layout is a pure function with tests of
-  its own.
-- **File.** A CodeMirror editor (`@codemirror/lang-yaml`, `@codemirror/lint`). Every pause in
-  typing goes to `workflow_check`, which is `workflow::parse`: the problems become gutter marks
-  and a list under the editor, and the last shape that checked out stays on the chart. Unsaved
-  text is kept in the store, per workflow, while the app runs. A built-in is read-only with
-  **Customize** (a copy under the same id, used instead) and **Duplicate** (a copy under a new
-  id); a user file has **Save**, **Revert**, **Duplicate**, and **Delete** or **Reset to
-  built-in**, which asks first through the OS dialog.
-- **Runs.** Newest first, each opening to its steps, notes and pull request; **Cancel run** on
-  one still going. `WorkflowRunsChanged`, emitted by the driver after any tick that changed a
-  run, reloads what is on screen.
+- **Definition: chart.** The steps as nodes, `needs` as edges, laid out top-down by
+  `@dagrejs/dagre` and drawn by `@xyflow/react`, read-only: the YAML is what runs and the chart
+  is a view of it. A 26rem column the full height of the page, left of the file, so the nodes
+  fit at a readable size; it was 42% of the height above the file, mostly empty. Each node shows
+  its status in the run on screen in Runs, behind a checkbox. The layout is a pure function with
+  tests of its own.
+- **Definition: file.** A CodeMirror editor (`@codemirror/lang-yaml`, `@codemirror/lint`). Every
+  pause in typing goes to `workflow_check`, which is `workflow::parse`: the problems become
+  gutter marks and a list under the editor, and the last shape that checked out stays on the
+  chart. Unsaved text is kept in the store, per workflow, while the app runs. A built-in is
+  read-only with **Customize** (a copy under the same id, used instead) and **Duplicate** (a copy
+  under a new id); a user file has **Save**, **Revert**, **Duplicate**, and **Delete** or **Reset
+  to built-in**, which asks first through the OS dialog. Save and Revert stay in the header in
+  Runs while the text is unsaved.
+- **Runs.** Three columns. The list, newest first; the newest is on screen until another is
+  picked. The run (`RunPanes`): its times, the error with **Continue from the failed step** under
+  it, **Cancel run** on one still going, **Copy id**, then **Summary** and the steps. Over six
+  steps, three or more succeeded in a row fold into one row (`railRows`), and the picked step
+  never folds. The detail takes the rest of the width: the summary, or the picked step's note,
+  approval or question, decision and artifacts (Markdown when `looksLikeMarkdown`). A run opens on
+  the waiting step, else the failed one, else the summary (`openingPick`).
+  `WorkflowRunsChanged`, emitted by the driver after any tick that changed a run, reloads what is
+  on screen.
 
 **Run…** is one dialog, opened from the workflow, from a workspace's menu (**Run workflow…**,
 and **Request code review…** straight onto the built-in), or from either with the other still

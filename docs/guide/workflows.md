@@ -5,8 +5,8 @@ agent review this workspace's pull request, then tell me and the agent that wrot
 one as a short YAML file. Yardsort checks every name and every `{{ variable }}` in it before it
 runs anything, and names the line and column of each mistake.
 
-**Workflows** in the sidebar opens the list of every workflow. Open one to see its steps as a
-chart, edit its file, and follow its runs; **Run…** starts it. `ys workflow run` starts one from a
+**Workflows** in the sidebar opens the list of every workflow. Open one to follow its runs, or to
+see its steps as a chart beside its file and edit it; **Run…** starts it. `ys workflow run` starts one from a
 terminal, with Yardsort open, because the app is what carries runs out.
 
 ## The Workflows list
@@ -38,27 +38,50 @@ the built-in back. Built-in rows have neither.
 
 ![The built-in code review with a selected step and its YAML source highlighted](../images/workflows.png)
 
-The center panel shows three things:
+A workflow's page has two views, switched in its header: **Runs** and **Definition**. It opens
+on **Runs** when the newest run failed or is still going, or when you opened a run from
+somewhere else, such as the list of runs waiting on you. Otherwise it opens on **Definition**.
+A dot on **Runs** says the newest run failed (red) or is going (amber). **Schedule…** and
+**Run…** are in the header in both views.
 
-- **The chart.** Every step as a box, top to bottom, with an arrow from each step to the ones
-  that need it. Steps that need the same ones sit side by side. The chart is drawn from the file
-  and follows it as you type. Click a box (or focus it and press **Enter** or **Space**) to select
-  that step and scroll the YAML editor to its highlighted `id` line, including in read-only
-  built-ins. Click the chart background to clear the selection. With a run open in the list on the
-  right, each box shows how that step went in it.
-- **The file.** A YAML editor. Every pause in typing checks the file, and each problem is marked
-  where it is and listed under the editor. A built-in is read-only: **Customize** copies it into
-  your folder under the same id, so your copy is used instead of it, and **Duplicate** copies it
-  under a new id, as a second workflow. Your own file has **Save**, **Revert** while there are
-  unsaved changes, **Duplicate**, and **Delete**, or **Reset to built-in** for a copy that
-  replaces one, which deletes your copy and brings the built-in back. Deleting asks first, and
-  goes back to the list.
-  Unsaved changes are kept while Yardsort is open, so you can look at another workflow and come
-  back; they are gone when it quits.
-- **Runs.** This workflow's runs, newest first, with the workspace and when each was asked for.
-  Open one for its steps, what each left or why it failed or was skipped, and the pull request it
-  is about. A run still going has **Cancel run**. A failed one has **Continue from the failed step**:
-  see [Continuing a failed run](#continuing-a-failed-run).
+**Definition** is the workflow itself, side by side:
+
+- **The chart**, on the left. Every step as a box, top to bottom, with an arrow from each step to
+  the ones that need it. Steps that need the same ones sit side by side. The chart is drawn from
+  the file and follows it as you type. Click a box (or focus it and press **Enter** or **Space**)
+  to select that step and scroll the YAML editor to its highlighted `id` line, including in
+  read-only built-ins. Click the chart background to clear the selection. Each box shows how that
+  step went in the run on screen in **Runs** — the newest, unless you picked another — while
+  **Show how the run in … went**, above the chart, is ticked.
+- **The file**, on the right. A YAML editor. Every pause in typing checks the file, and each
+  problem is marked where it is and listed under the editor. A built-in is read-only:
+  **Customize** copies it into your folder under the same id, so your copy is used instead of it,
+  and **Duplicate** copies it under a new id, as a second workflow. Your own file has **Save**,
+  **Revert** while there are unsaved changes, **Duplicate**, **Describe a change**, and **Delete**,
+  or **Reset to built-in** for a copy that replaces one, which deletes your copy and brings the
+  built-in back. Deleting asks first, and goes back to the list. Unsaved changes are kept while
+  Yardsort is open, so you can look at another workflow and come back; they are gone when it
+  quits. **Save** and **Revert** are in the header in **Runs** too while there are unsaved
+  changes.
+
+**Runs** is three columns:
+
+- **The runs**, newest first, with each one's state, how long ago it was asked for, the
+  workspace, and whether a schedule or a trigger started it. The newest is on screen until you
+  pick another.
+- **The run.** Its workspace, when it was asked for, when it ended and how long it took, and the
+  pull request it is about. When it failed, the reason is at the top, with **Continue from the
+  failed step** right under it: see [Continuing a failed run](#continuing-a-failed-run). A run
+  still going has **Cancel run**. **Copy id** copies the run's id, which every `ys workflow`
+  command takes. Below that are **Summary** and the run's steps, each with how it went. On a run
+  of more than six steps, three or more succeeded steps in a row fold into one row, such as
+  **9 steps succeeded**; click it to list them all.
+- **The detail**, across the rest of the window: the run's summary, or the step you picked. A
+  run opens on the step waiting for you, else on the step that failed, else on its summary. The
+  summary has the workflow, the workspace, where the run was asked from, its times, how many steps
+  ended each way, its id, and the inputs it was given. A step has its times, its note — what it
+  did, or why it failed or was skipped — the approval or the question it is waiting on, the
+  decision made on it, and each artifact it left, formatted when it is Markdown.
 
 **Run…** opens a dialog. It asks for the workspace and for each of the workflow's inputs; an agent
 is picked from the same list as the composer's, with those not installed greyed out. The
@@ -350,7 +373,8 @@ that do not need it. See [A test that must pass](#a-test-that-must-pass).
 ### Continuing a failed run
 
 A run that failed part of the way through does not have to start over. Open it in the
-workflow's **Runs** and press **Continue from the failed step**, or:
+workflow's **Runs** and press **Continue from the failed step**, right under the run's
+error, or:
 
 ```sh
 ys workflow continue 3f2a9c1e

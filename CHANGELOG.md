@@ -3,8 +3,14 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## 0.33.0
+## Unreleased
 
+- **A workflow's page has two views: Runs and Definition.** **Runs** puts the run list, the
+  picked run's steps and the step's detail side by side, so notes, answers and artifacts are read
+  at the width of the window instead of in a narrow column. **Continue from the failed step** sits
+  right under the run's error, a run opens on the step that needs you or the one that failed, and
+  a long run folds its succeeded steps into one row. **Definition** puts the chart beside the file
+  instead of above it. See [Workflows](docs/guide/workflows.md#the-workflows-list).
 - **Start a workflow from a project, in a workspace made for the run.** A run no longer needs a
   workspace to be there first. In the Run dialog, choose **new workspace** under a project, or
   open it from **Run workflow…** in the project's menu; from a terminal,
