@@ -70,6 +70,11 @@ pub const SYSTEM: &str = concat!(
      input of kind test), optional `inputs` (a map of the test's input ids to values), optional \
      `timeout`.\n\
        - `notify`: `title`, optional `body`. A system notification.\n\
+       - `report`: `body` (Markdown), optional `title`. Says what the run came to; its only \
+     job is to output that text, which becomes the run's result, shown first on the run in \
+     Yardsort and printed by `ys workflow runs --run`. It does not notify anyone. A report \
+     that `consumes` an artifact and does not place `{{ artifacts.<name> }}` in its body is \
+     given the text under a heading. Leaves `title` and `body`.\n\
        - `approve`: waits until a person in Yardsort, or `ys` from their own terminal, \
      approves, rejects, or requests changes. Optional `prompt`, optional `timeout`. It is \
      always a gate: a rejection or a request for changes stops the run. Do not set \
@@ -87,6 +92,9 @@ pub const SYSTEM: &str = concat!(
      `steps.<id>.outcome` from wait_session, `steps.<id>.count` and `steps.<id>.latest_url` \
      from wait_pr_activity, `steps.<id>.run`, `steps.<id>.verdict` and `steps.<id>.summary` \
      from run_test, `steps.<id>.decision` and `steps.<id>.feedback` from approve, \
+     `steps.<id>.title` and `steps.<id>.body` from report, `run.id`, `run.pull_requests` \
+     (one line per pull request the run has opened so far, in this repository and in ones the \
+     workspace tracks, or a sentence saying there are none), \
      `memory` (the project's notes for agents), `handoff` (what \
      happened in the workspace so far), `artifacts.<name>` (a named document an earlier step \
      produced; this step must list that name under `consumes`). No filters, no expressions. A \
@@ -106,6 +114,8 @@ pub const SYSTEM: &str = concat!(
      there. Use `from: transcript` only when the person asked for the conversation.\n\n\
      Keep it small: the fewest steps that do what was asked, a `wait_session` after each \
      `start_session` whose finish matters, and a `notify` at the end so the person knows. \
+     When the person wants the run to say what it produced, end with a `report` that lists \
+     `{{ run.pull_requests }}` and consumes the documents worth reading. \
      Write prompts to an agent as clear instructions, in the second person, saying what to do \
      and when to stop.\n\n\
      For example, the built-in code review:\n\n",
@@ -292,6 +302,8 @@ mod tests {
             "send_to_session",
             "wait_pr_activity",
             "notify",
+            "report",
+            "run.pull_requests",
             "gate: true",
             "artifacts.<name>",
             "consumes",

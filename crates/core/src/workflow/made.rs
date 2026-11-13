@@ -1,4 +1,5 @@
-//! What a run made: the pull requests opened while it was going.
+//! What a run made: the pull requests opened while it was going, and what its `report` steps
+//! said it came to.
 //!
 //! A run made a pull request when its workspace has one that was opened during the run's life.
 //! Two kinds, both claimed by the workspace and never by reading what an agent printed:
@@ -200,6 +201,37 @@ pub fn observe_pull_requests(
         }
     }
     Ok(())
+}
+
+/// What one `report` step said, once it succeeded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Report {
+    /// The step's id.
+    pub step: String,
+    pub title: Option<String>,
+    /// Markdown.
+    pub body: String,
+}
+
+/// A run's result: what each of its succeeded `report` steps said, in file order. Empty when
+/// it has none, or none has run yet. A report step that ran in an earlier attempt and is waiting
+/// to run again after a continue is not counted until it succeeds again.
+pub fn reports(store: &Store, run_id: &str) -> StoreResult<Vec<Report>> {
+    Ok(store
+        .workflow_steps(run_id)?
+        .into_iter()
+        .filter(|step| step.action == "report" && step.status == "succeeded")
+        .filter_map(|step| {
+            let outputs = super::engine::parse_outputs(&step.outputs);
+            let body = outputs.get("body")?.clone();
+            Some(Report {
+                step: step.step_id,
+                title: outputs.get("title").cloned(),
+                body,
+            })
+        })
+        .collect())
 }
 
 #[cfg(test)]

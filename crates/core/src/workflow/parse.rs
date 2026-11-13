@@ -27,6 +27,8 @@ const FIELDS: &[(&str, &[&str])] = &[
         &["name", "branch", "base_branch", "path", "task"],
     ),
     ("pr", &["number", "url", "title", "repo", "clone"]),
+    // The run itself: its id, and the pull requests it has opened so far (`workflow::made`).
+    ("run", &["id", "pull_requests"]),
     // What the event that started the run left. Empty when a person started it.
     (
         "event",
@@ -47,6 +49,7 @@ const ACTIONS: &[&str] = &[
     "wait_pr_activity",
     "run_test",
     "notify",
+    "report",
     "approve",
 ];
 
@@ -59,6 +62,7 @@ fn allowed(action: &str) -> &'static [&'static str] {
         "wait_pr_activity" => &["kind", "timeout"],
         "run_test" => &["test", "inputs", "timeout", "gate", "on", "max_attempts"],
         "notify" => &["title", "body"],
+        "report" => &["title", "body"],
         "approve" => &["prompt", "timeout", "gate", "on", "max_attempts"],
         _ => &[],
     }
@@ -821,6 +825,10 @@ impl Checker<'_> {
                     timeout_secs: self.timeout(raw),
                 }
             }
+            "report" => Action::Report {
+                title: self.text(&raw.title, scope),
+                body: self.required(&raw.body, raw, "body", "what the report says", scope),
+            },
             _ => Action::Notify {
                 title: self.required(
                     &raw.title,

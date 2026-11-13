@@ -1056,6 +1056,7 @@ fn step_of(effect: &Effect) -> &str {
         Effect::Start { step, .. }
         | Effect::Paste { step, .. }
         | Effect::Notify { step, .. }
+        | Effect::Report { step, .. }
         | Effect::RunTest { step, .. }
         | Effect::Capture { step, .. } => step,
     }
@@ -1127,6 +1128,14 @@ fn carry_out(
                 .notify(&title, body.as_deref())
                 .map(|()| Outputs::new()),
         ),
+        Effect::Report { title, body, .. } => {
+            let mut outputs = Outputs::new();
+            if let Some(title) = title {
+                outputs.insert("title".to_owned(), title);
+            }
+            outputs.insert("body".to_owned(), super::artifact::cap(&body).0);
+            done(Ok(outputs))
+        }
         Effect::RunTest { test, inputs, .. } => {
             // Queue the run in this workspace; the smoke runner, ticking on this same thread,
             // carries it out. The step then waits for the run's row to end. A run that needs the
@@ -1395,6 +1404,7 @@ impl Capture<'_> {
                         .and_then(|row| engine::parse_outputs(&row.outputs).get(field).cloned())
                 }
             }
+            [namespace, field] if namespace == "run" => run_var(self.store, self.run_id, field),
             [namespace, name] if namespace == "artifacts" => self
                 .store
                 .workflow_artifacts(self.run_id)
@@ -1419,6 +1429,19 @@ impl Capture<'_> {
                 .var(other)
                 .or_else(|| self.facts.borrow().var(other)),
         }
+    }
+}
+
+/// `{{ run.<field> }}`: the run's id, or the pull requests it has opened so far.
+fn run_var(store: &Store, run_id: &str, field: &str) -> Option<String> {
+    match field {
+        "id" => Some(run_id.to_owned()),
+        "pull_requests" => {
+            let run = store.workflow_run(run_id).ok().flatten()?;
+            let made = super::made::pull_requests_made(store, &run).ok()?;
+            Some(super::made::pull_requests_text(&made))
+        }
+        _ => None,
     }
 }
 
@@ -1478,6 +1501,7 @@ impl World for Seen<'_> {
                 }
                 self.facts.borrow().var(path)
             }
+            [namespace, field] if namespace == "run" => run_var(self.store, self.run_id, field),
             [namespace, name] if namespace == "artifacts" => self
                 .store
                 .workflow_artifacts(self.run_id)

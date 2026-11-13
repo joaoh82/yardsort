@@ -841,6 +841,13 @@ inputs: { [key in string]: string }; timeoutSecs: number | null } |
 /**  Tell the person who started the run. */
 { action: "notify"; title: string; body: string | null } | 
 /**
+ *  Say what the run came to: a title and a Markdown body, rendered from variables and the
+ *  artifacts the step consumes. Its only job is to output that text. The run's result is
+ *  what its succeeded report steps said, in file order; the window shows it first on the
+ *  run's summary and `ys workflow runs --run` prints it. Leaves `title` and `body`.
+ */
+{ action: "report"; title: string | null; body: string } | 
+/**
  *  Wait until a person approves, rejects, or requests changes. Always a gate. Waiting for
  *  a GitHub review is [`Action::WaitPrActivity`], not this. Leaves `decision` and `feedback`.
  */
@@ -2842,6 +2849,15 @@ export type Repo = {
 	kind: ForgeKind,
 };
 
+/**  What one `report` step said, once it succeeded. */
+export type Report = {
+	/**  The step's id. */
+	step: string,
+	title: string | null,
+	/**  Markdown. */
+	body: string,
+};
+
 /**  What [`Gh::repositories`] managed to read. */
 export type Repositories = {
 	repositories: RemoteRepository[],
@@ -4156,6 +4172,8 @@ export type WorkflowRun_Deserialize = {
 	blockedOn: string | null,
 	/**  The pull requests it opened, its own repository's first. See `workflow::made`. */
 	pullRequestsMade: MadePullRequest[],
+	/**  What its succeeded `report` steps said, in file order. Empty when it has none. */
+	reports: Report[],
 };
 
 /**  One run, as the view lists it. */
@@ -4179,6 +4197,8 @@ export type WorkflowRun_Serialize = {
 	blockedOn: string | null,
 	/**  The pull requests it opened, its own repository's first. See `workflow::made`. */
 	pullRequestsMade: MadePullRequest[],
+	/**  What its succeeded `report` steps said, in file order. Empty when it has none. */
+	reports: Report[],
 };
 
 /**

@@ -202,8 +202,21 @@ steps:
       The work is ready to release. Approve to finish this run. Reject, or request
       changes, to stop it. This does not merge, deploy, or roll back.
 
-  - id: ready
+  - id: result
     needs: [release]
+    action: report
+    consumes: [brief]
+    title: "{{ workspace.name }} is ready to release"
+    body: |
+      ## Pull requests
+
+      {{ run.pull_requests }}
+
+      The smoke test passed and the review was accepted. Merging and deploying are still
+      yours to do. What was agreed at the start follows.
+
+  - id: ready
+    needs: [result]
     action: notify
     title: "{{ workspace.name }} is ready to release"
     body: >

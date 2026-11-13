@@ -295,6 +295,12 @@ pub enum Effect {
         title: String,
         body: Option<String>,
     },
+    /// Keep what a report step says as its outputs. Nothing leaves the computer.
+    Report {
+        step: String,
+        title: Option<String>,
+        body: String,
+    },
     /// The step succeeded in the engine, and it leaves named artifacts. The driver reads them
     /// and then marks the step succeeded with [`recorded`]. Until then the step stays running,
     /// so a later step does not start on an empty handoff.
@@ -677,6 +683,7 @@ fn effect_step(effect: &Effect) -> &str {
         | Effect::Paste { step, .. }
         | Effect::RunTest { step, .. }
         | Effect::Notify { step, .. }
+        | Effect::Report { step, .. }
         | Effect::Capture { step, .. } => step,
     }
 }
@@ -1095,6 +1102,20 @@ fn begin(
                 step: id.to_owned(),
                 title: render(title),
                 body: body.as_deref().map(render).filter(|b| !b.trim().is_empty()),
+            });
+            to(id, StepStatus::Pending, StepStatus::Running)
+        }
+        Action::Report { title, body } => {
+            // Consumed artifacts the body does not place are appended under headings, as a
+            // start or a send does: a report that names `consumes` means to include them.
+            let body = handoff_prompt(body, &step.consumes, lookup);
+            effects.push(Effect::Report {
+                step: id.to_owned(),
+                title: title
+                    .as_deref()
+                    .map(render)
+                    .filter(|t| !t.trim().is_empty()),
+                body,
             });
             to(id, StepStatus::Pending, StepStatus::Running)
         }

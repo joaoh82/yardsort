@@ -673,6 +673,8 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
         pending_approvals: Vec<Pending<'a>>,
         /// Decisions recorded on this run, including one the app has not applied yet.
         decisions: Vec<Decision<'a>>,
+        /// What its succeeded `report` steps said, in file order: the run's result.
+        reports: Vec<workflow::made::Report>,
     }
     let parsed = workflow::parse(&run.definition).ok();
     let consumes_of = |step_id: &str| -> Vec<String> {
@@ -734,6 +736,7 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
         .flatten();
     listed.pull_requests = workflow::made::pull_requests_made(&ys.store, &run)?;
     let made = listed.pull_requests.clone();
+    let reports = workflow::made::reports(&ys.store, &run.id)?;
     let shown = Shown {
         run: listed,
         inputs: serde_json::from_str(&run.inputs).unwrap_or_default(),
@@ -755,6 +758,7 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
             .collect(),
         pending_approvals,
         decisions,
+        reports: reports.clone(),
         artifacts: artifacts
             .iter()
             .map(|artifact| Artifact {
@@ -791,6 +795,16 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
         );
         if let Some(error) = &run.error {
             sayln!("{error}");
+        }
+        if !reports.is_empty() {
+            sayln!();
+            sayln!("Result");
+            for report in &reports {
+                if let Some(title) = &report.title {
+                    sayln!("{title}");
+                }
+                sayln!("{}", report.body.trim_end());
+            }
         }
         if !made.is_empty() {
             sayln!();

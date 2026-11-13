@@ -3620,3 +3620,75 @@ fn a_continued_run_that_fails_again_tells_the_phone_again() {
         "the same run failing a second time is not a retry of the first notice"
     );
 }
+
+const REPORTS: &str = "id: reports
+name: Reports
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: decide
+    action: report
+    body: Decided on a plan.
+    produces:
+      - name: plan
+        text: Ship the login fix first.
+  - id: result
+    action: report
+    needs: [decide]
+    consumes: [plan]
+    title: \"{{ workspace.name }} is done\"
+    body: |
+      Run {{ run.id }}.
+
+      ## Pull requests
+      {{ run.pull_requests }}
+";
+
+#[test]
+fn a_report_step_says_what_the_run_came_to_with_its_pull_requests_and_what_it_consumes() {
+    let profile = Profile::new(&[("reports", REPORTS)]);
+    let run = profile.queue("reports");
+    // An agent in the run opened one in a nested clone, and the hook tracked it.
+    profile
+        .store
+        .track_pull_request(&crate::store::NewTrackedPullRequest {
+            workspace_id: &profile.workspace,
+            session_id: None,
+            repo: "github.com/o/cloud",
+            number: 41,
+            url: "https://github.com/o/cloud/pull/41",
+            tracked_by: "hook",
+        })
+        .unwrap();
+    let driver = Driver::default();
+    profile.until(&driver, &NoHands, || {
+        !matches!(profile.status(&run).as_str(), "queued" | "running")
+    });
+    assert_eq!(profile.status(&run), "succeeded");
+    let reports = crate::workflow::made::reports(&profile.store, &run).unwrap();
+    // Every report the run gave, in file order.
+    assert_eq!(reports.len(), 2);
+    assert_eq!(reports[0].step, "decide");
+    assert_eq!(reports[0].title, None);
+    assert_eq!(reports[0].body, "Decided on a plan.");
+    assert_eq!(reports[1].step, "result");
+    assert_eq!(reports[1].title.as_deref(), Some("fix-login is done"));
+    let body = &reports[1].body;
+    assert!(body.starts_with(&format!("Run {run}.")), "{body}");
+    assert!(
+        body.contains("- o/cloud#41 — https://github.com/o/cloud/pull/41"),
+        "{body}"
+    );
+    // A consumed artifact the body does not place is appended under its name.
+    assert!(
+        body.contains("## Artifact: plan\n\nShip the login fix first."),
+        "{body}"
+    );
+    let step = profile.step(&run, "result");
+    let outputs = engine::parse_outputs(&step.outputs);
+    assert_eq!(
+        outputs.get("title").map(String::as_str),
+        Some("fix-login is done")
+    );
+}

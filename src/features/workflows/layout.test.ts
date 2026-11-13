@@ -102,6 +102,7 @@ describe("layoutSteps", () => {
       "await-review",
       "accept-review",
       "release",
+      "result",
       "ready",
     ]);
     const y = (id: string) => at(nodes, id).y;
@@ -127,7 +128,8 @@ describe("layoutSteps", () => {
       "await-review->accept-review",
       "accept-review->release",
       "accept-review->implement",
-      "release->ready",
+      "release->result",
+      "result->ready",
     ]);
   });
 });
