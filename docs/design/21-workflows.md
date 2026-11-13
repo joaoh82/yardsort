@@ -259,6 +259,36 @@ Rules the engine enforces regardless of what a file says:
 - **Memory once.** A `start_session` prompt that places `{{ memory }}` itself starts the agent
   with `skip_memory`, so the launcher does not append the memory a second time.
 
+**Continuing a failed run** (`workflow::runs::continue_failed`, `Store::continue_workflow_run`)
+is one transaction on the same rows, not a new run: the run goes from `failed` back to
+`running`, with its error and end time cleared, and every step that is `failed`, `skipped` or
+`cancelled` goes back to `pending`. Nothing else is needed, because the engine already knows
+what to do with a running run whose steps are pending: the failed step's needs have succeeded,
+so it begins; a step skipped by a branch that did not choose it is skipped again, for the same
+reason. A step that goes back is treated as a rewind treats one: outputs, note and outcome
+cleared, its decision and its clarification rounds archived and removed, its `changes-*` and
+`failure-*` notes retired, a smoke test it still held cancelled in the same transaction, and
+its attempt count kept, so `max_attempts` still bounds it. Steps that succeeded are not
+touched, which is the point: their outputs, including the terminal ids later steps address,
+and their artifacts are what the continued steps read.
+
+It is refused, writing nothing, for a run that is not `failed`, while another run of the same
+workflow is queued or running in the workspace (the same rule, and the same unique index, as
+a new run), and when the workspace is archived or gone. Cancelled runs are left out on
+purpose: a cancel is a decision, and a step cancelled mid-effect is the case a restart already
+refuses to guess about. A continued run is no longer `unattended`, whoever started it:
+somebody is there now.
+
+A run can therefore fail more than once under one id. The phone's failure notice is keyed by the
+run and by the time it ended (`notify::workflow_failure`), not by the run alone, so a continued
+run that fails again is told about again, while the same failure asked about twice is still one
+notice.
+
+Two things it does not do. It does not bring back a session that has ended: a later step that
+addresses one skips or ends as it would have in the first place. And it does not pick the
+step: it is always the failed one and what was skipped behind it, never an earlier step that
+succeeded. Running an arbitrary step again is a rewind, and a file asks for that with a route.
+
 ## The command line
 
 ```
@@ -269,6 +299,7 @@ ys workflow validate <file>               # exit 0 or the errors, one per line, 
 ys workflow run <id> [--workspace <name>] [--input reviewer=claude --input focus="…"]
 ys workflow runs [--workspace <name>] [--run <id>]   # history, or one run step by step
 ys workflow cancel <run>
+ys workflow continue <run>                # a failed run, from the step that failed
 ```
 
 `run` refuses while the app is not running, then goes through `workflow::runs::queue`, the one

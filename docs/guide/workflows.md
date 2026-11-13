@@ -57,7 +57,8 @@ The center panel shows three things:
   back; they are gone when it quits.
 - **Runs.** This workflow's runs, newest first, with the workspace and when each was asked for.
   Open one for its steps, what each left or why it failed or was skipped, and the pull request it
-  is about. A run still going has **Cancel run**.
+  is about. A run still going has **Cancel run**. A failed one has **Continue from the failed step**:
+  see [Continuing a failed run](#continuing-a-failed-run).
 
 **Run…** opens a dialog. It asks for the workspace and for each of the workflow's inputs; an agent
 is picked from the same list as the composer's, with those not installed greyed out. If the
@@ -257,6 +258,7 @@ ys workflow approve 3f2a9c1e sign-off --code <code> --feedback "ship it"
 ys workflow reject 3f2a9c1e sign-off --code <code>
 ys workflow request-changes 3f2a9c1e sign-off --code <code> --feedback "split the migration"
 ys workflow cancel 3f2a9c1e       # stop it
+ys workflow continue 3f2a9c1e     # take a failed run up again from the step that failed
 ```
 
 What each step does while it runs:
@@ -292,6 +294,46 @@ What each step does while it runs:
 A step runs only when every step in its `needs` succeeded. When one fails, the steps that need it
 are skipped, and the run fails with that step's reason. A gate that fails also skips the steps
 that do not need it. See [A test that must pass](#a-test-that-must-pass).
+
+### Continuing a failed run
+
+A run that failed part of the way through does not have to start over. Open it in the
+workflow's **Runs** and press **Continue from the failed step**, or:
+
+```sh
+ys workflow continue 3f2a9c1e
+```
+
+It is the same run, with the same inputs and the workflow file as it was when the run was
+asked for, so an edit to the file since then does not change it. Every step that succeeded is
+kept as it was: what it left for later steps, its artifacts, and the agent sessions it started.
+The step that failed goes back to the start and runs again, and so do the steps that were
+skipped because of it. The run is _running_ again within a second.
+
+A step that runs again is a new attempt, and nothing of the earlier one stands:
+
+- A smoke test is queued again. If the earlier one never ended, which is what a `run_test`
+  timeout means, it is cancelled first.
+- An approval that was rejected, or that timed out, waits for you again with a new code.
+- A clarifying step waits again for the agent's summary. A question the agent had already
+  asked is no longer waiting in Yardsort: answer it in the agent's terminal, or tell the agent
+  to ask again.
+- A timeout counts from when the step starts again.
+- A step that failed with _Yardsort stopped while this step was running_ is carried out
+  again. Yardsort could not tell then whether the agent had started or the message had been
+  typed, and it still cannot: look at the workspace's tabs first, so an agent is not started
+  twice.
+
+Later steps still talk to the sessions the earlier steps started. An agent that has ended
+since is treated as it would have been during the run: a `send_to_session` to it is skipped,
+and a `wait_session` on it ends at once.
+
+Only a failed run can be continued, not a cancelled one or one that succeeded. It is refused,
+and nothing changes, while the same workflow is queued or running in that workspace, when the
+workspace is archived or gone, and from `ys` while Yardsort is closed. A step that reached
+its `max_attempts` keeps that count, so one more failure there stops the run again. A run a
+schedule started is treated as yours once you continue it: a smoke test that needs your
+approval waits for you, where it failed at once before.
 
 ### A test that must pass
 

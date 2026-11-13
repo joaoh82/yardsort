@@ -2761,6 +2761,69 @@ fn a_run_is_queued_followed_and_cancelled_while_the_app_holds_its_lock() {
 }
 
 #[test]
+fn a_failed_run_is_continued_from_ys_and_any_other_run_is_refused() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let json = {
+        // This test stands in for the running app. Nothing drives the run, so it stays queued.
+        let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+            .unwrap()
+            .expect("nobody else holds it");
+        fx.ys(&["workflow", "run", "ping", "--workspace", name, "--json"])
+            .ok()
+    };
+    let queued: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let run = queued["run"].as_str().unwrap().to_owned();
+    let short = &run[..8];
+
+    let early = fx.ys(&["workflow", "continue", short]).failed();
+    assert!(early.contains("Yardsort is not running"), "{early}");
+
+    let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .expect("nobody else holds it");
+    let queued_still = fx.ys(&["workflow", "continue", short]).failed();
+    assert!(
+        queued_still.contains("is queued. Only a failed run can be continued."),
+        "{queued_still}"
+    );
+
+    // What the app does when the run's one step fails.
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    assert!(store.start_workflow_run(&run, None).unwrap());
+    assert!(store
+        .move_workflow_step(
+            &run,
+            "tell",
+            &[yardsort_core::store::StepStatus::Pending],
+            yardsort_core::store::StepStatus::Failed,
+            None,
+            Some("no way"),
+            None,
+            false,
+        )
+        .unwrap());
+    assert!(store
+        .finish_workflow_run(&run, "failed", Some("Step `tell` failed: no way"))
+        .unwrap());
+
+    let continued = fx.ys(&["workflow", "continue", short]).ok();
+    assert!(
+        continued.contains(&format!("Continuing run {short} from `tell`.")),
+        "{continued}"
+    );
+    let shown: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workflow", "runs", "--run", short, "--json"]).ok()).unwrap();
+    assert_eq!(shown["status"], "running");
+    assert_eq!(shown["steps"][0]["status"], "pending");
+
+    let twice = fx.ys(&["workflow", "continue", short]).failed();
+    assert!(twice.contains("is running"), "{twice}");
+}
+
+#[test]
 fn a_run_shows_the_artifacts_it_handed_on() {
     let fx = Fixture::new();
     write_workflow(&fx, "ping.yaml", PING);

@@ -889,6 +889,20 @@ pub async fn workflow_cancel(app: AppHandle, run_id: String) -> IpcResult<bool> 
     Ok(cancelled)
 }
 
+/// Take a failed run up again from the step that failed. The driver starts that step on its
+/// next tick, and the steps that had succeeded are kept.
+#[tauri::command]
+#[specta::specta]
+pub async fn workflow_continue(app: AppHandle, run_id: String) -> IpcResult<()> {
+    blocking(app.clone(), move |state| {
+        runs::continue_failed(&state.store, &run_id)?;
+        Ok(())
+    })
+    .await?;
+    changed(&app);
+    Ok(())
+}
+
 /// What the app answers when a run is queued: the agents set up here and found on `PATH`, and
 /// the pull request from `gh`.
 pub(crate) struct AppLook<'a>(pub(crate) &'a AppState);

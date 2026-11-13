@@ -332,14 +332,17 @@ pub fn review_attention(slug: &str, number: u64, reason: &str) -> Option<NoticeD
     )
 }
 
-pub fn workflow_failure(run_id: &str, status: &str) -> Option<NoticeDraft> {
+/// A run that ended failed. `ended_at` is when, as the run's row has it: a run continued after
+/// a failure keeps its id, and one that fails again is a new failure to be told about, not a
+/// retry of the first notice. The same failure asked about twice still has one key.
+pub fn workflow_failure(run_id: &str, status: &str, ended_at: i64) -> Option<NoticeDraft> {
     if status != "failed" {
         return None;
     }
     draft(
         NoticeCategory::Failure,
         "failed",
-        &format!("workflow:{}", piece(run_id, 80)),
+        &format!("workflow:{}:{ended_at}", piece(run_id, 80)),
     )
 }
 
@@ -675,13 +678,27 @@ mod tests {
     }
 
     #[test]
+    fn a_run_that_fails_again_after_being_continued_is_a_new_notice() {
+        let store = Store::in_memory();
+        let first = workflow_failure("run-1", "failed", 100).unwrap();
+        let again = workflow_failure("run-1", "failed", 250).unwrap();
+        assert_ne!(first.event_key, again.event_key);
+        assert!(enqueue(&store, &first, 100).unwrap());
+        assert!(
+            !enqueue(&store, &first, 101).unwrap(),
+            "the same failure is still queued once"
+        );
+        assert!(enqueue(&store, &again, 250).unwrap());
+    }
+
+    #[test]
     fn each_category_has_a_stable_key_and_no_code() {
         let (code, _, _) = crate::workflow::code::issue();
         let drafts = [
             task_progress("example.widgets", 91, "2026-10-02t18-00-00z").unwrap(),
             task_complete("example.widgets", 91).unwrap(),
             review_attention("example.widgets", 41, "checks").unwrap(),
-            workflow_failure("run-1", "failed").unwrap(),
+            workflow_failure("run-1", "failed", 9).unwrap(),
             desktop_update("1.2.3").unwrap(),
             workflow_question("run-1", "ask", 10).unwrap(),
             workflow_approval("run-1", "approve", 11).unwrap(),
@@ -695,7 +712,7 @@ mod tests {
             NoticeCategory::Workflow,
             NoticeCategory::Workflow,
         ];
-        assert!(workflow_failure("run-1", "succeeded").is_none());
+        assert!(workflow_failure("run-1", "succeeded", 9).is_none());
         for (draft, category) in drafts.iter().zip(categories) {
             assert_eq!(draft.category, category);
             assert!(remote_proto::notify::valid_event_key(

@@ -10,6 +10,7 @@ const core = vi.hoisted(() => ({
   workflowCopy: vi.fn(),
   workflowRemove: vi.fn(),
   workflowRuns: vi.fn(),
+  workflowContinue: vi.fn(),
   workflowRunSteps: vi.fn(),
   workflowDecide: vi.fn(),
   workflowAnswer: vi.fn(),
@@ -406,6 +407,82 @@ describe("WorkflowView", () => {
     expect(within(runs).getByText("Scheduled · Nightly")).toBeInTheDocument();
     expect(within(runs).getByText("Triggered · Address reviews")).toBeInTheDocument();
     expect(core.workflowRunSteps).toHaveBeenCalledWith("run-1");
+  });
+
+  it("continues a failed run from the step that failed, and offers it for no other run", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    const run = {
+      id: "run-1",
+      workflowId: "demo",
+      workflowName: "Demo",
+      workspaceId: "w",
+      workspaceName: "fix-login",
+      status: "failed",
+      requestedBy: "cli",
+      error: "Step `verify` failed: The test run did not end within 30m.",
+      inputs: {},
+      pullRequest: null,
+      createdAt: Date.now(),
+      startedAt: null,
+      endedAt: null,
+    };
+    core.workflowRuns.mockResolvedValue([run]);
+    core.workflowRunSteps.mockResolvedValue([]);
+    // The window reloads the list too, and the workflow is still in it.
+    core.workflowList.mockResolvedValue([item("demo", { kind: "builtIn" })]);
+    core.workflowContinue.mockResolvedValue(undefined);
+    render(<WorkflowView workflowId="demo" />);
+    const runs = await screen.findByRole("region", { name: "Runs" });
+    const user = userEvent.setup();
+    await user.click(await within(runs).findByRole("button", { name: "Run in fix-login, failed" }));
+    expect(within(runs).queryByRole("button", { name: "Cancel run" })).not.toBeInTheDocument();
+
+    // The app answers with the run going again, and the window shows what it is told.
+    core.workflowRuns.mockResolvedValue([{ ...run, status: "running", error: null }]);
+    await user.click(within(runs).getByRole("button", { name: "Continue from the failed step" }));
+    expect(core.workflowContinue).toHaveBeenCalledWith("run-1");
+    expect(
+      await within(runs).findByRole("button", { name: "Run in fix-login, running" }),
+    ).toBeInTheDocument();
+    expect(
+      within(runs).queryByRole("button", { name: "Continue from the failed step" }),
+    ).not.toBeInTheDocument();
+    expect(within(runs).getByRole("button", { name: "Cancel run" })).toBeInTheDocument();
+  });
+
+  it("says why a failed run could not continue", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    core.workflowRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "demo",
+        workflowName: "Demo",
+        workspaceId: "w",
+        workspaceName: "fix-login",
+        status: "failed",
+        requestedBy: "cli",
+        error: "Step `tell` failed: no way",
+        inputs: {},
+        pullRequest: null,
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+      },
+    ]);
+    core.workflowRunSteps.mockResolvedValue([]);
+    // The window reloads the list too, and the workflow is still in it.
+    core.workflowList.mockResolvedValue([item("demo", { kind: "builtIn" })]);
+    core.workflowContinue.mockRejectedValue({
+      code: "workflow_already_running",
+      message:
+        "`demo` is already running in `fix-login` (run 3f2a9c1e). Wait for it, or cancel it.",
+    });
+    render(<WorkflowView workflowId="demo" />);
+    const runs = await screen.findByRole("region", { name: "Runs" });
+    const user = userEvent.setup();
+    await user.click(await within(runs).findByRole("button", { name: "Run in fix-login, failed" }));
+    await user.click(within(runs).getByRole("button", { name: "Continue from the failed step" }));
+    expect(await within(runs).findByRole("alert")).toHaveTextContent("already running in");
   });
 
   it("opens the page of the workflow a run started as, when that is its twin elsewhere", async () => {

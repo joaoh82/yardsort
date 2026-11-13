@@ -3371,3 +3371,252 @@ fn a_tracked_file_under_factory_survives_the_rewrite_clear() {
         "a tracked file under factory/ was deleted"
     );
 }
+
+/// A step that succeeds, a test that gates, and a step after it: what a failed run looks like
+/// when it is taken up again.
+const HELLO_THEN_GATE: &str = r#"id: gate
+name: Gate
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: hello
+    action: notify
+    title: Starting
+  - id: run
+    action: run_test
+    needs: [hello]
+    test: demo
+    gate: true
+    timeout: 30m
+  - id: tell
+    action: notify
+    needs: [run]
+    title: Tests passed
+"#;
+
+#[test]
+fn a_failed_run_continues_from_the_step_that_failed_and_keeps_the_steps_before_it() {
+    let (_dir, store, run, _, _) = queued_workflow(HELLO_THEN_GATE);
+    let hands = Told {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    let first_test = step_test_id(&store, &run, "run");
+    finish_smoke(&store, "failed", Some("wanted 200, got 500"));
+    tick(&store, &hands);
+    let failed = store.workflow_run(&run).unwrap().unwrap();
+    assert_eq!(failed.status, "failed");
+    assert!(failed.error.is_some());
+    assert_eq!(step(&store, &run, "run").status, "failed");
+    assert_eq!(step(&store, &run, "tell").status, "skipped");
+
+    let again = crate::workflow::runs::continue_failed(&store, &run).unwrap();
+    assert_eq!(again, ["run", "tell"]);
+    let going = store.workflow_run(&run).unwrap().unwrap();
+    assert_eq!(going.status, "running");
+    assert_eq!(going.error, None);
+    assert_eq!(going.ended_at, None);
+    assert_eq!(step(&store, &run, "hello").status, "succeeded");
+    let reset = step(&store, &run, "run");
+    assert_eq!(reset.status, "pending");
+    assert_eq!(reset.note, None);
+    assert_eq!(reset.outcome, None, "the failed verdict does not stand");
+
+    tick(&store, &hands);
+    let second_test = step_test_id(&store, &run, "run");
+    assert_ne!(
+        second_test, first_test,
+        "the test is run again, not read again"
+    );
+    finish_smoke(&store, "passed", None);
+    tick(&store, &hands);
+
+    assert_eq!(
+        store.workflow_run(&run).unwrap().unwrap().status,
+        "succeeded"
+    );
+    let titles: Vec<String> = hands
+        .sent
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(title, _)| title.clone())
+        .collect();
+    assert_eq!(
+        titles,
+        ["Starting", "Tests passed"],
+        "the step that had succeeded is not carried out a second time"
+    );
+    assert_eq!(step(&store, &run, "hello").attempts, 1);
+    assert_eq!(step(&store, &run, "run").attempts, 2);
+}
+
+#[test]
+fn continuing_after_a_test_that_never_ended_cancels_that_test_and_runs_a_new_one() {
+    let (_dir, store, run, _, _) = queued_workflow(HELLO_THEN_GATE);
+    let hands = Told {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    let stuck = step_test_id(&store, &run, "run");
+    // What the engine does once the step's timeout has passed with the test still going.
+    assert!(store
+        .move_workflow_step(
+            &run,
+            "run",
+            &[StepStatus::Waiting],
+            StepStatus::Failed,
+            None,
+            Some("The test run did not end within 30m."),
+            None,
+            false,
+        )
+        .unwrap());
+    tick(&store, &hands);
+    let failed = store.workflow_run(&run).unwrap().unwrap();
+    assert_eq!(failed.status, "failed");
+    assert_eq!(
+        failed.error.as_deref(),
+        Some("Step `run` failed: The test run did not end within 30m.")
+    );
+    assert_eq!(step(&store, &run, "tell").status, "skipped");
+
+    crate::workflow::runs::continue_failed(&store, &run).unwrap();
+    let old = store.test_run(&stuck).unwrap().unwrap();
+    assert_eq!(old.status, "cancelled");
+    assert_eq!(
+        old.error.as_deref(),
+        Some("The workflow is running this step again.")
+    );
+
+    tick(&store, &hands);
+    assert_ne!(step_test_id(&store, &run, "run"), stuck);
+    assert_eq!(step(&store, &run, "run").status, "waiting");
+    assert_eq!(step(&store, &run, "tell").status, "pending");
+}
+
+#[test]
+fn only_a_failed_run_continues_and_never_beside_another_run_of_the_same_workflow() {
+    let (dir, store, run, _, workspace) = queued_workflow(HELLO_THEN_GATE);
+    let hands = Told {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+
+    let refused = crate::workflow::runs::continue_failed(&store, &run).unwrap_err();
+    assert_eq!(refused.code, "workflow_run_not_failed");
+    assert!(
+        refused.message.contains("is running"),
+        "{}",
+        refused.message
+    );
+    assert_eq!(step(&store, &run, "run").status, "waiting");
+
+    let nothing = crate::workflow::runs::continue_failed(&store, "no-such-run").unwrap_err();
+    assert_eq!(nothing.code, "workflow_run_not_found");
+
+    finish_smoke(&store, "failed", None);
+    tick(&store, &hands);
+    assert_eq!(store.workflow_run(&run).unwrap().unwrap().status, "failed");
+    let other = queue(
+        &store,
+        dir.path(),
+        &Request {
+            workflow_id: "gate",
+            workspace_id: &workspace,
+            inputs: &BTreeMap::new(),
+            requested_by: "cli",
+            unattended: false,
+            origin_record: None,
+            depth: 0,
+            event: None,
+            tracked: None,
+        },
+        &crate::workflow::runs::Accepting::default(),
+    )
+    .unwrap();
+
+    let refused = crate::workflow::runs::continue_failed(&store, &run).unwrap_err();
+    assert_eq!(refused.code, "workflow_already_running");
+    assert!(
+        refused.message.contains(crate::memory::short_id(&other)),
+        "{}",
+        refused.message
+    );
+    assert_eq!(store.workflow_run(&run).unwrap().unwrap().status, "failed");
+    assert_eq!(
+        step(&store, &run, "run").status,
+        "failed",
+        "a refusal changes nothing"
+    );
+}
+
+#[test]
+fn a_rejected_approval_asks_again_when_the_run_continues() {
+    let (_dir, store, run, _worktree) = queue_folder(SIGN_OFF, "sign", &BTreeMap::new());
+    let hands = Filed {
+        sent: Mutex::new(Vec::new()),
+    };
+    tick(&store, &hands);
+    store
+        .record_workflow_approval(&run, "sign-off", "rejected", Some("not yet"), "ada", None)
+        .unwrap();
+    tick(&store, &hands);
+    assert_eq!(store.workflow_run(&run).unwrap().unwrap().status, "failed");
+
+    let again = crate::workflow::runs::continue_failed(&store, &run).unwrap();
+    assert_eq!(again, ["sign-off", "next"]);
+    tick(&store, &hands);
+    assert_eq!(
+        step(&store, &run, "sign-off").status,
+        "waiting",
+        "the earlier rejection is not applied to the new attempt"
+    );
+    assert_eq!(step(&store, &run, "brief").attempts, 1);
+
+    assert_eq!(
+        store
+            .record_workflow_approval(&run, "sign-off", "approved", None, "ada", None)
+            .unwrap(),
+        crate::store::ApprovalWrite::Recorded
+    );
+    tick(&store, &hands);
+    assert_eq!(
+        store.workflow_run(&run).unwrap().unwrap().status,
+        "succeeded"
+    );
+}
+
+#[test]
+fn a_continued_run_that_fails_again_tells_the_phone_again() {
+    let (_dir, store, run, _, _) = queued_workflow(HELLO_THEN_GATE);
+    let hands = Told {
+        sent: Mutex::new(Vec::new()),
+    };
+    let failures = |store: &Store| {
+        crate::notify::pending(store, now_ms())
+            .unwrap()
+            .into_iter()
+            .filter(|notice| notice.category == "failure")
+            .count()
+    };
+    tick(&store, &hands);
+    finish_smoke(&store, "failed", Some("wanted 200, got 500"));
+    tick(&store, &hands);
+    assert_eq!(store.workflow_run(&run).unwrap().unwrap().status, "failed");
+    assert_eq!(failures(&store), 1);
+
+    // The second failure ends at a later time than the first, as it does outside a test.
+    std::thread::sleep(Duration::from_millis(5));
+    crate::workflow::runs::continue_failed(&store, &run).unwrap();
+    tick(&store, &hands);
+    finish_smoke(&store, "failed", Some("wanted 200, got 500"));
+    tick(&store, &hands);
+    assert_eq!(store.workflow_run(&run).unwrap().unwrap().status, "failed");
+    assert_eq!(
+        failures(&store),
+        2,
+        "the same run failing a second time is not a retry of the first notice"
+    );
+}

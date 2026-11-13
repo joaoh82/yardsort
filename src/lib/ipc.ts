@@ -1039,6 +1039,8 @@ export const ipc = {
     trackedId: string | null = null,
   ) => unwrap(commands.workflowStart(workflowId, workspaceId, inputs, trackedId)),
   workflowCancel: (runId: string) => unwrap(commands.workflowCancel(runId)),
+  /** Take a failed run up again from the step that failed. Finished steps are kept. */
+  workflowContinue: (runId: string) => unwrap(commands.workflowContinue(runId)),
   workflowDecide: (
     runId: string,
     stepId: string,

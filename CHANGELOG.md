@@ -3,6 +3,14 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Continue a failed workflow run from the step that failed.** A run that failed part of the
+  way through no longer has to start over: **Continue from the failed step** on the run, or
+  `ys workflow continue <run>`, runs the failed step again and then the steps that were skipped
+  after it. The steps that had succeeded are kept, with what they left and the agents they
+  started. See [Continuing a failed run](docs/guide/workflows.md#continuing-a-failed-run).
+
 ## 0.31.0
 
 - **Answer a workflow's questions one at a time.** When an agent in a workflow asks several

@@ -74,6 +74,11 @@ pub enum Command {
         /// The run: its id, or the start of it.
         run: String,
     },
+    /// Take a failed run up again from the step that failed. Steps that succeeded are kept.
+    Continue {
+        /// The run: its id, or the start of it.
+        run: String,
+    },
     /// Approve a step that is waiting for you. The app applies it on its next tick.
     Approve {
         /// The run: its id, or the start of it.
@@ -219,6 +224,10 @@ pub fn run(data_dir: Option<PathBuf>, command: Command, out: &Output) -> Result<
         Command::Cancel { run } => {
             let ys = Yardsort::open(data_dir)?;
             cancel(&ys, &run, out)
+        }
+        Command::Continue { run } => {
+            let ys = Yardsort::open(data_dir)?;
+            continue_run(&ys, &run, out)
         }
         Command::Approve {
             run,
@@ -1154,6 +1163,37 @@ fn cancel(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
             memory::short_id(&run.id)
         );
     })
+}
+
+fn continue_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
+    let run = find_run(ys, wanted)?;
+    super::someone_carries_it_out(
+        ys,
+        "Yardsort is not running. Workflows run in the app: open it, then run this again. \
+         Nothing was changed.",
+    )?;
+    let steps = runs::continue_failed(&ys.store, &run.id)?;
+    #[derive(Serialize)]
+    struct Continuing<'a> {
+        run: &'a str,
+        steps: &'a [String],
+    }
+    out.emit(
+        &Continuing {
+            run: &run.id,
+            steps: &steps,
+        },
+        || {
+            let short = memory::short_id(&run.id);
+            match steps.first() {
+                Some(first) => sayln!(
+                    "Continuing run {short} from `{first}`. `ys workflow runs --run {short}` \
+                     follows it."
+                ),
+                None => sayln!("Continuing run {short}."),
+            }
+        },
+    )
 }
 
 /// A run by its id or the start of one, as `runs` prints it.

@@ -19,7 +19,10 @@ interface Props {
   onSelect: (runId: string | null) => void;
 }
 
-/** A workflow's runs, newest first; one open shows its steps, and an active one can be stopped. */
+/**
+ * A workflow's runs, newest first; one open shows its steps. An active one can be stopped, and a
+ * failed one continued from the step that failed.
+ */
 export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
   const runs = useWorkflowStore((s) => s.runs[workflowId]) ?? EMPTY;
   const steps = useWorkflowStore((s) => (selected ? s.steps[selected] : undefined));
@@ -41,6 +44,16 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
     setError(null);
     try {
       await ipc.workflowCancel(run.id);
+      await useWorkflowStore.getState().refresh();
+    } catch (failed) {
+      setError(errorMessage(failed));
+    }
+  }
+
+  async function carryOn(run: WorkflowRun) {
+    setError(null);
+    try {
+      await ipc.workflowContinue(run.id);
       await useWorkflowStore.getState().refresh();
     } catch (failed) {
       setError(errorMessage(failed));
@@ -207,6 +220,16 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                         onClick={() => void cancel(run)}
                       >
                         Cancel run
+                      </button>
+                    )}
+                    {run.status === "failed" && run.workspaceId && (
+                      <button
+                        type="button"
+                        title="Run the failed step again, then the steps after it. Steps that succeeded are kept."
+                        className="mt-2 rounded border border-line px-2 py-0.5 text-small text-ink-muted hover:border-accent hover:text-ink"
+                        onClick={() => void carryOn(run)}
+                      >
+                        Continue from the failed step
                       </button>
                     )}
                   </div>
