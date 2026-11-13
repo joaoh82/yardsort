@@ -85,7 +85,9 @@ A dot on **Runs** says the newest run failed (red) or is going (amber). **Schedu
   decision made on it, and each artifact it left, formatted when it is Markdown.
 
 **Run…** opens a dialog. It asks for the workspace and for each of the workflow's inputs; an agent
-is picked from the same list as the composer's, with those not installed greyed out. If the
+is picked from the same list as the composer's, with those not installed greyed out. The
+workspace is one that is already there, or **new workspace** under a project's name, which makes
+one for the run: see [In a new workspace](#in-a-new-workspace). If the
 workflow works with the pull request, the dialog looks it up and shows it, or says why there is
 none to use. It also says what the run would find nothing for: a prompt that uses
 `{{ workspace.task }}` in a workspace started without a first message, `{{ memory }}` in a
@@ -96,7 +98,9 @@ press **Run**, and appears at the top of the runs at once.
 ![The Run dialog: the workspace, the reviewer to use, what to focus on, and the pull request it found](../images/workflow-run.png)
 
 A workspace's menu has **Run workflow…**, which opens the same dialog for that workspace, and
-**Request code review…**, which opens it on the built-in review.
+**Request code review…**, which opens it on the built-in review. A project's menu has **Run
+workflow…** too: the dialog opens on a new workspace in that project, and still offers the
+workspaces that are there.
 
 **New workflow…** in the list starts a new workflow from a short example, with every part a file
 needs.
@@ -234,8 +238,8 @@ together.
 
 ## Running a workflow
 
-**Run…** on the workflow, or **Run workflow…** in a workspace's menu, asks the same questions as
-the command line and starts the run. From a terminal, with Yardsort open, because the app is what
+**Run…** on the workflow, or **Run workflow…** in a workspace's or a project's menu, asks the same
+questions as the command line and starts the run. From a terminal, with Yardsort open, because the app is what
 carries runs out in the background while you keep working:
 
 ```sh
@@ -270,6 +274,54 @@ workspace: asking again while it runs is refused, naming the run. With Yardsort 
 so and queues nothing. When the run would find nothing for a variable the file uses — the task
 of a workspace started without a first message, say — `ys` says so in a note after queuing, and
 the Run dialog shows it before; the run goes ahead either way.
+
+### In a new workspace
+
+A run does not need a workspace to be there first. Started from a project, it gets one of its
+own: a new branch and its worktree, made as the composer makes one, with the project's
+[setup](projects.md#project-automation) run in it. This is for a workflow that does a whole piece
+of work, such as **Software factory**, where the workspace is part of what the run makes.
+
+In the Run dialog, choose **new workspace** under the project's name, or open the dialog from
+**Run workflow…** in the project's menu. Two more fields appear:
+
+- **Name**: what to call the workspace. Left empty, it is named after the workflow's id. Either
+  way a number is added when the name is taken, so a second run of `software-factory` works in
+  `software-factory-2`.
+- **Start from**: the branch the new one is made from. It starts on the repository's default
+  branch.
+
+From a terminal, `--project` takes the place of `--workspace`, with `--name` and `--base` for the
+same two things:
+
+```sh
+ys workflow run software-factory --project app \
+  --input task="Add a logout button" --input agent=claude --input suite=login
+ys workflow run fix-tests --project app --name nightly-fix --base release --input fixer=claude
+```
+
+It prints the workspace it made, with its branch and folder, and then the run.
+
+Everything is checked before the workspace is made, so a run that is refused leaves no branch
+and no folder behind. Three things are different from a run in a workspace that was there:
+
+- A workflow that needs an open pull request when it starts is refused, because a branch made
+  now has none. **Request code review** is one. A workflow that waits for its pull request
+  starts, as it does anywhere.
+- `{{ workspace.task }}` is empty for the whole run, since the workspace was started with no
+  first message. The dialog and `ys` say so.
+- No agent is working there yet, so a step for `session: origin` is skipped, saying so.
+
+A `test` input offers the smoke tests of the project's own checkout, because the new workspace
+is not there to look in. A test that is not on the branch the workspace starts from fails its
+step when the run reaches it.
+
+If the project's setup command fails, the workspace is kept, as it is when the composer makes
+one, and no run is queued. The message says where the workspace is. A workflow about a pull
+request elsewhere is started from that pull request, never in a new workspace.
+[Schedules](schedules.md) and [triggers](triggers.md) still name a workspace that is there.
+
+### Following a run
 
 `ys workflow run` prints the run's id and returns at once. The app picks the run up within a
 second, and moves each step on as soon as it can: every second, and the moment an agent goes
@@ -787,6 +839,9 @@ The run starts from the task. It does not need an open pull request first: the s
 installed and logged in, because Yardsort asks it when you press **Run** and looks again while
 the run is going. The smoke test you name has to be one of the workspace's.
 
+With `--project app` in place of `--workspace`, or **new workspace** in the Run dialog, the run
+makes the workspace it works in: see [In a new workspace](#in-a-new-workspace).
+
 ```sh
 ys workflow run software-factory --workspace fix-login \
   --input task="Add a logout button" \
@@ -940,7 +995,7 @@ nothing else: no filters, no expressions. Anything else is reported where it is 
 | Variable                                                                                                                                                             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `project.name`, `project.root`                                                                                                                                       | The project, and the folder of its own checkout.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task`                                                                    | The workspace the run is about. `task` is the first message it was started with. In the project's own checkout, `branch` is whatever git has checked out, and `base_branch` the repository's default branch, unless that is the branch itself.                                                                                                                                                                                                                                                                                                                                                           |
+| `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task`                                                                    | The workspace the run is about. `task` is the first message it was started with; a workspace [made for the run](#in-a-new-workspace) has none. In the project's own checkout, `branch` is whatever git has checked out, and `base_branch` the repository's default branch, unless that is the branch itself.                                                                                                                                                                                                                                                                                             |
 | `pr.number`, `pr.url`, `pr.title`, `pr.repo`, `pr.clone`                                                                                                             | The open pull request for the workspace's branch. Found when the run is queued when a step names it before any `wait_pr_activity`; that run needs one open. When every such step comes after a `wait_pr_activity`, the run can start without one and looks again, and a step that names it fails once that lookup finds there is still none. `wait_pr_activity` keeps waiting instead. For a `tracked_pull_request` workflow, the one it is about, read by its link, with `pr.repo` its repository (`owner/name`) and `pr.clone` the project's nested clone of it; both are empty for a workspace's own. |
 | `inputs.<id>`                                                                                                                                                        | What was given for that input.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `steps.<id>.<field>`                                                                                                                                                 | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`, `decision` and `feedback` from `approve`, `title` and `body` from `report`. The step must be among this step's `needs`.                                                                                                                                                                                                                                                                            |

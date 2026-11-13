@@ -591,8 +591,20 @@ export const commands = {
 	workflowRunSteps: (runId: string) => typedError<WorkflowStepRun[], IpcError>(__TAURI_INVOKE("workflow_run_steps", { runId })),
 	/**  What a run of `workflowId` in `workspaceId` would find, for the Run dialog to show. */
 	workflowPreview: (workflowId: string, workspaceId: string, trackedId: string | null) => typedError<RunPreview_Serialize, IpcError>(__TAURI_INVOKE("workflow_preview", { workflowId, workspaceId, trackedId })),
+	/**
+	 *  What the Run dialog shows before starting a run in a workspace that is not made yet: one
+	 *  asked for from a project. The forge is not asked, since a branch made now has no pull
+	 *  request; a workflow that needs one open says so here, and Run stays off.
+	 */
+	workflowPreviewNew: (workflowId: string, projectId: string) => typedError<RunPreview_Serialize, IpcError>(__TAURI_INVOKE("workflow_preview_new", { workflowId, projectId })),
 	/**  Start a run. The same checks as `ys workflow run`; the driver picks it up at once. */
 	workflowStart: (workflowId: string, workspaceId: string, inputs: { [key in string]: string }, trackedId: string | null) => typedError<string, IpcError>(__TAURI_INVOKE("workflow_start", { workflowId, workspaceId, inputs, trackedId })),
+	/**
+	 *  Start a run from a project: make a workspace for it — a new branch from `base_branch`, or
+	 *  from the default branch, named `name`, or after the workflow — and queue the run there.
+	 *  Every check `workflow_start` makes is made before anything is created.
+	 */
+	workflowStartNew: (workflowId: string, projectId: string, baseBranch: string | null, name: string | null, inputs: { [key in string]: string }) => typedError<StartedInNewWorkspace, IpcError>(__TAURI_INVOKE("workflow_start_new", { workflowId, projectId, baseBranch, name, inputs })),
 	/**  Cancel a run. Agents it started keep running. */
 	workflowCancel: (runId: string) => typedError<boolean, IpcError>(__TAURI_INVOKE("workflow_cancel", { runId })),
 	/**
@@ -3318,6 +3330,12 @@ export type SpawnRequest = {
 	/**  Run a harness instead of `program`. Requires `workspace_id`. */
 	harness: HarnessRequest | null,
 	size: TermSize,
+};
+
+/**  A run started from a project: the run, and the workspace made for it. */
+export type StartedInNewWorkspace = {
+	run: string,
+	workspace: Workspace,
 };
 
 /**  One node of the graph. */

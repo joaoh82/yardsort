@@ -49,6 +49,8 @@ const core = vi.hoisted(() => ({
   onSessionStarted: vi.fn(),
   workflowList: vi.fn(),
   workflowPreview: vi.fn(),
+  workflowPreviewNew: vi.fn(),
+  projectBranches: vi.fn(),
   harnessesList: vi.fn(),
   workspaceFork: vi.fn(),
   testList: vi.fn(),
@@ -698,6 +700,24 @@ describe("Sidebar", () => {
     await user.click(screen.getByRole("menuitem", { name: "Request code review…" }));
     const dialog = await screen.findByRole("dialog", { name: /Run/ });
     expect(within(dialog).queryByRole("combobox", { name: "Workspace" })).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offers Run workflow… on a project, in the Run dialog set to a new workspace there", async () => {
+    core.workflowList.mockResolvedValue([]);
+    core.harnessesList.mockResolvedValue([]);
+    core.projectBranches.mockResolvedValue({ branches: ["main"], default: "main", checkedOut: [] });
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More actions for alpha" }));
+    await user.click(screen.getByRole("menuitem", { name: "Run workflow…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Run a workflow" });
+    // A new workspace in this project is what it opens on; the ones already there are offered.
+    const where = within(dialog).getByRole("combobox", { name: "Workspace" });
+    expect(where).toHaveValue("new:p-alpha");
+    expect(within(where).getByRole("option", { name: "alpha / feature" })).toBeInTheDocument();
+    expect(await within(dialog).findByRole("combobox", { name: "Start from" })).toHaveValue("main");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
   });

@@ -6,7 +6,11 @@ import type { RunPreview, WorkflowItem } from "@/lib/ipc";
 const core = vi.hoisted(() => ({
   workflowList: vi.fn(),
   workflowPreview: vi.fn(),
+  workflowPreviewNew: vi.fn(),
   workflowStart: vi.fn(),
+  workflowStartNew: vi.fn(),
+  projectBranches: vi.fn(),
+  projectsList: vi.fn(),
   harnessList: vi.fn(),
   testList: vi.fn(),
 }));
@@ -440,6 +444,196 @@ describe("RunWorkflowDialog", () => {
     await screen.findByText("#7 Fix the login");
     await user.click(screen.getByRole("button", { name: "Run" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("already running in `fix-login`");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("RunWorkflowDialog from a project", () => {
+  const app = { ...project("app"), workspaces: [...project("app").workspaces, fixLogin] };
+  const quiet: RunPreview = {
+    needsPullRequest: false,
+    pullRequest: null,
+    pullRequestProblem: null,
+    pullRequestNote: null,
+    needsOrigin: false,
+    empty: [],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    core.testList.mockResolvedValue([]);
+    core.projectsList.mockResolvedValue([app]);
+    core.projectBranches.mockResolvedValue({
+      branches: ["main", "release"],
+      default: "main",
+      checkedOut: ["main"],
+    });
+    useWorkflowStore.setState({ items: [review], loaded: true });
+    useHarnessStore.setState({ loaded: true, harnesses: [harness("claude"), harness("codex")] });
+    useProjectsStore.setState({ projects: [app, project("docs", { missing: true })] });
+  });
+
+  it("makes a workspace for the run, named and based as asked, and starts it there", async () => {
+    core.workflowPreviewNew.mockResolvedValue(quiet);
+    core.workflowStartNew.mockResolvedValue({
+      run: "run-9",
+      workspace: worktree("app", "nightly"),
+    });
+    const onStarted = vi.fn();
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <RunWorkflowDialog
+        workflowId="code-review"
+        project={app}
+        onClose={onClose}
+        onStarted={onStarted}
+      />,
+    );
+    // It opens on a new workspace in the project, and still offers the ones that are there.
+    const where = screen.getByRole("combobox", { name: "Workspace" });
+    expect(where).toHaveValue("new:p-app");
+    expect(screen.getByRole("option", { name: "app / new workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "app / fix-login" })).toBeInTheDocument();
+    // A project whose folder is gone can have no workspace made in it.
+    expect(screen.queryByRole("option", { name: "docs / new workspace" })).toBeNull();
+    expect(screen.getByText(/The run gets a workspace of its own/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(core.workflowPreviewNew).toHaveBeenCalledWith("code-review", "p-app"),
+    );
+    expect(core.workflowPreview).not.toHaveBeenCalled();
+
+    const from = await screen.findByRole("combobox", { name: "Start from" });
+    await waitFor(() => expect(from).toHaveValue("main"));
+    await user.selectOptions(from, "release");
+    await user.type(screen.getByRole("textbox", { name: "New workspace name" }), " Nightly ");
+    await user.click(screen.getByRole("button", { name: "Run" }));
+
+    expect(core.workflowStartNew).toHaveBeenCalledWith(
+      "code-review",
+      "p-app",
+      { reviewer: "claude" },
+      "release",
+      "Nightly",
+    );
+    expect(core.workflowStart).not.toHaveBeenCalled();
+    await waitFor(() => expect(onStarted).toHaveBeenCalledWith("run-9", "code-review"));
+    expect(onClose).toHaveBeenCalled();
+    // The workspace was made by the core: the sidebar reads the projects again.
+    expect(core.projectsList).toHaveBeenCalled();
+  });
+
+  it("leaves the name and the branch to the core when neither is touched", async () => {
+    core.workflowPreviewNew.mockResolvedValue(quiet);
+    core.workflowStartNew.mockResolvedValue({ run: "run-9", workspace: worktree("app", "x") });
+    core.projectBranches.mockRejectedValue({ code: "git", message: "git is not there" });
+    const user = userEvent.setup();
+    render(<RunWorkflowDialog workflowId="code-review" project={app} onClose={() => {}} />);
+    const run = screen.getByRole("button", { name: "Run" });
+    await waitFor(() => expect(run).toBeEnabled());
+    expect(screen.getByRole("combobox", { name: "Start from" })).toBeDisabled();
+    await user.click(run);
+    expect(core.workflowStartNew).toHaveBeenCalledWith(
+      "code-review",
+      "p-app",
+      { reviewer: "claude" },
+      null,
+      null,
+    );
+  });
+
+  it("will not start a workflow that needs a pull request open, and says a new workspace has none", async () => {
+    core.workflowPreviewNew.mockResolvedValue({
+      ...quiet,
+      needsPullRequest: true,
+      needsOrigin: true,
+      pullRequestProblem:
+        "A new workspace has no pull request. Run it in a workspace whose branch has one open.",
+    });
+    core.workflowPreview.mockResolvedValue(withPr);
+    const user = userEvent.setup();
+    render(<RunWorkflowDialog workflowId="code-review" project={app} onClose={() => {}} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "A new workspace has no pull request",
+    );
+    expect(screen.getByText(/has no agent of its own yet/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+
+    // One that is there, with a pull request, runs it: the new-workspace fields go away.
+    await user.selectOptions(screen.getByRole("combobox", { name: "Workspace" }), fixLogin.id);
+    expect(await screen.findByText("#7 Fix the login")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "New workspace name" })).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run" })).toBeEnabled());
+  });
+
+  it("offers a `test` input the smoke tests of the project's own checkout", async () => {
+    const workflow = review.workflow!;
+    useWorkflowStore.setState({
+      items: [
+        {
+          ...review,
+          workflow: {
+            ...workflow,
+            inputs: [
+              {
+                id: "suite",
+                kind: "test",
+                label: "Smoke test to run",
+                required: true,
+                default: null,
+                options: [],
+              },
+            ],
+          },
+        },
+      ],
+      loaded: true,
+    });
+    core.workflowPreviewNew.mockResolvedValue(quiet);
+    core.workflowStartNew.mockResolvedValue({ run: "run-9", workspace: worktree("app", "x") });
+    core.testList.mockResolvedValue([
+      {
+        id: "login",
+        name: "Log in",
+        description: null,
+        path: "/code/app/.yardsort/tests/login.yaml",
+        text: "",
+        problems: [],
+        runnable: true,
+        usesBrowser: false,
+        browserMissing: false,
+        inputs: [],
+      },
+    ]);
+    const user = userEvent.setup();
+    render(<RunWorkflowDialog workflowId="code-review" project={app} onClose={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Smoke test to run" })).toHaveValue("login"),
+    );
+    expect(core.testList).toHaveBeenCalledWith("w-app");
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    expect(core.workflowStartNew).toHaveBeenCalledWith(
+      "code-review",
+      "p-app",
+      { suite: "login" },
+      "main",
+      null,
+    );
+  });
+
+  it("shows what the core refused, and stays open", async () => {
+    core.workflowPreviewNew.mockResolvedValue(quiet);
+    core.workflowStartNew.mockRejectedValue({
+      code: "workspace_setup_failed",
+      message: "Workspace kept at /worktrees/app/code-review. Preparation failed: exit 1",
+    });
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<RunWorkflowDialog workflowId="code-review" project={app} onClose={onClose} />);
+    const run = screen.getByRole("button", { name: "Run" });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Workspace kept at");
     expect(onClose).not.toHaveBeenCalled();
   });
 });

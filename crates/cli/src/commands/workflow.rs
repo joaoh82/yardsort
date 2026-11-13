@@ -47,12 +47,25 @@ pub enum Command {
     },
     /// Run a workflow in a workspace. Yardsort must be open: the app carries runs out. Prints
     /// the run's id and returns at once; `ys workflow runs --run <id>` follows it.
+    ///
+    /// With `--project` the run gets a workspace of its own: a new branch and worktree in that
+    /// project, made once everything else has been checked.
     Run {
         /// The workflow, from `ys workflow list`.
         id: String,
         /// Which workspace, by name or id. Default: the one this is run in.
-        #[arg(long, value_name = "WORKSPACE")]
+        #[arg(long, value_name = "WORKSPACE", conflicts_with = "project")]
         workspace: Option<String>,
+        /// Make a new workspace for the run in this project, by name or id.
+        #[arg(long, value_name = "PROJECT")]
+        project: Option<String>,
+        /// With --project: the branch the new workspace starts from. Default: the repository's
+        /// default branch.
+        #[arg(long, value_name = "BRANCH", requires = "project")]
+        base: Option<String>,
+        /// With --project: what to call the new workspace. Default: the workflow's id.
+        #[arg(long, value_name = "NAME", requires = "project")]
+        name: Option<String>,
         /// An answer to one of the workflow's inputs. Repeat for each.
         #[arg(long = "input", value_name = "ID=VALUE")]
         inputs: Vec<String>,
@@ -205,10 +218,21 @@ pub fn run(data_dir: Option<PathBuf>, command: Command, out: &Output) -> Result<
         Command::Run {
             id,
             workspace,
+            project,
+            base,
+            name,
             inputs,
         } => {
             let ys = Yardsort::open(data_dir)?;
-            start_run(&ys, &id, workspace.as_deref(), &inputs, out)
+            let place = match &project {
+                Some(project) => RunIn::New {
+                    project,
+                    base: base.as_deref(),
+                    name: name.as_deref(),
+                },
+                None => RunIn::Workspace(workspace.as_deref()),
+            };
+            start_run(&ys, &id, place, &inputs, out)
         }
         Command::Runs {
             workspace,
@@ -376,16 +400,48 @@ fn show(data_dir: &Path, id: &str, out: &Output) -> Result<(), Failure> {
     })
 }
 
+/// Where `ys workflow run` is asked to run.
+enum RunIn<'a> {
+    /// A workspace by name or id, or the one this is run in.
+    Workspace(Option<&'a str>),
+    /// A workspace made for the run, in a project.
+    New {
+        project: &'a str,
+        base: Option<&'a str>,
+        name: Option<&'a str>,
+    },
+}
+
 fn start_run(
     ys: &Yardsort,
     id: &str,
-    workspace: Option<&str>,
+    place: RunIn<'_>,
     given: &[String],
     out: &Output,
 ) -> Result<(), Failure> {
-    let workspace = match workspace {
-        Some(wanted) => super::workspace::find_workspace(ys, wanted)?,
-        None => here(ys)?,
+    // Found before anything else, so a name that is not there is the first thing said.
+    enum Found<'a> {
+        Workspace(WorkspaceRow),
+        New {
+            project: yardsort_core::store::ProjectRow,
+            base: Option<&'a str>,
+            name: Option<&'a str>,
+        },
+    }
+    let found = match place {
+        RunIn::Workspace(Some(wanted)) => {
+            Found::Workspace(super::workspace::find_workspace(ys, wanted)?)
+        }
+        RunIn::Workspace(None) => Found::Workspace(here(ys)?),
+        RunIn::New {
+            project,
+            base,
+            name,
+        } => Found::New {
+            project: ys.project(project)?,
+            base,
+            name,
+        },
     };
     let mut inputs = BTreeMap::new();
     for pair in given {
@@ -401,33 +457,73 @@ fn start_run(
         "Yardsort is not running. Workflows run in the app: open it, then run this again. \
              Nothing was queued.",
     )?;
-    let run_id = runs::queue(
-        &ys.store,
-        &ys.data_dir,
-        &runs::Request {
-            workflow_id: id,
-            workspace_id: &workspace.id,
-            inputs: &inputs,
-            requested_by: "cli",
-            unattended: false,
-            origin_record: None,
-            depth: 0,
-            event: None,
-            tracked: None,
-        },
-        &Looking(ys),
-    )?;
-
-    // What the run will find nothing for: said, not refused.
-    let empty = match (
-        workflow::find(&ys.data_dir, id).and_then(|e| e.workflow),
-        runs::Place::load(&ys.store, &workspace.id, &ys.git()?)?,
-    ) {
-        (Some(found), Some(place)) => {
-            let shared = ys.store.memory_shared(&workspace.project_id)?;
-            runs::empty_variables(&found, &place, shared)
+    let request = |workspace_id| runs::Request {
+        workflow_id: id,
+        workspace_id,
+        inputs: &inputs,
+        requested_by: "cli",
+        unattended: false,
+        origin_record: None,
+        depth: 0,
+        event: None,
+        tracked: None,
+    };
+    let known = workflow::find(&ys.data_dir, id).and_then(|e| e.workflow);
+    // The run, where it is, and what it will find nothing for: said, not refused.
+    let (run_id, workspace, created, empty) = match found {
+        Found::New {
+            project,
+            base,
+            name,
+        } => {
+            let git = ys.git()?;
+            let worktree_root = ys.worktree_root()?;
+            let (run_id, workspace) = runs::queue_in_new_workspace(
+                &ys.store,
+                &ys.data_dir,
+                &request(""),
+                &Looking(ys),
+                &yardsort_core::workspaces::Workspaces {
+                    env: ys.env(),
+                    store: &ys.store,
+                    git: &git,
+                    worktree_root: &worktree_root,
+                    settings: &ys.settings.workspaces,
+                },
+                &runs::NewWorkspace {
+                    project_id: &project.id,
+                    base,
+                    name,
+                },
+            )?;
+            let empty = match &known {
+                Some(found) => {
+                    let shared = ys.store.memory_shared(&project.id)?;
+                    runs::empty_in_new_workspace(found, &project, shared)
+                }
+                None => Vec::new(),
+            };
+            (run_id, workspace, true, empty)
         }
-        _ => Vec::new(),
+        Found::Workspace(workspace) => {
+            let run_id = runs::queue(
+                &ys.store,
+                &ys.data_dir,
+                &request(&workspace.id),
+                &Looking(ys),
+            )?;
+            let empty = match (
+                &known,
+                runs::Place::load(&ys.store, &workspace.id, &ys.git()?)?,
+            ) {
+                (Some(found), Some(place)) => {
+                    let shared = ys.store.memory_shared(&workspace.project_id)?;
+                    runs::empty_variables(found, &place, shared)
+                }
+                _ => Vec::new(),
+            };
+            (run_id, workspace, false, empty)
+        }
     };
 
     #[derive(Serialize)]
@@ -436,6 +532,12 @@ fn start_run(
         run: &'a str,
         workflow: &'a str,
         workspace: &'a str,
+        /// The workspace was made for this run: its branch and folder are new.
+        created: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        branch: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        path: Option<&'a str>,
         /// Variables the run will render as nothing, and why.
         empty: &'a [String],
     }
@@ -443,10 +545,20 @@ fn start_run(
         run: &run_id,
         workflow: id,
         workspace: &workspace.name,
+        created,
+        branch: workspace.branch.as_deref().filter(|_| created),
+        path: created.then_some(workspace.path.as_str()),
         empty: &empty,
     };
     out.emit(&queued, || {
         let short = memory::short_id(&run_id);
+        if created {
+            sayln!("created  {}", workspace.name);
+            if let Some(branch) = &workspace.branch {
+                sayln!("  branch {branch}");
+            }
+            sayln!("  path   {}", workspace.path);
+        }
         sayln!("Queued `{id}` in {} as run {short}.", workspace.name);
         for line in &empty {
             sayln!("Note: {line}");

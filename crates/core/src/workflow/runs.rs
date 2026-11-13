@@ -8,6 +8,9 @@
 //! still needs an open pull request then. One that only names the pull request after that wait
 //! can start without one: the run looks again. `gh` not answering is a refusal either way. A
 //! workflow about a pull request elsewhere still needs that pull request.
+//!
+//! [`queue_in_new_workspace`] is the same door for a run asked for from a project: it makes the
+//! workspace, once everything else has been checked, and queues the run there.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -89,6 +92,11 @@ pub struct Facts {
     /// event started.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub event: BTreeMap<String, String>,
+    /// The workspace was made for this run ([`queue_in_new_workspace`]), so it was started
+    /// with no first message: `{{ workspace.task }}` stays empty for the whole run, where it
+    /// would otherwise become the prompt of the run's own first agent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub new_workspace: bool,
 }
 
 fn is_zero(depth: &i64) -> bool {
@@ -191,21 +199,8 @@ pub fn queue(
     request: &Request<'_>,
     look: &dyn Look,
 ) -> IpcResult<String> {
-    let entry = find(data_dir, request.workflow_id).ok_or_else(|| {
-        IpcError::new(
-            "workflow_not_found",
-            format!("There is no workflow `{}`.", request.workflow_id),
-        )
-    })?;
-    let Some(workflow) = entry.workflow.as_ref().filter(|_| entry.runnable()) else {
-        return Err(IpcError::new(
-            "workflow_invalid",
-            format!(
-                "`{}` has problems and cannot run. `ys workflow show {}` lists them.",
-                entry.id, entry.id
-            ),
-        ));
-    };
+    let entry = runnable(data_dir, request.workflow_id)?;
+    let workflow = entry.workflow.as_ref().expect("runnable has a workflow");
     let workspace = store
         .workspace(request.workspace_id)?
         .filter(|w| !w.forgotten)
@@ -219,17 +214,7 @@ pub fn queue(
             ),
         ));
     }
-    let harness = |wanted: &str| look.harness(wanted);
-    let inputs = check_inputs(workflow, request.inputs, &harness)
-        .map_err(|why| IpcError::new("workflow_inputs", why))?;
-    for step in &workflow.steps {
-        if let Action::StartSession { harness: named, .. } = &step.action {
-            if !named.contains("{{") {
-                look.harness(named)
-                    .map_err(|why| IpcError::new("harness_not_found", why))?;
-            }
-        }
-    }
+    let inputs = answered(workflow, request, look)?;
     // Last, because it asks the forge over the network.
     let mut facts = Facts {
         unattended: request.unattended,
@@ -246,16 +231,7 @@ pub fn queue(
             }
             facts.pr = Some(tracked.clone());
         }
-        (true, None) => {
-            return Err(IpcError::new(
-                "pull_request_missing",
-                format!(
-                    "`{}` is about a pull request a workspace tracks in another repository. Start \
-                     it from that pull request, in the Pull requests view.",
-                    workflow.id
-                ),
-            ))
-        }
+        (true, None) => return Err(started_without_its_pull_request(workflow)),
         (false, Some(_)) => {
             return Err(IpcError::new(
                 "workflow_not_for_tracked",
@@ -293,9 +269,195 @@ pub fn queue(
             ));
         }
     }
+    write(
+        store, &entry, workflow, &workspace, &inputs, &facts, request,
+    )
+}
 
+/// A workspace to make for a run: a new branch and its worktree, in a project.
+#[derive(Debug, Clone, Copy)]
+pub struct NewWorkspace<'a> {
+    pub project_id: &'a str,
+    /// The branch to start from. `None` is the repository's default branch.
+    pub base: Option<&'a str>,
+    /// What to call it. `None` names it after the workflow. Either way a number is added when
+    /// the name is taken.
+    pub name: Option<&'a str>,
+}
+
+/// Queue a run in a workspace made for it, and return the run's id and the workspace.
+///
+/// For a run asked for from a project, with no workspace picked. `request.workspace_id` is
+/// not read. Everything [`queue`] checks is checked first, so a refusal makes nothing: no
+/// branch, no worktree, no row. A workflow that needs an open pull request when it is queued
+/// is refused, since a branch made now has none; one that waits for its pull request starts
+/// without it, as it does anywhere. The forge is not asked.
+///
+/// The workspace is made as the composer makes one, and the project's setup runs in it. When
+/// that fails the workspace is kept, as it is for the composer, and no run is queued.
+pub fn queue_in_new_workspace(
+    store: &Store,
+    data_dir: &Path,
+    request: &Request<'_>,
+    look: &dyn Look,
+    workspaces: &crate::workspaces::Workspaces<'_>,
+    new: &NewWorkspace<'_>,
+) -> IpcResult<(String, WorkspaceRow)> {
+    let entry = runnable(data_dir, request.workflow_id)?;
+    let workflow = entry.workflow.as_ref().expect("runnable has a workflow");
+    if workflow.trigger.context == super::RunContext::TrackedPullRequest
+        || request.tracked.is_some()
+    {
+        return Err(started_without_its_pull_request(workflow));
+    }
+    let inputs = answered(workflow, request, look)?;
+    if let Some(problem) = new_workspace_pull_request(workflow).0 {
+        return Err(IpcError::new(
+            "pull_request_missing",
+            format!(
+                "`{}` works with the workspace's pull request. {problem}",
+                workflow.id
+            ),
+        ));
+    }
+    let name = match new.name.map(str::trim).filter(|name| !name.is_empty()) {
+        Some(given) => crate::workspaces::naming::slugify_name(given).ok_or_else(|| {
+            IpcError::new(
+                "invalid_name",
+                format!("`{given}` has nothing a branch can be named with. Use letters or digits."),
+            )
+        })?,
+        None => crate::workspaces::naming::slugify_name(&workflow.id)
+            .unwrap_or_else(|| workflow.id.clone()),
+    };
+    let workspace = workspaces.create_named(new.project_id, new.base, &name)?;
+    let facts = Facts {
+        unattended: request.unattended,
+        origin_record: request.origin_record.map(str::to_owned),
+        depth: request.depth,
+        event: request.event.cloned().unwrap_or_default(),
+        new_workspace: true,
+        ..Facts::default()
+    };
+    match write(
+        store, &entry, workflow, &workspace, &inputs, &facts, request,
+    ) {
+        Ok(id) => Ok((id, workspace)),
+        // Never silently: what was made is still there, and the person is told where.
+        Err(error) => Err(IpcError::new(
+            &error.code,
+            format!(
+                "Workspace kept at {}. The run could not be queued: {}",
+                workspace.path, error.message
+            ),
+        )),
+    }
+}
+
+/// What the Run dialog shows about the pull request of a workspace that is not made yet: the
+/// problem that blocks Run when a step names `{{ pr.* }}` before any wait for it, or a note
+/// when the run can open one later. Neither when the workflow does not use a pull request.
+pub fn new_workspace_pull_request(workflow: &Workflow) -> (Option<String>, Option<String>) {
+    if !needs_pull_request(workflow) {
+        (None, None)
+    } else if defers_pull_request(workflow) {
+        (None, Some("Will use the PR the run opens.".to_owned()))
+    } else {
+        (
+            Some(
+                "A new workspace has no pull request. Run it in a workspace whose branch has one \
+                 open."
+                    .to_owned(),
+            ),
+            None,
+        )
+    }
+}
+
+/// What a run of `workflow` in a workspace made for it would render as nothing, and why. As
+/// [`empty_variables`], for a workspace that is not there to ask.
+pub fn empty_in_new_workspace(
+    workflow: &Workflow,
+    project: &ProjectRow,
+    memory_shared: bool,
+) -> Vec<String> {
+    let used = variables(workflow);
+    let mut empty = event_variables(&used);
+    if used.contains("workspace.task") {
+        empty.push(
+            "`{{ workspace.task }}` will be empty: a workspace made for the run has no first \
+             message."
+                .to_owned(),
+        );
+    }
+    if used.contains("memory") && !memory_shared {
+        empty.push(format!(
+            "`{{{{ memory }}}}` will be empty: {} does not give its agents its memory.",
+            project.name
+        ));
+    }
+    empty
+}
+
+/// The workflow `id`, when it is there and can run.
+fn runnable(data_dir: &Path, id: &str) -> IpcResult<super::Entry> {
+    let entry = find(data_dir, id).ok_or_else(|| {
+        IpcError::new(
+            "workflow_not_found",
+            format!("There is no workflow `{id}`."),
+        )
+    })?;
+    if entry.workflow.is_none() || !entry.runnable() {
+        return Err(IpcError::new(
+            "workflow_invalid",
+            format!(
+                "`{}` has problems and cannot run. `ys workflow show {}` lists them.",
+                entry.id, entry.id
+            ),
+        ));
+    }
+    Ok(entry)
+}
+
+/// The run's inputs, checked, and every agent a step names by id found.
+fn answered(workflow: &Workflow, request: &Request<'_>, look: &dyn Look) -> IpcResult<Inputs> {
+    let harness = |wanted: &str| look.harness(wanted);
+    let inputs = check_inputs(workflow, request.inputs, &harness)
+        .map_err(|why| IpcError::new("workflow_inputs", why))?;
+    for step in &workflow.steps {
+        if let Action::StartSession { harness: named, .. } = &step.action {
+            if !named.contains("{{") {
+                look.harness(named)
+                    .map_err(|why| IpcError::new("harness_not_found", why))?;
+            }
+        }
+    }
+    Ok(inputs)
+}
+
+fn started_without_its_pull_request(workflow: &Workflow) -> IpcError {
+    IpcError::new(
+        "pull_request_missing",
+        format!(
+            "`{}` is about a pull request a workspace tracks in another repository. Start it \
+             from that pull request, in the Pull requests view.",
+            workflow.id
+        ),
+    )
+}
+
+/// Write the run's row and its steps', all pending.
+fn write(
+    store: &Store,
+    entry: &super::Entry,
+    workflow: &Workflow,
+    workspace: &WorkspaceRow,
+    inputs: &Inputs,
+    facts: &Facts,
+    request: &Request<'_>,
+) -> IpcResult<String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let inputs_json = serde_json::to_string(&inputs).unwrap_or_else(|_| "{}".to_owned());
+    let inputs_json = serde_json::to_string(inputs).unwrap_or_else(|_| "{}".to_owned());
     let steps: Vec<(&str, &str)> = workflow
         .steps
         .iter()
@@ -478,18 +640,7 @@ fn asked_error(error: &crate::forge::ForgeError, workspace: &str) -> String {
 pub fn empty_variables(workflow: &Workflow, place: &Place, memory_shared: bool) -> Vec<String> {
     let used = variables(workflow);
     let name = &place.workspace.name;
-    let mut empty = Vec::new();
-    let events: Vec<String> = used
-        .iter()
-        .filter(|var| var.starts_with("event."))
-        .map(|var| format!("`{{{{ {var} }}}}`"))
-        .collect();
-    if !events.is_empty() {
-        empty.push(format!(
-            "{} will be empty: only a run a trigger starts has an event.",
-            events.join(", ")
-        ));
-    }
+    let mut empty = event_variables(&used);
     if used.contains("workspace.task") && place.task.is_none() {
         empty.push(format!(
             "`{{{{ workspace.task }}}}` will be empty: `{name}` was started without a first message."
@@ -513,6 +664,22 @@ pub fn empty_variables(workflow: &Workflow, place: &Place, memory_shared: bool) 
         ));
     }
     empty
+}
+
+/// The line about `{{ event.* }}`, when any is used: a run a person asks for has no event.
+fn event_variables(used: &std::collections::BTreeSet<String>) -> Vec<String> {
+    let events: Vec<String> = used
+        .iter()
+        .filter(|var| var.starts_with("event."))
+        .map(|var| format!("`{{{{ {var} }}}}`"))
+        .collect();
+    if events.is_empty() {
+        return Vec::new();
+    }
+    vec![format!(
+        "{} will be empty: only a run a trigger starts has an event.",
+        events.join(", ")
+    )]
 }
 
 /// Every `{{ variable }}` a workflow's steps use, as dotted paths: `workspace.task`,
@@ -760,6 +927,17 @@ impl Place {
             branch,
             base_branch,
         }))
+    }
+
+    /// The place as a run with these `facts` sees it. A workspace made for the run was started
+    /// with no first message, and the first prompt on record there is the run's own first
+    /// agent's: that is not the workspace's task, so the run has none.
+    #[must_use]
+    pub fn in_run(mut self, facts: &Facts) -> Self {
+        if facts.new_workspace {
+            self.task = None;
+        }
+        self
     }
 
     /// A `project.…` or `workspace.…` variable. Others are the caller's.

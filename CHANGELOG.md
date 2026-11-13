@@ -11,6 +11,12 @@ has the downloads and the full commit lists.
   right under the run's error, a run opens on the step that needs you or the one that failed, and
   a long run folds its succeeded steps into one row. **Definition** puts the chart beside the file
   instead of above it. See [Workflows](docs/guide/workflows.md#the-workflows-list).
+- **Start a workflow from a project, in a workspace made for the run.** A run no longer needs a
+  workspace to be there first. In the Run dialog, choose **new workspace** under a project, or
+  open it from **Run workflow…** in the project's menu; from a terminal,
+  `ys workflow run <id> --project <name>`. The branch and worktree are made once everything else
+  has been checked, so a refused run leaves nothing behind. See
+  [In a new workspace](docs/guide/workflows.md#in-a-new-workspace).
 - **A workflow run lists the pull requests it opened.** The run's summary shows each one with its
   state and a link, in the project's own repository and in the repositories its workspace tracks,
   and the run's row says how many. `ys workflow runs` has a **PRS** column, and

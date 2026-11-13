@@ -636,7 +636,8 @@ still to be done, and is the milestone's exit.
   Conditional paths and bounded revision loops are in [Conditional paths](#conditional-paths).
   A step that runs a program would be a shell string by another name. Project automation is
   where commands live, and a `run_automation` step can call it later.
-- Reviewing in a fresh worktree; headless reviewers.
+- Reviewing in a fresh worktree; headless reviewers. **A run can since be started from a project,
+  in a workspace made for it**: see [A run from a project](#a-run-from-a-project).
 - Jev's judgment of a review, or of a workflow a model wrote.
 
 ## Open questions
@@ -999,6 +1000,44 @@ the prompt.
 
 A workflow file from before this has no `produces` or `consumes`, and still parses. A run
 saved before the table still opens, and lists no artifacts. The schema version stays 1.
+
+## A run from a project
+
+_Asked for and built on 2026-11-13._ Until now a run was always about a workspace that was
+already there, so a workflow that does a whole piece of work, the software factory above all,
+needed a workspace made by hand first. A run can now be asked for from a project, and gets a
+workspace of its own.
+
+- **It is a second door beside `runs::queue`, not a new trigger context.** `queue_in_new_workspace`
+  runs every check `queue` runs that does not need the workspace, then makes the workspace with
+  `Workspaces::create_named`, the composer's own path, and writes the run. The file format does
+  not change: whether a run gets a new workspace is chosen by whoever starts it, per run. The
+  same workflow can run in a workspace that is there one day and in a new one the next.
+- **A refusal makes nothing.** The workflow, the inputs and the agents are checked before
+  `git worktree add`. A workflow that needs an open pull request when it is queued is refused
+  then, without asking the forge: a branch made a moment ago has none. One that defers its pull
+  request starts.
+- **What is made is kept.** If the project's setup fails, the workspace stays and no run is
+  queued, as for the composer. If the run's row cannot be written after the workspace is made,
+  the error says where the workspace is. Nothing is deleted to tidy up.
+- **Named after the workflow**, or as the person asks, with a number added when the name is
+  taken. A second run of the same workflow therefore gets its own workspace instead of being
+  refused as already running.
+- **`workspace.task` is empty for the whole run.** `Place` reads the task as the first prompt on
+  record in the workspace, and in a workspace made for a run that would be the prompt of the
+  run's own first agent from the second step on. The run's facts carry `new_workspace`, and
+  `Place::in_run` clears the task for such a run.
+- **The window and `ys` only.** The Run dialog offers a new workspace under each project, the
+  project's menu opens it there, and `ys workflow run` takes `--project`, `--name` and `--base`.
+
+Not built, on purpose:
+
+- **Schedules and triggers.** Both still name a workspace that is there. A schedule that makes a
+  workspace per run is the "fresh worktree per run" [34](34-schedules.md) put off, and it still
+  needs its rule for the worktrees that pile up. A trigger belongs to a workspace by definition.
+- **The phone.** A phone starts no workflow runs yet.
+- **A workflow that says it wants a new workspace.** A `context: project` in the file would let
+  the dialog open on a new workspace for workflows written for one. Nothing needs it yet.
 
 ## What a run made
 

@@ -3551,6 +3551,137 @@ fn a_run_says_what_it_will_find_nothing_for_before_it_goes() {
     assert!(json.contains("task-note"), "queued all the same: {json}");
 }
 
+/// `--project` in place of `--workspace`: the run gets a workspace of its own, a real branch
+/// and worktree, and a refusal makes neither.
+#[test]
+fn a_run_asked_for_from_a_project_makes_its_own_workspace() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    write_workflow(&fx, "task-note.yaml", TASK_NOTE);
+    write_workflow(&fx, "pr-note.yaml", PR_NOTE);
+    let project = fx.project_name.clone();
+    let worktrees = || -> Vec<String> {
+        let listed = fx.ys(&["workspace", "list", "--json"]).ok();
+        serde_json::from_str::<Vec<serde_json::Value>>(&listed)
+            .unwrap()
+            .iter()
+            .filter(|w| w["kind"] == "worktree")
+            .map(|w| w["name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let before = worktrees();
+
+    // With Yardsort closed nothing would carry the run out, so nothing is made for it.
+    let closed = fx
+        .ys(&["workflow", "run", "ping", "--project", &project])
+        .failed();
+    assert!(closed.contains("Yardsort is not running"), "{closed}");
+    assert_eq!(
+        worktrees(),
+        before,
+        "no workspace for a run that was not queued"
+    );
+
+    let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .unwrap();
+    // Refused for what the workflow needs: a new branch has no pull request. A bad input, and
+    // a project that is not there, are refused too. None of them leaves a workspace.
+    let refused = fx
+        .ys(&["workflow", "run", "pr-note", "--project", &project])
+        .failed();
+    assert!(
+        refused.contains("A new workspace has no pull request"),
+        "{refused}"
+    );
+    let unknown = fx
+        .ys(&[
+            "workflow",
+            "run",
+            "ping",
+            "--project",
+            &project,
+            "--input",
+            "colour=red",
+        ])
+        .failed();
+    assert!(unknown.contains("has no input `colour`"), "{unknown}");
+    fx.ys(&["workflow", "run", "ping", "--project", "nowhere"])
+        .failed();
+    // The two are one choice, and a name is for a workspace that is being made: usage errors.
+    let both = fx.ys(&[
+        "workflow",
+        "run",
+        "ping",
+        "--project",
+        &project,
+        "--workspace",
+        "local",
+    ]);
+    assert_eq!(both.code, Some(2), "{}", both.stderr);
+    assert!(
+        both.stderr.contains("cannot be used with"),
+        "{}",
+        both.stderr
+    );
+    let alone = fx.ys(&["workflow", "run", "ping", "--name", "x"]);
+    assert_eq!(alone.code, Some(2), "{}", alone.stderr);
+    assert!(alone.stderr.contains("--project"), "{}", alone.stderr);
+    assert_eq!(worktrees(), before, "a refusal makes nothing");
+
+    // Named after the workflow, and said to be new, with where it is.
+    let said = fx
+        .ys(&["workflow", "run", "task-note", "--project", &project])
+        .ok();
+    assert!(said.contains("created  task-note"), "{said}");
+    assert!(said.contains("Queued `task-note` in task-note"), "{said}");
+    assert!(
+        said.contains("Note: `{{ workspace.task }}` will be empty: a workspace made for the run"),
+        "{said}"
+    );
+
+    // Named as asked, in JSON: the branch and the folder are real.
+    let json = fx
+        .ys(&[
+            "workflow",
+            "run",
+            "ping",
+            "--project",
+            &project,
+            "--name",
+            "Nightly Ping",
+            "--json",
+        ])
+        .ok();
+    let queued: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(queued["workspace"], "nightly-ping");
+    assert_eq!(queued["created"], true);
+    let path = PathBuf::from(queued["path"].as_str().unwrap());
+    assert!(path.starts_with(&fx.worktree_root), "{}", path.display());
+    assert_eq!(
+        fx.git().head(&path).unwrap(),
+        yardsort_core::git::Head::Branch(queued["branch"].as_str().unwrap().to_owned())
+    );
+    let runs = fx.ys(&["workflow", "runs", "--json"]).ok();
+    assert!(
+        runs.contains("nightly-ping") && runs.contains("task-note"),
+        "{runs}"
+    );
+
+    // The run is in that workspace: the same workflow cannot be asked for there again yet.
+    let existing = fx
+        .ys(&[
+            "workflow",
+            "run",
+            "ping",
+            "--workspace",
+            "nightly-ping",
+            "--json",
+        ])
+        .failed();
+    assert!(existing.contains("already running"), "{existing}");
+}
+
 /// A profile whose project is on GitHub as far as its remote says, and a `gh` that answers
 /// from the recorded fixtures and writes down what it was asked. `PATH` is that `gh` and git,
 /// and nothing else: the machine's own `gh`, if it has one, is never run.

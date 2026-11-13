@@ -93,6 +93,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
   const [removing, setRemoving] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [outcomesOpen, setOutcomesOpen] = useState(false);
+  const [runWorkflow, setRunWorkflow] = useState(false);
   const waiting = useMemoryStore((s) => s.waiting[project.id] ?? 0);
 
   const items: MenuItem[] = [
@@ -103,6 +104,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
     },
     { label: "Outcomes…", onSelect: () => setOutcomesOpen(true) },
     { label: "New workspace", disabled: project.missing, onSelect: () => compose(project.id) },
+    { label: "Run workflow…", disabled: project.missing, onSelect: () => setRunWorkflow(true) },
     {
       label: "Import worktrees…",
       disabled: project.missing,
@@ -202,6 +204,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
       )}
       {importing && <ImportWorktreesDialog project={project} onClose={() => setImporting(false)} />}
       {removing && <RemoveProjectDialog project={project} onClose={() => setRemoving(false)} />}
+      {runWorkflow && <RunWorkflowDialog project={project} onClose={() => setRunWorkflow(false)} />}
       {memoryOpen && <MemoryDialog project={project} onClose={() => setMemoryOpen(false)} />}
       {outcomesOpen && <OutcomesDialog project={project} onClose={() => setOutcomesOpen(false)} />}
     </li>

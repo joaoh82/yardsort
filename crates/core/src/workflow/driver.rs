@@ -643,6 +643,7 @@ fn move_on(
         return Ok(());
     };
     let facts = RefCell::new(Facts::parse(&run.context));
+    let place = place.in_run(&facts.borrow());
     let mut started_at = run.started_at;
     if run.status == "queued" {
         // The workspace's own agent is whichever was newest when the run began: found now,
