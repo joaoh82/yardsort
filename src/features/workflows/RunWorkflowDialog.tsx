@@ -2,7 +2,9 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   errorMessage,
   ipc,
+  type BranchList,
   type Input,
+  type Project,
   type RunPreview,
   type TestItem,
   type TrackedPullRequest,
@@ -26,6 +28,11 @@ interface Props {
   /** In this workspace; without it, the dialog asks which. */
   workspace?: Workspace;
   /**
+   * Started from this project: the dialog opens on a new workspace in it, made for the run, and
+   * still offers every workspace that is already there.
+   */
+  project?: Project;
+  /**
    * On this pull request, which the workspace tracks in another repository: only the workflows
    * about one (`context: tracked_pull_request`) are offered, and the run is about it.
    */
@@ -35,14 +42,19 @@ interface Props {
   onStarted?: (runId: string, workflowId: string) => void;
 }
 
+/** The Workspace select's value for "a new workspace in this project". */
+const NEW = "new:";
+
 /**
- * Start a run: which workflow, in which workspace, and the answers to its inputs. Everything
+ * Start a run: which workflow, in which workspace — one that is there, or a new one made for
+ * the run in a project — and the answers to its inputs. Everything
  * is checked again by the core when it is queued, exactly as `ys workflow run` does; what shows
  * here first is so the person can see what the run will find before asking for it.
  */
 export function RunWorkflowDialog({
   workflowId,
   workspace,
+  project: projectGiven,
   tracked: trackedGiven,
   onClose,
   onStarted,
@@ -57,7 +69,15 @@ export function RunWorkflowDialog({
   const harnesses = allHarnesses.filter((h) => h.enabled);
 
   const [chosenWorkflow, setChosenWorkflow] = useState(workflowId ?? "");
-  const [chosenWorkspace, setChosenWorkspace] = useState(workspace?.id ?? "");
+  // A workspace's id, or `new:<project id>` for one made for the run in that project.
+  const [chosenWorkspace, setChosenWorkspace] = useState(
+    workspace?.id ?? (projectGiven && !trackedGiven ? `${NEW}${projectGiven.id}` : ""),
+  );
+  // For a new workspace: what to call it, and the branch it starts from. Both may be left alone:
+  // it is then named after the workflow, and starts from the default branch.
+  const [newName, setNewName] = useState("");
+  const [newBase, setNewBase] = useState("");
+  const [branches, setBranches] = useState<{ project: string; list: BranchList } | null>(null);
   // The pull request elsewhere the run is about: the one it was opened from, or one the person
   // picked when the workspace had no open pull request of its own.
   const [tracked, setTracked] = useState(trackedGiven);
@@ -99,6 +119,13 @@ export function RunWorkflowDialog({
   const firstAgent = harnesses.find((h) => h.resolvedPath)?.id ?? "";
   // A `test` input picks from the chosen workspace's smoke tests; load them when one is needed.
   const needsTest = inputs.some((input) => input.kind === "test");
+  // The project a workspace is to be made in, when that is what is chosen.
+  const newIn = chosenWorkspace.startsWith(NEW) ? chosenWorkspace.slice(NEW.length) : null;
+  // A workspace that is not made yet has no tests to list. It will be a checkout of the same
+  // repository, so the project's own checkout answers for it.
+  const testsFrom = newIn
+    ? (projects.find((p) => p.id === newIn)?.workspaces.find((w) => w.kind === "local")?.id ?? "")
+    : chosenWorkspace;
   // Only the tests the core listed for the workspace now chosen count. Until that load lands
   // (`testsLoaded` is false) there are none to offer and Run waits; a list left over from another
   // workspace never leaks in.
@@ -136,39 +163,66 @@ export function RunWorkflowDialog({
   useEffect(() => {
     if (!chosenWorkflow || !chosenWorkspace || !workflow) return;
     let current = true;
-    ipc.workflowPreview(chosenWorkflow, chosenWorkspace, trackedId).then(
+    const asked = newIn
+      ? ipc.workflowPreviewNew(chosenWorkflow, newIn)
+      : ipc.workflowPreview(chosenWorkflow, chosenWorkspace, trackedId);
+    asked.then(
       (found) => current && setPreviewed({ key: previewKey, preview: found }),
       (failed) => current && setError(errorMessage(failed)),
     );
     return () => {
       current = false;
     };
-  }, [chosenWorkflow, chosenWorkspace, trackedId, workflow, previewKey]);
+  }, [chosenWorkflow, chosenWorkspace, newIn, trackedId, workflow, previewKey]);
 
   useEffect(() => {
     if (!needsTest || !chosenWorkspace) return;
     let current = true;
-    ipc.testList(chosenWorkspace).then(
+    const listed = testsFrom ? ipc.testList(testsFrom) : Promise.resolve([]);
+    listed.then(
       (found) => current && setTests({ workspace: chosenWorkspace, items: found }),
       () => current && setTests({ workspace: chosenWorkspace, items: [] }),
     );
     return () => {
       current = false;
     };
-  }, [needsTest, chosenWorkspace]);
+  }, [needsTest, chosenWorkspace, testsFrom]);
 
-  const workspaces = projects.flatMap((project) =>
-    project.workspaces
+  // The branches a new workspace can start from. Without them it starts from the default one.
+  useEffect(() => {
+    if (!newIn) return;
+    let current = true;
+    ipc.projectBranches(newIn).then(
+      (list) => current && setBranches({ project: newIn, list }),
+      () => current && setBranches(null),
+    );
+    return () => {
+      current = false;
+    };
+  }, [newIn]);
+  const branchList = branches && branches.project === newIn ? branches.list : null;
+  // What the select shows is what is sent: a pick left over from another project is not.
+  const base =
+    branchList && branchList.branches.includes(newBase) ? newBase : (branchList?.default ?? "");
+
+  // Each project offers a new workspace first, then the ones it has. A run about a pull request
+  // elsewhere is about one a workspace tracks, so there is no new workspace for it.
+  const workspaces = projects.flatMap((project) => [
+    ...(tracked || project.missing
+      ? []
+      : [{ id: `${NEW}${project.id}`, name: `${project.name} / new workspace` }]),
+    ...project.workspaces
       .filter((w) => !w.archived && !w.missing)
       .map((w) => ({ id: w.id, name: `${project.name} / ${w.name}` })),
-  );
+  ]);
   const missing = inputs.filter((input) => input.required && !answers[input.id]?.trim());
   const blockedByPullRequest =
     !!preview?.needsPullRequest && !preview.pullRequest && !!preview.pullRequestProblem;
 
   // No open pull request of its own, but open ones the workspace tracks elsewhere — often the
   // whole of its work, in a parent project. The workflow's `-elsewhere` twin can run on one.
-  const projectId = projects.find((p) => p.workspaces.some((w) => w.id === chosenWorkspace))?.id;
+  const projectId =
+    newIn ?? projects.find((p) => p.workspaces.some((w) => w.id === chosenWorkspace))?.id;
   const openElsewhere =
     !tracked && preview?.needsPullRequest && !preview.pullRequest && projectId
       ? (pullRequestsByProject[projectId]?.tracked ?? []).filter(
@@ -208,10 +262,26 @@ export function RunWorkflowDialog({
     setError(null);
     try {
       const given = Object.fromEntries(Object.entries(answers).filter(([, v]) => v.trim()));
-      const run = await ipc.workflowStart(chosenWorkflow, chosenWorkspace, given, trackedId);
+      let run: string;
+      if (newIn) {
+        const started = await ipc.workflowStartNew(
+          chosenWorkflow,
+          newIn,
+          given,
+          base || null,
+          newName.trim() || null,
+        );
+        run = started.run;
+        // The core made a workspace: the sidebar reads it from there.
+        void useProjectsStore.getState().refresh();
+      } else {
+        run = await ipc.workflowStart(chosenWorkflow, chosenWorkspace, given, trackedId);
+      }
       onStarted?.(run, chosenWorkflow);
       onClose();
     } catch (failed) {
+      // A workspace whose setup failed is kept, with no run in it: show it too.
+      if (newIn) void useProjectsStore.getState().refresh();
       setError(errorMessage(failed));
       setBusy(false);
     }
@@ -278,6 +348,43 @@ export function RunWorkflowDialog({
                 ))}
               </select>
             </label>
+          )}
+          {newIn && (
+            <div className="flex flex-col gap-3 rounded border border-line bg-canvas/40 p-2.5">
+              <p className="text-ink-muted">
+                The run gets a workspace of its own: a new branch and worktree, made when you press
+                Run.
+              </p>
+              <div className="flex gap-3">
+                <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <span className={label}>Name (optional)</span>
+                  <input
+                    aria-label="New workspace name"
+                    className={control}
+                    value={newName}
+                    placeholder={chosenWorkflow}
+                    onChange={(event) => setNewName(event.target.value)}
+                  />
+                </label>
+                <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <span className={label}>Start from</span>
+                  <select
+                    aria-label="Start from"
+                    className={`${control} font-mono text-detail`}
+                    value={base}
+                    disabled={!branchList}
+                    onChange={(event) => setNewBase(event.target.value)}
+                  >
+                    {!branchList?.default && <option value="">Default branch</option>}
+                    {branchList?.branches.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
           )}
 
           {inputs.map((input) => (
@@ -364,7 +471,9 @@ export function RunWorkflowDialog({
             <p className="text-ink-faint">
               {tracked
                 ? "When it is time, it tells the agent that opened the pull request, if it is known, or the one running in this workspace."
-                : "When it is time, it tells the agent already running in this workspace, if there is one."}
+                : newIn
+                  ? "A new workspace has no agent of its own yet, so the steps that tell that agent something are skipped."
+                  : "When it is time, it tells the agent already running in this workspace, if there is one."}
             </p>
           )}
           {error && (

@@ -1030,6 +1030,21 @@ export const ipc = {
   /** What a run would find: the pull request, and whether it needs one. */
   workflowPreview: (workflowId: string, workspaceId: string, trackedId: string | null = null) =>
     unwrap(commands.workflowPreview(workflowId, workspaceId, trackedId)),
+  /** What a run would find in a workspace made for it, in a project: no forge is asked. */
+  workflowPreviewNew: (workflowId: string, projectId: string) =>
+    unwrap(commands.workflowPreviewNew(workflowId, projectId)),
+  /**
+   * Start a run from a project: a workspace is made for it — a new branch from `baseBranch`, or
+   * the default branch, called `name`, or after the workflow — once everything else has been
+   * checked. The run's id and the workspace back.
+   */
+  workflowStartNew: (
+    workflowId: string,
+    projectId: string,
+    inputs: Record<string, string>,
+    baseBranch: string | null = null,
+    name: string | null = null,
+  ) => unwrap(commands.workflowStartNew(workflowId, projectId, baseBranch, name, inputs)),
   /** Start a run; its id back. Rejects with what is wrong, as `ys workflow run` does. */
   /** `trackedId`: run it on a pull request the workspace tracks in another repository. */
   workflowStart: (

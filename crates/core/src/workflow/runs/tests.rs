@@ -829,3 +829,276 @@ fn the_projects_own_checkout_takes_its_branch_from_git() {
     assert_eq!(said.len(), 1, "{said:?}");
     assert!(said[0].contains("workspace.base_branch") && said[0].contains("default branch"));
 }
+
+/// A real repository as a project, and where its worktrees go: what a run asked for from a
+/// project needs, since it makes a branch and a worktree.
+struct ProjectFixture {
+    _dirs: (tempfile::TempDir, tempfile::TempDir),
+    data: tempfile::TempDir,
+    env: crate::env::ShellEnv,
+    store: Store,
+    git: Git,
+    worktrees: std::path::PathBuf,
+    project_id: String,
+    settings: crate::settings::WorkspaceSettings,
+    look: Looks,
+}
+
+impl ProjectFixture {
+    fn new() -> Self {
+        let (code, worktrees) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (store, git) = (Store::in_memory(), git());
+        let added = crate::projects::Projects {
+            store: &store,
+            git: &git,
+        }
+        .create("app", &crate::git::normalize(code.path()))
+        .unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let folder = crate::workflow::user_dir(data.path());
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("demo.yaml"), DEMO).unwrap();
+        Self {
+            env: crate::env::ShellEnv {
+                vars: std::env::vars().collect(),
+                source: crate::env::EnvSource::Process,
+                warning: None,
+            },
+            worktrees: crate::git::normalize(worktrees.path()),
+            project_id: added.project.id,
+            settings: crate::settings::WorkspaceSettings::default(),
+            _dirs: (code, worktrees),
+            data,
+            store,
+            git,
+            look: Looks::default(),
+        }
+    }
+
+    fn queue_new(
+        &self,
+        workflow: &str,
+        inputs: &[(&str, &str)],
+        name: Option<&str>,
+    ) -> IpcResult<(String, WorkspaceRow)> {
+        let inputs: BTreeMap<String, String> = inputs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        queue_in_new_workspace(
+            &self.store,
+            self.data.path(),
+            &Request {
+                workflow_id: workflow,
+                workspace_id: "",
+                inputs: &inputs,
+                requested_by: "app",
+                unattended: false,
+                origin_record: None,
+                depth: 0,
+                event: None,
+                tracked: None,
+            },
+            &self.look,
+            &crate::workspaces::Workspaces {
+                env: &self.env,
+                store: &self.store,
+                git: &self.git,
+                worktree_root: &self.worktrees,
+                settings: &self.settings,
+            },
+            &NewWorkspace {
+                project_id: &self.project_id,
+                base: None,
+                name,
+            },
+        )
+    }
+
+    /// The worktree workspaces: every one but the project's own checkout.
+    fn made(&self) -> Vec<String> {
+        self.store
+            .workspaces()
+            .unwrap()
+            .into_iter()
+            .filter(|w| w.branch.is_some())
+            .map(|w| w.name)
+            .collect()
+    }
+}
+
+#[test]
+fn a_run_asked_for_from_a_project_gets_a_workspace_made_for_it() {
+    let fx = ProjectFixture::new();
+    let (id, workspace) = fx.queue_new("demo", &[("who", "claude")], None).unwrap();
+
+    // A real branch and a real worktree, named after the workflow.
+    assert_eq!(workspace.name, "demo");
+    assert_eq!(workspace.project_id, fx.project_id);
+    let path = Path::new(&workspace.path);
+    assert!(
+        path.join(".git").exists(),
+        "{} is a worktree",
+        workspace.path
+    );
+    assert_eq!(
+        fx.git.head(path).unwrap(),
+        crate::git::Head::Branch(workspace.branch.clone().unwrap())
+    );
+
+    // The run is queued there, and knows the workspace was made for it.
+    let run = fx.store.workflow_run(&id).unwrap().unwrap();
+    assert_eq!(run.workspace_id.as_deref(), Some(workspace.id.as_str()));
+    assert_eq!(run.workspace_name, "demo");
+    assert_eq!(
+        (run.status.as_str(), run.requested_by.as_str()),
+        ("queued", "app")
+    );
+    assert!(Facts::parse(&run.context).new_workspace);
+    assert_eq!(fx.store.workflow_steps(&id).unwrap().len(), 2);
+
+    // Asked again, it does not join the first: another workspace, numbered. A name that is
+    // given is made into a slug.
+    let (_, second) = fx.queue_new("demo", &[("who", "claude")], None).unwrap();
+    assert_eq!(second.name, "demo-2");
+    let (_, named) = fx
+        .queue_new("demo", &[("who", "claude")], Some("Try The Login"))
+        .unwrap();
+    assert_eq!(named.name, "try-the-login");
+    assert!(
+        fx.look.asked.get() == 0,
+        "a branch made now has no pull request to ask the forge about"
+    );
+}
+
+/// Without the change this covers, a refusal would come after `git worktree add`, and leave a
+/// branch and a folder behind for a run that never was.
+#[test]
+fn a_run_that_is_refused_makes_no_workspace() {
+    let fx = ProjectFixture::new();
+
+    let error = fx.queue_new("demo", &[], None).unwrap_err();
+    assert_eq!(error.code, "workflow_inputs", "{}", error.message);
+    let error = fx
+        .queue_new("demo", &[("who", "cursor")], None)
+        .unwrap_err();
+    assert_eq!(error.code, "workflow_inputs", "{}", error.message);
+    let error = fx.queue_new("nope", &[], None).unwrap_err();
+    assert_eq!(error.code, "workflow_not_found");
+
+    // Code review names the pull request in its first step, and a new branch has none.
+    let error = fx
+        .queue_new("code-review", &[("reviewer", "claude")], None)
+        .unwrap_err();
+    assert_eq!(error.code, "pull_request_missing");
+    assert!(
+        error
+            .message
+            .contains("A new workspace has no pull request"),
+        "{}",
+        error.message
+    );
+    // One about a pull request elsewhere is started from that pull request.
+    let error = fx
+        .queue_new("code-review-elsewhere", &[("reviewer", "claude")], None)
+        .unwrap_err();
+    assert_eq!(error.code, "pull_request_missing");
+    assert!(
+        error.message.contains("Pull requests view"),
+        "{}",
+        error.message
+    );
+
+    let error = fx
+        .queue_new("demo", &[("who", "claude")], Some("!!!"))
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_name");
+
+    assert_eq!(fx.made(), Vec::<String>::new(), "nothing was made");
+    assert!(fx.store.workflow_runs(None, 10).unwrap().is_empty());
+    let branches = fx
+        .git
+        .run(
+            Path::new(&fx.store.project(&fx.project_id).unwrap().unwrap().root_path),
+            &["branch", "--format=%(refname:short)"],
+        )
+        .unwrap();
+    assert_eq!(branches.lines().count(), 1, "no branch either: {branches}");
+}
+
+#[test]
+fn a_workflow_that_waits_for_its_pull_request_starts_in_a_new_workspace_without_one() {
+    let fx = ProjectFixture::new();
+    let factory = crate::workflow::find(fx.data.path(), "software-factory")
+        .unwrap()
+        .workflow
+        .unwrap();
+    assert_eq!(
+        new_workspace_pull_request(&factory),
+        (None, Some("Will use the PR the run opens.".into()))
+    );
+    let demo = crate::workflow::find(fx.data.path(), "demo")
+        .unwrap()
+        .workflow
+        .unwrap();
+    assert_eq!(new_workspace_pull_request(&demo), (None, None));
+
+    let (id, workspace) = fx
+        .queue_new(
+            "software-factory",
+            &[
+                ("task", "Add a logout button"),
+                ("agent", "claude"),
+                ("suite", "login"),
+            ],
+            None,
+        )
+        .unwrap();
+    assert_eq!(workspace.name, "software-factory");
+    assert!(
+        Facts::parse(&fx.store.workflow_run(&id).unwrap().unwrap().context)
+            .pr
+            .is_none()
+    );
+
+    // What it will render as nothing is known before the workspace is: its task.
+    let project = fx.store.project(&fx.project_id).unwrap().unwrap();
+    let said = empty_in_new_workspace(&factory, &project, true);
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("workspace.task") && said[0].contains("made for the run"));
+}
+
+/// The first prompt on record in a workspace made for a run is the run's own first agent's.
+/// Without `in_run`, a later step's `{{ workspace.task }}` would be that prompt.
+#[test]
+fn a_workspace_made_for_a_run_has_no_task_however_many_agents_the_run_starts() {
+    let fx = ProjectFixture::new();
+    let (id, workspace) = fx.queue_new("demo", &[("who", "claude")], None).unwrap();
+    fx.store
+        .add_session(&crate::store::NewSession {
+            id: "s1",
+            workspace_id: &workspace.id,
+            harness_id: "claude",
+            model: None,
+            effort: None,
+            harness_session_id: None,
+            title: "Define the outcome",
+            forked_from: None,
+            pty_session_id: "pty-1",
+            prompt: Some("Define the outcome of this work"),
+        })
+        .unwrap();
+    let facts = Facts::parse(&fx.store.workflow_run(&id).unwrap().unwrap().context);
+    let load = || {
+        Place::load(&fx.store, &workspace.id, &fx.git)
+            .unwrap()
+            .unwrap()
+    };
+    assert!(load().task.is_some(), "what the store alone would say");
+    let place = load().in_run(&facts);
+    assert_eq!(place.task, None);
+    assert_eq!(place.branch, workspace.branch, "the rest is as it is");
+
+    // A run in a workspace somebody started keeps that workspace's task.
+    assert!(load().in_run(&Facts::default()).task.is_some());
+}

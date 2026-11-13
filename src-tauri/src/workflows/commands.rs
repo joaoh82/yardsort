@@ -567,6 +567,116 @@ pub async fn workflow_start(
     Ok(run)
 }
 
+/// What the Run dialog shows before starting a run in a workspace that is not made yet: one
+/// asked for from a project. The forge is not asked, since a branch made now has no pull
+/// request; a workflow that needs one open says so here, and Run stays off.
+#[tauri::command]
+#[specta::specta]
+pub async fn workflow_preview_new(
+    app: AppHandle,
+    workflow_id: String,
+    project_id: String,
+) -> IpcResult<RunPreview> {
+    blocking(app, move |state| {
+        let workflow = workflow::find(&state.data_dir, &workflow_id)
+            .ok_or_else(|| IpcError::new("workflow_not_found", "That workflow is not there."))?
+            .workflow
+            .ok_or_else(|| {
+                IpcError::new(
+                    "workflow_invalid",
+                    "This workflow has problems and cannot run.",
+                )
+            })?;
+        let project = state
+            .store
+            .project(&project_id)?
+            .ok_or_else(|| IpcError::new("unknown_project", "That project no longer exists."))?;
+        let (pull_request_problem, pull_request_note) = runs::new_workspace_pull_request(&workflow);
+        let shared = state.store.memory_shared(&project.id)?;
+        Ok(RunPreview {
+            needs_pull_request: runs::needs_pull_request(&workflow),
+            pull_request: None,
+            pull_request_problem,
+            pull_request_note,
+            needs_origin: runs::needs_origin(&workflow),
+            empty: runs::empty_in_new_workspace(&workflow, &project, shared),
+        })
+    })
+    .await
+}
+
+/// A run started from a project: the run, and the workspace made for it.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StartedInNewWorkspace {
+    pub run: String,
+    pub workspace: crate::projects::Workspace,
+}
+
+/// Start a run from a project: make a workspace for it — a new branch from `base_branch`, or
+/// from the default branch, named `name`, or after the workflow — and queue the run there.
+/// Every check `workflow_start` makes is made before anything is created.
+#[tauri::command]
+#[specta::specta]
+pub async fn workflow_start_new(
+    app: AppHandle,
+    workflow_id: String,
+    project_id: String,
+    base_branch: Option<String>,
+    name: Option<String>,
+    inputs: BTreeMap<String, String>,
+) -> IpcResult<StartedInNewWorkspace> {
+    let started = blocking(app.clone(), move |state| {
+        let git = crate::git::Git::new(&state.env())?;
+        let root = state.worktree_root()?;
+        let settings = state.settings.get();
+        let (run, row) = runs::queue_in_new_workspace(
+            &state.store,
+            &state.data_dir,
+            &runs::Request {
+                workflow_id: &workflow_id,
+                workspace_id: "",
+                inputs: &inputs,
+                requested_by: "app",
+                unattended: false,
+                origin_record: None,
+                depth: 0,
+                event: None,
+                tracked: None,
+            },
+            &AppLook(state),
+            &yardsort_core::workspaces::Workspaces {
+                env: &state.env(),
+                store: &state.store,
+                git: &git,
+                worktree_root: &root,
+                settings: &settings.workspaces,
+            },
+            &runs::NewWorkspace {
+                project_id: &project_id,
+                base: base_branch
+                    .as_deref()
+                    .filter(|base| !base.trim().is_empty()),
+                name: name.as_deref(),
+            },
+        )?;
+        Ok(StartedInNewWorkspace {
+            run,
+            workspace: crate::projects::Projects {
+                store: &state.store,
+                git: &git,
+            }
+            .describe_workspace(row),
+        })
+    })
+    .await?;
+    if let Some(driver) = tauri::Manager::try_state::<super::Driver>(&app) {
+        driver.wake();
+    }
+    changed(&app);
+    Ok(started)
+}
+
 /// A workflow a model wrote from a description, checked, for the editor. Nothing is saved.
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]

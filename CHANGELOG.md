@@ -3,6 +3,15 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## 0.33.0
+
+- **Start a workflow from a project, in a workspace made for the run.** A run no longer needs a
+  workspace to be there first. In the Run dialog, choose **new workspace** under a project, or
+  open it from **Run workflow…** in the project's menu; from a terminal,
+  `ys workflow run <id> --project <name>`. The branch and worktree are made once everything else
+  has been checked, so a refused run leaves nothing behind. See
+  [In a new workspace](docs/guide/workflows.md#in-a-new-workspace).
+
 ## 0.32.0
 
 - **Continue a failed workflow run from the step that failed.** A run that failed part of the

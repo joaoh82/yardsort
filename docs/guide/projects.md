@@ -159,6 +159,8 @@ Hover a project and press **⋯**, or right-click it:
 - **Outcomes…** — every attempt in the project with what became of it, and each agent's
   history. See [Outcomes](outcomes.md).
 - **New workspace** — same as the **+** on the row. See [Workspaces](workspaces.md).
+- **Run workflow…** — start a [workflow](workflows.md) in a new workspace made for the run, or in
+  one that is there. See [In a new workspace](workflows.md#in-a-new-workspace).
 - **Import worktrees…** — make workspaces of worktrees that already exist in the repository, made
   by hand or by another tool. See
   [Worktrees made elsewhere](workspaces.md#worktrees-made-elsewhere).
