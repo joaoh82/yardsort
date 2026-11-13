@@ -302,6 +302,8 @@ ys workflow run fix-tests --project app --name nightly-fix --base release --inpu
 
 It prints the workspace it made, with its branch and folder, and then the run.
 
+![The Run dialog for Software factory with a new workspace chosen in api-gateway: its name, the branch it starts from, what to build, who does the work and the smoke test to run](../images/workflow-run-new-workspace.png)
+
 Everything is checked before the workspace is made, so a run that is refused leaves no branch
 and no folder behind. Three things are different from a run in a workspace that was there:
 

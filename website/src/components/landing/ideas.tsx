@@ -317,15 +317,15 @@ export function Ideas() {
           shot={
             <Shot
               name="schedules"
-              alt="Schedules: every project's schedules in one list, each with what it runs, when, and how its last time went, and one open with its history"
+              alt="Schedules: every project's schedules in one list, each with what it runs, when, and how its last time went, and one open that makes a new workspace for each run, with how many it keeps and its history"
             />
           }
         >
           <p>
             A schedule starts a workflow or a smoke test without you pressing Run: once at a time
             you pick, or again and again — every weekday at nine, every two hours, a cron
-            expression. It runs in a workspace you already have, and what it starts is an ordinary
-            run, marked as scheduled.
+            expression. It runs in a workspace you already have, or for a workflow in a new one made
+            for each run, and what it starts is an ordinary run, marked as scheduled.
           </p>
           <p>
             Schedules fire while Yardsort is open. A time that comes while it is closed, or while

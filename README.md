@@ -90,8 +90,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   [More below](#smoke-tests-the-ten-minute-check-repeatable).
 - **Schedules: at a set time, or on a routine.** Run a workflow or a smoke test once at a time
   you pick, or again and again — every weekday at nine, every two hours, a cron expression — in
-  a workspace you already have, while Yardsort is open. A notification tells you when a run
-  fails. [Schedules](docs/guide/schedules.md).
+  a workspace you already have, or for a workflow in a new one made for each run, while Yardsort
+  is open. A notification tells you when a run fails. [Schedules](docs/guide/schedules.md).
 - **Triggers: when something happens.** Start a workflow or a smoke test when an agent says its
   work is done, someone reviews the pull request, its checks fail, a run ends, or something you
   name happens. Ready-made ones — address reviews, fix failing checks, review or smoke test the
@@ -449,9 +449,11 @@ tell the agent** does both.
 
 A test or a workflow can also run on a [schedule](docs/guide/schedules.md): once at a time you
 pick, or on a routine such as every weekday at nine, in a workspace you already have, while
-Yardsort is open.
+Yardsort is open. A workflow's schedule can instead make a new workspace for each run. Yardsort
+never removes those: the schedule keeps up to a number you set, then waits for you to archive or
+delete one.
 
-![Schedules: every project's schedules in one list, each with what it runs, when, and how its last time went, and one open with its history](docs/images/schedules.png)
+![Schedules: every project's schedules in one list, each with what it runs, when, and how its last time went, and one open that makes a new workspace for each run, with how many it keeps and its history](docs/images/schedules.png)
 
 From a terminal:
 

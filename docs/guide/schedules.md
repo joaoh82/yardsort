@@ -129,7 +129,7 @@ Either way the next time is worked out from now.
 
 ## The Schedules view
 
-![The Schedules view: five schedules in a list, each with what it runs, where, when and how its last time went, and one open beside it with its switch, Run now, Edit and Remove, and its history](../images/schedules.png)
+![The Schedules view: six schedules in a list, each with what it runs, where, when and how its last time went, and one open beside it — a workflow that gets a new workspace for each run — with its switch, Run now, Edit and Remove, how many workspaces it keeps, and its history](../images/schedules.png)
 
 Each row shows the schedule's name, what it runs and where, when in words, the next time it
 fires, how its last time went, and where it stands:

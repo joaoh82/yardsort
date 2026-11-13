@@ -32,7 +32,7 @@
 #   diff is read from are already there, so nothing is fetched.
 #
 # `seed` writes the three demo projects, a workspace on the pull request's branch that was
-# started from one of the demo tasks, a handful of smoke test runs, and five schedules and five
+# started from one of the demo tasks, a handful of smoke test runs, and six schedules and five
 # triggers with their history into the profile's database once the app has created it, so nothing has to be typed
 # into the window.
 #
@@ -928,14 +928,16 @@ PY
   echo "  repositories for the clone dialog in $DEMO/gh"
 }
 
-# What the Schedules view shows, as SQL: five schedules across the demo projects, in each kind
-# of "when" and in the states the view can show — on, waiting for approval, off — with the
+# What the Schedules view shows, as SQL: six schedules across the demo projects, in each kind
+# of "when" and in the states the view can show — on, waiting for approval, off — one of them
+# making a new workspace for each run, with the
 # history each would have by now. Times are worked out from now, on this machine's clock, so the
 # weekday schedule's lines fall on weekdays at nine whenever the shot is taken.
 #
 # The app fires what is due while it is open, and these are real rows: left open, it will run
-# the tests they name. The one workflow among them comes due on Mondays at eight, and would
-# start a reviewer in the demo worktree; close the app once the shots are taken.
+# the tests they name. The review among them comes due on Mondays at eight, and would start a
+# reviewer in the demo worktree; the upkeep comes due on Sundays at three, and would make a
+# workspace in api-gateway. Close the app once the shots are taken.
 demo_schedules() {
   python3 - <<'EOF'
 import json
@@ -970,13 +972,16 @@ def after(wanted, hour):
 schedules, lines = [], []
 
 def schedule(key, name, kind, target, project, workspace, spec, next_at, *, inputs=None,
-             missed="run_once", notify="failure", enabled=True):
+             missed="run_once", notify="failure", enabled=True, keep=None):
+    # `keep` is for a schedule that makes a workspace for each run: it names no workspace, and
+    # `workspace` is then what its workspaces are called.
     place = f"demo-{project}-{'pr' if workspace == 'celsius-fahrenheit' else 'local'}"
+    place = "NULL" if keep else f"'{place}'"
     schedules.append(
         f"('demo-schedule-{key}', {text(name)}, '{kind}', '{target}', 'demo-{project}', "
-        f"'{place}', '{workspace}', {text(json.dumps(inputs or {}))}, {text(json.dumps(spec))}, "
+        f"{place}, '{workspace}', {text(json.dumps(inputs or {}))}, {text(json.dumps(spec))}, "
         f"'{missed}', '{notify}', {int(enabled)}, {'NULL' if next_at is None else ms(next_at)}, "
-        f"'app', {ms(now)}, {ms(now)})")
+        f"'app', {ms(now)}, {ms(now)}, {int(bool(keep))}, {keep or 5})")
 
 def line(key, due, result, *, fired=None, manual=False, run=None, waiting=False):
     number = len(lines) + 1
@@ -988,8 +993,8 @@ def line(key, due, result, *, fired=None, manual=False, run=None, waiting=False)
         f"'started', {int(manual)}, '{run or f'demo-scheduled-run-{number}'}', NULL, "
         f"{text(result)}, {'NULL' if result is None else ms(fired)}, {int(waiting)})")
 
-# The one the shot opens: a week and a half of mornings, one of them failed and run again by
-# hand, one caught up on when the app was opened late.
+# A week and a half of mornings, one of them failed and run again by hand, one caught up on
+# when the app was opened late.
 schedule("morning", "Morning unit tests", "test", "unit-tests", "weather-cli", "local",
          {"kind": "weekly", "days": ["mon", "tue", "wed", "thu", "fri"], "time": clock(9)},
          after(weekday, 9))
@@ -1018,6 +1023,19 @@ schedule("review", "Review the pull request", "workflow", "code-review", "weathe
 for due in before(monday, 8, 2):
     line("review", due, "succeeded")
 
+# The one the shot opens: it makes a workspace for each run and keeps three. The workspaces of
+# its three runs so far have been archived or deleted since, so none is there now and the demo
+# projects need no worktrees for it. It comes due on Sundays at three in the morning, and would
+# then make one in api-gateway and start an agent there.
+sunday = lambda day: day.weekday() == 6
+schedule("upkeep", "Weekly upkeep", "workflow", "software-factory", "api-gateway", "upkeep",
+         {"kind": "weekly", "days": ["sun"], "time": clock(3)}, after(sunday, 3),
+         inputs={"task": "Update the dependencies and fix what breaks", "agent": "claude",
+                 "suite": "readme"},
+         keep=3)
+for index, due in enumerate(before(sunday, 3, 3)):
+    line("upkeep", due, "failed" if index == 1 else "succeeded")
+
 # A `once` whose time came a quarter of an hour ago. Its run is the seeded one that waits for
 # approval, so the schedule reads "waiting for approval" and the sidebar row counts it.
 tried = now - timedelta(minutes=15)
@@ -1027,7 +1045,7 @@ line("branch", tried, None, run="demo-run-5", waiting=True)
 
 print("INSERT INTO schedules (id, name, target_kind, target_id, project_id, workspace_id, "
       "workspace_name, inputs, spec, missed, notify, enabled, next_at, created_by, created_at, "
-      "updated_at) VALUES\n  " + ",\n  ".join(schedules) + ";")
+      "updated_at, new_workspace, keep) VALUES\n  " + ",\n  ".join(schedules) + ";")
 print("INSERT INTO schedule_runs (id, schedule_id, due_at, fired_at, outcome, manual, run_id, "
       "note, result, notified_at, told_waiting) VALUES\n  " + ",\n  ".join(lines) + ";")
 EOF
