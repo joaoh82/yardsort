@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.33.0
 
 - **A workflow's page has two views: Runs and Definition.** **Runs** puts the run list, the
   picked run's steps and the step's detail side by side, so notes, answers and artifacts are read
