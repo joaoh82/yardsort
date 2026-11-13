@@ -1082,6 +1082,11 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
       ([30](30-open-source-and-managed.md)).
+      R6 planned on 2026-11-13 in [42](42-remote-r6.md): sync between an
+      account's hosts, a project at a time and only where the person turns it on or links it, in
+      five slices (the server's records; turning a project on and linking it; approved notes with
+      their conflicts; workspaces seen elsewhere; checking a branch out here). The owner took the
+      defaults for its four questions the same day.
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is
