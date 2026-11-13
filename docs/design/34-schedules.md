@@ -364,7 +364,7 @@ for, through the call a workflow's `notify` step already uses. macOS and Windows
 tests in CI only.
 
 The view's shot (`docs/images/schedules.png`) is taken on the same throwaway profile.
-`scripts/screenshots.sh seed` writes its five schedules and their history into the database, as
+`scripts/screenshots.sh seed` writes its six schedules and their history into the database, as
 it does the smoke test runs, with times worked out from the moment it is run. They are real
 rows, so an app left open fires them.
 
