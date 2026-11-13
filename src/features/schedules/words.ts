@@ -81,3 +81,13 @@ export function clockTime(at: number): string {
 export function targetWords(schedule: Pick<Schedule, "target" | "targetId">): string {
   return `${schedule.target === "test" ? "smoke test" : "workflow"} ${schedule.targetId}`;
 }
+
+/** Where a schedule runs, in words: `app / fix-login`, or `app / new workspace each run`. */
+export function placeWords(
+  schedule: Pick<Schedule, "newWorkspace" | "workspaceName">,
+  project: string,
+): string {
+  return schedule.newWorkspace
+    ? `${project} / new workspace each run`
+    : `${project} / ${schedule.workspaceName}`;
+}

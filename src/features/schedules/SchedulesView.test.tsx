@@ -86,6 +86,29 @@ describe("SchedulesView", () => {
     expect(rows[1]).toHaveTextContent("Last: waiting for approval");
   });
 
+  it("says of a schedule that makes its workspaces how many it keeps and which are there", async () => {
+    core.scheduleList.mockResolvedValue([
+      schedule("s9", {
+        name: "Nightly fix",
+        newWorkspace: true,
+        workspaceId: null,
+        workspaceName: "",
+        keep: 2,
+        made: ["ping", "ping-2"],
+      }),
+    ]);
+    await opened("Nightly fix");
+    const list = screen.getByRole("list", { name: "Schedules" });
+    expect(within(list).getByRole("button", { name: /Nightly fix/ })).toHaveTextContent(
+      "workflow ping · app / new workspace each run",
+    );
+    expect(screen.getByText(/It keeps 2, and 2 are there now: ping, ping-2\./)).toHaveTextContent(
+      "Yardsort removes none of them",
+    );
+    // It has no workspace of its own, and can still be run now.
+    expect(screen.getByRole("button", { name: "Run now" })).toBeEnabled();
+  });
+
   it("opens a schedule to its history, and a line to the run it started", async () => {
     core.scheduleRuns.mockResolvedValue([
       scheduleRun("l1", { scheduleId: "s2", runId: "run-7", result: "failed" }),

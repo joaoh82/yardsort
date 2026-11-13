@@ -369,7 +369,10 @@ pub struct Draft<'a> {
     pub name: Option<&'a str>,
     pub target: ScheduleTarget,
     pub target_id: &'a str,
+    /// Not read when `new_workspace` is given.
     pub workspace_id: &'a str,
+    /// Make a workspace for each run instead of running in `workspace_id`. Workflows only.
+    pub new_workspace: Option<EachRun<'a>>,
     /// As given, by input id. Checked against what the target asks for.
     pub inputs: &'a BTreeMap<String, String>,
     pub spec: &'a ScheduleSpec,
@@ -377,10 +380,40 @@ pub struct Draft<'a> {
     pub notify: ScheduleNotify,
 }
 
+/// A workspace made for each run of a schedule, in a project.
+#[derive(Debug, Clone, Copy)]
+pub struct EachRun<'a> {
+    pub project_id: &'a str,
+    /// The branch each one starts from. `None` is the repository's default branch.
+    pub base: Option<&'a str>,
+    /// What they are called. `None` names them after the workflow. A number is added when the
+    /// name is taken, so every run after the first gets one.
+    pub name: Option<&'a str>,
+    /// The most that may be there at once. `None` is [`KEEP_DEFAULT`].
+    pub keep: Option<u32>,
+}
+
+/// How many of its own workspaces a schedule keeps when it does not say.
+pub const KEEP_DEFAULT: u32 = 5;
+/// The most it can be told to keep.
+pub const KEEP_MOST: u32 = 50;
+
+/// Where a checked draft runs.
+enum Place {
+    In(WorkspaceRow),
+    New {
+        project_id: String,
+        base: Option<String>,
+        /// As it will be given to the door: empty for "after the workflow".
+        name: String,
+        keep: u32,
+    },
+}
+
 /// A draft that passed every check, ready to be written.
 struct Checked {
     name: String,
-    workspace: WorkspaceRow,
+    place: Place,
     inputs: String,
     spec: String,
     next_at: Option<i64>,
@@ -397,19 +430,16 @@ fn check_draft<Tz: TimeZone>(
     draft: &Draft<'_>,
     now: &DateTime<Tz>,
 ) -> IpcResult<Checked> {
-    let workspace = store
-        .workspace(draft.workspace_id)?
-        .filter(|w| !w.forgotten)
-        .ok_or_else(|| IpcError::new("workspace_not_found", "That workspace is not there."))?;
-    if workspace.archived {
-        return Err(IpcError::new(
-            "workspace_archived",
-            format!(
-                "`{}` is archived. Restore it before scheduling something in it.",
-                workspace.name
-            ),
-        ));
-    }
+    let place = match &draft.new_workspace {
+        Some(each) => new_place(store, each)?,
+        None => Place::In(workspace_of(store, draft.workspace_id)?),
+    };
+    // Where a smoke test is looked for before the run: the workspace, or the project's own
+    // checkout when the workspace is still to be made.
+    let stand_in = match &place {
+        Place::In(workspace) => Some(workspace.clone()),
+        Place::New { project_id, .. } => local_workspace(store, project_id)?,
+    };
     let target_name = match draft.target {
         ScheduleTarget::Workflow => {
             let entry = crate::workflow::find(data_dir, draft.target_id).ok_or_else(|| {
@@ -427,12 +457,26 @@ fn check_draft<Tz: TimeZone>(
             let harness = |wanted: &str| look.harness(wanted);
             crate::workflow::runs::check_inputs(workflow, draft.inputs, &harness)
                 .map_err(|why| IpcError::new("workflow_inputs", why))?;
-            if let Some(why) = workflow_needs_a_person(store, &workspace, workflow)? {
-                return Err(IpcError::new("schedule_needs_person", why));
+            if matches!(place, Place::New { .. }) {
+                if let Some(why) = crate::workflow::runs::refused_in_new_workspace(workflow) {
+                    return Err(why);
+                }
+            }
+            if let Some(workspace) = &stand_in {
+                if let Some(why) = workflow_needs_a_person(store, workspace, workflow)? {
+                    return Err(IpcError::new("schedule_needs_person", why));
+                }
             }
             workflow.name.clone()
         }
         ScheduleTarget::Test => {
+            let Place::In(workspace) = &place else {
+                return Err(IpcError::new(
+                    "schedule_target",
+                    "A smoke test runs in a workspace that is there. Pick one, or schedule a \
+                     workflow that runs the test.",
+                ));
+            };
             let worktree = Path::new(&workspace.path);
             let entry = crate::smoke::find(worktree, draft.target_id).ok_or_else(|| {
                 IpcError::new(
@@ -469,11 +513,70 @@ fn check_draft<Tz: TimeZone>(
         .unwrap_or(target_name);
     Ok(Checked {
         name,
-        workspace,
+        place,
         inputs: serde_json::to_string(draft.inputs).unwrap_or_else(|_| "{}".to_owned()),
         spec: draft.spec.to_json(),
         next_at,
     })
+}
+
+/// The workspace a schedule names, when it is there to run in.
+fn workspace_of(store: &Store, id: &str) -> IpcResult<WorkspaceRow> {
+    let workspace = store
+        .workspace(id)?
+        .filter(|w| !w.forgotten)
+        .ok_or_else(|| IpcError::new("workspace_not_found", "That workspace is not there."))?;
+    if workspace.archived {
+        return Err(IpcError::new(
+            "workspace_archived",
+            format!(
+                "`{}` is archived. Restore it before scheduling something in it.",
+                workspace.name
+            ),
+        ));
+    }
+    Ok(workspace)
+}
+
+/// What a schedule that makes its own workspaces was asked for, checked.
+fn new_place(store: &Store, each: &EachRun<'_>) -> IpcResult<Place> {
+    let project = store
+        .project(each.project_id)?
+        .ok_or_else(|| IpcError::new("project_not_found", "That project is not there."))?;
+    let given = each.name.map(str::trim).filter(|name| !name.is_empty());
+    if let Some(given) = given {
+        if crate::workspaces::naming::slugify_name(given).is_none() {
+            return Err(IpcError::new(
+                "invalid_name",
+                format!("`{given}` has nothing a branch can be named with. Use letters or digits."),
+            ));
+        }
+    }
+    let keep = each.keep.unwrap_or(KEEP_DEFAULT);
+    if !(1..=KEEP_MOST).contains(&keep) {
+        return Err(IpcError::new(
+            "schedule_keep",
+            format!("Keep from 1 to {KEEP_MOST} workspaces."),
+        ));
+    }
+    Ok(Place::New {
+        project_id: project.id,
+        base: each
+            .base
+            .map(str::trim)
+            .filter(|base| !base.is_empty())
+            .map(str::to_owned),
+        name: given.unwrap_or_default().to_owned(),
+        keep,
+    })
+}
+
+/// The project's own checkout, when it has one on show.
+pub(crate) fn local_workspace(store: &Store, project_id: &str) -> IpcResult<Option<WorkspaceRow>> {
+    Ok(store
+        .workspaces()?
+        .into_iter()
+        .find(|w| w.project_id == project_id && w.kind == "local"))
 }
 
 /// Why a smoke test cannot run with nobody there, when it cannot: it has a step a person does.
@@ -521,13 +624,31 @@ pub(crate) fn workflow_needs_a_person(
 }
 
 fn fields<'a>(draft: &'a Draft<'_>, checked: &'a Checked) -> ScheduleFields<'a> {
+    let (project_id, workspace_id, workspace_name, base_branch, keep) = match &checked.place {
+        Place::In(workspace) => (
+            &workspace.project_id,
+            Some(workspace.id.as_str()),
+            &workspace.name,
+            None,
+            i64::from(KEEP_DEFAULT),
+        ),
+        Place::New {
+            project_id,
+            base,
+            name,
+            keep,
+        } => (project_id, None, name, base.as_deref(), i64::from(*keep)),
+    };
     ScheduleFields {
         name: &checked.name,
         target_kind: draft.target.as_str(),
         target_id: draft.target_id,
-        project_id: &checked.workspace.project_id,
-        workspace_id: &checked.workspace.id,
-        workspace_name: &checked.workspace.name,
+        project_id,
+        workspace_id,
+        workspace_name,
+        new_workspace: matches!(checked.place, Place::New { .. }),
+        base_branch,
+        keep,
         inputs: &checked.inputs,
         spec: &checked.spec,
         missed: draft.missed.as_str(),
@@ -575,7 +696,7 @@ pub fn set_enabled<Tz: TimeZone>(
 ) -> IpcResult<ScheduleRow> {
     let schedule = store.schedule(id)?.ok_or_else(not_found)?;
     let next_at = if enabled {
-        if schedule.workspace_id.is_none() {
+        if schedule.workspace_id.is_none() && !schedule.new_workspace {
             return Err(IpcError::new(
                 "workspace_not_found",
                 format!(
@@ -661,7 +782,7 @@ pub fn standing(
     last: Option<&ScheduleRunRow>,
     going: Option<&ScheduleRunRow>,
 ) -> ScheduleStanding {
-    if schedule.workspace_id.is_none() {
+    if schedule.workspace_id.is_none() && !schedule.new_workspace {
         return ScheduleStanding::NoWorkspace;
     }
     // A run that is still going is said first: a `once` that has fired is not done with while

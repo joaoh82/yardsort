@@ -92,33 +92,81 @@ pub(crate) struct Fx {
     pub store: Store,
     pub project_id: String,
     pub workspace: WorkspaceRow,
+    env: crate::env::ShellEnv,
+    git: crate::git::Git,
+    settings: crate::settings::WorkspaceSettings,
+    worktrees: PathBuf,
 }
 
 impl Fx {
+    /// What makes workspaces: real git, into a folder of this fixture.
+    pub fn workspaces(&self) -> crate::workspaces::Workspaces<'_> {
+        crate::workspaces::Workspaces {
+            env: &self.env,
+            store: &self.store,
+            git: &self.git,
+            worktree_root: &self.worktrees,
+            settings: &self.settings,
+        }
+    }
+
+    /// The same, with the project a real repository, so a workspace can be made in it.
+    /// `workspace` is still the made-up worktree `fix`; the project's own checkout is `local`.
+    pub fn with_repository() -> Self {
+        Self::build(true)
+    }
+
     pub fn new() -> Self {
+        Self::build(false)
+    }
+
+    fn build(repository: bool) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let data_dir = dir.path().join("data");
         let database = data_dir.join("yardsort.db");
         let store = Store::open(&database).unwrap();
-        let project = store
-            .add_project("app", &dir.path().join("code").to_string_lossy())
-            .unwrap();
+        let git = crate::git::testing::git();
+        let code = dir.path().join("code");
+        let project_id = if repository {
+            std::fs::create_dir_all(&code).unwrap();
+            crate::projects::Projects {
+                store: &store,
+                git: &git,
+            }
+            .create("app", &crate::git::normalize(&code))
+            .unwrap()
+            .project
+            .id
+        } else {
+            store
+                .add_project("app", &code.to_string_lossy())
+                .unwrap()
+                .id
+        };
         let worktree = dir.path().join("wt");
         std::fs::create_dir_all(crate::smoke::dir(&worktree)).unwrap();
         std::fs::write(crate::smoke::dir(&worktree).join("demo.yaml"), DEMO).unwrap();
         let workspace = store
-            .add_worktree(&project.id, "fix", &worktree.to_string_lossy(), None, None)
+            .add_worktree(&project_id, "fix", &worktree.to_string_lossy(), None, None)
             .unwrap();
         let folder = crate::workflow::user_dir(&data_dir);
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(folder.join("ping.yaml"), PING).unwrap();
         Self {
-            _dir: dir,
             data_dir,
             database,
             store,
-            project_id: project.id,
+            project_id,
             workspace,
+            env: crate::env::ShellEnv {
+                vars: std::env::vars().collect(),
+                source: crate::env::EnvSource::Process,
+                warning: None,
+            },
+            git,
+            settings: crate::settings::WorkspaceSettings::default(),
+            worktrees: crate::git::normalize(&dir.path().join("made")),
+            _dir: dir,
         }
     }
 
@@ -178,6 +226,7 @@ impl Fx {
                 target,
                 target_id,
                 workspace_id: &self.workspace.id,
+                new_workspace: None,
                 inputs: &BTreeMap::new(),
                 spec,
                 missed,
@@ -245,6 +294,7 @@ fn a_schedule_is_refused_for_what_its_run_would_be_refused_for() {
         target,
         target_id,
         workspace_id,
+        new_workspace: None,
         inputs: &inputs,
         spec: &ScheduleSpec::Every { minutes: 30 },
         missed: IfMissed::Skip,
@@ -586,6 +636,7 @@ fn changing_a_schedule_works_its_next_time_out_again() {
             target: ScheduleTarget::Workflow,
             target_id: "ping",
             workspace_id: &fx.workspace.id,
+            new_workspace: None,
             inputs: &inputs,
             spec: &ScheduleSpec::Daily { time: time(18, 0) },
             missed: IfMissed::Skip,
@@ -610,6 +661,7 @@ fn changing_a_schedule_works_its_next_time_out_again() {
             target: ScheduleTarget::Workflow,
             target_id: "ping",
             workspace_id: &fx.workspace.id,
+            new_workspace: None,
             inputs: &BTreeMap::new(),
             spec: &daily(),
             missed: IfMissed::default(),
@@ -660,6 +712,7 @@ fn where_a_schedule_stands_follows_its_newest_time() {
         &fx.store,
         &fx.data_dir,
         &Accepting::default(),
+        &fx.workspaces(),
         &nov(6, 9, 0),
     )
     .unwrap();
@@ -684,6 +737,7 @@ fn where_a_schedule_stands_follows_its_newest_time() {
         &fx.store,
         &fx.data_dir,
         &Accepting::default(),
+        &fx.workspaces(),
         &nov(7, 9, 0),
     )
     .unwrap();
@@ -708,6 +762,7 @@ fn a_once_that_has_fired_is_done() {
         &fx.store,
         &fx.data_dir,
         &Accepting::default(),
+        &fx.workspaces(),
         &nov(5, 18, 0),
     )
     .unwrap();
@@ -743,6 +798,7 @@ fn a_once_that_was_missed_or_refused_does_not_say_it_is_done() {
         &fx.store,
         &fx.data_dir,
         &Accepting::default(),
+        &fx.workspaces(),
         &nov(6, 8, 0),
     )
     .unwrap();
@@ -761,6 +817,7 @@ fn a_once_that_was_missed_or_refused_does_not_say_it_is_done() {
         &fx.store,
         &fx.data_dir,
         &Accepting::default(),
+        &fx.workspaces(),
         &nov(5, 18, 0),
     )
     .unwrap();

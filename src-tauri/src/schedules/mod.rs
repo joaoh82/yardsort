@@ -103,7 +103,7 @@ fn look(handle: &AppHandle, woken: &Receiver<()>) {
             }
         }
 
-        match fire::tick(&state.store, &state.data_dir, &AppLook(&state), &now) {
+        match tick(&state, &now) {
             Ok(fired) => {
                 changed |= !fired.is_empty();
                 for notice in fired.iter().filter_map(|fired| fired.notice.as_ref()) {
@@ -138,6 +138,28 @@ fn look(handle: &AppHandle, woken: &Receiver<()>) {
             let _ = SchedulesChanged {}.emit(handle);
         }
     }
+}
+
+/// Act on what is due, with what a schedule needs to make a workspace: git, the worktree
+/// root and the workspace settings as they are now.
+fn tick(state: &AppState, now: &clock::Now) -> crate::error::IpcResult<Vec<fire::Fired>> {
+    let env = state.env();
+    let git = crate::git::Git::new(&env)?;
+    let root = state.worktree_root()?;
+    let settings = state.settings.get();
+    fire::tick(
+        &state.store,
+        &state.data_dir,
+        &AppLook(state),
+        &yardsort_core::workspaces::Workspaces {
+            env: &env,
+            store: &state.store,
+            git: &git,
+            worktree_root: &root,
+            settings: &settings.workspaces,
+        },
+        now,
+    )
 }
 
 /// Show a desktop notification about a schedule.

@@ -3,8 +3,10 @@
 A schedule starts a [workflow](workflows.md) or a [smoke test](smoke-tests.md) without you
 pressing **Run**: once, at a time you pick, or again and again — every weekday at nine, every two
 hours, the first of the month. A repeating schedule is what you might call a routine. It runs in
-a workspace you already have, with the inputs you gave it, and what it starts is an ordinary run:
-it shows in the workflow's runs or in **Tests** like any other, marked as scheduled.
+a workspace you already have, or, for a workflow, in a
+[new workspace made for each run](#a-new-workspace-for-each-run), with the inputs you gave it.
+What it starts is an ordinary run: it shows in the workflow's runs or in **Tests** like any
+other, marked as scheduled.
 
 Three things to know before you make one:
 
@@ -26,21 +28,60 @@ filled in.
 
 The dialog asks, in order:
 
-| Field               | What it is                                                                         |
-| ------------------- | ---------------------------------------------------------------------------------- |
-| Run                 | A workflow or a smoke test                                                         |
-| In workspace        | Where to run it: any workspace that is not archived, a project's `local` included  |
-| Workflow or test    | Which one. Tests are the ones in the chosen workspace's `.yardsort/tests`          |
-| Its inputs          | The same questions **Run…** asks, starting from their defaults                     |
-| When                | See [When](#when). The next few times are shown as you fill it in                  |
-| If a time is missed | **Run once when Yardsort next opens** (the default) or **Skip it**                 |
-| Tell me             | **When a run fails** (the default), **How every run ends**, or **Never**           |
-| Name                | What the list calls it. Left empty, it takes the workflow's or the test's own name |
+| Field               | What it is                                                                                                                                            |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Run                 | A workflow or a smoke test                                                                                                                            |
+| In workspace        | Where to run it: any workspace that is not archived, a project's `local` included. For a workflow, also **new workspace each run** under each project |
+| Workflow or test    | Which one. Tests are the ones in the chosen workspace's `.yardsort/tests`                                                                             |
+| Its inputs          | The same questions **Run…** asks, starting from their defaults                                                                                        |
+| When                | See [When](#when). The next few times are shown as you fill it in                                                                                     |
+| If a time is missed | **Run once when Yardsort next opens** (the default) or **Skip it**                                                                                    |
+| Tell me             | **When a run fails** (the default), **How every run ends**, or **Never**                                                                              |
+| Name                | What the list calls it. Left empty, it takes the workflow's or the test's own name                                                                    |
 
 Saving checks everything a run would be refused for — the workspace is there and not archived,
 the workflow or the test is there and ready, every required input is given — so a mistake is
 told to you now rather than at three in the morning. All of it is checked again each time the
 schedule fires, since any of it can change in between.
+
+### A new workspace for each run
+
+A workflow that does a piece of work of its own, such as **Software factory**, wants somewhere
+of its own to do it. Choose **new workspace each run** under a project in **In workspace**, and
+each time the schedule fires it makes a new branch and its worktree, as
+[starting a run from a project](workflows.md#in-a-new-workspace) does, and runs there. Three
+more fields appear:
+
+| Field          | What it is                                                                                                                                                                            |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workspace name | What the workspaces are called. Left empty, they are named after the workflow's id. A number is added when the name is taken, so the runs work in `nightly`, `nightly-2`, `nightly-3` |
+| Start from     | The branch each one is made from. **Default branch** follows the repository's default                                                                                                 |
+| Keep           | The most of this schedule's workspaces that may be there at once, from 1 to 50. It starts at 5                                                                                        |
+
+**Yardsort never removes a workspace a schedule made.** Each one holds a branch, and maybe work
+nobody has looked at yet. So that they do not pile up without end, the schedule counts the ones
+it made that are still there, and at **Keep** it stops: that time is **refused**, the history
+names the workspaces in the way, and you are told once. Archive or delete one, from its menu in
+the sidebar as for any workspace, and the next time goes ahead. Archived and deleted ones are
+not counted. The schedule's details say how many it keeps and which are there now.
+
+What is different from a schedule in a workspace that is there:
+
+- **Only a workflow.** A smoke test is a file in a workspace, so it needs one that is there.
+- **A workflow that needs an open pull request when it starts cannot be scheduled this way**,
+  because a branch made now has none. **Request code review** is one. Saving says so.
+- **A time is not skipped because the last run is still going.** Each run is in its own
+  workspace, so they do not get in each other's way. **Keep** is what bounds them.
+- **`{{ workspace.task }}` is empty**, and a step for `session: origin` is skipped, as in any
+  [run in a new workspace](workflows.md#in-a-new-workspace).
+- **If the project's setup command fails**, the workspace is kept, no run is started, and the
+  time is **refused** with where the workspace is. That workspace counts towards **Keep**, so a
+  setup that fails every night stops at **Keep** workspaces too.
+- **A smoke test the workflow runs** is looked for in the project's own checkout when the
+  schedule is saved and each time it fires, since the new workspace is not there yet.
+
+Making a workspace runs the project's setup, which can take a while. Other schedules wait for
+it: a time that comes due meanwhile is acted on when it is done.
 
 A schedule runs one thing in one workspace. To run two things, make two schedules, or a workflow
 with two steps. A workflow that runs a smoke test with its `run_test` step is scheduled like any
@@ -125,12 +166,15 @@ A row opens to the schedule's details, with:
 
 A schedule never starts a second run of the same thing in the same workspace while the first is
 going. A schedule that fires every ten minutes with a run that takes twenty skips every other
-time; nothing piles up.
+time; nothing piles up. One that makes a
+[new workspace for each run](#a-new-workspace-for-each-run) is bounded by how many it keeps
+instead.
 
 **Refused** is whatever a run would be refused for at that moment: the workspace is archived,
 the workflow or the test file is gone or no longer valid, an input no longer fits, a test's
 `browser` step has no browser, a value it reads from the project's test environment is not set,
-a smoke test the workflow runs would wait for you. A workflow that works with the workspace's
+a smoke test the workflow runs would wait for you, as many of the workspaces it made are still
+there as it keeps. A workflow that works with the workspace's
 pull request asks GitHub for it first, and is refused when `gh` has not answered in 20 seconds.
 The schedule stays on and tries again at its next time, so fixing the cause is all it takes.
 
@@ -204,6 +248,7 @@ ys schedule add --test login --workspace local --weekly mon-fri 09:00
 ys schedule add --workflow code-review --workspace fix-login --input reviewer=codex --daily 18:30
 ys schedule add --test login --at "2026-11-06 18:00"
 ys schedule add --workflow nightly --cron "0 3 * * *" --if-missed skip --notify always
+ys schedule add --workflow fix-tests --project app --keep 3 --daily 02:00 --input fixer=claude
 ys schedule show Nightly
 ys schedule pause Nightly
 ys schedule resume Nightly
@@ -220,7 +265,7 @@ already approved.
 ## What it does not do
 
 - **Run while Yardsort is closed.** A missed time is handled, not prevented.
-- **Make a fresh worktree for each run.** It runs in the workspace you chose, on whatever is
-  checked out there.
+- **Clean up after itself.** A schedule that makes a workspace for each run never archives or
+  deletes one. It stops at the number it keeps and waits for you.
 - **React to things that happen.** A schedule knows only the clock; a [trigger](triggers.md)
   starts a run when an agent says it is done, a test fails, or a run ends.

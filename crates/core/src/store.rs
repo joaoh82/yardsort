@@ -50,6 +50,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0038_remote_grant_kind.sql"),
     include_str!("../migrations/0039_agent_notices.sql"),
     include_str!("../migrations/0040_workflow_run_pull_requests.sql"),
+    include_str!("../migrations/0041_schedule_new_workspace.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -6587,9 +6588,10 @@ steps:
             let mut conn = Connection::open(&path).unwrap();
             assert!(MIGRATIONS[30].contains("CREATE TABLE workflow_approval_decisions"));
             // 0037 adds nullable device columns and an empty actions table, 0039 two
-            // nullable columns to the notice outbox, and 0040 an empty table of the pull
-            // requests runs made.
-            assert_eq!(MIGRATIONS.len(), 40);
+            // nullable columns to the notice outbox, 0040 an empty table of the pull
+            // requests runs made, and 0041 three columns with defaults to schedules and an
+            // empty table of the workspaces schedules made.
+            assert_eq!(MIGRATIONS.len(), 41);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -6657,9 +6659,10 @@ steps:
             assert!(MIGRATIONS[31].contains("CREATE TABLE workflow_waits"));
             assert!(MIGRATIONS[31].contains("code_rounds"));
             // 0037 adds nullable device columns and an empty actions table, 0039 two
-            // nullable columns to the notice outbox, and 0040 an empty table of the pull
-            // requests runs made.
-            assert_eq!(MIGRATIONS.len(), 40);
+            // nullable columns to the notice outbox, 0040 an empty table of the pull
+            // requests runs made, and 0041 three columns with defaults to schedules and an
+            // empty table of the workspaces schedules made.
+            assert_eq!(MIGRATIONS.len(), 41);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs

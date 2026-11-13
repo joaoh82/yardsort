@@ -2096,6 +2096,17 @@ export type NewWorkspace = {
 	presets: PresetPick[],
 };
 
+/**  A workspace made for each run of a schedule. */
+export type NewWorkspaceEachRun = {
+	projectId: string,
+	/**  `None` or empty: the repository's default branch. */
+	baseBranch: string | null,
+	/**  `None` or empty: named after the workflow. */
+	name: string | null,
+	/**  `None`: five. */
+	keep: number | null,
+};
+
 /**  One tool call that was executing when the file was last written. */
 export type ObservedMatch = {
 	runId: string,
@@ -3038,6 +3049,17 @@ export type Schedule = {
 	/**  `None` once the workspace is deleted; `workspace_name` keeps what it was called. */
 	workspaceId: string | null,
 	workspaceName: string,
+	/**
+	 *  It makes a workspace in the project for each run. `workspace_id` is then `None`, and
+	 *  `workspace_name` is what they are called: empty names them after the workflow.
+	 */
+	newWorkspace: boolean,
+	/**  The branch each new workspace starts from; `None` is the default branch. */
+	baseBranch: string | null,
+	/**  The most of its own workspaces that may be there at once. */
+	keep: number,
+	/**  The workspaces it made that are still there, oldest first. */
+	made: string[],
 	inputs: { [key in string]: string },
 	/**  `None` for a spec this Yardsort cannot read. */
 	spec: ScheduleSpec | null,
@@ -3060,7 +3082,10 @@ export type ScheduleDraft = {
 	name: string | null,
 	target: ScheduleTarget,
 	targetId: string,
+	/**  Not read when `new_workspace` is given. */
 	workspaceId: string,
+	/**  Make a workspace for each run, in this project. Workflows only. */
+	newWorkspace: NewWorkspaceEachRun | null,
 	inputs: { [key in string]: string },
 	spec: ScheduleSpec,
 	missed: IfMissed,

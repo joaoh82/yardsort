@@ -35,6 +35,15 @@ pub struct Schedule {
     /// `None` once the workspace is deleted; `workspace_name` keeps what it was called.
     pub workspace_id: Option<String>,
     pub workspace_name: String,
+    /// It makes a workspace in the project for each run. `workspace_id` is then `None`, and
+    /// `workspace_name` is what they are called: empty names them after the workflow.
+    pub new_workspace: bool,
+    /// The branch each new workspace starts from; `None` is the default branch.
+    pub base_branch: Option<String>,
+    /// The most of its own workspaces that may be there at once.
+    pub keep: u32,
+    /// The workspaces it made that are still there, oldest first.
+    pub made: Vec<String>,
     pub inputs: BTreeMap<String, String>,
     /// `None` for a spec this Yardsort cannot read.
     pub spec: Option<ScheduleSpec>,
@@ -79,7 +88,10 @@ pub struct ScheduleDraft {
     pub name: Option<String>,
     pub target: ScheduleTarget,
     pub target_id: String,
+    /// Not read when `new_workspace` is given.
     pub workspace_id: String,
+    /// Make a workspace for each run, in this project. Workflows only.
+    pub new_workspace: Option<NewWorkspaceEachRun>,
     pub inputs: BTreeMap<String, String>,
     pub spec: ScheduleSpec,
     pub missed: IfMissed,
@@ -87,6 +99,19 @@ pub struct ScheduleDraft {
     /// For a test: the file's hash when the dialog showed it. Saving approves that file, and
     /// only that file.
     pub content_hash: Option<String>,
+}
+
+/// A workspace made for each run of a schedule.
+#[derive(Debug, Clone, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NewWorkspaceEachRun {
+    pub project_id: String,
+    /// `None` or empty: the repository's default branch.
+    pub base_branch: Option<String>,
+    /// `None` or empty: named after the workflow.
+    pub name: Option<String>,
+    /// `None`: five.
+    pub keep: Option<u32>,
 }
 
 /// What a spec comes to, for the dialog as it is filled in.
@@ -125,13 +150,23 @@ fn run_item(row: ScheduleRunRow) -> ScheduleRun {
 }
 
 fn item(
+    store: &Store,
     row: ScheduleRow,
     last: Option<ScheduleRunRow>,
     going: Option<&ScheduleRunRow>,
-) -> Schedule {
+) -> IpcResult<Schedule> {
     let spec = ScheduleSpec::parse(&row.spec);
-    Schedule {
+    let made = if row.new_workspace {
+        store.schedule_workspaces(&row.id)?
+    } else {
+        Vec::new()
+    };
+    Ok(Schedule {
+        made,
+        new_workspace: row.new_workspace,
+        keep: u32::try_from(row.keep).unwrap_or(schedule::KEEP_DEFAULT),
         standing: schedule::standing(&row, last.as_ref(), going),
+        base_branch: row.base_branch,
         when: spec
             .as_ref()
             .map(|spec| schedule::describe(spec, &clock::now().timezone()))
@@ -151,7 +186,7 @@ fn item(
         next_at: row.next_at.map(|at| at as f64),
         last: last.map(run_item),
         created_at: row.created_at as f64,
-    }
+    })
 }
 
 /// One schedule with the newest line of its history, and where the run it started stands.
@@ -159,7 +194,7 @@ fn one(store: &Store, row: ScheduleRow) -> IpcResult<Schedule> {
     let last = store.schedule_runs(&row.id, 1)?.into_iter().next();
     let going = schedule::going_runs(store)?;
     let going = going.get(&row.id);
-    Ok(item(row, last, going))
+    item(store, row, last, going)
 }
 
 /// Tell the window schedules changed, and have the thread look now: one may be due at once.
@@ -182,16 +217,16 @@ pub async fn schedule_list(app: AppHandle) -> IpcResult<Vec<Schedule>> {
             .map(|run| (run.schedule_id.clone(), run))
             .collect();
         let going = schedule::going_runs(&state.store)?;
-        Ok(state
+        state
             .store
             .schedules()?
             .into_iter()
             .map(|row| {
                 let last = latest.remove(&row.id);
                 let going = going.get(&row.id);
-                item(row, last, going)
+                item(&state.store, row, last, going)
             })
-            .collect())
+            .collect()
     })
     .await
 }
@@ -268,6 +303,12 @@ pub async fn schedule_save(app: AppHandle, draft: ScheduleDraft) -> IpcResult<Sc
             target: draft.target,
             target_id: &draft.target_id,
             workspace_id: &draft.workspace_id,
+            new_workspace: draft.new_workspace.as_ref().map(|each| schedule::EachRun {
+                project_id: &each.project_id,
+                base: each.base_branch.as_deref(),
+                name: each.name.as_deref(),
+                keep: each.keep,
+            }),
             inputs: &draft.inputs,
             spec: &draft.spec,
             missed: draft.missed,
@@ -337,10 +378,21 @@ pub async fn schedule_remove(app: AppHandle, schedule_id: String) -> IpcResult<(
 pub async fn schedule_run_now(app: AppHandle, schedule_id: String) -> IpcResult<ScheduleRun> {
     let started = blocking(app.clone(), move |state| {
         let now = clock::now().timestamp_millis();
+        let env = state.env();
+        let git = crate::git::Git::new(&env)?;
+        let root = state.worktree_root()?;
+        let settings = state.settings.get();
         let fired = fire::run_now(
             &state.store,
             &state.data_dir,
             &AppLook(state),
+            &yardsort_core::workspaces::Workspaces {
+                env: &env,
+                store: &state.store,
+                git: &git,
+                worktree_root: &root,
+                settings: &settings.workspaces,
+            },
             &schedule_id,
             now,
         )?;

@@ -3554,6 +3554,96 @@ fn a_run_says_what_it_will_find_nothing_for_before_it_goes() {
 /// `--project` in place of `--workspace`: the run gets a workspace of its own, a real branch
 /// and worktree, and a refusal makes neither.
 #[test]
+fn a_schedule_added_for_a_project_makes_a_workspace_each_time_it_runs() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    write_workflow(&fx, "pr-note.yaml", PR_NOTE);
+    let project = fx.project_name.clone();
+    let worktrees = || -> Vec<String> {
+        let listed = fx.ys(&["workspace", "list", "--json"]).ok();
+        serde_json::from_str::<Vec<serde_json::Value>>(&listed)
+            .unwrap()
+            .iter()
+            .filter(|w| w["kind"] == "worktree")
+            .map(|w| w["name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let before = worktrees();
+    let add = |more: &[&str]| {
+        let mut args = vec!["schedule", "add", "--project", &project, "--every", "1d"];
+        args.extend_from_slice(more);
+        fx.ys(&args)
+    };
+
+    // What could never start in a workspace made for it is refused when it is added.
+    let refused = add(&["--workflow", "pr-note"]).failed();
+    assert!(
+        refused.contains("A new workspace has no pull request"),
+        "{refused}"
+    );
+    let none = add(&["--workflow", "ping", "--keep", "0"]).failed();
+    assert!(none.contains("Keep from 1 to 50"), "{none}");
+    // A smoke test runs where its file is, and the two places are one choice: usage errors.
+    let test = add(&["--test", "demo"]);
+    assert_eq!(test.code, Some(2), "{}", test.stderr);
+    let both = add(&["--workflow", "ping", "--workspace", "local"]);
+    assert_eq!(both.code, Some(2), "{}", both.stderr);
+    let alone = fx.ys(&[
+        "schedule",
+        "add",
+        "--workflow",
+        "ping",
+        "--every",
+        "1d",
+        "--keep",
+        "2",
+    ]);
+    assert_eq!(alone.code, Some(2), "{}", alone.stderr);
+    assert!(alone.stderr.contains("--project"), "{}", alone.stderr);
+
+    let added = add(&[
+        "--workflow",
+        "ping",
+        "--keep",
+        "1",
+        "--workspace-name",
+        "Nightly ping",
+        "--name",
+        "nightly",
+    ])
+    .ok();
+    assert!(added.contains("a new workspace in"), "{added}");
+    assert!(added.contains("keeps 1"), "{added}");
+    assert_eq!(worktrees(), before, "adding a schedule makes nothing");
+
+    let shown: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["schedule", "show", "nightly", "--json"]).ok()).unwrap();
+    assert_eq!(shown["newWorkspace"], true);
+    assert_eq!(shown["keep"], 1);
+    assert_eq!(shown["workspaceName"], "Nightly ping");
+    assert!(shown["workspaceId"].is_null());
+
+    // Run now makes the workspace and queues the run in it.
+    let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .unwrap();
+    fx.ys(&["schedule", "run", "nightly"]).ok();
+    let mut after = worktrees();
+    after.retain(|name| !before.contains(name));
+    assert_eq!(after, ["nightly-ping"]);
+
+    // It keeps one, and that one is still there: a second is refused, and nothing is removed.
+    let full = fx.ys(&["schedule", "run", "nightly"]).failed();
+    assert!(full.contains("`nightly-ping`"), "{full}");
+    assert!(full.contains("Archive or delete one"), "{full}");
+    let mut still = worktrees();
+    still.retain(|name| !before.contains(name));
+    assert_eq!(still, ["nightly-ping"]);
+    let listed = fx.ys(&["schedule", "show", "nightly"]).ok();
+    assert!(listed.contains("Still there: nightly-ping"), "{listed}");
+}
+
+#[test]
 fn a_run_asked_for_from_a_project_makes_its_own_workspace() {
     let fx = Fixture::new();
     write_workflow(&fx, "ping.yaml", PING);

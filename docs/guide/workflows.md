@@ -319,7 +319,8 @@ step when the run reaches it.
 If the project's setup command fails, the workspace is kept, as it is when the composer makes
 one, and no run is queued. The message says where the workspace is. A workflow about a pull
 request elsewhere is started from that pull request, never in a new workspace.
-[Schedules](schedules.md) and [triggers](triggers.md) still name a workspace that is there.
+A [schedule](schedules.md#a-new-workspace-for-each-run) can make a workspace for each of its
+runs the same way. [Triggers](triggers.md) still name a workspace that is there.
 
 ### Following a run
 

@@ -135,7 +135,7 @@ Yardsort is free software under GPL-3.0. Your coding agents' subscriptions or AP
 
 ### Can I schedule checks after migrating?
 
-Yes, in the current release. A schedule can start a workflow or a smoke test in a workspace you already have, while Yardsort is open. A time missed while it is closed can run once when Yardsort next opens, or be skipped, depending on that schedule. Saving a smoke-test schedule in the app shows the file's steps and approves that version. A later change to the file still waits for approval. A schedule does not run an unapproved test by itself, and it does not create a fresh worktree for each run. See [Schedules](schedules.md).
+Yes, in the current release. A schedule can start a workflow or a smoke test in a workspace you already have, while Yardsort is open. A workflow's schedule can instead make a new workspace for each run. A time missed while it is closed can run once when Yardsort next opens, or be skipped, depending on that schedule. Saving a smoke-test schedule in the app shows the file's steps and approves that version. A later change to the file still waits for approval. A schedule does not run an unapproved test by itself, and it never removes a workspace it made: it keeps up to a number you set and then waits for you. See [Schedules](schedules.md).
 
 ## Install Yardsort and try one workspace
 
