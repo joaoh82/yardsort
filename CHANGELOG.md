@@ -3,6 +3,15 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **A workflow's page has two views: Runs and Definition.** **Runs** puts the run list, the
+  picked run's steps and the step's detail side by side, so notes, answers and artifacts are read
+  at the width of the window instead of in a narrow column. **Continue from the failed step** sits
+  right under the run's error, a run opens on the step that needs you or the one that failed, and
+  a long run folds its succeeded steps into one row. **Definition** puts the chart beside the file
+  instead of above it. See [Workflows](docs/guide/workflows.md#the-workflows-list).
+
 ## 0.32.0
 
 - **Continue a failed workflow run from the step that failed.** A run that failed part of the

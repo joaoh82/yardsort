@@ -401,7 +401,10 @@ describe("WorkflowView", () => {
     await userEvent.setup().click(row);
     expect(await within(runs).findByText("no way")).toHaveClass("whitespace-pre-wrap");
     expect(within(runs).getByText("Step `tell` failed: no way")).toHaveClass("whitespace-pre-wrap");
-    expect(within(runs).getByText("Notify you")).toBeInTheDocument();
+    // The failed run opens on the step that failed, beside the list of its steps.
+    const rail = within(runs).getByRole("list", { name: "Steps of this run" });
+    expect(within(rail).getByText("Notify you")).toBeInTheDocument();
+    expect(within(runs).getByRole("region", { name: "Step tell" })).toBeInTheDocument();
     expect(within(runs).getByText("Artifact spec")).toBeInTheDocument();
     expect(within(runs).getByText("Be kind.")).toBeInTheDocument();
     expect(within(runs).getByText("Scheduled · Nightly")).toBeInTheDocument();
@@ -436,6 +439,13 @@ describe("WorkflowView", () => {
     const user = userEvent.setup();
     await user.click(await within(runs).findByRole("button", { name: "Run in fix-login, failed" }));
     expect(within(runs).queryByRole("button", { name: "Cancel run" })).not.toBeInTheDocument();
+    // It sits right under the error, ahead of the steps, which can run long.
+    const carry = within(runs).getByRole("button", { name: "Continue from the failed step" });
+    const failure = within(runs).getByText(
+      "Step `verify` failed: The test run did not end within 30m.",
+      { selector: "p" },
+    );
+    expect(failure.nextElementSibling).toBe(carry);
 
     // The app answers with the run going again, and the window shows what it is told.
     core.workflowRuns.mockResolvedValue([{ ...run, status: "running", error: null }]);
@@ -448,6 +458,93 @@ describe("WorkflowView", () => {
       within(runs).queryByRole("button", { name: "Continue from the failed step" }),
     ).not.toBeInTheDocument();
     expect(within(runs).getByRole("button", { name: "Cancel run" })).toBeInTheDocument();
+  });
+
+  it("opens on Definition unless the newest run needs looking at, and switches views", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    const run = {
+      id: "run-1",
+      workflowId: "demo",
+      workflowName: "Demo",
+      workspaceId: "w",
+      workspaceName: "fix-login",
+      status: "succeeded",
+      requestedBy: "app",
+      error: null,
+      inputs: { task: "Fix the login" },
+      pullRequest: null,
+      createdAt: Date.now(),
+      startedAt: null,
+      endedAt: null,
+    };
+    core.workflowRuns.mockResolvedValue([run]);
+    core.workflowRunSteps.mockResolvedValue([]);
+    render(<WorkflowView workflowId="demo" />);
+    const views = screen.getByRole("group", { name: "View" });
+    await waitFor(() =>
+      expect(within(views).getByRole("button", { name: "Definition" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    expect(screen.queryByRole("region", { name: "Runs" })).toBeNull();
+    expect(await screen.findByLabelText("Workflow file")).toBeInTheDocument();
+    expect(screen.getByText("Show how the run in fix-login went")).toBeInTheDocument();
+
+    await userEvent.setup().click(within(views).getByRole("button", { name: "Runs" }));
+    const runs = screen.getByRole("region", { name: "Runs" });
+    // The newest run is on screen without picking it, open on its summary.
+    const summary = within(runs).getByRole("region", { name: "Run summary" });
+    expect(within(summary).getByText("Fix the login")).toBeInTheDocument();
+    expect(within(summary).getByText("run-1")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Workflow file")).toBeNull();
+  });
+
+  it("folds a long run's succeeded steps until asked to show them", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    core.workflowRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "demo",
+        workflowName: "Demo",
+        workspaceId: "w",
+        workspaceName: "fix-login",
+        status: "failed",
+        requestedBy: "cli",
+        error: "Step `verify` failed: it did not end.",
+        inputs: {},
+        pullRequest: null,
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+      },
+    ]);
+    const step = (stepId: string, status: string) => ({
+      stepId,
+      action: "notify",
+      status,
+      startedAt: null,
+      endedAt: null,
+      outputs: {},
+      note: null,
+      outcome: null,
+      artifacts: [],
+      consumed: [],
+    });
+    core.workflowRunSteps.mockResolvedValue([
+      ...["one", "two", "three", "four", "five"].map((id) => step(id, "succeeded")),
+      step("verify", "failed"),
+      step("after", "skipped"),
+    ]);
+    render(<WorkflowView workflowId="demo" />);
+    const runs = await screen.findByRole("region", { name: "Runs" });
+    const rail = within(runs).getByRole("list", { name: "Steps of this run" });
+    const fold = await within(rail).findByRole("button", { name: /5 steps succeeded/ });
+    expect(within(rail).queryByText("one")).toBeNull();
+    expect(within(rail).getByText("verify")).toBeInTheDocument();
+    await userEvent.setup().click(fold);
+    expect(within(rail).getByText("one")).toBeInTheDocument();
+    expect(within(rail).queryByRole("button", { name: /steps succeeded/ })).toBeNull();
   });
 
   it("says why a failed run could not continue", async () => {
@@ -543,6 +640,10 @@ describe("WorkflowView", () => {
     useWorkflowStore.getState().showRun("demo", "run-1");
     render(<WorkflowView workflowId="demo" />);
     const runs = await screen.findByRole("region", { name: "Runs" });
+    // A run that went well opens on its summary; its steps are a click away.
+    expect(await within(runs).findByRole("region", { name: "Run summary" })).toBeInTheDocument();
+    const rail = within(runs).getByRole("list", { name: "Steps of this run" });
+    await userEvent.setup().click(await within(rail).findByRole("button", { name: /Notify you/ }));
     expect(await within(runs).findByText("told it")).toBeInTheDocument();
     expect(core.workflowRunSteps).toHaveBeenCalledWith("run-1");
     // Taken: the view opened from the sidebar next time starts with no run picked.

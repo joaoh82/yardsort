@@ -8,7 +8,7 @@ import { useModalFocus } from "@/lib/useModalFocus";
 export type Decision = "approved" | "rejected" | "changes_requested";
 
 /** A current that reads as Markdown: a `.md` file, or text that opens a heading somewhere. */
-function looksLikeMarkdown(artifact: WorkflowArtifact): boolean {
+export function looksLikeMarkdown(artifact: WorkflowArtifact): boolean {
   return /\.(md|markdown)$/i.test(artifact.detail ?? "") || /^#{1,6}\s/m.test(artifact.body);
 }
 
