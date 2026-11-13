@@ -145,9 +145,79 @@ Needs a paid Apple Developer account. Set these repository secrets
 | `APPLE_PASSWORD`             | An **app-specific password** for that Apple ID, from [account.apple.com](https://account.apple.com) → _Sign-In and Security_                  |
 | `APPLE_TEAM_ID`              | The ten-character team id, from the developer portal's _Membership_ page                                                                      |
 
-Creating the certificate: in Xcode → _Settings → Accounts → Manage Certificates → + → Developer ID
-Application_; or in the developer portal under _Certificates_. Then export it from Keychain Access
-(select the certificate **with its private key** → _Export_).
+### The account that signs
+
+Releases are signed and notarized by one Apple Developer team. The secrets above decide which, and
+no code or workflow file names it.
+
+| Releases       | Team                                                         | Certificate                                                                    |
+| -------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| 0.31.0 onwards | `8935C3P62X`, Joao Henrique Machado Silva (individual)       | `Developer ID Application: Joao Henrique Machado Silva (8935C3P62X)`           |
+| Up to 0.30.0   | `9ML54U6JYH`, ROCK FLOW JP LTDA (the owner's former company) | `Developer ID Application: ROCK FLOW JP LTDA (9ML54U6JYH)`, expires 2027-02-01 |
+
+The iOS app is on the same team as the macOS app, `8935C3P62X`, through its own secrets (see
+`.github/workflows/testflight.yml`).
+
+**Do not revoke the old team's certificate.** Gatekeeper can refuse to open apps signed with a
+revoked Developer ID certificate, and every installed copy up to 0.30.0 carries it. Let it expire.
+
+To see which team signed a published build, without a Mac, read the certificate out of the
+binary's signature:
+
+```sh
+gh release download v0.31.0 -p '*.app.tar.gz' -D /tmp/sig && tar xzf /tmp/sig/*.app.tar.gz -C /tmp/sig
+python3 -c 'import sys; d=open(sys.argv[1],"rb").read(); i=d.find(b"\xfa\xde\x0b\x01"); n=int.from_bytes(d[i+4:i+8],"big"); sys.stdout.buffer.write(d[i+8:i+n])' \
+  /tmp/sig/Yardsort.app/Contents/MacOS/ys | openssl pkcs7 -inform DER -print_certs -noout | grep 'subject=UID'
+```
+
+### Creating the certificate
+
+Only the team's **Account Holder** can create a Developer ID Application certificate. An Admin
+cannot, and Xcode can list the Account Holder as Admin. On the current team, Xcode refused with
+"This operation can only be performed by the Account Holder" while App Store Connect → _Users and
+Access_ showed that same Apple ID as _Account Holder, Admin_. The developer portal works when Xcode
+refuses:
+
+1. Keychain Access → _Certificate Assistant → Request a Certificate From a Certificate Authority…_,
+   _Saved to disk_. The private key stays in the login keychain.
+2. [developer.apple.com/account](https://developer.apple.com/account) → _Certificates_ → **+** →
+   _Developer ID Application_ (G2 Sub-CA). Upload the request and download the `.cer`.
+3. Open the `.cer` on the same Mac. It appears under _My Certificates_ with its key.
+4. Select it there → _Export_, as `cert.p12` with a password.
+
+`security find-identity -v -p codesigning` then prints the value for `APPLE_SIGNING_IDENTITY`: the
+quoted name on the _Developer ID Application_ line, not the _Apple Development_ or _Apple
+Distribution_ ones.
+
+Where Xcode does let you: _Settings → Accounts → Manage Certificates → + → Developer ID
+Application_, then export it the same way.
+
+### When notarization fails
+
+The macOS job signs, then sends the app to Apple's notary service and waits. Two failures look
+alarming and are not about the code:
+
+- **`HTTP status code: 403. A required agreement is missing or has expired.`** Apple has a new
+  developer program agreement, and nothing is notarized until the Account Holder accepts it on
+  [developer.apple.com/account](https://developer.apple.com/account) for the team in the secrets.
+  This is what stopped 0.31.0 on the old team.
+- **`The Internet connection appears to be offline`** (`NSURLErrorDomain Code=-1009`), after a
+  submission id is printed. The runner lost its network while it waited for Apple. Re-run the
+  failed job.
+
+After either, `gh run rerun <run id> --failed` builds macOS again and reads the secrets afresh; the
+release publishes itself if that passes.
+
+### Changing the account
+
+Set all six secrets for the new team, then rerun or release. The signature changes, and nothing
+else does: the bundle id, the update signing key (`TAURI_SIGNING_PRIVATE_KEY`, which the updater
+checks instead of Apple's) and the Homebrew cask stay as they are, so an installed copy updates
+across the change. Keychain items the old build saved — the TypeSafe key and the Remote sign-in —
+trust the old signature, so macOS is expected to ask once per Mac whether the new build may use
+them. Say so in the release notes, as 0.31.0's do.
+
+### Setting the secrets
 
 With `gh`:
 
