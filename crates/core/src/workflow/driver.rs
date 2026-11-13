@@ -1921,8 +1921,20 @@ fn open_approval_wait(
 }
 
 /// A failed run, for the phone. The error text stays on the computer.
+/// Tell the phone a run failed. The notice is keyed by the run and by when it ended, read back
+/// from the row: a run that is continued and fails again is told about again.
 fn note_run_finished(store: &Store, run_id: &str, status: &str) {
-    note_mobile(store, crate::notify::workflow_failure(run_id, status));
+    if status != "failed" {
+        return;
+    }
+    let Ok(Some(run)) = store.workflow_run(run_id) else {
+        return;
+    };
+    let ended_at = run.ended_at.unwrap_or(run.created_at);
+    note_mobile(
+        store,
+        crate::notify::workflow_failure(run_id, &run.status, ended_at),
+    );
 }
 
 /// Queue a phone notice. The desktop notification is separate and may still carry a code.

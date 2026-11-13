@@ -3587,3 +3587,36 @@ fn a_rejected_approval_asks_again_when_the_run_continues() {
         "succeeded"
     );
 }
+
+#[test]
+fn a_continued_run_that_fails_again_tells_the_phone_again() {
+    let (_dir, store, run, _, _) = queued_workflow(HELLO_THEN_GATE);
+    let hands = Told {
+        sent: Mutex::new(Vec::new()),
+    };
+    let failures = |store: &Store| {
+        crate::notify::pending(store, now_ms())
+            .unwrap()
+            .into_iter()
+            .filter(|notice| notice.category == "failure")
+            .count()
+    };
+    tick(&store, &hands);
+    finish_smoke(&store, "failed", Some("wanted 200, got 500"));
+    tick(&store, &hands);
+    assert_eq!(store.workflow_run(&run).unwrap().unwrap().status, "failed");
+    assert_eq!(failures(&store), 1);
+
+    // The second failure ends at a later time than the first, as it does outside a test.
+    std::thread::sleep(Duration::from_millis(5));
+    crate::workflow::runs::continue_failed(&store, &run).unwrap();
+    tick(&store, &hands);
+    finish_smoke(&store, "failed", Some("wanted 200, got 500"));
+    tick(&store, &hands);
+    assert_eq!(store.workflow_run(&run).unwrap().unwrap().status, "failed");
+    assert_eq!(
+        failures(&store),
+        2,
+        "the same run failing a second time is not a retry of the first notice"
+    );
+}

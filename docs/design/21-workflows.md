@@ -279,6 +279,11 @@ purpose: a cancel is a decision, and a step cancelled mid-effect is the case a r
 refuses to guess about. A continued run is no longer `unattended`, whoever started it:
 somebody is there now.
 
+A run can therefore fail more than once under one id. The phone's failure notice is keyed by the
+run and by the time it ended (`notify::workflow_failure`), not by the run alone, so a continued
+run that fails again is told about again, while the same failure asked about twice is still one
+notice.
+
 Two things it does not do. It does not bring back a session that has ended: a later step that
 addresses one skips or ends as it would have in the first place. And it does not pick the
 step: it is always the failed one and what was skipped behind it, never an earlier step that
