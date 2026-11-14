@@ -51,6 +51,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0039_agent_notices.sql"),
     include_str!("../migrations/0040_workflow_run_pull_requests.sql"),
     include_str!("../migrations/0041_schedule_new_workspace.sql"),
+    include_str!("../migrations/0042_session_label.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -193,6 +194,8 @@ pub struct SessionRow {
     pub effort: Option<String>,
     pub harness_session_id: Option<String>,
     pub title: String,
+    /// What the user called this conversation; empty when they have not.
+    pub label: String,
     pub forked_from: Option<String>,
     pub running: bool,
     pub exit_code: Option<i64>,
@@ -1932,6 +1935,16 @@ impl Store {
             params![title, id],
         )?;
         Ok(())
+    }
+
+    /// What the user calls a conversation. Empty clears it. `false` when there is no such
+    /// conversation.
+    pub fn set_session_label(&self, id: &str, label: &str) -> StoreResult<bool> {
+        let changed = self.conn().execute(
+            "UPDATE sessions SET label = ? WHERE id = ?",
+            params![label, id],
+        )?;
+        Ok(changed > 0)
     }
 
     /// A resumed session runs again, in a new PTY.
@@ -5816,7 +5829,7 @@ fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceRow>
 
 const SESSION_COLUMNS: &str = "id, workspace_id, harness_id, model, effort, harness_session_id, \
      title, forked_from, state, exit_code, pty_session_id, started_at, ended_at, \
-     COALESCE(began_at, started_at)";
+     COALESCE(began_at, started_at), label";
 
 fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
     Ok(SessionRow {
@@ -5834,6 +5847,7 @@ fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         started_at: row.get(11)?,
         ended_at: row.get(12)?,
         began_at: row.get(13)?,
+        label: row.get(14)?,
     })
 }
 
@@ -6429,6 +6443,29 @@ mod tests {
     }
 
     #[test]
+    fn a_conversation_keeps_the_label_it_is_given_apart_from_its_title() {
+        let store = Store::in_memory();
+        let ws = worktree(&store);
+        store.add_session(&new_session("s", &ws.id, "p1")).unwrap();
+        let title = store.session("s").unwrap().unwrap().title;
+        assert_eq!(store.session("s").unwrap().unwrap().label, "");
+
+        assert!(store.set_session_label("s", "reviewer").unwrap());
+        let row = store.session("s").unwrap().unwrap();
+        assert_eq!((row.label.as_str(), row.title), ("reviewer", title));
+        store.mark_session_running("s", "p2").unwrap();
+        assert_eq!(
+            store.session("s").unwrap().unwrap().label,
+            "reviewer",
+            "a resume keeps it"
+        );
+
+        assert!(store.set_session_label("s", "").unwrap());
+        assert_eq!(store.session("s").unwrap().unwrap().label, "");
+        assert!(!store.set_session_label("gone", "x").unwrap());
+    }
+
+    #[test]
     fn workspaces_can_be_renamed_and_archived_but_local_cannot() {
         let store = Store::in_memory();
         let ws = worktree(&store);
@@ -6590,8 +6627,9 @@ steps:
             // 0037 adds nullable device columns and an empty actions table, 0039 two
             // nullable columns to the notice outbox, 0040 an empty table of the pull
             // requests runs made, and 0041 three columns with defaults to schedules and an
-            // empty table of the workspaces schedules made.
-            assert_eq!(MIGRATIONS.len(), 41);
+            // empty table of the workspaces schedules made, and 0042 a column with a default
+            // to sessions.
+            assert_eq!(MIGRATIONS.len(), 42);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -6661,8 +6699,9 @@ steps:
             // 0037 adds nullable device columns and an empty actions table, 0039 two
             // nullable columns to the notice outbox, 0040 an empty table of the pull
             // requests runs made, and 0041 three columns with defaults to schedules and an
-            // empty table of the workspaces schedules made.
-            assert_eq!(MIGRATIONS.len(), 41);
+            // empty table of the workspaces schedules made, and 0042 a column with a default
+            // to sessions.
+            assert_eq!(MIGRATIONS.len(), 42);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs

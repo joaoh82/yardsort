@@ -47,6 +47,7 @@ import {
   type DownloadProgress,
   type DraftedPullRequest,
   type DraftStatus,
+  type SuggestedName,
   type EnvInfo,
   type ExitInfo,
   type FileChange,
@@ -293,6 +294,7 @@ export type {
   DownloadProgress,
   DraftedPullRequest,
   DraftStatus,
+  SuggestedName,
   EnvInfo,
   ExitInfo,
   FileChange,
@@ -594,6 +596,8 @@ export const ipc = {
   /** Start a copy of a conversation that goes its own way. */
   sessionFork: (id: string, size: TermSize) => unwrap(commands.sessionFork(id, size)),
   sessionForget: (id: string) => done(commands.sessionForget(id)),
+  /** Name a conversation, so its tab says what it is doing. Empty clears it; returns it as kept. */
+  sessionSetLabel: (id: string, label: string) => unwrap(commands.sessionSetLabel(id, label)),
 
   /** Remove the worktree but keep branch and history. Rejects with `worktree_dirty` unless forced. */
   workspaceArchive: (id: string, force = false) => done(commands.workspaceArchive(id, force)),
@@ -828,6 +832,17 @@ export const ipc = {
   draftForgetKey: () => unwrap(commands.draftForgetKey()),
   draftSaveSettings: (enabled: boolean, model: string) =>
     unwrap(commands.draftSaveSettings(enabled, model)),
+  /**
+   * A name for a new workspace. Without `askModel` it is the message's own words and nothing is
+   * sent; with it, the drafting model is told the project and the message and names the subject.
+   */
+  workspaceSuggestName: (
+    projectId: string,
+    message: string,
+    askModel: boolean,
+    harnessId: string | null = null,
+  ): Promise<SuggestedName> =>
+    unwrap(commands.workspaceSuggestName(projectId, message, askModel, harnessId)),
 
   /**
    * Remote, still under development: this computer as a host on a Yardsort server. The webview never sees a

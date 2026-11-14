@@ -286,6 +286,16 @@ export const commands = {
 	draftSaveKey: (key: string) => typedError<DraftStatus, IpcError>(__TAURI_INVOKE("draft_save_key", { key })),
 	draftForgetKey: () => typedError<DraftStatus, IpcError>(__TAURI_INVOKE("draft_forget_key")),
 	draftSaveSettings: (enabled: boolean, model: string) => typedError<DraftStatus, IpcError>(__TAURI_INVOKE("draft_save_settings", { enabled, model })),
+	/**
+	 *  Name a workspace from the message it is being started with.
+	 * 
+	 *  Without `ask_model`, or with writing switched off or nobody able to write, this is the message's own
+	 *  words (see `yardsort_core::workspaces::naming`) and nothing leaves the machine. With it, a
+	 *  model is told the project, the names already in use there and the message, and asked for the
+	 *  subject. Unlike a draft, the **API key goes first**: a name is waited on, and one request is
+	 *  quicker than starting an agent. Anything going wrong falls back to the message's words.
+	 */
+	workspaceSuggestName: (projectId: string, message: string, askModel: boolean, harnessId: string | null) => typedError<SuggestedName, IpcError>(__TAURI_INVOKE("workspace_suggest_name", { projectId, message, askModel, harnessId })),
 	/**  Open a file (or the workspace folder, when `path` is `None`) in the user's editor. */
 	openInEditor: (workspaceId: string, path: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("open_in_editor", { workspaceId, path })),
 	/**  Reveal a workspace entry, or open its nearest existing folder when it was deleted. */
@@ -494,6 +504,11 @@ export const commands = {
 	sessionFork: (id: string, size: TermSize) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("session_fork", { id, size })),
 	/**  Drop a record from the history. The harness's own copy of the conversation is not touched. */
 	sessionForget: (id: string) => typedError<null, IpcError>(__TAURI_INVOKE("session_forget", { id })),
+	/**
+	 *  Give a conversation a label, so its tab says what it is doing. Empty clears it. The label
+	 *  is the record's, so it outlives the process: a resume keeps it.
+	 */
+	sessionSetLabel: (id: string, label: string) => typedError<string, IpcError>(__TAURI_INVOKE("session_set_label", { id, label })),
 	/**
 	 *  Put a workspace away: the worktree is removed, the branch and session history stay.
 	 *  Fails with `worktree_dirty` unless `force`.
@@ -2090,6 +2105,12 @@ export type NewWorkspace = {
 	 */
 	task: TaskRef | null,
 	/**
+	 *  The name the composer showed, when it showed one: chosen by the user, a model, or the
+	 *  message's own words. `None` names it from the prompt here. Ignored for a task, which
+	 *  names its own, and for an existing branch, which is named after itself.
+	 */
+	name?: string | null,
+	/**
 	 *  The presets ticked in the composer: each becomes a trigger on the new workspace before
 	 *  its agent starts, so the agent is told what it needs to know about them.
 	 */
@@ -3245,6 +3266,11 @@ export type SessionRecord = {
 	model: string | null,
 	effort: string | null,
 	title: string,
+	/**
+	 *  What the user called it, to tell it from the others in its workspace. Empty when they
+	 *  have not: the agent's name stands in.
+	 */
+	label: string,
 	forkedFrom: string | null,
 	running: boolean,
 	/**  The live PTY session, while running. */
@@ -3437,6 +3463,19 @@ export type StepWords = {
 	action: string,
 	/**  What the step does, in a sentence. */
 	words: string,
+};
+
+/**  A name for a new workspace, and who chose it. */
+export type SuggestedName = {
+	/**
+	 *  A slug, ready to be a folder and a branch. `None` when the message yields none, in which
+	 *  case the workspace gets a station name.
+	 */
+	name: string | null,
+	/**  The agent or model that chose it; `None` when it is the message's own words. */
+	by: string | null,
+	/**  Why a model was asked and did not name it, when that happened. */
+	problem: string | null,
 };
 
 export type Suggestion = {

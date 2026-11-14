@@ -30,6 +30,21 @@ terminals, named after the test with a dot for how the run is going. It shows th
 their output rather than a terminal; the terminal behind it keeps running, and `Mod+W` closes the
 tab without touching the run.
 
+### Labelling a tab
+
+Several agents in one workspace all show their agent's name — three tabs saying _claude_. Give a
+conversation a label to say what each is doing: **double-click its tab**, or choose **Label…**
+from its right-click menu, type, and press `Enter`. `Escape` keeps what was there, and an empty
+label brings the agent's name back.
+
+The label takes the agent's name's place on the tab — its mark stays beside it, and hovering
+says which agent it is — and in the sidebar's list of open harnesses and in
+[Previous sessions](#resume), with the agent's name after it. It belongs to the conversation, not
+the terminal: closing the tab and resuming the session later keeps it, and a fork starts without
+one. Labels are one line of up to 40 characters.
+
+Shells have no label: there is no conversation to keep it in.
+
 ### Copy, paste, links
 
 |                    | Linux / Windows                                        | macOS     |

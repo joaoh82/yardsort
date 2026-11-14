@@ -85,6 +85,7 @@ export const record = (id: string, overrides: Partial<SessionRecord> = {}): Sess
   model: null,
   effort: null,
   title: "fix the login bug",
+  label: "",
   forkedFrom: null,
   running: false,
   ptySessionId: null,

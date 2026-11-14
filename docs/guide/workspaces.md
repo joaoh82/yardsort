@@ -21,6 +21,7 @@ Press **+** on a project row, or `Ctrl+Shift+N` / `⌘N` for the project you are
 | **Model**   | Free text with suggestions. Empty means "let the agent use its default" — no flag is passed at all.                                                                                                                                                                                                                                                                                                                                                                    |
 | **Effort**  | Offered only for agents that have the concept.                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | **Branch**  | Under _New branch from_, pick the branch to start from. Under _Open existing branch_, pick a branch to check out in a workspace as it is — no new branch is made.                                                                                                                                                                                                                                                                                                      |
+| **Name**    | The new workspace's folder, and its branch after the prefix. Filled in as you type — see [How a workspace is named](#how-a-workspace-is-named) — and yours to change. Shown only when a new branch is made: a task names its own workspace, and an existing branch is named after itself.                                                                                                                                                                              |
 
 Under the pickers, **Import worktrees…** opens the same dialog as the project menu, for worktrees
 that already exist — see [Worktrees made elsewhere](#worktrees-made-elsewhere).
@@ -57,17 +58,48 @@ cancelling (`Esc`) leaves no trace.
 
 On Start, Yardsort:
 
-1. names the workspace from your message (`Add a --units flag…` → `add-units-flag`), making it
-   unique if needed;
-2. runs `git worktree add` with a new branch, `ys/add-units-flag` by default;
+1. names the workspace as the **Name** field shows, making it unique if needed (`-2`, `-3`…);
+2. runs `git worktree add` with a new branch, `ys/smarter-workspace-names` by default;
 3. starts the agent there with your message.
 
-Naming looks for an explicit task in the message, including after introductory background:
-`I've been looking at the settings screen. Could you please add dark mode?` becomes
-`add-dark-mode`. It skips fenced code and common request lead-ins, then keeps up to four words
-and 32 characters. This is local text extraction, not an AI summary; unrecognized wording falls
-back to the opening words. Empty or unusable messages get a railway station name. Names are
-chosen when the workspace is created; later messages do not rename it.
+### How a workspace is named
+
+A folder and a branch cannot be renamed under a running agent, so the name is settled in the
+composer, where you can see it, before anything is made.
+
+**From your words.** As you type, the field fills with words from your message. This looks for an
+explicit task, including after introductory background — `I've been looking at the settings
+screen. Could you please add dark mode?` becomes `add-dark-mode` — skips fenced code and common
+request lead-ins, then keeps up to four words and 32 characters. Nothing leaves the machine. A
+message with no usable words gets a railway station name.
+
+**By a model.** Words from the message are often the wrong words: a message that begins "Improve
+automatic generation of workspace and branch names…" says what to do, not what it is about. With
+[writing by a model](assist.md#writing-commit-messages-pull-requests-and-workflows) switched on
+and something able to write, a model is asked once typing pauses for a second and a half — never
+more than one request at a time — and its name replaces the words: `smarter-workspace-names`. The
+line beside the field says **named by** whoever answered.
+
+- **Your Anthropic API key goes first** when there is one, because a single request is quicker
+  than starting an agent; otherwise **the agent you picked** answers in its non-interactive mode,
+  run in the project's folder, or the first other agent that can write.
+- **What is sent:** the project's name, the names of its other workspaces (so it picks a
+  different one), and your message — the first 6,000 characters of it.
+- Messages shorter than 15 characters are named from their words.
+- Its answer is made safe exactly like your words are: lowercase letters, digits and dashes, at
+  most four words and 32 characters. An answer that is a sentence rather than a name is ignored.
+
+**On Start**, if the model has not yet answered for the message as it now stands, Yardsort waits
+for it: the button says **Naming…**, and **Start without waiting** beside the field goes ahead
+with your words instead. An agent gets 45 seconds. If it fails or gives no name, the workspace is
+named from your words, and hovering _from your words_ says why.
+
+**Your own name wins.** Type in the field and nothing replaces what you typed; **Use suggestion**
+goes back to the suggested one. Clear the field and the suggestion it then shows faintly is
+the one used.
+
+Names are chosen when the workspace is created; later messages do not rename it, and **Rename…**
+later changes only the label in the sidebar (see [below](#rename)).
 
 If preparation or the agent launch fails, the worktree and its branch are kept, so script output
 and copied files remain available. The error names its folder. Fix the problem and open the

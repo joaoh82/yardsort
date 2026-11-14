@@ -33,7 +33,8 @@ export function SessionHistory({ workspaceId }: { workspaceId: string }) {
             <HarnessIcon id={record.harnessId} label={record.harnessLabel} />
             <div className="min-w-0 flex-1">
               <div className="truncate">
-                <span className="font-medium">{record.harnessLabel}</span>
+                <span className="font-medium">{record.label || record.harnessLabel}</span>
+                {record.label && <span className="text-ink-faint"> · {record.harnessLabel}</span>}
                 {record.forkedFrom && <span className="text-ink-faint"> · fork</span>}
                 {record.title && <span className="text-ink-muted"> — {record.title}</span>}
               </div>

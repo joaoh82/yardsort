@@ -89,3 +89,21 @@ pub async fn session_forget(app: AppHandle, id: String) -> IpcResult<()> {
     })
     .await
 }
+
+/// Give a conversation a label, so its tab says what it is doing. Empty clears it. The label
+/// is the record's, so it outlives the process: a resume keeps it.
+#[tauri::command]
+#[specta::specta]
+pub async fn session_set_label(app: AppHandle, id: String, label: String) -> IpcResult<String> {
+    blocking(app, move |state| {
+        let label = yardsort_core::sessions::tidy_label(&label);
+        if !state.store.set_session_label(&id, &label)? {
+            return Err(IpcError::new(
+                "unknown_session",
+                "That conversation is no longer in the history.",
+            ));
+        }
+        Ok(label)
+    })
+    .await
+}

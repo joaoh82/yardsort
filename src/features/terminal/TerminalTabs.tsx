@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { ContextMenu, type MenuItem } from "@/features/sidebar/ContextMenu";
 import { runActivity, statusWords } from "@/features/smoke/words";
-import type { TestRun } from "@/lib/ipc";
+import { errorMessage, ipc, type SessionRecord, type TestRun } from "@/lib/ipc";
 import { useShortcutLabel } from "@/stores/preferences";
 import { useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
@@ -124,6 +124,10 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
   );
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [showing, setShowing] = useState(false);
+  // Only a conversation has a record to keep a label in; a shell is what it runs.
+  const [labelling, setLabelling] = useState(false);
+  const label = record?.label || "";
+  const name = label || tab.title;
   const status = tab.exit ? (tab.exit.success ? "ended" : `exited ${tab.exit.code}`) : null;
   const activity = tab.exit
     ? tab.exit.success
@@ -136,6 +140,11 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
   const items: MenuItem[] = [
     ...(tab.recordId
       ? [
+          {
+            label: label ? "Rename label…" : "Label…",
+            disabled: !record,
+            onSelect: () => setLabelling(true),
+          },
           {
             label: "Fork this conversation",
             disabled: !record?.forkable,
@@ -174,16 +183,32 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
           }
         }}
         aria-selected={active}
+        aria-label={label ? `${label} (${record?.harnessLabel ?? tab.title})` : undefined}
         onClick={() => activate(tab.id)}
-        title={record?.title || undefined}
+        onDoubleClick={() => record && setLabelling(true)}
+        title={
+          [label && record?.harnessLabel, record?.title, record && "Double-click to label"]
+            .filter(Boolean)
+            .join(" — ") || undefined
+        }
         className="flex h-full items-center gap-2 pr-1 pl-3"
       >
         <StatusDot activity={activity} attention={tab.attention} />
         {record && <HarnessIcon id={record.harnessId} label={record.harnessLabel} size={14} />}
-        <span className="max-w-40 truncate">{tab.title}</span>
+        {!(labelling && record) && <span className="max-w-40 truncate">{name}</span>}
         {status && <span className="text-small text-ink-faint">{status}</span>}
         {!tab.exit && tab.busySince !== null && <BusyClock since={tab.busySince} />}
       </button>
+      {labelling && record && (
+        <LabelInput
+          initial={label}
+          placeholder={tab.title}
+          onDone={(wanted) => {
+            setLabelling(false);
+            if (wanted !== null && wanted !== label) void saveLabel(record, wanted);
+          }}
+        />
+      )}
       {tab.toldAbout && (
         <button
           type="button"
@@ -197,7 +222,7 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
       )}
       <button
         type="button"
-        aria-label={`Close ${tab.title}`}
+        aria-label={`Close ${name}`}
         onClick={() => void close(tab.id)}
         className="mr-1 rounded px-1 text-ink-faint opacity-0 group-hover:opacity-100 hover:bg-line hover:text-ink focus-visible:opacity-100"
       >
@@ -212,6 +237,58 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
         />
       )}
     </div>
+  );
+}
+
+/** Keep a conversation's label in its record, and show the record as the core now has it. */
+async function saveLabel(record: SessionRecord, label: string) {
+  const sessions = useSessionsStore.getState();
+  try {
+    await ipc.sessionSetLabel(record.id, label);
+  } catch (error) {
+    useTerminalStore.setState({ error: errorMessage(error) });
+  }
+  await sessions.load(record.workspaceId);
+}
+
+/**
+ * The label being typed, in place of the tab's name. Enter or leaving keeps it, Escape keeps
+ * what was there; empty clears it, and the agent's name comes back.
+ */
+function LabelInput({
+  initial,
+  placeholder,
+  onDone,
+}: {
+  initial: string;
+  placeholder: string;
+  onDone: (label: string | null) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const finished = useRef(false);
+  const finish = (label: string | null) => {
+    if (finished.current) return;
+    finished.current = true;
+    onDone(label === null ? null : label.trim());
+  };
+  return (
+    <input
+      aria-label="Label"
+      autoFocus
+      value={value}
+      placeholder={placeholder}
+      maxLength={40}
+      spellCheck={false}
+      onFocus={(event) => event.currentTarget.select()}
+      onChange={(event) => setValue(event.target.value)}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") finish(value);
+        else if (event.key === "Escape") finish(null);
+      }}
+      onBlur={() => finish(value)}
+      className="mr-1 h-6 w-36 rounded border border-accent bg-canvas px-1 text-ink outline-none select-text"
+    />
   );
 }
 
