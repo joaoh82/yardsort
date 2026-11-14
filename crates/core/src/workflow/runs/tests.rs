@@ -277,12 +277,8 @@ fn the_software_factory_queues_before_the_branch_has_a_pull_request() {
         .workflow
         .unwrap();
     assert!(
-        defers_pull_request(&factory),
-        "the factory names the pull request only after it waits for a review"
-    );
-    assert_eq!(
-        missing_pull_request_preview(&factory, "fix-login"),
-        (None, Some("Will use the PR the run opens.".into()))
+        !needs_pull_request(&factory),
+        "the factory's agents find the pull request from the branch; no step of its own uses it"
     );
     let id = fx
         .queue(
@@ -290,7 +286,7 @@ fn the_software_factory_queues_before_the_branch_has_a_pull_request() {
             &[
                 ("task", "Add a logout button"),
                 ("agent", "claude"),
-                ("suite", "login"),
+                ("reviewer", "claude"),
             ],
         )
         .unwrap();
@@ -1029,14 +1025,45 @@ fn a_run_that_is_refused_makes_no_workspace() {
 #[test]
 fn a_workflow_that_waits_for_its_pull_request_starts_in_a_new_workspace_without_one() {
     let fx = ProjectFixture::new();
-    let factory = crate::workflow::find(fx.data.path(), "software-factory")
+    std::fs::write(
+        crate::workflow::user_dir(fx.data.path()).join("open-and-wait.yaml"),
+        r##"version: 1
+id: open-and-wait
+name: Open a pull request and wait for its review
+trigger: { kind: manual, context: workspace }
+inputs:
+  - { id: agent, kind: harness, required: true }
+steps:
+  - id: open
+    action: start_session
+    harness: "{{ inputs.agent }}"
+    prompt: "Do {{ workspace.task }} and open a pull request."
+  - id: reviewed
+    needs: [open]
+    action: wait_pr_activity
+    kind: review
+  - id: tell
+    needs: [reviewed]
+    action: notify
+    title: "#{{ pr.number }} has a review"
+    body: Read it.
+"##,
+    )
+    .unwrap();
+    let waits = crate::workflow::find(fx.data.path(), "open-and-wait")
         .unwrap()
         .workflow
         .unwrap();
     assert_eq!(
-        new_workspace_pull_request(&factory),
+        new_workspace_pull_request(&waits),
         (None, Some("Will use the PR the run opens.".into()))
     );
+    let factory = crate::workflow::find(fx.data.path(), "software-factory")
+        .unwrap()
+        .workflow
+        .unwrap();
+    assert_eq!(new_workspace_pull_request(&factory), (None, None));
+    assert!(refused_in_new_workspace(&factory).is_none());
     let demo = crate::workflow::find(fx.data.path(), "demo")
         .unwrap()
         .workflow
@@ -1044,17 +1071,9 @@ fn a_workflow_that_waits_for_its_pull_request_starts_in_a_new_workspace_without_
     assert_eq!(new_workspace_pull_request(&demo), (None, None));
 
     let (id, workspace) = fx
-        .queue_new(
-            "software-factory",
-            &[
-                ("task", "Add a logout button"),
-                ("agent", "claude"),
-                ("suite", "login"),
-            ],
-            None,
-        )
+        .queue_new("open-and-wait", &[("agent", "claude")], None)
         .unwrap();
-    assert_eq!(workspace.name, "software-factory");
+    assert_eq!(workspace.name, "open-and-wait");
     assert!(
         Facts::parse(&fx.store.workflow_run(&id).unwrap().unwrap().context)
             .pr
@@ -1063,7 +1082,7 @@ fn a_workflow_that_waits_for_its_pull_request_starts_in_a_new_workspace_without_
 
     // What it will render as nothing is known before the workspace is: its task.
     let project = fx.store.project(&fx.project_id).unwrap().unwrap();
-    let said = empty_in_new_workspace(&factory, &project, true);
+    let said = empty_in_new_workspace(&waits, &project, true);
     assert_eq!(said.len(), 1, "{said:?}");
     assert!(said[0].contains("workspace.task") && said[0].contains("made for the run"));
 }

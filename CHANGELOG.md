@@ -17,6 +17,13 @@ has the downloads and the full commit lists.
   [When an agent asks for a permission](docs/guide/remote.md#when-an-agent-asks-for-a-permission).
 - **The phone's terminal fits the screen while you watch.** A terminal wider than the phone is
   zoomed out to fit its width instead of scrolling sideways; pinch to read it closer.
+- **Software factory writes its own smoke test and has its code reviewed by an agent.** After
+  implementation, an agent decides whether the change needs a smoke test and leaves one,
+  `factory-smoke`, for the verify step to run; then a second agent, the new **Who reviews the
+  code** input, reviews the pull request and posts on GitHub before the review gate. The
+  **Smoke test to run** input is gone, and the run no longer waits for a review to appear on
+  GitHub. A copy of the factory in your workflows folder still replaces the built-in. See
+  [The software factory](docs/guide/workflows.md#the-software-factory).
 
 ## 0.33.0
 
