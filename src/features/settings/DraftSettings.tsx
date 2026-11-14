@@ -65,7 +65,9 @@ export function DraftSettings() {
             A ✦ beside the commit box and in the pull request dialog. It sends that change&rsquo;s
             diff, and what the workspace was asked to do. Nothing happens until you press it, and
             what comes back goes in the box for you to read and edit — never straight to git. Also
-            enables Write it when describing a new workflow.
+            enables Write it when describing a new workflow, and names new workspaces: the composer
+            sends your message, the project&rsquo;s name and its workspaces&rsquo; names once you
+            pause typing, and shows the name it gets back for you to keep or change.
           </span>
         </span>
       </label>

@@ -311,6 +311,7 @@ mod tests {
             model: None,
             effort: None,
             title: "Fix the login".into(),
+            label: String::new(),
             forked_from: None,
             running: false,
             pty_session_id: None,

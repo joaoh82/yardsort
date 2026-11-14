@@ -172,6 +172,34 @@ pub fn base_name(prompt: &str, seed: usize) -> String {
     slugify(prompt).unwrap_or_else(|| STATIONS[seed % STATIONS.len()].to_owned())
 }
 
+/// The name a model's answer gives, made safe the same way as any other: `None` when it gave
+/// none worth using.
+///
+/// Models are told to reply with the name alone, and mostly do. When one wraps it anyway — in
+/// backticks, quotes, a `Name:` label, or a branch prefix such as `ys/` or `feature/` — the name
+/// is still what it meant. A reply that reads as a sentence is not a name: better the words of
+/// the message than a slug of "Sure, here is a name for".
+pub fn from_answer(answer: &str) -> Option<String> {
+    let line = crate::draft::tidy(answer)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?
+        .to_owned();
+    let line = line
+        .split_once(':')
+        .filter(|(label, _)| {
+            label.trim().eq_ignore_ascii_case("name") || label.trim().eq_ignore_ascii_case("branch")
+        })
+        .map_or(line.as_str(), |(_, rest)| rest)
+        .trim()
+        .trim_matches(|c: char| matches!(c, '`' | '"' | '\'' | '*' | '.'));
+    let name = line.rsplit('/').next().unwrap_or(line).trim();
+    if name.split_whitespace().count() > 1 {
+        return None;
+    }
+    slugify_name(name)
+}
+
 /// `base`, or `base-2`, `base-3`, … — the first candidate `taken` does not object to.
 pub fn unique(base: &str, mut taken: impl FnMut(&str) -> bool) -> String {
     if !taken(base) {
@@ -275,6 +303,41 @@ mod tests {
         assert_eq!(base_name("", 0), "paddington");
         assert_eq!(base_name("", STATIONS.len() + 1), "shinjuku");
         assert_eq!(slugify("can you please").unwrap(), "can-you-please");
+    }
+
+    #[test]
+    fn a_models_answer_becomes_a_name() {
+        assert_eq!(
+            from_answer("smarter-workspace-names").unwrap(),
+            "smarter-workspace-names"
+        );
+        assert_eq!(
+            from_answer("`session-tab-labels`\n").unwrap(),
+            "session-tab-labels"
+        );
+        assert_eq!(from_answer("Name: \"dark-mode\"").unwrap(), "dark-mode");
+        assert_eq!(
+            from_answer("ys/fix-login-redirect").unwrap(),
+            "fix-login-redirect"
+        );
+        assert_eq!(
+            from_answer("```\nfeature/Unit_Flags\n```").unwrap(),
+            "unit-flags"
+        );
+    }
+
+    #[test]
+    fn an_answer_that_is_a_sentence_is_not_a_name() {
+        assert_eq!(from_answer("Sure, here is a name for it"), None);
+        assert_eq!(from_answer(""), None);
+        assert_eq!(from_answer("修复登录"), None);
+    }
+
+    #[test]
+    fn a_models_name_is_capped_like_any_other() {
+        let name =
+            from_answer("rework-the-whole-workspace-naming-pipeline-and-everything").unwrap();
+        assert!(name.len() <= MAX_LEN, "{name}");
     }
 
     #[test]

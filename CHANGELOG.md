@@ -14,6 +14,22 @@ has the downloads and the full commit lists.
   with no screen, `yardsort-host sync`; `ys sync status` says what syncs and changes nothing. See
   [Syncing projects](docs/guide/remote.md#syncing-projects).
 
+## 0.34.1
+
+- **New workspaces are named after what the work is about.** The composer shows the name before
+  anything is made, in a **Name** field you can change. It starts as words from your message;
+  with writing by a model switched on (Settings → Assist), the agent you picked or your Anthropic
+  key is asked once typing pauses, and is told the project and the names already in use there —
+  so a message that begins "Improve automatic generation of workspace and branch names" becomes
+  `smarter-workspace-names`, not `improve-automatic-generation`. Start waits for that answer if
+  it is still coming, with **Start without waiting** beside it. See
+  [How a workspace is named](docs/guide/workspaces.md#how-a-workspace-is-named).
+- **Label an agent's tab.** Double-click a conversation's tab, or choose **Label…** from its
+  menu, and type what it is doing — _reviewer_, _auth refactor_. The label replaces the agent's
+  name on the tab, in the sidebar's list of open harnesses and in Previous sessions, and it stays
+  with the conversation when you resume it. See
+  [Labelling a tab](docs/guide/terminals-and-sessions.md#labelling-a-tab).
+
 ## 0.34.0
 
 - **On the phone, a conversation opens as Chat.** One column at the phone's width, scrolled up

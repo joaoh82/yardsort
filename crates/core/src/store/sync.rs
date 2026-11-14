@@ -1,5 +1,5 @@
 //! This installation's side of sync: which local records it syncs and as what, the ops waiting to
-//! go up, and how far it has pulled. See `migrations/0042_sync.sql` and `crate::sync`, which owns
+//! go up, and how far it has pulled. See `migrations/0043_sync.sql` and `crate::sync`, which owns
 //! the rules; the loop that talks to the server is `remote_host::sync`.
 
 use remote_proto::sync::{

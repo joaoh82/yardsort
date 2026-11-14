@@ -32,6 +32,8 @@ const core = vi.hoisted(() => ({
   outcomesAgents: vi.fn(),
   triggerPresets: vi.fn(),
   testListInProject: vi.fn(),
+  workspaceSuggestName: vi.fn(),
+  draftStatus: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -40,6 +42,7 @@ vi.mock("@/lib/ipc", async (original) => ({
 }));
 
 import { useAssistStore } from "@/stores/assist";
+import { useDraftStore } from "@/stores/draft";
 import { useHarnessStore } from "@/stores/harnesses";
 import { useProjectsStore } from "@/stores/projects";
 import { useTerminalStore } from "@/stores/terminals";
@@ -80,6 +83,32 @@ const session = (workspace: string) => ({
 });
 
 const app = project("app");
+
+const wordsOf = (text: string) =>
+  text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word && !["the", "a", "in"].includes(word))
+    .slice(0, 4)
+    .join("-") || null;
+
+/** The message's own words, the way the core makes them; no model unless a test says so. */
+function namingByWords() {
+  core.workspaceSuggestName.mockImplementation((_project: string, text: string) =>
+    Promise.resolve({ name: wordsOf(text), by: null, problem: null }),
+  );
+  core.draftStatus.mockResolvedValue(drafting(false));
+  useDraftStore.setState({ status: null });
+}
+
+const drafting = (available: boolean) => ({
+  enabled: true,
+  available,
+  harness: available ? "Claude Code" : null,
+  key: false,
+  model: "claude-opus-5",
+  problem: null,
+});
 
 async function renderComposer() {
   render(<Composer project={app} />);
@@ -127,6 +156,7 @@ describe("Composer", () => {
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });
     useTriggersStore.setState({ presets: [], presetsLoaded: false });
+    namingByWords();
   });
 
   it("starts a workspace with the message on Enter and lands in its terminal", async () => {
@@ -604,6 +634,136 @@ describe("Composer", () => {
   });
 });
 
+describe("Composer naming the workspace", () => {
+  const created = worktree("app", "x");
+  const startable = () =>
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: [],
+    });
+
+  it("shows the name the message's words make, and sends a name typed over it", async () => {
+    startable();
+    const user = await renderComposer();
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Fix the login bug");
+    const name = screen.getByRole("textbox", { name: "Name" });
+    await waitFor(() => expect(name).toHaveValue("fix-login-bug"));
+    expect(screen.getByText("from your words")).toBeInTheDocument();
+    expect(core.workspaceSuggestName).not.toHaveBeenCalledWith(
+      "p-app",
+      expect.anything(),
+      true,
+      expect.anything(),
+    );
+
+    await user.clear(name);
+    await user.type(name, "auth-redirect");
+    expect(name).toHaveValue("auth-redirect");
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    expect(core.workspaceCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "auth-redirect" }),
+    );
+  });
+
+  it("leaves naming to the core when the name is the message's words", async () => {
+    startable();
+    const user = await renderComposer();
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Fix the login bug{Enter}");
+    expect(core.workspaceCreate.mock.calls[0]![0]).not.toHaveProperty("name");
+  });
+
+  it("asks the model once typing pauses, shows who named it, and starts with that name", async () => {
+    startable();
+    core.draftStatus.mockResolvedValue(drafting(true));
+    core.workspaceSuggestName.mockImplementation((_p: string, text: string, ask: boolean) =>
+      Promise.resolve(
+        ask
+          ? { name: "smarter-workspace-names", by: "Claude Code", problem: null }
+          : { name: wordsOf(text), by: null, problem: null },
+      ),
+    );
+    const user = await renderComposer();
+    await user.type(
+      screen.getByRole("textbox", { name: /work on/ }),
+      "Improve automatic generation of workspace names",
+    );
+    const name = screen.getByRole("textbox", { name: "Name" });
+    await waitFor(() => expect(name).toHaveValue("smarter-workspace-names"), { timeout: 3_000 });
+    expect(screen.getByText("named by Claude Code")).toBeInTheDocument();
+    expect(core.workspaceSuggestName).toHaveBeenCalledWith(
+      "p-app",
+      "Improve automatic generation of workspace names",
+      true,
+      "claude",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    expect(core.workspaceCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "smarter-workspace-names" }),
+    );
+    // Answered already: Start asked nothing more.
+    expect(core.workspaceSuggestName.mock.calls.filter((call) => call[2])).toHaveLength(1);
+  });
+
+  it("waits for the model on Start, and goes ahead with the words when told not to wait", async () => {
+    startable();
+    core.draftStatus.mockResolvedValue(drafting(true));
+    core.workspaceSuggestName.mockImplementation((_p: string, text: string, ask: boolean) =>
+      ask
+        ? new Promise(() => {})
+        : Promise.resolve({ name: wordsOf(text), by: null, problem: null }),
+    );
+    const user = await renderComposer();
+    await waitFor(() => expect(useDraftStore.getState().status?.available).toBe(true));
+    await user.type(
+      screen.getByRole("textbox", { name: /work on/ }),
+      "Improve automatic generation of names{Enter}",
+    );
+    expect(await screen.findByRole("button", { name: "Naming…" })).toBeDisabled();
+    expect(core.workspaceCreate).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Start without waiting" }));
+    await waitFor(() => expect(core.workspaceCreate).toHaveBeenCalledTimes(1));
+    expect(core.workspaceCreate.mock.calls[0]![0]).not.toHaveProperty("name");
+  });
+
+  it("still offers to start without waiting after the name was cleared", async () => {
+    startable();
+    core.draftStatus.mockResolvedValue(drafting(true));
+    core.workspaceSuggestName.mockImplementation((_p: string, text: string, ask: boolean) =>
+      ask
+        ? new Promise(() => {})
+        : Promise.resolve({ name: wordsOf(text), by: null, problem: null }),
+    );
+    const user = await renderComposer();
+    await waitFor(() => expect(useDraftStore.getState().status?.available).toBe(true));
+    await user.type(
+      screen.getByRole("textbox", { name: /work on/ }),
+      "Improve automatic generation of names",
+    );
+    const name = screen.getByRole("textbox", { name: "Name" });
+    await waitFor(() => expect(name).toHaveValue("improve-automatic-generation-of"));
+    await user.clear(name);
+    await user.click(screen.getByRole("button", { name: "Start" }));
+
+    expect(await screen.findByRole("button", { name: "Naming…" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Start without waiting" }));
+    await waitFor(() => expect(core.workspaceCreate).toHaveBeenCalledTimes(1));
+  });
+
+  it("names nothing for a task or an existing branch", async () => {
+    const user = await renderComposer();
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Fix the login bug");
+    expect(screen.getByRole("textbox", { name: "Name" })).toBeInTheDocument();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Branch" }),
+      "open:ys/kept-earlier",
+    );
+    expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
+  });
+});
+
 describe("Composer with Assist", () => {
   const suggestion = (harnessId: string | null, efforts: Record<string, string> = {}) => ({
     harnessId,
@@ -631,6 +791,7 @@ describe("Composer with Assist", () => {
       ui: {},
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });
+    namingByWords();
   });
 
   it("offers a harness and an effort for the message, and applies them only when asked", async () => {

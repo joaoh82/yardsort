@@ -90,6 +90,7 @@ mod tests {
             model: None,
             effort: None,
             harness_session_id: None,
+            label: String::new(),
             title: id.into(),
             forked_from: None,
             running: false,

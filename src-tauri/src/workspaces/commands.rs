@@ -16,6 +16,7 @@ use crate::state::{blocking, AppState};
 use crate::tasks::delegate::{self, TaskRef};
 use crate::terminal::{spawn_in_workspace, HarnessRequest, Launch};
 use crate::triggers::commands::PresetPick;
+use yardsort_core::workspaces::naming;
 
 /// A harness definition plus whether its command can be found on this machine.
 #[derive(Debug, Clone, Serialize, Type)]
@@ -123,6 +124,11 @@ pub struct NewWorkspace {
     /// The task this workspace is being started from, when it is: it names the workspace and
     /// is recorded against it. See `crate::tasks::delegate`.
     pub task: Option<TaskRef>,
+    /// The name the composer showed, when it showed one: chosen by the user, a model, or the
+    /// message's own words. `None` names it from the prompt here. Ignored for a task, which
+    /// names its own, and for an existing branch, which is named after itself.
+    #[serde(default)]
+    pub name: Option<String>,
     /// The presets ticked in the composer: each becomes a trigger on the new workspace before
     /// its agent starts, so the agent is told what it needs to know about them.
     pub presets: Vec<PresetPick>,
@@ -404,11 +410,29 @@ pub async fn workspace_create(
                     request.base_branch.as_deref(),
                     &delegate::workspace_name(task),
                 )?,
-                None => workspaces.create(
-                    &request.project_id,
-                    request.base_branch.as_deref(),
-                    &prompt,
-                )?,
+                None => match request
+                    .name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|n| !n.is_empty())
+                {
+                    // The window holds no truth: what it sends is made a slug again here.
+                    Some(given) => workspaces.create_named(
+                        &request.project_id,
+                        request.base_branch.as_deref(),
+                        &naming::slugify_name(given).ok_or_else(|| {
+                            IpcError::new(
+                                "bad_workspace_name",
+                                "A workspace name needs a letter or a digit (a–z, 0–9).",
+                            )
+                        })?,
+                    )?,
+                    None => workspaces.create(
+                        &request.project_id,
+                        request.base_branch.as_deref(),
+                        &prompt,
+                    )?,
+                },
             },
         };
         // Recorded before the agent starts: a workspace that is kept after its agent failed to

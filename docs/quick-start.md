@@ -117,7 +117,8 @@ Press the **+** on the project row (or `Ctrl+Shift+N` / `⌘N`) and say what you
 Pick the agent, optionally a model and effort level, and press **Enter**. Yardsort then:
 
 1. creates a new branch and a **git worktree** for it — a separate folder, so the agent cannot
-   disturb your own checkout or any other agent;
+   disturb your own checkout or any other agent — named as the **Name** field under your message
+   shows; change it there if you like;
 2. starts the agent in that folder, in a real terminal, with your message as its first prompt.
 
 The first time an agent sees a new folder it may ask whether you trust it; answer in the terminal
@@ -138,7 +139,8 @@ unticked for now if you like; they can be added to a workspace later.
   agent has been working that long. The harness pill counts
   all open agent tabs, including finished ones; its amber tint means an agent is waiting for you.
   A **✓** means they have all finished successfully. Hover or keyboard-focus the pill to see each
-  agent's name and activity, then select one to open its terminal.
+  agent's name and activity, then select one to open its terminal. Double-click an agent's tab to
+  label it with what it is doing.
 
 When the work is done, it is an ordinary git branch: review it, push it, open a pull request —
 from the agent, from a shell tab (`Ctrl+Shift+T`), or from your usual tools.

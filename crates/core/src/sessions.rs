@@ -34,6 +34,9 @@ pub struct SessionRecord {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub title: String,
+    /// What the user called it, to tell it from the others in its workspace. Empty when they
+    /// have not: the agent's name stands in.
+    pub label: String,
     pub forked_from: Option<String>,
     pub running: bool,
     /// The live PTY session, while running.
@@ -48,6 +51,22 @@ pub struct SessionRecord {
     pub resumable: bool,
     pub forkable: bool,
     pub unavailable_reason: Option<String>,
+}
+
+/// The longest label a conversation may have: it is read on a tab, beside others.
+pub const MAX_LABEL_CHARS: usize = 40;
+
+/// A label as it is kept: one line, its spaces tidied, no longer than [`MAX_LABEL_CHARS`].
+pub fn tidy_label(label: &str) -> String {
+    label
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(MAX_LABEL_CHARS)
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
 }
 
 /// Turn rows (newest first) into records, deciding what can be continued.
@@ -95,6 +114,7 @@ pub fn describe(rows: Vec<SessionRow>, harnesses: &[HarnessDef]) -> Vec<SessionR
                 model: row.model,
                 effort: row.effort,
                 title: row.title,
+                label: row.label,
                 forked_from: row.forked_from,
                 running: row.running,
                 pty_session_id: row.pty_session_id,
@@ -390,6 +410,7 @@ mod tests {
             effort: None,
             harness_session_id: harness_session.map(str::to_owned),
             title: String::new(),
+            label: String::new(),
             forked_from: None,
             running,
             exit_code: (!running).then_some(0),
@@ -398,6 +419,17 @@ mod tests {
             began_at: 1_790_000_000_000,
             ended_at: None,
         }
+    }
+
+    #[test]
+    fn a_label_is_one_tidy_line_of_a_tab_s_length() {
+        assert_eq!(
+            tidy_label("  review   the\nauth  work "),
+            "review the auth work"
+        );
+        assert_eq!(tidy_label(""), "");
+        let long = tidy_label(&"é".repeat(100));
+        assert_eq!(long.chars().count(), MAX_LABEL_CHARS);
     }
 
     fn by_id(records: &[SessionRecord], id: &str) -> SessionRecord {

@@ -378,7 +378,7 @@ workspaces are slices 3 and 4.
 
 **What it adds.**
 
-- **The local tables** (core migration 42): `sync_ids`, a record's logical id beside its local id,
+- **The local tables** (core migration 43): `sync_ids`, a record's logical id beside its local id,
   with its project's, the server's revision as last heard (none until the server has it) and
   whether it was just linked; `sync_outbox`, the ops waiting to go up, a refused one held with the
   server's reason; and `sync_state`, the cursor, when a pass last went through, and why the last

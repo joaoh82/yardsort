@@ -10,7 +10,9 @@
 //! 2. **The user's own Anthropic API key**, for when no configured harness can write — a custom
 //!    harness with no write arguments, or none installed.
 //!
-//! The agent is tried first, for the reason above. Neither runs unless the button is pressed.
+//! The agent is tried first, for the reason above. Neither runs unless the button is pressed —
+//! except to name a new workspace, which the composer asks for once typing pauses and where the
+//! key goes first, being quicker (see [`NAME_SYSTEM`]).
 //!
 //! This module holds only what every client needs: the prompts, the limits, and how an answer is
 //! cleaned up. Running a program and calling an API live in the app, which has the runtime for it.
@@ -80,6 +82,36 @@ pub fn prompt(want: Want, task: Option<&str>, diff: &str) -> String {
     prompt
 }
 
+/// How much of a first message goes into naming its workspace. A name needs the gist, and a
+/// pasted log or handoff packet can run to pages.
+pub const MAX_NAME_MESSAGE_CHARS: usize = 6_000;
+
+/// The standing instruction for naming a workspace from its first message.
+///
+/// The words of the message are what the name used to be made of; this asks for the *subject*
+/// instead, which is what a list of branches is read for.
+pub const NAME_SYSTEM: &str = "You name git branches. Reply with the name and nothing else: no \
+     preamble, no quotation marks, no prefix such as feature/.\n\n\
+     The name is two to four lowercase English words joined by hyphens, at most 32 characters. \
+     It says what the work is about — its subject — so someone scanning a list of branches can \
+     tell this one from the rest. Prefer the specific thing being changed over generic verbs: \
+     not improve-automatic-generation but smarter-workspace-names. Answer straight away; you do \
+     not need to read any files.";
+
+/// What the model is told about the work it is naming: the project, the names already in use
+/// there (so it does not hand back one of them, and can match their style), and the message.
+pub fn name_prompt(project: &str, taken: &[String], message: &str) -> String {
+    let mut prompt = format!("Name a branch for new work in the project \"{project}\".\n\n");
+    if !taken.is_empty() {
+        prompt.push_str("Branches already in use there, so pick something else: ");
+        prompt.push_str(&taken.join(", "));
+        prompt.push_str(".\n\n");
+    }
+    prompt.push_str("The work was asked for like this:\n\n");
+    prompt.push_str(&clamp(message.trim(), MAX_NAME_MESSAGE_CHARS));
+    prompt
+}
+
 /// Cut a diff down, saying so where it was cut rather than trailing off mid-line.
 pub fn clamp(diff: &str, limit: usize) -> String {
     if diff.chars().count() <= limit {
@@ -133,6 +165,17 @@ mod tests {
         assert!(without.starts_with("Write a commit message"));
         let blank = prompt(Want::CommitMessage, Some("   "), "-a\n+b\n");
         assert_eq!(without, blank, "a blank task is no task");
+    }
+
+    #[test]
+    fn a_name_prompt_carries_the_project_the_names_in_use_and_the_message() {
+        let prompt = name_prompt("yardsort", &["fix-login".into()], "  Add dark mode  ");
+        assert!(prompt.contains("\"yardsort\""));
+        assert!(prompt.contains("fix-login"));
+        assert!(prompt.ends_with("Add dark mode"));
+        assert!(!name_prompt("yardsort", &[], "x").contains("already in use"));
+        let long = name_prompt("p", &[], &"word\n".repeat(5_000));
+        assert!(long.len() < MAX_NAME_MESSAGE_CHARS + 500);
     }
 
     #[test]
