@@ -1,0 +1,40 @@
+{
+  "results": [
+    {
+      "outcome": "applied",
+      "op": "0b6f6f2e-3c1d-4a8e-9f1e-2d5c7a9b1c01",
+      "revision": 1,
+      "cursor": 41
+    },
+    {
+      "outcome": "conflict",
+      "op": "0b6f6f2e-3c1d-4a8e-9f1e-2d5c7a9b1c02",
+      "current": {
+        "kind": "note",
+        "id": "9a3e1b77-0c4d-4f2a-b6e8-3d1c5f7a9e21",
+        "project": "5f0c8a52-6a1e-4d3b-8c2f-1e9d7b6a5c40",
+        "revision": 4,
+        "schema": 1,
+        "body": { "text": "Run the tests with just test." },
+        "host": "host-build-box",
+        "changedAt": 1763000000000,
+        "cursor": 39
+      }
+    },
+    {
+      "outcome": "applied",
+      "op": "0b6f6f2e-3c1d-4a8e-9f1e-2d5c7a9b1c03",
+      "revision": 6,
+      "cursor": 42
+    },
+    {
+      "outcome": "refused",
+      "op": "0b6f6f2e-3c1d-4a8e-9f1e-2d5c7a9b1c04",
+      "error": {
+        "code": "not_found",
+        "message": "There is nothing by that id here.",
+        "retryable": false
+      }
+    }
+  ]
+}

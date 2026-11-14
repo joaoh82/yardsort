@@ -27,6 +27,7 @@ use std::collections::BTreeSet;
 use remote_proto::account::{DeviceKind, Secret};
 use remote_proto::notify::{NotificationPreferences, FLUSH_CAP};
 use remote_proto::pairing::MAX_OFFER_MISSES;
+use remote_proto::sync::{Cursor, OpResult, RecordKind, SyncId, SyncOp, SyncProject, SyncRecord};
 use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, Scope, ServerId};
 use tokio::sync::{broadcast, mpsc};
 use tokio_postgres::{AsyncMessage, Client, Row};
@@ -37,6 +38,9 @@ use crate::records::{
     LinkPlace, NoticePage, NoticeRecord, NoticeToSend, PendingLogin, Records, RecordsError,
     Redemption, Result, RevokeReason, Revoked, Rotation, Signal, CLAIM_LEASE_MS, OPEN_NOTICE_CAP,
     SEEN_RESOLUTION_MS, SIGNALS_KEPT,
+};
+use crate::sync::{
+    decide, kind_of, kind_spelled, Applied, ProjectState, Pulled, Snapshot, Verdict,
 };
 use crate::tokens::TokenHash;
 
@@ -87,6 +91,7 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         "agent_notices",
         include_str!("../migrations/0009_agent_notices.sql"),
     ),
+    (10, "sync", include_str!("../migrations/0010_sync.sql")),
 ];
 
 /// Held while migrating, so instances starting together take turns. Any constant will do, as
@@ -1645,6 +1650,546 @@ impl Records for PgRecords {
             terminal_id: row.get(9),
         }))
     }
+
+    async fn apply_sync_op(
+        &self,
+        account: &AccountId,
+        host: &HostId,
+        op: &SyncOp,
+        now: i64,
+    ) -> Result<Applied> {
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        // The account's head row, locked: its ops are applied one at a time, in cursor order.
+        tx.execute(
+            "INSERT INTO sync_heads (account, head, floor) VALUES ($1, 0, 0)
+             ON CONFLICT (account) DO NOTHING",
+            &[&account.0],
+        )
+        .await
+        .map_err(failed)?;
+        tx.execute(
+            "SELECT head FROM sync_heads WHERE account = $1 FOR UPDATE",
+            &[&account.0],
+        )
+        .await
+        .map_err(failed)?;
+        let nothing = |result| Applied {
+            result,
+            linked: Vec::new(),
+        };
+        if let Some(row) = tx
+            .query_opt(
+                "SELECT revision, cursor FROM sync_ops WHERE account = $1 AND op = $2",
+                &[&account.0, &op.op.as_str()],
+            )
+            .await
+            .map_err(failed)?
+        {
+            tx.commit().await.map_err(failed)?;
+            return Ok(nothing(OpResult::Applied {
+                op: op.op.clone(),
+                revision: row.get::<_, i64>(0) as u64,
+                cursor: row.get::<_, i64>(1) as u64,
+            }));
+        }
+        let current = tx
+            .query_opt(
+                &format!("SELECT {RECORD} FROM sync_records r WHERE r.account = $1 AND r.id = $2"),
+                &[&account.0, &op.id.as_str()],
+            )
+            .await
+            .map_err(failed)?
+            .map(|row| sync_record(&row))
+            .transpose()?;
+        let project = tx
+            .query_opt(
+                "SELECT r.deleted, EXISTS (
+                     SELECT 1 FROM sync_links l
+                     WHERE l.account = r.account AND l.project = r.id AND l.host = $3
+                 )
+                 FROM sync_records r
+                 WHERE r.account = $1 AND r.id = $2 AND r.kind = 'project'",
+                &[&account.0, &op.project.as_str(), &host.as_str()],
+            )
+            .await
+            .map_err(failed)?
+            .map_or(ProjectState::Missing, |row| ProjectState::Present {
+                deleted: row.get(0),
+                linked: row.get(1),
+            });
+        let write = match decide(op, current.as_ref(), project) {
+            Verdict::Refused(error) => {
+                return Ok(nothing(OpResult::Refused {
+                    op: op.op.clone(),
+                    error,
+                }))
+            }
+            Verdict::Conflict(current) => {
+                return Ok(nothing(OpResult::Conflict {
+                    op: op.op.clone(),
+                    current,
+                }))
+            }
+            Verdict::Unchanged { revision, cursor } => {
+                return Ok(nothing(OpResult::Applied {
+                    op: op.op.clone(),
+                    revision,
+                    cursor,
+                }))
+            }
+            Verdict::Write(write) => write,
+        };
+        let body = write
+            .body
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(failed)?;
+        let cursor = write_sync_record(
+            &tx,
+            account,
+            &SyncWrite {
+                kind: op.kind,
+                id: &op.id,
+                project: &op.project,
+                revision: write.revision,
+                schema: write.schema,
+                body: body.as_deref(),
+                revoked: write.revoked,
+                deleted: write.deleted,
+                outcome: write.outcome,
+            },
+            host,
+            now,
+        )
+        .await?;
+        tx.execute(
+            "INSERT INTO sync_ops (account, op, revision, cursor, at) VALUES ($1, $2, $3, $4, $5)",
+            &[
+                &account.0,
+                &op.op.as_str(),
+                &(write.revision as i64),
+                &(cursor as i64),
+                &now,
+            ],
+        )
+        .await
+        .map_err(failed)?;
+        if op.kind == RecordKind::Project && current.is_none() {
+            tx.execute(
+                "INSERT INTO sync_links (account, project, host, linked_at) VALUES ($1, $2, $3, $4)
+                 ON CONFLICT DO NOTHING",
+                &[&account.0, &op.id.as_str(), &host.as_str(), &now],
+            )
+            .await
+            .map_err(failed)?;
+        }
+        if write.cascade {
+            let doomed = tx
+                .query(
+                    "SELECT id, kind, revision, schema FROM sync_records
+                     WHERE account = $1 AND project = $2 AND id <> $2 AND NOT deleted
+                     ORDER BY id FOR UPDATE",
+                    &[&account.0, &op.project.as_str()],
+                )
+                .await
+                .map_err(failed)?;
+            for row in doomed {
+                let id = SyncId::new(row.get::<_, String>(0)).map_err(failed)?;
+                write_sync_record(
+                    &tx,
+                    account,
+                    &SyncWrite {
+                        kind: kind_of(row.get(1)),
+                        id: &id,
+                        project: &op.project,
+                        revision: row.get::<_, i64>(2) as u64 + 1,
+                        schema: row.get::<_, i32>(3) as u16,
+                        body: None,
+                        revoked: false,
+                        deleted: true,
+                        outcome: "deleted",
+                    },
+                    host,
+                    now,
+                )
+                .await?;
+            }
+        }
+        let linked = tx
+            .query(
+                "SELECT l.host FROM sync_links l JOIN hosts h ON h.id = l.host
+                 WHERE l.account = $1 AND l.project = $2 AND h.removed_at IS NULL",
+                &[&account.0, &op.project.as_str()],
+            )
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(|row| HostId::new(row.get::<_, String>(0)).map_err(failed))
+            .collect::<Result<_>>()?;
+        tx.commit().await.map_err(failed)?;
+        Ok(Applied {
+            result: OpResult::Applied {
+                op: op.op.clone(),
+                revision: write.revision,
+                cursor,
+            },
+            linked,
+        })
+    }
+
+    async fn sync_pull(
+        &self,
+        account: &AccountId,
+        host: &HostId,
+        after: Cursor,
+        limit: usize,
+    ) -> Result<Pulled> {
+        let client = self.client().await?;
+        let (head, floor) = client
+            .query_opt(
+                "SELECT head, floor FROM sync_heads WHERE account = $1",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?
+            .map_or((0, 0), |row| (row.get::<_, i64>(0), row.get::<_, i64>(1)));
+        let Ok(after) = i64::try_from(after) else {
+            return Ok(Pulled::Expired);
+        };
+        if after < floor || after > head {
+            return Ok(Pulled::Expired);
+        }
+        let mut records = client
+            .query(
+                &format!(
+                    "SELECT {RECORD} FROM sync_records r
+                     JOIN sync_links l
+                       ON l.account = r.account AND l.project = r.project AND l.host = $2
+                     WHERE r.account = $1 AND r.cursor > $3
+                     ORDER BY r.cursor LIMIT $4"
+                ),
+                &[&account.0, &host.as_str(), &after, &(limit as i64 + 1)],
+            )
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(sync_record)
+            .collect::<Result<Vec<_>>>()?;
+        let more = records.len() > limit;
+        records.truncate(limit);
+        Ok(Pulled::Page { records, more })
+    }
+
+    async fn sync_snapshot(
+        &self,
+        account: &AccountId,
+        host: &HostId,
+        project: Option<&SyncId>,
+        after: Option<&SyncId>,
+        limit: usize,
+    ) -> Result<Option<Snapshot>> {
+        let client = self.client().await?;
+        let head = client
+            .query_opt(
+                "SELECT head FROM sync_heads WHERE account = $1",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?
+            .map_or(0, |row| row.get::<_, i64>(0));
+        let project = project.map(SyncId::as_str);
+        if let Some(project) = project {
+            let linked: bool = client
+                .query_one(
+                    "SELECT EXISTS (
+                         SELECT 1 FROM sync_links l JOIN sync_records r
+                           ON r.account = l.account AND r.id = l.project AND r.kind = 'project'
+                         WHERE l.account = $1 AND l.project = $2 AND l.host = $3
+                     )",
+                    &[&account.0, &project, &host.as_str()],
+                )
+                .await
+                .map_err(failed)?
+                .get(0);
+            if !linked {
+                return Ok(None);
+            }
+        }
+        let mut records = client
+            .query(
+                &format!(
+                    "SELECT {RECORD} FROM sync_records r
+                     JOIN sync_links l
+                       ON l.account = r.account AND l.project = r.project AND l.host = $2
+                     WHERE r.account = $1
+                       AND ($3::TEXT IS NULL OR r.project = $3)
+                       AND ($4::TEXT IS NULL OR r.id > $4)
+                     ORDER BY r.id LIMIT $5"
+                ),
+                &[
+                    &account.0,
+                    &host.as_str(),
+                    &project,
+                    &after.map(SyncId::as_str),
+                    &(limit as i64 + 1),
+                ],
+            )
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(sync_record)
+            .collect::<Result<Vec<_>>>()?;
+        let more = records.len() > limit;
+        records.truncate(limit);
+        Ok(Some(Snapshot {
+            records,
+            head: head as u64,
+            more,
+        }))
+    }
+
+    async fn sync_projects(&self, account: &AccountId, host: &HostId) -> Result<Vec<SyncProject>> {
+        self.client()
+            .await?
+            .query(
+                &format!(
+                    "SELECT {RECORD}, EXISTS (
+                         SELECT 1 FROM sync_links l
+                         WHERE l.account = r.account AND l.project = r.id AND l.host = $2
+                     )
+                     FROM sync_records r
+                     WHERE r.account = $1 AND r.kind = 'project' AND NOT r.deleted
+                     ORDER BY r.id"
+                ),
+                &[&account.0, &host.as_str()],
+            )
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(|row| {
+                Ok(SyncProject {
+                    record: sync_record(row)?,
+                    linked: row.get(RECORD_COLUMNS),
+                })
+            })
+            .collect()
+    }
+
+    async fn sync_link(
+        &self,
+        account: &AccountId,
+        host: &HostId,
+        project: &SyncId,
+        linked: bool,
+        now: i64,
+    ) -> Result<bool> {
+        let client = self.client().await?;
+        let Some(row) = client
+            .query_opt(
+                "SELECT deleted FROM sync_records
+                 WHERE account = $1 AND id = $2 AND kind = 'project'",
+                &[&account.0, &project.as_str()],
+            )
+            .await
+            .map_err(failed)?
+        else {
+            return Ok(false);
+        };
+        if !linked {
+            client
+                .execute(
+                    "DELETE FROM sync_links WHERE account = $1 AND project = $2 AND host = $3",
+                    &[&account.0, &project.as_str(), &host.as_str()],
+                )
+                .await
+                .map_err(failed)?;
+            return Ok(true);
+        }
+        if row.get::<_, bool>(0) {
+            return Ok(false);
+        }
+        client
+            .execute(
+                "INSERT INTO sync_links (account, project, host, linked_at) VALUES ($1, $2, $3, $4)
+                 ON CONFLICT DO NOTHING",
+                &[&account.0, &project.as_str(), &host.as_str(), &now],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(true)
+    }
+
+    async fn prune_sync(
+        &self,
+        changes_before: i64,
+        ops_before: i64,
+        batch: usize,
+    ) -> Result<usize> {
+        let client = self.client().await?;
+        let batch = batch as i64;
+        let tombstones: i64 = client
+            .query_one(
+                "WITH gone AS (
+                     DELETE FROM sync_records WHERE (account, id) IN (
+                         SELECT account, id FROM sync_records
+                         WHERE deleted AND changed_at < $1 LIMIT $2
+                     )
+                     RETURNING account, cursor
+                 ), raised AS (
+                     UPDATE sync_heads h SET floor = GREATEST(h.floor, g.top)
+                     FROM (SELECT account, MAX(cursor) AS top FROM gone GROUP BY account) g
+                     WHERE h.account = g.account
+                 )
+                 SELECT COUNT(*) FROM gone",
+                &[&changes_before, &batch],
+            )
+            .await
+            .map_err(failed)?
+            .get(0);
+        let changes = client
+            .execute(
+                "DELETE FROM sync_changes WHERE (account, cursor) IN (
+                     SELECT account, cursor FROM sync_changes WHERE at < $1 LIMIT $2
+                 )",
+                &[&changes_before, &batch],
+            )
+            .await
+            .map_err(failed)?;
+        let ops = client
+            .execute(
+                "DELETE FROM sync_ops WHERE (account, op) IN (
+                     SELECT account, op FROM sync_ops WHERE at < $1 LIMIT $2
+                 )",
+                &[&ops_before, &batch],
+            )
+            .await
+            .map_err(failed)?;
+        let orphans = client
+            .execute(
+                "DELETE FROM sync_links WHERE (account, project, host) IN (
+                     SELECT l.account, l.project, l.host FROM sync_links l
+                     WHERE NOT EXISTS (
+                         SELECT 1 FROM sync_records r
+                         WHERE r.account = l.account AND r.id = l.project
+                     )
+                     LIMIT $1
+                 )",
+                &[&batch],
+            )
+            .await
+            .map_err(failed)?;
+        Ok([tombstones as u64, changes, ops, orphans]
+            .into_iter()
+            .max()
+            .unwrap_or_default() as usize)
+    }
+}
+
+/// A sync record's columns, as every query that returns one selects them.
+const RECORD: &str = "r.kind, r.id, r.project, r.revision, r.schema, r.body, r.revoked, \
+                      r.deleted, r.host, r.changed_at, r.cursor";
+/// How many columns [`RECORD`] is: the first column after it.
+const RECORD_COLUMNS: usize = 11;
+
+fn sync_record(row: &Row) -> Result<SyncRecord> {
+    let body: Option<String> = row.get(5);
+    Ok(SyncRecord {
+        kind: kind_of(row.get(0)),
+        id: SyncId::new(row.get::<_, String>(1)).map_err(failed)?,
+        project: SyncId::new(row.get::<_, String>(2)).map_err(failed)?,
+        revision: row.get::<_, i64>(3) as u64,
+        schema: row.get::<_, i32>(4) as u16,
+        body: body
+            .map(|text| serde_json::from_str(&text))
+            .transpose()
+            .map_err(failed)?,
+        revoked: row.get(6),
+        deleted: row.get(7),
+        host: HostId::new(row.get::<_, String>(8)).map_err(failed)?,
+        changed_at: row.get(9),
+        cursor: row.get::<_, i64>(10) as u64,
+    })
+}
+
+/// A record's new revision, as written.
+struct SyncWrite<'a> {
+    kind: RecordKind,
+    id: &'a SyncId,
+    project: &'a SyncId,
+    revision: u64,
+    schema: u16,
+    body: Option<&'a str>,
+    revoked: bool,
+    deleted: bool,
+    outcome: &'static str,
+}
+
+/// Write `record` at the account's next cursor, and enter it in the change log. The head row is
+/// locked already.
+async fn write_sync_record(
+    tx: &Transaction<'_>,
+    account: &AccountId,
+    record: &SyncWrite<'_>,
+    host: &HostId,
+    now: i64,
+) -> Result<Cursor> {
+    let cursor: i64 = tx
+        .query_one(
+            "UPDATE sync_heads SET head = head + 1 WHERE account = $1 RETURNING head",
+            &[&account.0],
+        )
+        .await
+        .map_err(failed)?
+        .get(0);
+    let kind = kind_spelled(record.kind);
+    let revision = record.revision as i64;
+    tx.execute(
+        "INSERT INTO sync_records
+             (account, id, kind, project, revision, schema, body, revoked, deleted, host,
+              changed_at, cursor)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         ON CONFLICT (account, id) DO UPDATE SET
+             revision = EXCLUDED.revision, schema = EXCLUDED.schema, body = EXCLUDED.body,
+             revoked = EXCLUDED.revoked, deleted = EXCLUDED.deleted, host = EXCLUDED.host,
+             changed_at = EXCLUDED.changed_at, cursor = EXCLUDED.cursor",
+        &[
+            &account.0,
+            &record.id.as_str(),
+            &kind,
+            &record.project.as_str(),
+            &revision,
+            &i32::from(record.schema),
+            &record.body,
+            &record.revoked,
+            &record.deleted,
+            &host.as_str(),
+            &now,
+            &cursor,
+        ],
+    )
+    .await
+    .map_err(failed)?;
+    tx.execute(
+        "INSERT INTO sync_changes
+             (account, cursor, kind, id, project, revision, host, outcome, at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        &[
+            &account.0,
+            &cursor,
+            &kind,
+            &record.id.as_str(),
+            &record.project.as_str(),
+            &revision,
+            &host.as_str(),
+            &record.outcome,
+            &now,
+        ],
+    )
+    .await
+    .map_err(failed)?;
+    Ok(cursor as u64)
 }
 
 fn link_place(row: &Row) -> Result<LinkPlace> {

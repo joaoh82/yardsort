@@ -1,0 +1,60 @@
+id: sync-server
+name: Two hosts of one account sync through the server, and another account sees none of it
+description: >-
+  R6 slice 1 (docs/design/42-remote-r6.md §9). Against the stand-in server, two pretend hosts and a
+  pretend phone of one account: the phone may not sync; one host turns a project on, the other is
+  offered it with its hint and may write only once it links it; a push sent twice is applied once;
+  an edit is a hint on the other host's relay link and not on its own; a stale edit is a conflict,
+  a stale revoke still applies and nothing brings the note back; a deleted workspace refuses a
+  stale create; a cursor the server never gave asks for a snapshot; a push over the limit is
+  refused whole. Then a host of another account is offered, pulls and may write none of it. No
+  window opens, and nothing of the app runs: this slice is the server's alone.
+version: 1
+timeout: 20m
+
+setup:
+  - id: build
+    action: shell
+    line: cargo build -q -p yardsort-server --examples
+    timeout: 15m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes. Commands are appended to stand-in.in.
+      - >-
+        : > "{{ run.dir }}/stand-in.in" && tail -f "{{ run.dir }}/stand-in.in" |
+        target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+
+steps:
+  - id: two_hosts
+    action: shell
+    line: >-
+      target/debug/examples/sync two-hosts "$(head -1 "$YS_RUN_DIR/stand-in.json" | sed
+      's/.*"server":"\([^"]*\)".*/\1/')" --keep "$YS_RUN_DIR/project" --follow
+    timeout: 2m
+    expect:
+      stdout_contains: All passed.
+  - id: another_account
+    action: shell
+    line: >-
+      printf '%s\n' '{"op":"signInAs","subject":"someone-else"}' >> "$YS_RUN_DIR/stand-in.in"
+  - id: signed_in_as_another
+    action: wait_for
+    program: sh
+    args: [-c, 'test "$(grep -c "\"ok\"" "$YS_RUN_DIR/stand-in.json")" -ge 1']
+    timeout: 30s
+  - id: other_account
+    action: shell
+    line: >-
+      target/debug/examples/sync other-account "$(head -1 "$YS_RUN_DIR/stand-in.json" | sed
+      's/.*"server":"\([^"]*\)".*/\1/')" --keep "$YS_RUN_DIR/project" --follow
+    timeout: 2m
+    expect:
+      stdout_contains: All passed.

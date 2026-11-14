@@ -1,7 +1,8 @@
 # Remote, R6: durable sync
 
-**Status:** planned on 2026-11-13. Nothing in it is built yet. The owner took the defaults for the
-four questions in §3 the same day.
+**Status:** planned on 2026-11-13. The owner took the defaults for the four questions in §3 the same
+day. Slice 1, the server's records, was built on 2026-11-14 (§9); its tests and its local smoke test
+passed, and its staging run waits for the owner's go-ahead to deploy.
 
 This is the plan for the phase after R4 and R5 ([35](35-remote-r4-r5.md)): what it has to show, what
 it starts from, the decisions taken before any code, the slices in the order they are built, and
@@ -185,7 +186,8 @@ audit from 35 §19 extends to sync).
 
 **Versions.** Sync's records have a schema version of their own, beside `PROTOCOL_MINOR`. A host that
 does not know a record's version leaves it on the server untouched and says so, rather than
-dropping fields. Only the relay hint is a protocol change: minor 8.
+dropping fields. Only the relay hint is a protocol change: minor 9, since minor 8 went to the
+phone's chat ([43](43-phone-chat.md)).
 
 **Settled by the owner on 2026-11-13, all four as the defaults:**
 
@@ -206,7 +208,7 @@ dropping fields. Only the relay hint is a protocol change: minor 8.
 
 | #   | Slice                                | What it adds                                                                                                                                                                                                                                                                                                                                                          | Its smoke test                                                                                                                                                                                                                                                          |
 | --- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | The server's records                 | `remote_proto::sync`: logical ids, op ids, revisions, cursors, ops and their answers, with fixtures. The server's tables, `Records` methods on both stores, the three routes, the pruner, the relay hint (minor 8). No client                                                                                                                                         | The server's own: two accounts, duplicate push, stale base, revoke over a stale edit, a tombstone refusing a create, cursor past the floor answered with "take a snapshot", a body over the limit, a phone's token refused. Run on PostgreSQL in CI and on the stand-in |
+| 1   | The server's records (built, §9)     | `remote_proto::sync`: logical ids, op ids, revisions, cursors, ops and their answers, with fixtures. The server's tables, `Records` methods on both stores, the three routes, the pruner, the relay hint (minor 9). No client                                                                                                                                         | The server's own: two accounts, duplicate push, stale base, revoke over a stale edit, a tombstone refusing a create, cursor past the floor answered with "take a snapshot", a body over the limit, a phone's token refused. Run on PostgreSQL in CI and on the stand-in |
 | 2   | Turning a project on, and linking it | The local tables: the logical-id map, the outbox, the cursor. The core's sync loop in the host runtime. Projects only: **Sync** in Project settings with its preview, **Link a synced project** on another machine, **Stop syncing**, **Remove from the server**; `yardsort-host sync on`, `link`, `status`, behind the operator's guard. `ys sync status`, read-only | `sync-link.yaml`: two throwaway profiles on the stand-in, one turning a project on, the other linking it to a clone of the same repository; the hint offered first, nothing linked until chosen; stop and remove                                                        |
 | 3   | Approved notes                       | The outbox written in `add_memory` and `change_memory`'s transactions for a synced project's approved and revoked notes; import without echo; revisions; conflicts kept locally with both texts; the Memory view's **Conflicts** section; "from Build box", "source unavailable on this device". Agents' launches get the synced notes as their own                   | `sync-memory.yaml`: two profiles; approve on one, launch an agent on the other and find the note in its first message; both offline, edit the same note on each, reconnect, settle the conflict; revoke on one while the other edits, reconnect: revoked on both        |
 | 4   | Workspaces, seen elsewhere           | The outbox in the workspace methods, each in a transaction. On a linked machine, the other host's workspaces under the project, named with their host, branch and task, and never made here. A conflict shown, nothing renamed                                                                                                                                        | `sync-workspaces.yaml`: make, rename and archive on one profile, see each on the other; no worktree, branch or directory appears on the second                                                                                                                          |
@@ -267,3 +269,92 @@ applies as it starts (28). Staging's Neon free tier has room for records this si
 - Account export and deletion, with backups that cannot bring back revoked records (R7).
 - Moving an account to another server: an explicit export and import, never forwarding (proposal
   §10.2).
+
+## 9 · Slice 1: the server's records
+
+**Built on 2026-11-14.** No client syncs yet: this is what slices 2 to 5 push to.
+
+**What it adds.**
+
+- **`remote_proto::sync`**: logical ids and op ids (`SyncId`, `OpId`, both lowercase UUID v4s,
+  checked on the way in), revisions and cursors, the three kinds (project, note, workspace), an op
+  (put, revoke or delete, with its base revision, and a put's schema and body), its four answers
+  (applied, conflict with the record as it is, refused with the reason, and one from a newer
+  server), and the pull, snapshot and project pages. The limits are there too: 100 ops a push,
+  256 KiB a push, 16 KiB a record's body, 200 records a page, 90 days for changes and tombstones,
+  30 for op ids. Its fixtures are in `crates/remote-proto/fixtures/sync-v1/`, apart from the remote
+  protocol's: only hosts sync, and every host is Rust, so the TypeScript client does not read them.
+- **The server's tables** (migration 10): the records at their latest revision, each account's
+  head and floor, the change log, the applied op ids and the links. All cascade from the account,
+  so R7's account deletion takes them.
+- **What an op comes to** is decided once, by `sync::decide`, for both stores, then written in one
+  step: the account's head row is locked, so its ops apply one at a time and cursors come in the
+  order they commit.
+- **The routes**, host devices with a registered host only, each counted per device (120 a
+  minute):
+
+  | Route                                | What                                                   |
+  | ------------------------------------ | ------------------------------------------------------ |
+  | `POST /v1/sync/push`                 | Up to 100 ops, answered one by one, in order           |
+  | `GET /v1/sync/pull?after=`           | The linked projects' records changed after a cursor    |
+  | `GET /v1/sync/snapshot`              | A page of one linked project's records, or all, by id  |
+  | `GET /v1/sync/projects`              | The account's synced projects, to link one, with hints |
+  | `POST /v1/sync/projects/{id}/link`   | Link this host to one                                  |
+  | `POST /v1/sync/projects/{id}/unlink` | Unlink it ("Stop syncing")                             |
+
+- **The pruner**, hourly on every instance, in batches of 1000.
+- **The relay's hint**, `syncChanged` on a host's link, protocol minor 9, sent once a push to every
+  other host linked to a project it changed, and to every instance by signal. The TypeScript
+  client reads it and states minor 9 too. A host before minor 9 ignores it, as it ignores any
+  notice it does not know.
+- **`remote_client::Client`** gains the six calls, for slice 2's loop.
+
+**What building it settled, beyond §3.**
+
+- **Six routes, not three.** Linking is a host's own state, not a record, so it is its own call,
+  and the list a person links from is the projects call. Creating a project links the host that
+  created it.
+- **The server reads no body.** A body is a JSON object of at most 16 KiB, kept as text. Each kind's
+  fields are defined by the slice that syncs it: projects in 2, notes in 3, workspaces in 4.
+- **Removing a project from the server** deletes every record of it, each with a tombstone and a
+  change of its own. Its hosts stay linked until its tombstone is pruned, so each one pulls the
+  tombstones and learns of it. It is then no longer offered for linking, and nothing more can be
+  written to it.
+- **A revoke of a revoked note, and a delete of a deleted record**, answer applied, at the
+  revision that did it, and write nothing.
+- **Only applied ops are remembered.** A refused one changed nothing, so retrying it is decided
+  again. So is an op retried more than 30 days later, which most likely comes to a conflict.
+- **A cursor is expired** when it is below the account's floor, which pruning a tombstone raises to
+  that tombstone's change, or past its head, as after a server lost its records. Pruning the change
+  log does not expire a cursor: a pull reads the records, not the log.
+- **What is logged** is each request's method, path and status, as for every route. A path can hold
+  a project's logical id, as other routes' hold a grant's or a host's; never a body, a name or a
+  hint.
+
+**Its tests.** `crates/remote-proto` pins each message to its fixture and checks every op on its
+own. The server's `tests/records.rs` holds both stores to the same seven cases: revisions, a
+duplicate op, a stale base, revoke over a stale edit, a tombstone refusing a stale create or edit,
+a project's removal and its hosts hearing of it, two accounts and linked hosts, paging, pruning and
+the floor, and eight ops racing on one record, of which one applies. `tests/sync.rs` goes through
+HTTP on both stores: a phone, a computer acting as a client and an unregistered host refused; two
+hosts syncing with the hint reaching only the other's link; a push over 256 KiB refused as too large
+while one past every other route's 16 KiB goes through, a wrong op refused alone among good ones;
+a cursor ahead of the head answered `cursorExpired`; and the per-device limit. CI runs the
+PostgreSQL half on Linux.
+
+**Its smoke test.** `.yardsort/tests/sync-server.yaml`, against the stand-in, with
+`examples/sync.rs` as two pretend hosts and a phone, then a host of another account. Passed on
+2026-11-14 with its steps run by hand, 16 checks and then 4, since a new test file waits for the
+owner's approval in the app before `ys test run` runs it. With the stand-in's logs on, nothing of a
+body, name or hint was in them.
+
+**On staging**, once the owner says to deploy this branch's server:
+
+```sh
+cargo run -p yardsort-server --example sync -- two-hosts https://remote-staging.yardsort.sh \
+  --keep /tmp/sync-project --clean
+```
+
+It signs three devices in, in the browser, and ends by removing the project from the server and
+both hosts from the account. `other-account` with the same `--keep` checks a second account, if
+there is one to sign in as.

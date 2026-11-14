@@ -216,6 +216,8 @@ fn relay_messages_and_events_match_their_fixtures() {
     let _: Presented = pinned("relay-presented.json");
     let notice: HostNotice = pinned("relay-notice-pairing.json");
     assert!(matches!(notice, HostNotice::PairingRequested { .. }));
+    let notice: HostNotice = pinned("relay-notice-sync.json");
+    assert_eq!(notice, HostNotice::SyncChanged);
     // A newer server's notice reads as one to ignore, not as a broken link.
     let newer: HostNotice = serde_json::from_str(r#"{"kind":"hostRenamed","name":"x"}"#).unwrap();
     assert_eq!(newer, HostNotice::Unknown);
@@ -641,7 +643,7 @@ fn every_fixture_is_read_here() {
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
-    assert!(names.len() >= 42, "{names:?}");
+    assert!(names.len() >= 43, "{names:?}");
     for name in names {
         assert!(name.ends_with(".json"), "{name} is not a fixture");
         assert!(
@@ -649,6 +651,161 @@ fn every_fixture_is_read_here() {
             "no test reads {name}"
         );
     }
+}
+
+fn sync_fixture<T: Serialize + DeserializeOwned>(name: &str) -> T {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/sync-v1/");
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(format!("{path}{name}")).unwrap()).unwrap();
+    let parsed: T = serde_json::from_value(json.clone()).unwrap_or_else(|e| panic!("{name}: {e}"));
+    assert_eq!(serde_json::to_value(&parsed).unwrap(), json, "{name}");
+    parsed
+}
+
+#[test]
+fn sync_messages_match_their_fixtures() {
+    use crate::sync::*;
+    let push: PushRequest = sync_fixture("push.json");
+    assert!(push.check().is_ok());
+    assert!(push.ops.iter().all(|op| op.check().is_ok()));
+    let actions: Vec<Action> = push.ops.iter().map(|op| op.action).collect();
+    assert_eq!(
+        actions,
+        [Action::Put, Action::Put, Action::Revoke, Action::Delete]
+    );
+    let reply: PushReply = sync_fixture("push-reply.json");
+    assert!(matches!(
+        reply.results[0],
+        OpResult::Applied { revision: 1, .. }
+    ));
+    let OpResult::Conflict { current, .. } = &reply.results[1] else {
+        panic!("a conflict carries the record as it is");
+    };
+    assert_eq!(current.revision, 4);
+    assert!(
+        matches!(&reply.results[3], OpResult::Refused { error, .. } if error.code == ErrorCode::NotFound)
+    );
+    let page: SyncPage = sync_fixture("page.json");
+    assert!(page.records[0].revoked && page.records[0].body.is_some());
+    assert!(page.records[1].deleted && page.records[1].body.is_none());
+    assert_eq!(page.cursor, page.records[1].cursor);
+    let snapshot: SnapshotPage = sync_fixture("snapshot.json");
+    assert!(snapshot.next.is_some());
+    let projects: SyncProjects = sync_fixture("projects.json");
+    assert_eq!(projects.projects[0].record.kind, RecordKind::Project);
+
+    // A newer server's outcome, a newer kind or action, read as ones to leave alone.
+    let newer: OpResult = serde_json::from_str(r#"{"outcome":"merged","op":"x"}"#).unwrap();
+    assert_eq!(newer, OpResult::Unknown);
+    let mut op = push.ops[0].clone();
+    op.kind = serde_json::from_str(r#""branch""#).unwrap();
+    assert_eq!(op.kind, RecordKind::Unknown);
+    assert!(op.check().is_err());
+}
+
+#[test]
+fn every_sync_fixture_is_read_here() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/sync-v1/");
+    let here = include_str!("tests.rs");
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+        assert!(
+            here.contains(&format!("sync_fixture(\"{name}\")")),
+            "no test reads {name}"
+        );
+    }
+}
+
+#[test]
+fn sync_ids_are_lowercase_uuid_v4s() {
+    use crate::sync::{OpId, SyncId};
+    assert!(SyncId::new("5f0c8a52-6a1e-4d3b-8c2f-1e9d7b6a5c40").is_ok());
+    for bad in [
+        "",
+        "5F0C8A52-6A1E-4D3B-8C2F-1E9D7B6A5C40",
+        "5f0c8a52-6a1e-1d3b-8c2f-1e9d7b6a5c40",
+        "5f0c8a52-6a1e-4d3b-cc2f-1e9d7b6a5c40",
+        "5f0c8a526a1e4d3b8c2f1e9d7b6a5c40",
+        "../../5f0c8a52-6a1e-4d3b-8c2f-1e9d7b",
+        "project-1",
+    ] {
+        assert!(SyncId::new(bad).is_err(), "{bad}");
+        assert!(OpId::new(bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn sync_ops_are_checked_on_their_own() {
+    use crate::sync::*;
+    let push: PushRequest = sync_fixture("push.json");
+    let [project, note, revoke, delete] = [0, 1, 2, 3].map(|at| push.ops[at].clone());
+    let fails = |op: SyncOp| op.check().is_err();
+
+    assert!(!fails(project.clone()));
+    assert!(
+        fails(SyncOp {
+            id: note.id.clone(),
+            ..project.clone()
+        }),
+        "a project is its own"
+    );
+    assert!(
+        fails(SyncOp {
+            project: note.id.clone(),
+            ..note.clone()
+        }),
+        "a note is not"
+    );
+    assert!(fails(SyncOp {
+        body: None,
+        ..note.clone()
+    }));
+    assert!(fails(SyncOp {
+        schema: Some(0),
+        ..note.clone()
+    }));
+    assert!(fails(SyncOp {
+        body: Some(serde_json::json!("text")),
+        ..note.clone()
+    }));
+    let large = serde_json::json!({ "text": "x".repeat(MAX_RECORD_BODY) });
+    assert!(fails(SyncOp {
+        body: Some(large),
+        ..note.clone()
+    }));
+    assert!(
+        fails(SyncOp {
+            kind: RecordKind::Workspace,
+            ..revoke.clone()
+        }),
+        "only notes"
+    );
+    assert!(fails(SyncOp {
+        body: note.body.clone(),
+        ..revoke.clone()
+    }));
+    assert!(fails(SyncOp {
+        base: None,
+        ..delete.clone()
+    }));
+    assert!(fails(SyncOp {
+        action: Action::Unknown,
+        ..delete.clone()
+    }));
+
+    let many = PushRequest {
+        ops: (0..=MAX_PUSH_OPS).map(|_| note.clone()).collect(),
+    };
+    assert!(many.check().is_err());
+    assert!(PushRequest { ops: vec![] }.check().is_err());
+    assert!(
+        PushRequest {
+            ops: vec![note.clone(), note]
+        }
+        .check()
+        .is_err(),
+        "an op id twice"
+    );
 }
 
 #[test]
