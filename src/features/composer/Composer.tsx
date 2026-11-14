@@ -23,6 +23,8 @@ import {
 import { useFileDrop } from "@/lib/useFileDrop";
 import { useShortcutLabel } from "@/stores/preferences";
 import { insertDroppedPaths } from "./drop";
+import { useWorkspaceName } from "./useWorkspaceName";
+import { useDraftStore } from "@/stores/draft";
 import { assistOn, useAssistStore } from "@/stores/assist";
 import { useHarnessStore } from "@/stores/harnesses";
 import { recall, useProjectsStore } from "@/stores/projects";
@@ -102,6 +104,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   // Where to put the caret after a drop has been written into `message`.
   const caretAfterDrop = useRef<number | null>(null);
   const modelsId = useId();
+  const nameId = useId();
   const assist = useAssistStore((s) => s.status);
   // Kept together with the message it was asked about, so an answer for older text is ignored.
   const [suggested, setSuggested] = useState<{ forMessage: string; suggestion: Suggestion } | null>(
@@ -109,6 +112,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   );
 
   useEffect(() => void useHarnessStore.getState().load(), []);
+  const drafting = useDraftStore((s) => s.status);
   useEffect(() => void useAssistStore.getState().load(), []);
   useEffect(() => messageRef.current?.focus(), [project.id]);
 
@@ -278,6 +282,20 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
     !!harness?.resolvedPath &&
     (!!runIn || (base !== "" && !pending(picks, presetChoices)));
   const [mode, branch] = [base.slice(0, base.indexOf(":")), base.slice(base.indexOf(":") + 1)];
+  // A new branch is the only kind that gets named here: a task names its own, an existing
+  // branch is named after itself, and running in a workspace makes none.
+  const naming = useWorkspaceName(
+    project.id,
+    message,
+    harness?.id ?? null,
+    !runIn && !task && mode === "new",
+    !!drafting?.available,
+  );
+  // Who could name it depends on the agent picked: its own non-interactive mode comes first.
+  const draftFor = harness?.id ?? null;
+  useEffect(() => {
+    if (!runIn) void useDraftStore.getState().load(draftFor);
+  }, [runIn, draftFor]);
   // The packet tells the agent the forked branch's commits are its history, which is true only
   // when the new branch starts there: picked something else under Branch, or the forked branch
   // was not offered, and it is an ordinary new workspace, the packet left out.
@@ -302,6 +320,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   const launch = async (harness: HarnessInfo) => {
     setBusy(true);
     setError(null);
+    const name = await naming.settle();
     const projects = useProjectsStore.getState();
     const request = {
       id: harness.id,
@@ -351,6 +370,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
       harness: request,
       size: useTerminalStore.getState().lastSize,
       task,
+      ...(name ? { name } : {}),
       presets: answered(picks, presetChoices),
     });
     setBusy(false);
@@ -472,6 +492,57 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           className="w-full resize-none rounded-lg border border-line bg-surface p-3 text-[15px] leading-relaxed outline-none select-text focus:border-accent disabled:opacity-60"
         />
 
+        {!runIn && !task && mode === "new" && (
+          <div className="mt-2 flex items-center gap-2 text-detail text-ink-faint">
+            <label htmlFor={nameId} className="shrink-0">
+              Name
+            </label>
+            <input
+              id={nameId}
+              value={naming.shown}
+              placeholder={naming.suggested || "a station name, when the message has no words"}
+              disabled={busy}
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(event) => naming.edit(event.target.value)}
+              title="The new workspace's folder, and its branch after the prefix"
+              className="h-7 min-w-0 flex-1 rounded border border-line bg-canvas px-2 font-mono text-ink outline-none select-text focus:border-accent disabled:opacity-50"
+            />
+            <span aria-live="polite" className="shrink-0">
+              {busy && naming.naming ? (
+                // Waiting on Start comes first: whatever is in the field, the way out stays.
+                <>
+                  naming…{" "}
+                  <button
+                    type="button"
+                    onClick={naming.skip}
+                    className="text-ink-muted underline decoration-line underline-offset-2 hover:text-ink"
+                  >
+                    Start without waiting
+                  </button>
+                </>
+              ) : naming.edited ? (
+                <button
+                  type="button"
+                  onClick={naming.reset}
+                  disabled={busy}
+                  className="text-ink-muted underline decoration-line underline-offset-2 hover:text-ink"
+                >
+                  Use suggestion
+                </button>
+              ) : naming.naming ? (
+                "naming…"
+              ) : naming.by ? (
+                `named by ${naming.by}`
+              ) : naming.shown ? (
+                <span title={naming.problem ?? undefined}>
+                  from your words{naming.problem ? " · the model gave none" : ""}
+                </span>
+              ) : null}
+            </span>
+          </div>
+        )}
+
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className="relative flex items-center">
             {harness && (
@@ -566,7 +637,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
             disabled={!ready}
             className="h-9 rounded bg-accent px-4 font-medium text-canvas disabled:opacity-40"
           >
-            {busy ? "Starting…" : "Start"}
+            {busy ? (naming.naming ? "Naming…" : "Starting…") : "Start"}
           </button>
         </div>
 

@@ -8,7 +8,8 @@
 //! 2. **The user's own Anthropic API key**, when no configured harness can write.
 //!
 //! Nothing runs until the button is pressed, and what is sent is the diff — the same diff the
-//! user is looking at — plus the workspace's task when there is one.
+//! user is looking at — plus the workspace's task when there is one. Naming a new workspace is
+//! the exception: see `commands::workspace_suggest_name`.
 
 pub mod anthropic;
 pub mod commands;
@@ -57,6 +58,17 @@ pub fn ask_agent(
     root: &Path,
     prompt: &str,
 ) -> IpcResult<String> {
+    ask_agent_within(program, harness, root, prompt, AGENT_TIMEOUT)
+}
+
+/// [`ask_agent`], giving up after `limit` instead — for an answer someone is waiting on.
+pub fn ask_agent_within(
+    program: &Program,
+    harness: &HarnessDef,
+    root: &Path,
+    prompt: &str,
+    limit: std::time::Duration,
+) -> IpcResult<String> {
     let args: Vec<String> = harness
         .base_args
         .iter()
@@ -67,6 +79,8 @@ pub fn ask_agent(
     let mut child = program
         .command(root)
         .args(&args)
+        // Nothing to read: Claude Code otherwise waits three seconds for stdin that never comes.
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -77,7 +91,7 @@ pub fn ask_agent(
             )
         })?;
 
-    let output = match wait_with_timeout(&mut child, AGENT_TIMEOUT) {
+    let output = match wait_with_timeout(&mut child, limit) {
         Some(output) => output.map_err(|error| {
             IpcError::new(
                 "draft_agent_failed",
@@ -91,7 +105,7 @@ pub fn ask_agent(
                 format!(
                     "{} took longer than {} seconds to answer.",
                     harness.label,
-                    AGENT_TIMEOUT.as_secs()
+                    limit.as_secs()
                 ),
             ));
         }

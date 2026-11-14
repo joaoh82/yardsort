@@ -37,7 +37,12 @@ export function WorkspaceHarnesses({
                   id={record?.harnessId ?? tab.title}
                   label={record?.harnessLabel ?? tab.title}
                 />
-                <span className="min-w-0 flex-1 truncate">{record?.harnessLabel ?? tab.title}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {record?.label || record?.harnessLabel || tab.title}
+                  {record?.label && (
+                    <span className="text-ink-faint"> · {record.harnessLabel}</span>
+                  )}
+                </span>
                 <span className={tab.exit && !tab.exit.success ? "text-red-400" : "text-ink-faint"}>
                   {tab.exit
                     ? tab.exit.success

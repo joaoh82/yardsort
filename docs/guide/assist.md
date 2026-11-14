@@ -175,6 +175,12 @@ coding agent you already have, or your own Anthropic API key. See
 switch and the same writers are behind **Write it** on a new [workflow](workflows.md), which
 turns a description into a workflow file for you to check and save.
 
+They also **name new workspaces**. While you write a new workspace's first message, the composer
+asks for a name once you pause typing, sending the message, the project's name and the names of
+its other workspaces; your API key goes first here, being quicker than starting an agent. Unlike
+the ✦, this one does not wait to be pressed. The name lands in the composer's **Name** field for
+you to keep or change. See [How a workspace is named](workspaces.md#how-a-workspace-is-named).
+
 **Workflow writer** chooses which harness writes workflow files: Claude Code, Codex, or any
 installed, enabled harness with **Write args**, including your custom ones. **Automatic** uses
 the first available writer. Harnesses that are disabled, missing, or have no Write args are

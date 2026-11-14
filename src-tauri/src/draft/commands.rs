@@ -367,3 +367,119 @@ pub async fn draft_pull_request(
     let (title, body) = draft::split_pull_request(&written);
     Ok(DraftedPullRequest { title, body })
 }
+
+/// How long naming may take before the composer goes ahead with the message's own words. A name
+/// is waited on by someone who has pressed Start; a draft is not.
+const NAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// A name for a new workspace, and who chose it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestedName {
+    /// A slug, ready to be a folder and a branch. `None` when the message yields none, in which
+    /// case the workspace gets a station name.
+    pub name: Option<String>,
+    /// The agent or model that chose it; `None` when it is the message's own words.
+    pub by: Option<String>,
+    /// Why a model was asked and did not name it, when that happened.
+    pub problem: Option<String>,
+}
+
+/// Name a workspace from the message it is being started with.
+///
+/// Without `ask_model`, or with writing switched off or nobody able to write, this is the message's own
+/// words (see `yardsort_core::workspaces::naming`) and nothing leaves the machine. With it, a
+/// model is told the project, the names already in use there and the message, and asked for the
+/// subject. Unlike a draft, the **API key goes first**: a name is waited on, and one request is
+/// quicker than starting an agent. Anything going wrong falls back to the message's words.
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_suggest_name(
+    app: AppHandle,
+    project_id: String,
+    message: String,
+    ask_model: bool,
+    harness_id: Option<String>,
+) -> IpcResult<SuggestedName> {
+    use yardsort_core::workspaces::naming;
+
+    let words = naming::slugify(&message);
+    let plain = |problem: Option<String>| SuggestedName {
+        name: words.clone(),
+        by: None,
+        problem,
+    };
+    if !ask_model || message.trim().is_empty() {
+        return Ok(plain(None));
+    }
+
+    let asked = blocking(app, move |state| {
+        let (agent, key) = match writers(state, harness_id.as_deref()) {
+            Ok(found) => found,
+            Err(_) => return Ok(None),
+        };
+        let project = state
+            .store
+            .project(&project_id)?
+            .ok_or_else(|| IpcError::new("unknown_project", "That project no longer exists."))?;
+        let taken: Vec<String> = state
+            .store
+            .workspaces()?
+            .into_iter()
+            .filter(|row| row.project_id == project_id && row.kind != "local" && !row.forgotten)
+            .map(|row| row.name)
+            .collect();
+        let prompt = draft::name_prompt(&project.name, &taken, &message);
+        let model = state.settings.get().draft.model;
+        Ok(Some((
+            agent,
+            key,
+            std::path::PathBuf::from(project.root_path),
+            prompt,
+            model,
+        )))
+    })
+    .await?;
+    let Some((agent, key, root, prompt, model)) = asked else {
+        return Ok(plain(None));
+    };
+    let mut problem = None;
+    if let Some(key) = key {
+        match anthropic::write(&key, &model, draft::NAME_SYSTEM, &prompt).await {
+            Ok(answer) => match naming::from_answer(&answer) {
+                Some(name) => {
+                    return Ok(SuggestedName {
+                        name: Some(name),
+                        by: Some(model),
+                        problem: None,
+                    })
+                }
+                None => problem = Some(format!("{model} did not answer with a name.")),
+            },
+            Err(error) => problem = Some(failed(error).message),
+        }
+    }
+    if let Some((program, def)) = agent {
+        // The agent gets the instruction and the request as one message: its own system prompt
+        // is the one it was built with.
+        let whole = format!("{}\n\n{prompt}", draft::NAME_SYSTEM);
+        let label = def.label.clone();
+        let answered = tauri::async_runtime::spawn_blocking(move || {
+            super::ask_agent_within(&program, &def, &root, &whole, NAME_TIMEOUT)
+        })
+        .await
+        .map_err(|error| IpcError::internal(error.to_string()))?;
+        match answered.map(|answer| naming::from_answer(&answer)) {
+            Ok(Some(name)) => {
+                return Ok(SuggestedName {
+                    name: Some(name),
+                    by: Some(label),
+                    problem: None,
+                })
+            }
+            Ok(None) => problem = Some(format!("{label} did not answer with a name.")),
+            Err(error) => problem = Some(error.message),
+        }
+    }
+    Ok(plain(problem))
+}
