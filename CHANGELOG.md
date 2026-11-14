@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.34.0
 
 - **On the phone, a conversation opens as Chat.** One column at the phone's width, scrolled up
   and down: what you asked, the agent's steps folded to one line, and what it wrote back, read on
