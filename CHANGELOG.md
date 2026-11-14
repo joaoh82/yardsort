@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.34.1
 
 - **New workspaces are named after what the work is about.** The composer shows the name before
   anything is made, in a **Name** field you can change. It starts as words from your message;
