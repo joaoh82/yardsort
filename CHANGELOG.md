@@ -5,6 +5,14 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Sync a project with your other computers** (Remote, under development). **Sync** in Project
+  settings shows what turning it on sends, the project's name and its Git remote without any
+  password, and turns it on; on your other computer, **Link to a synced project…** offers it, the
+  one with the same remote first, and links nothing until you choose. **Stop syncing** unlinks
+  one computer; **Remove from the server** removes it for all, each keeping its own copy. Only
+  the project itself syncs for now; its approved notes and workspaces come next. On a computer
+  with no screen, `yardsort-host sync`; `ys sync status` says what syncs and changes nothing. See
+  [Syncing projects](docs/guide/remote.md#syncing-projects).
 - **On the phone, Settings is a gear at the top right** of Connect and the account screen, in place
   of the button at the foot of the screen.
 

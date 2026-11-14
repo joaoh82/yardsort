@@ -1088,7 +1088,11 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       their conflicts; workspaces seen elsewhere; checking a branch out here). The owner took the
       defaults for its four questions the same day. Slice 1, the server's records, was built on
       2026-11-14: the sync routes, tables and pruner, and the relay's hint as protocol minor 9; its
-      local smoke test passed, and its staging run waits on a deploy.
+      local smoke test passed, and its staging run waits on a deploy. Slice 2, turning a project
+      on and linking it, was built the same day (42 §10): the local tables and the sync loop,
+      **Sync** in Project settings, `yardsort-host sync` behind the operator's guard and a
+      read-only `ys sync status`; its local smoke test, `sync-link.yaml`, passed, and its owner
+      run through staging waits on the same deploy.
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is

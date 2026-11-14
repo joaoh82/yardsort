@@ -71,6 +71,11 @@ impl HostHome {
         self.env.get_or_init(|| Arc::new(ShellEnv::resolve()))
     }
 
+    /// Git, as programs here run it. Blocking on first use: it resolves the environment.
+    pub fn git(&self) -> Option<&Git> {
+        self.git.get_or_init(|| Git::new(self.env()).ok()).as_ref()
+    }
+
     pub fn asking(&self) -> tokio::sync::broadcast::Receiver<Request> {
         self.asked.subscribe()
     }
@@ -100,7 +105,7 @@ impl Home for HostHome {
         let Some(terminals) = &self.terminals else {
             return;
         };
-        let Some(git) = self.git.get_or_init(|| Git::new(self.env()).ok()) else {
+        let Some(git) = self.git() else {
             return;
         };
         let Ok(Some(row)) = self.store.remote_host() else {
