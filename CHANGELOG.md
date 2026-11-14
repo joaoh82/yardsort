@@ -3,6 +3,11 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **On the phone, Settings is a gear at the top right** of Connect and the account screen, in place
+  of the button at the foot of the screen.
+
 ## 0.34.1
 
 - **New workspaces are named after what the work is about.** The composer shows the name before

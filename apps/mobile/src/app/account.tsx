@@ -15,6 +15,7 @@ import type { Profile } from "../lib/profiles";
 import { Computers } from "../ui/computers";
 import { stillSignedIn } from "../ui/leaving";
 import { SeenComputers } from "../ui/live";
+import { SettingsCorner } from "../ui/settings-corner";
 import {
   Body,
   Button,
@@ -38,13 +39,13 @@ export default function Account() {
   if (!snapshot.loaded) return <Screen>{null}</Screen>;
   if (!profile) return <Redirect href="/connect" />;
 
-  const servers = (
+  const servers = <Button title="Servers on this phone" onPress={() => router.push("/servers")} />;
+  const title = (
     <>
-      <Button title="Servers on this phone" onPress={() => router.push("/servers")} />
-      <Button title="Settings" onPress={() => router.push("/settings")} />
+      <Stack.Screen options={{ title: profile.serverName }} />
+      <SettingsCorner />
     </>
   );
-  const title = <Stack.Screen options={{ title: profile.serverName }} />;
 
   if (!standing || standing.kind === "opening") {
     return (
