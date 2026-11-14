@@ -509,7 +509,19 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
               className="h-7 min-w-0 flex-1 rounded border border-line bg-canvas px-2 font-mono text-ink outline-none select-text focus:border-accent disabled:opacity-50"
             />
             <span aria-live="polite" className="shrink-0">
-              {naming.edited ? (
+              {busy && naming.naming ? (
+                // Waiting on Start comes first: whatever is in the field, the way out stays.
+                <>
+                  naming…{" "}
+                  <button
+                    type="button"
+                    onClick={naming.skip}
+                    className="text-ink-muted underline decoration-line underline-offset-2 hover:text-ink"
+                  >
+                    Start without waiting
+                  </button>
+                </>
+              ) : naming.edited ? (
                 <button
                   type="button"
                   onClick={naming.reset}
@@ -519,20 +531,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
                   Use suggestion
                 </button>
               ) : naming.naming ? (
-                busy ? (
-                  <>
-                    naming…{" "}
-                    <button
-                      type="button"
-                      onClick={naming.skip}
-                      className="text-ink-muted underline decoration-line underline-offset-2 hover:text-ink"
-                    >
-                      Start without waiting
-                    </button>
-                  </>
-                ) : (
-                  "naming…"
-                )
+                "naming…"
               ) : naming.by ? (
                 `named by ${naming.by}`
               ) : naming.shown ? (

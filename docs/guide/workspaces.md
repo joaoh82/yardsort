@@ -78,7 +78,8 @@ automatic generation of workspace and branch names…" says what to do, not what
 [writing by a model](assist.md#writing-commit-messages-pull-requests-and-workflows) switched on
 and something able to write, a model is asked once typing pauses for a second and a half — never
 more than one request at a time — and its name replaces the words: `smarter-workspace-names`. The
-line beside the field says **named by** whoever answered.
+line beside the field says **named by** whoever answered. A name is shown only for the message it was given: change the
+message and the field shows your words again until the model has answered for the new one.
 
 - **Your Anthropic API key goes first** when there is one, because a single request is quicker
   than starting an agent; otherwise **the agent you picked** answers in its non-interactive mode,

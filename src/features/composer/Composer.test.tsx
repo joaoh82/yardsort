@@ -728,6 +728,30 @@ describe("Composer naming the workspace", () => {
     expect(core.workspaceCreate.mock.calls[0]![0]).not.toHaveProperty("name");
   });
 
+  it("still offers to start without waiting after the name was cleared", async () => {
+    startable();
+    core.draftStatus.mockResolvedValue(drafting(true));
+    core.workspaceSuggestName.mockImplementation((_p: string, text: string, ask: boolean) =>
+      ask
+        ? new Promise(() => {})
+        : Promise.resolve({ name: wordsOf(text), by: null, problem: null }),
+    );
+    const user = await renderComposer();
+    await waitFor(() => expect(useDraftStore.getState().status?.available).toBe(true));
+    await user.type(
+      screen.getByRole("textbox", { name: /work on/ }),
+      "Improve automatic generation of names",
+    );
+    const name = screen.getByRole("textbox", { name: "Name" });
+    await waitFor(() => expect(name).toHaveValue("improve-automatic-generation-of"));
+    await user.clear(name);
+    await user.click(screen.getByRole("button", { name: "Start" }));
+
+    expect(await screen.findByRole("button", { name: "Naming…" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Start without waiting" }));
+    await waitFor(() => expect(core.workspaceCreate).toHaveBeenCalledTimes(1));
+  });
+
   it("names nothing for a task or an existing branch", async () => {
     const user = await renderComposer();
     await user.type(screen.getByRole("textbox", { name: /work on/ }), "Fix the login bug");

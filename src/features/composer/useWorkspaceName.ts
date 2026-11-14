@@ -78,17 +78,26 @@ export function useWorkspaceName(
     };
   }, [enabled, projectId, text]);
 
+  // The message most recently asked about: only its answer is kept, so a slower answer about an
+  // older message can never replace a newer one.
+  const latest = useRef<string | null>(null);
   const ask = useCallback(
     (wanted: string): Promise<SuggestedName | null> => {
-      if (inflight.current?.text === wanted) return inflight.current.promise;
+      latest.current = wanted;
+      const running = inflight.current;
+      if (running?.text === wanted) return running.promise;
       setNaming(true);
-      const promise = ipc.workspaceSuggestName(projectId, wanted, true, harnessId).then(
-        (found) => {
-          setAnswer({ ...found, forText: wanted });
-          return found;
-        },
-        () => null,
-      );
+      // One request at a time, even when Start asks about a message edited since the last one:
+      // wait for that one to finish (its answer is dropped as stale), then ask.
+      const promise = (running ? running.promise.then(() => undefined) : Promise.resolve())
+        .then(() => ipc.workspaceSuggestName(projectId, wanted, true, harnessId))
+        .then(
+          (found) => {
+            if (latest.current === wanted) setAnswer({ ...found, forText: wanted });
+            return found;
+          },
+          () => null,
+        );
       inflight.current = { text: wanted, promise };
       void promise.finally(() => {
         if (inflight.current?.promise === promise) inflight.current = null;
@@ -108,7 +117,9 @@ export function useWorkspaceName(
     return () => clearTimeout(timer);
   }, [asking, own, naming, text, answer, ask]);
 
-  const modelName = answer?.name && answer.by ? answer : null;
+  // Only an answer about the message as it stands: an older one could name a workspace Start
+  // would not make — a message cut below the model's minimum is never asked about again.
+  const modelName = answer?.forText === text && answer.name && answer.by ? answer : null;
   const suggested = !text
     ? ""
     : (modelName?.name ?? (words?.forText === text ? (words.name ?? "") : ""));
