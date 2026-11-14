@@ -27,6 +27,7 @@ use serde_json::json;
 use crate::settings::ActivitySettings;
 use crate::store::{NewEvent, NewRun, RunRow, Store, StoreResult};
 
+pub mod asks;
 pub mod claude;
 pub mod codex;
 pub mod context;

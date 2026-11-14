@@ -5,7 +5,10 @@
 //! exits 0 — always 0. A non-zero exit is something Claude Code
 //! shows the user, and 2 would *block* the action the hook was told about; Yardsort observes,
 //! it never gets in the way. Whatever goes wrong is a line on stderr, which the agent keeps to
-//! itself. Nothing is written to stdout: some hooks' stdout is read back as instructions.
+//! itself. Nothing is written to stdout — some hooks' stdout is read back as instructions — but
+//! for one thing: Claude Code's `PermissionRequest` hook stays to wait for a device to answer
+//! the question, while the terminal asks it too, and prints that answer when one comes
+//! ([`super::asks`]). Claude Code takes whichever answer comes first.
 //!
 //! Both the app's binary and `ys` have this mode, before anything else they do: whichever
 //! launched the agent named itself in the settings file, and both are the same core.
@@ -14,6 +17,7 @@ use std::ffi::OsStr;
 use std::io::Read;
 use std::path::Path;
 
+use super::asks;
 use super::inbox::{Inbox, InboxEntry, INBOX_VERSION};
 use super::{
     claude, codex, cursor, opencode, pi, PRIVACY_METADATA, RECORD_ENV, RUN_ENV, WORKSPACE_ENV,
@@ -52,7 +56,15 @@ pub fn run_hook_and_exit_if_asked() {
         Some(text) => serde_json::from_str::<serde_json::Value>(text)
             .map_err(|error| format!("the payload argument is not JSON: {error}"))
             .and_then(|value| deliver_payload(&harness, inbox, value, &env)),
-        None => deliver(&harness, inbox, &mut std::io::stdin().lock(), &env),
+        None => read_payload(&mut std::io::stdin().lock()).and_then(|value| {
+            let delivered = deliver_payload(&harness, inbox, value.clone(), &env);
+            if harness == claude::HARNESS_ID {
+                if let Ok(entry) = &delivered {
+                    claude_asks(inbox, &value, entry);
+                }
+            }
+            delivered
+        }),
     };
     if let Err(why) = delivered {
         eprintln!("yardsort hook: {why}");
@@ -80,14 +92,58 @@ pub fn deliver(
     input: &mut dyn Read,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Result<InboxEntry, String> {
+    deliver_payload(harness, inbox_dir, read_payload(input)?, env)
+}
+
+fn read_payload(input: &mut dyn Read) -> Result<serde_json::Value, String> {
     let mut bytes = Vec::new();
     input
         .take(MAX_STDIN_BYTES)
         .read_to_end(&mut bytes)
         .map_err(|error| format!("reading stdin: {error}"))?;
-    let payload: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|error| format!("stdin is not JSON: {error}"))?;
-    deliver_payload(harness, inbox_dir, payload, env)
+    serde_json::from_slice(&bytes).map_err(|error| format!("stdin is not JSON: {error}"))
+}
+
+/// A permission Claude Code asks for is opened for a device to answer, and waited on; a hook that
+/// says the agent moved past one closes it. Only for an agent Yardsort launched, which names its
+/// conversation's record.
+fn claude_asks(inbox: &Path, hook: &serde_json::Value, entry: &InboxEntry) {
+    let Some(session) = &entry.session_record_id else {
+        return;
+    };
+    let dir = asks::asks_dir_beside(inbox);
+    if let Some(call) = claude::moved_past(hook) {
+        asks::close_answered(&dir, session, call.as_deref());
+        return;
+    }
+    let Some((tool, command, path, call)) = claude::ask_of(hook) else {
+        return;
+    };
+    let ask = asks::Ask {
+        id: entry.id.clone(),
+        at_ms: entry.at_ms,
+        session_record_id: session.clone(),
+        harness: claude::HARNESS_ID.to_owned(),
+        tool,
+        command,
+        path,
+        call,
+    };
+    if let Err(error) = asks::post(&dir, &ask) {
+        eprintln!("yardsort hook: could not open the question: {error}");
+        return;
+    }
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_millis(asks::ASK_TTL_MS.unsigned_abs());
+    // Answered at the terminal, "No" and Esc included, the call gets its result in the transcript.
+    let mut watch = claude::CallWatch::new(hook);
+    let mut moved_on = || watch.as_mut().is_some_and(claude::CallWatch::answered);
+    if let Some(decision) = asks::wait(&dir, &ask.id, deadline, asks::POLL, &mut moved_on) {
+        use std::io::Write;
+        let mut out = std::io::stdout().lock();
+        let _ = out.write_all(claude::decision_output(decision).to_string().as_bytes());
+        let _ = out.flush();
+    }
 }
 
 /// The same, for a payload already in hand.
@@ -365,5 +421,117 @@ mod tests {
             !entry.payload.to_string().contains("hello.txt"),
             "no output"
         );
+    }
+
+    /// What Claude Code sends when it asks for a permission, as its documentation shows it.
+    fn permission_request(command: &str) -> serde_json::Value {
+        serde_json::json!({
+            "session_id": "native-1",
+            "transcript_path": "/nowhere.jsonl",
+            "cwd": "/work/repo",
+            "permission_mode": "default",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "tool_input": { "command": command, "description": "Run the tests" },
+        })
+    }
+
+    fn entry_for(session: Option<&str>) -> InboxEntry {
+        InboxEntry {
+            version: INBOX_VERSION,
+            id: "11111111-2222-4333-8444-555555555555".into(),
+            at_ms: crate::store::now_ms(),
+            producer: "claude".into(),
+            method: "hook".into(),
+            fidelity: "reported".into(),
+            run_id: None,
+            workspace_id: None,
+            session_record_id: session.map(str::to_owned),
+            native_session_id: None,
+            kind: "approval.requested".into(),
+            privacy_class: PRIVACY_METADATA.into(),
+            payload: serde_json::Value::Null,
+        }
+    }
+
+    #[test]
+    fn a_permission_waits_for_a_devices_answer_and_the_next_hook_of_that_call_closes_it() {
+        let data = tempfile::tempdir().unwrap();
+        let inbox = data.path().join("activity").join("inbox");
+        let dir = asks::asks_dir(data.path());
+        assert_eq!(asks::asks_dir_beside(&inbox), dir);
+
+        // Answered from a device: the hook's wait returns it.
+        let waiting = {
+            let inbox = inbox.clone();
+            std::thread::spawn(move || {
+                claude_asks(
+                    &inbox,
+                    &permission_request("npm test"),
+                    &entry_for(Some("rec-1")),
+                );
+            })
+        };
+        let open = loop {
+            let open = asks::open(&dir, "rec-1", crate::store::now_ms());
+            if !open.is_empty() {
+                break open;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert_eq!(open[0].tool, "Bash");
+        assert_eq!(open[0].command.as_deref(), Some("npm test"));
+        assert!(asks::answer(
+            &dir,
+            "rec-1",
+            &open[0].id,
+            asks::Decision::Allow,
+            crate::store::now_ms()
+        )
+        .unwrap());
+        waiting.join().unwrap();
+        assert!(asks::open(&dir, "rec-1", crate::store::now_ms()).is_empty());
+
+        // Answered at the terminal: the tool ran, and its PostToolUse closes the question.
+        let waiting = {
+            let inbox = inbox.clone();
+            std::thread::spawn(move || {
+                claude_asks(
+                    &inbox,
+                    &permission_request("npm run lint"),
+                    &entry_for(Some("rec-1")),
+                );
+            })
+        };
+        while asks::open(&dir, "rec-1", crate::store::now_ms()).is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        // Another call of the same conversation does not close it.
+        let mut other = permission_request("ls");
+        other["hook_event_name"] = "PostToolUse".into();
+        claude_asks(&inbox, &other, &entry_for(Some("rec-1")));
+        assert_eq!(asks::open(&dir, "rec-1", crate::store::now_ms()).len(), 1);
+        let mut ran = permission_request("npm run lint");
+        ran["hook_event_name"] = "PostToolUse".into();
+        claude_asks(&inbox, &ran, &entry_for(Some("rec-1")));
+        waiting.join().unwrap();
+        assert!(asks::open(&dir, "rec-1", crate::store::now_ms()).is_empty());
+
+        // An agent Yardsort did not launch names no conversation: nothing is opened, nothing waits.
+        claude_asks(&inbox, &permission_request("npm test"), &entry_for(None));
+        assert!(!dir.exists() || std::fs::read_dir(&dir).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn the_answer_is_printed_as_claude_code_reads_a_permission_decision() {
+        let allow = claude::decision_output(asks::Decision::Allow);
+        assert_eq!(
+            allow["hookSpecificOutput"]["hookEventName"],
+            "PermissionRequest"
+        );
+        assert_eq!(allow["hookSpecificOutput"]["decision"]["behavior"], "allow");
+        let deny = claude::decision_output(asks::Decision::Deny);
+        assert_eq!(deny["hookSpecificOutput"]["decision"]["behavior"], "deny");
+        assert!(deny["hookSpecificOutput"]["decision"]["message"].is_string());
     }
 }

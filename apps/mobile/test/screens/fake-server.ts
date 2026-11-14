@@ -156,7 +156,24 @@ export class FakeServer {
     ],
     /** Where an upload lands. */
     uploadPath: "/home/ana/My Data/uploads/workspace-1/1-photo.jpg",
+    /** What `conversation.read` answers, by conversation: its turns, oldest first. */
+    turns: [
+      {
+        n: 1,
+        at: 1_700_000_000_000,
+        user: "Add an --imperial option to weather-cli",
+        said: [
+          "Units go through render.js.",
+          "I added the `--imperial` flag.\n\n- `src/cli.js` parses it",
+        ],
+        cut: false,
+      },
+    ] as Record<string, unknown>[],
+    /** The questions its agent has open. */
+    asks: [] as Record<string, unknown>[],
   };
+  /** The questions answered, each as it came. */
+  answers: { ask: string; decision: string }[] = [];
   /** What was uploaded, each as it came. */
   uploads: { workspace: string; name: string; size: number; bytes: number[] }[] = [];
   /** Every operation a computer was asked, in order. */
@@ -500,6 +517,27 @@ export class FakeServer {
         return { kind: "done" };
       case "memory.list":
         return { kind: "memory", notes: computer.notes, next: null };
+      case "conversation.read": {
+        const from = params.from as unknown as number | undefined;
+        return {
+          kind: "conversation",
+          session: params.session,
+          total: computer.turns.length,
+          turns:
+            from === undefined
+              ? computer.turns
+              : computer.turns.filter((t) => (t.n as number) >= from),
+          asks: computer.asks,
+          answersAsks: true,
+        };
+      }
+      case "approval.answer":
+        this.answers.push({
+          ask: params.ask as unknown as string,
+          decision: params.decision as unknown as string,
+        });
+        computer.asks = computer.asks.filter((a) => a.id !== (params.ask as unknown as string));
+        return { kind: "done" };
       case "harness.list":
         return { kind: "harnesses", harnesses: computer.harnesses };
       case "workspace.start":

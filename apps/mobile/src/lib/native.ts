@@ -59,6 +59,22 @@ export const cacheShelf: Shelf = {
   },
 };
 
+/**
+ * Chat or Terminal for each conversation, in the documents folder beside the appearance. It holds
+ * conversations' ids and nothing they said.
+ */
+export const viewsFile: ChoiceFile = {
+  read: () => {
+    const file = new File(Paths.document, "views.json");
+    return file.exists ? file.textSync() : null;
+  },
+  write: (choices) => {
+    const file = new File(Paths.document, "views.json");
+    if (!file.exists) file.create();
+    file.writeSync(choices);
+  },
+};
+
 /** In the documents folder, as the system never clears it. It says nothing about anyone. */
 export const appearanceFile: ChoiceFile = {
   read: () => {

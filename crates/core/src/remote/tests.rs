@@ -68,6 +68,7 @@ impl Fixture {
             starting: None,
             terminals_later: None,
             workflow: false,
+            conversations: None,
         }
     }
 
@@ -1608,5 +1609,317 @@ fn text_longer_than_the_protocol_allows_is_clipped_on_the_way_out() {
     assert_eq!(
         session.model.as_deref().map(|m| m.chars().count()),
         Some(remote_proto::MAX_LABEL)
+    );
+}
+
+/// A Claude Code conversation recorded in the alpha worktree, whose transcript is the recorded
+/// fixture, and the facade that knows where it is.
+fn conversation_fixture(f: &Fixture) -> (crate::remote::Conversations, String) {
+    let claude = f.dir.path().join("claude-config");
+    let folder = claude.join("projects").join("-wt");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/claude-transcript/2.1.302/conversation.jsonl"),
+        folder.join("6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b.jsonl"),
+    )
+    .unwrap();
+    f.store
+        .add_session(&NewSession {
+            id: "rec-chat",
+            workspace_id: &f.alpha.worktree,
+            harness_id: "claude",
+            title: "Chat",
+            harness_session_id: Some("6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b"),
+            pty_session_id: "pty-chat",
+            ..Default::default()
+        })
+        .unwrap();
+    (
+        crate::remote::Conversations {
+            sources: crate::usage::logs::Sources {
+                claude: vec![claude],
+                ..Default::default()
+            },
+            data_dir: f.dir.path().join("data"),
+        },
+        "rec-chat".to_owned(),
+    )
+}
+
+fn read_conversation(
+    facade: &HostFacade<'_>,
+    grant: &Grant,
+    workspace: &str,
+    session: &str,
+    from: Option<u32>,
+) -> Response {
+    ask(
+        facade,
+        grant,
+        Operation::ConversationRead(remote_proto::conversation::ConversationReadParams {
+            workspace: WorkspaceId::new(workspace).unwrap(),
+            session: remote_proto::SessionRecordId::new(session).unwrap(),
+            from,
+        }),
+    )
+}
+
+#[test]
+fn a_conversation_is_read_whole_from_its_transcript_by_a_grant_that_may_watch() {
+    let f = Fixture::new();
+    let (conversations, session) = conversation_fixture(&f);
+    let mut facade = f.facade(None);
+    facade.conversations = Some(&conversations);
+    assert!(facade
+        .describe()
+        .capabilities
+        .contains(&"conversation.read".to_owned()));
+
+    let Reply::Conversation(page) = reply(read_conversation(
+        &facade,
+        &everything(),
+        &f.alpha.worktree,
+        &session,
+        None,
+    )) else {
+        panic!("not a conversation");
+    };
+    // The same turns the digest reads, all of them, in order.
+    let workspace = f.store.workspace(&f.alpha.worktree).unwrap().unwrap();
+    let read = crate::activity::digest::one(
+        &f.store,
+        &workspace,
+        &session,
+        &conversations.sources,
+        crate::store::now_ms(),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(!read.turns.is_empty());
+    assert_eq!(page.total as usize, read.turns.len());
+    assert_eq!(page.turns.len(), read.turns.len());
+    for (shown, turn) in page.turns.iter().zip(&read.turns) {
+        assert_eq!(shown.user, turn.user);
+        assert_eq!(shown.said, turn.said);
+        assert!(!shown.cut);
+    }
+    assert_eq!(page.turns[0].n, 1);
+    assert!(page.answers_asks);
+    assert!(page.asks.is_empty());
+
+    // From a turn on: that turn and those after it.
+    let last = page.total;
+    let Reply::Conversation(tail) = reply(read_conversation(
+        &facade,
+        &everything(),
+        &f.alpha.worktree,
+        &session,
+        Some(last),
+    )) else {
+        panic!("not a conversation");
+    };
+    assert_eq!(tail.turns.len(), 1);
+    assert_eq!(tail.turns[0].n, last);
+
+    // Watching is what it takes; activity alone is not enough.
+    let activity_only = grant(
+        &[Scope::WorkspaceRead, Scope::ActivityRead],
+        ProjectGrant::All,
+    );
+    assert_eq!(
+        refusal(read_conversation(
+            &facade,
+            &activity_only,
+            &f.alpha.worktree,
+            &session,
+            None
+        ))
+        .code,
+        ErrorCode::Forbidden
+    );
+    // Another project's grant cannot tell it exists.
+    let beta_only = only(&f.beta.id, &[Scope::TerminalRead]);
+    assert_eq!(
+        refusal(read_conversation(
+            &facade,
+            &beta_only,
+            &f.alpha.worktree,
+            &session,
+            None
+        ))
+        .code,
+        ErrorCode::NotFound
+    );
+    // A conversation of another workspace is not found in this one.
+    assert_eq!(
+        refusal(read_conversation(
+            &facade,
+            &everything(),
+            &f.alpha.local,
+            &session,
+            None
+        ))
+        .code,
+        ErrorCode::NotFound
+    );
+    // Without knowing where conversations are, the host does not offer them.
+    let bare = f.facade(None);
+    assert_eq!(
+        refusal(read_conversation(
+            &bare,
+            &everything(),
+            &f.alpha.worktree,
+            &session,
+            None
+        ))
+        .code,
+        ErrorCode::Unsupported
+    );
+}
+
+#[test]
+fn a_long_conversation_comes_in_pages_and_a_huge_turn_is_cut_to_fit() {
+    let f = Fixture::new();
+    let (conversations, _) = conversation_fixture(&f);
+    let claude = &conversations.sources.claude[0];
+    let id = "7a6b5c4d-3e2f-4a1b-9c8d-7e6f5a4b3c2d";
+    let mut lines = String::new();
+    for n in 0..40 {
+        let at = format!("2026-11-14T10:{n:02}:00.000Z");
+        lines.push_str(
+            &serde_json::json!({"type": "user", "timestamp": at, "message": {"role": "user", "content": format!("question {n} {}", "x".repeat(3000))}})
+                .to_string(),
+        );
+        lines.push('\n');
+        lines.push_str(
+            &serde_json::json!({"type": "assistant", "timestamp": at, "message": {"role": "assistant", "content": [{"type": "text", "text": format!("answer {n} {}", "y".repeat(if n == 39 { 200_000 } else { 3000 }))}]}})
+                .to_string(),
+        );
+        lines.push('\n');
+    }
+    std::fs::write(
+        claude.join("projects/-wt").join(format!("{id}.jsonl")),
+        lines,
+    )
+    .unwrap();
+    f.store
+        .add_session(&NewSession {
+            id: "rec-long",
+            workspace_id: &f.alpha.worktree,
+            harness_id: "claude",
+            title: "Long",
+            harness_session_id: Some(id),
+            pty_session_id: "pty-long",
+            ..Default::default()
+        })
+        .unwrap();
+    let mut facade = f.facade(None);
+    facade.conversations = Some(&conversations);
+    let read = |from| {
+        let Reply::Conversation(page) = reply(read_conversation(
+            &facade,
+            &everything(),
+            &f.alpha.worktree,
+            "rec-long",
+            from,
+        )) else {
+            panic!("not a conversation");
+        };
+        page
+    };
+    let newest = read(None);
+    assert_eq!(newest.total, 40);
+    assert!(newest.turns.len() < 40, "not all of it fits one message");
+    let last = newest.turns.last().unwrap();
+    assert_eq!(last.n, 40);
+    assert!(last.said[0].starts_with("answer 39"));
+    // The huge reply is cut so the newest turn always comes, and says so.
+    assert!(last.cut);
+    assert!(newest.turns.iter().rev().skip(1).all(|turn| !turn.cut));
+    // Numbers run on without a gap, and paging forward from the first gives the start.
+    let numbers: Vec<u32> = newest.turns.iter().map(|t| t.n).collect();
+    assert!(numbers.windows(2).all(|w| w[1] == w[0] + 1));
+    let first = read(Some(1));
+    assert_eq!(first.turns[0].n, 1);
+    assert!(first.turns[0].user.starts_with("question 0"));
+}
+
+#[test]
+fn a_question_the_agent_asked_is_listed_and_answered_once_by_a_grant_that_may_type() {
+    use crate::activity::asks;
+    let f = Fixture::new();
+    let (conversations, session) = conversation_fixture(&f);
+    let mut facade = f.facade(None);
+    facade.conversations = Some(&conversations);
+    let dir = asks::asks_dir(&conversations.data_dir);
+    let now = crate::store::now_ms();
+    asks::post(
+        &dir,
+        &asks::Ask {
+            id: "ask-1".into(),
+            at_ms: now,
+            session_record_id: session.clone(),
+            harness: "claude".into(),
+            tool: "Bash".into(),
+            command: Some("npm test -- --run render".into()),
+            path: None,
+            call: "c".into(),
+        },
+    )
+    .unwrap();
+    let Reply::Conversation(page) = reply(read_conversation(
+        &facade,
+        &everything(),
+        &f.alpha.worktree,
+        &session,
+        None,
+    )) else {
+        panic!("not a conversation");
+    };
+    assert_eq!(page.asks.len(), 1);
+    assert_eq!(
+        page.asks[0].command.as_deref(),
+        Some("npm test -- --run render")
+    );
+
+    let answer = |grant: &Grant, ask_id: &str| {
+        ask(
+            &facade,
+            grant,
+            Operation::ApprovalAnswer(remote_proto::conversation::ApprovalAnswerParams {
+                workspace: WorkspaceId::new(f.alpha.worktree.clone()).unwrap(),
+                session: remote_proto::SessionRecordId::new(session.clone()).unwrap(),
+                ask: ask_id.into(),
+                decision: remote_proto::conversation::ApprovalDecision::Allow,
+            }),
+        )
+    };
+    let watcher = grant(&[Scope::TerminalRead], ProjectGrant::All);
+    assert_eq!(
+        refusal(answer(&watcher, "ask-1")).code,
+        ErrorCode::Forbidden
+    );
+    assert_eq!(reply(answer(&everything(), "ask-1")), Reply::Done);
+    // The waiting hook takes it.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    assert_eq!(
+        asks::wait(
+            &dir,
+            "ask-1",
+            deadline,
+            Duration::from_millis(5),
+            &mut || false
+        ),
+        Some(asks::Decision::Allow)
+    );
+    // Then it is gone: a second answer is told so.
+    assert_eq!(
+        refusal(answer(&everything(), "ask-1")).code,
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        refusal(answer(&everything(), "ask-2")).code,
+        ErrorCode::NotFound
     );
 }

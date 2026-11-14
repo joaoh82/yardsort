@@ -180,6 +180,7 @@ impl Started {
             interactive: true,
             starting: starting.then(|| Arc::clone(&self.lent) as Arc<dyn Starting>),
             workflow: None,
+            conversations: None,
         }
     }
 

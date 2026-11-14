@@ -25,10 +25,12 @@
 //! operations: see [`terminal`]. Since minor 3 a client can follow activity as it is recorded,
 //! with `activity.subscribe`: see [`ActivitySubscribeParams`]. Since minor 5 a client that may
 //! type into a terminal may also start an agent, in a new workspace or an existing one, and
-//! upload a file for one, and since minor 6 resume an ended conversation: see [`start`]. A host lists what it answers in
-//! [`HostDescription::capabilities`].
+//! upload a file for one, and since minor 6 resume an ended conversation: see [`start`]. Since
+//! minor 8 a client may read a conversation's turns and answer the permissions its agent asks
+//! for: see [`conversation`]. A host lists what it answers in [`HostDescription::capabilities`].
 
 pub mod account;
+pub mod conversation;
 pub mod grant;
 pub mod ids;
 pub mod model;
@@ -70,7 +72,8 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// - 5: `harness.list`, `workspace.start`, `session.start`, `upload.begin` and `upload.chunk`.
 /// - 6: `session.resume`, and `resumable` in a session's summary.
 /// - 7: `workflow.run.list`, `workflow.run.get`, `workflow.challenge` and `workflow.decide`.
-pub const PROTOCOL_MINOR: u16 = 7;
+/// - 8: `conversation.read` and `approval.answer`.
+pub const PROTOCOL_MINOR: u16 = 8;
 /// `workflow:read` and `workflow:decide` arrived in this minor. A host is shown
 /// those scope names when it stated this minor or a newer minor of this major.
 pub const WORKFLOW_SCOPES_MINOR: u16 = 7;
@@ -444,6 +447,12 @@ pub enum Operation {
     /// Since minor 7.
     #[serde(rename = "workflow.decide")]
     WorkflowDecide(workflow::WorkflowDecideParams),
+    /// Since minor 8.
+    #[serde(rename = "conversation.read")]
+    ConversationRead(conversation::ConversationReadParams),
+    /// Since minor 8.
+    #[serde(rename = "approval.answer")]
+    ApprovalAnswer(conversation::ApprovalAnswerParams),
 }
 
 /// Every operation's wire name, in [`Operation`]'s order.
@@ -473,6 +482,8 @@ pub const OPERATIONS: &[&str] = &[
     "workflow.run.get",
     "workflow.challenge",
     "workflow.decide",
+    "conversation.read",
+    "approval.answer",
 ];
 
 impl Operation {
@@ -503,6 +514,8 @@ impl Operation {
             Self::WorkflowRunGet(_) => 22,
             Self::WorkflowChallenge(_) => 23,
             Self::WorkflowDecide(_) => 24,
+            Self::ConversationRead(_) => 25,
+            Self::ApprovalAnswer(_) => 26,
         };
         OPERATIONS[index]
     }
@@ -520,7 +533,9 @@ impl Operation {
                 Scope::ActivityRead
             }
             Self::MemoryList(_) => Scope::MemoryRead,
-            Self::TerminalAttach(_) | Self::TerminalDetach(_) => Scope::TerminalRead,
+            Self::TerminalAttach(_) | Self::TerminalDetach(_) | Self::ConversationRead(_) => {
+                Scope::TerminalRead
+            }
             Self::TerminalAcquire(_)
             | Self::TerminalRenew(_)
             | Self::TerminalRelease(_)
@@ -530,7 +545,8 @@ impl Operation {
             | Self::SessionStart(_)
             | Self::UploadBegin(_)
             | Self::UploadChunk(_)
-            | Self::SessionResume(_) => Scope::TerminalControl,
+            | Self::SessionResume(_)
+            | Self::ApprovalAnswer(_) => Scope::TerminalControl,
             Self::WorkflowRunList(_) | Self::WorkflowRunGet(_) => Scope::WorkflowRead,
             Self::WorkflowChallenge(_) | Self::WorkflowDecide(_) => Scope::WorkflowDecide,
         })
@@ -578,6 +594,13 @@ impl Operation {
                 invalid("That run or step is not one Yardsort uses.")
             }
             Self::WorkflowDecide(params) => match params.invalid() {
+                Some(message) => invalid(message),
+                None => Ok(()),
+            },
+            Self::ConversationRead(params) if params.from == Some(0) => {
+                invalid("Turns are numbered from 1.")
+            }
+            Self::ApprovalAnswer(params) => match params.invalid() {
                 Some(message) => invalid(message),
                 None => Ok(()),
             },
@@ -629,6 +652,8 @@ pub enum Reply {
     WorkflowChallenge(workflow::WorkflowChallenge),
     /// Since minor 7.
     WorkflowDecision(workflow::WorkflowDecision),
+    /// Since minor 8.
+    Conversation(conversation::ConversationPage),
     Done,
 }
 

@@ -108,6 +108,10 @@ impl Home for AppHome {
         let Ok(id) = remote_proto::HostId::new(row.host_id) else {
             return;
         };
+        let conversations = yardsort_core::remote::Conversations {
+            sources: crate::conversations::sources(state),
+            data_dir: state.data_dir.clone(),
+        };
         f(&Context {
             store: &state.store,
             git,
@@ -116,6 +120,7 @@ impl Home for AppHome {
             interactive: state.host.shares_control(),
             starting: Some(Arc::clone(&self.starting) as Arc<dyn Starting>),
             workflow: Some(Arc::new(AppWorkflows(self.app.clone())) as Arc<dyn WorkflowGate>),
+            conversations: Some(&conversations),
         });
     }
 

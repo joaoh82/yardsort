@@ -77,6 +77,29 @@ function sayCell(): void {
   say({ t: "cell", width: drawn.width / cols, height: drawn.height / rows });
 }
 
+const viewport = document.querySelector("meta[name=viewport]");
+/** What the page's viewport says while the terminal fits the phone. */
+const PHONE_WIDTH = "width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=4";
+
+/**
+ * A terminal wider than the phone — the computer's size, while it is only watched — is zoomed out
+ * to fit the phone's width, and pinched to read: the viewport is made as wide as the terminal, so
+ * nothing needs scrolling sideways until the person zooms in. Once it fits, as it does with the
+ * phone in control, the page is the phone's width again. Sizes here are the page's own pixels,
+ * which zooming does not change, so what a cell measures is the same either way.
+ */
+function fitWidth(): void {
+  const screen = terminal.element?.querySelector(".xterm-screen")?.getBoundingClientRect();
+  const phone = window.screen.width;
+  if (!viewport || !screen || screen.width <= 0 || phone <= 0) return;
+  const wide = Math.ceil(screen.width);
+  const wanted =
+    wide > phone
+      ? `width=${wide},initial-scale=${(phone / wide).toFixed(4)},minimum-scale=${(phone / wide).toFixed(4)},maximum-scale=4`
+      : PHONE_WIDTH;
+  if (viewport.getAttribute("content") !== wanted) viewport.setAttribute("content", wanted);
+}
+
 let applicationCursor = false;
 
 /** Arrows are sent by the app, and what a program asked for changes what they should say. */
@@ -108,10 +131,14 @@ function heard(message: unknown): void {
         terminal.resize(m.cols, m.rows);
         sayCell();
         sayCursorKeys();
+        fitWidth();
       });
       break;
     case "resize":
-      inTurn(() => terminal.resize(m.cols, m.rows));
+      inTurn(() => {
+        terminal.resize(m.cols, m.rows);
+        fitWidth();
+      });
       break;
     case "output":
       terminal.write(fromBase64(m.data), () => {
@@ -125,7 +152,8 @@ function heard(message: unknown): void {
 // One finger up or down moves through everything there is: the page while it can move, and past
 // its top, what scrolled off the screen. Both are moved here, not by the WebView: a native scroll
 // takes the gesture for itself, and the page then hears nothing more of it, so the history could
-// never be reached. Sideways, and two fingers, are left to the WebView.
+// never be reached. Sideways, and two fingers — pinching to read a terminal zoomed out to fit — are
+// left to the WebView.
 let finger: { y: number; x: number; at: number } | null = null;
 let upright: boolean | null = null;
 let carried = 0;

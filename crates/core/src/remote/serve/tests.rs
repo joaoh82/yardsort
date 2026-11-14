@@ -177,6 +177,7 @@ impl Fixture {
             interactive: true,
             starting: None,
             workflow: None,
+            conversations: None,
         }
     }
 

@@ -102,6 +102,9 @@ pub struct Context<'a> {
     /// What issues a one-time code and wakes the workflow driver. Without it, workflow
     /// operations are not answered. A headless host leaves this empty.
     pub workflow: Option<Arc<dyn super::workflow::WorkflowGate>>,
+    /// Where agents keep their conversations and open questions. Without it, conversations are
+    /// not read and questions not answered.
+    pub conversations: Option<&'a super::Conversations>,
 }
 
 impl Context<'_> {
@@ -117,6 +120,7 @@ impl Context<'_> {
             // A channel's daemon that does not share control is one from before leases.
             terminals_later: (!self.interactive).then(super::earlier_daemon),
             workflow: self.workflow.is_some(),
+            conversations: self.conversations,
         }
     }
 }

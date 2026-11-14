@@ -57,6 +57,9 @@ import {
   request as requestDecoder,
   type RequestId,
   response as responseDecoder,
+  type ApprovalAnswerParams,
+  type ConversationPage,
+  type ConversationReadParams,
   type SessionListParams,
   type SessionPage,
   type SessionResumeParams,
@@ -392,6 +395,23 @@ export class Channel {
       "workflowDecision",
     );
     return decision;
+  }
+
+  /**
+   * A conversation's turns, read on the computer from its agent's own record: the newest that fit,
+   * or from turn `from` on. Its open questions come with it. Minor 8.
+   */
+  async conversation(params: ConversationReadParams): Promise<ConversationPage> {
+    const { kind: _, ...page } = expect(
+      await this.ask({ op: "conversation.read", params }),
+      "conversation",
+    );
+    return page;
+  }
+
+  /** Answer a question the agent asked. Refused as `not_found` once it is not open any more. */
+  async answerAsk(params: ApprovalAnswerParams): Promise<void> {
+    expect(await this.ask({ op: "approval.answer", params }), "done");
   }
 
   /** An ended conversation again, under its own record: one whose summary says `resumable`. */
