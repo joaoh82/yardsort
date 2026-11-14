@@ -41,6 +41,8 @@ use yardsort_core::remote::HostIdentity;
 use yardsort_core::settings::SettingsFile;
 use yardsort_core::store::Store;
 
+pub mod sync;
+
 use crate::error::{IpcError, IpcResult};
 use crate::state::{blocking, AppState};
 use crate::{quit, updates};
@@ -129,6 +131,10 @@ impl Home for AppHome {
             request: request.into(),
         }
         .emit(&self.app);
+    }
+
+    fn synced(&self) {
+        let _ = sync::SyncChanged {}.emit(&self.app);
     }
 }
 

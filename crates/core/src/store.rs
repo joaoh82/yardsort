@@ -51,6 +51,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0039_agent_notices.sql"),
     include_str!("../migrations/0040_workflow_run_pull_requests.sql"),
     include_str!("../migrations/0041_schedule_new_workspace.sql"),
+    include_str!("../migrations/0042_sync.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -61,6 +62,9 @@ pub enum StoreError {
     Io(#[from] std::io::Error),
     #[error("this database was written by a newer version of Yardsort (schema {found}, this build knows {known})")]
     TooNew { found: usize, known: usize },
+    /// A rule of the records, said in words for the person who hit it.
+    #[error("{0}")]
+    Refused(String),
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;
@@ -701,6 +705,9 @@ pub use pr_watches::*;
 
 mod triggers;
 pub use triggers::*;
+
+mod sync;
+pub use sync::*;
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -5486,6 +5493,8 @@ impl Store {
             .unwrap_or(false);
         if !same_server {
             tx.execute("DELETE FROM remote_grants", [])?;
+            // The new host is linked to nothing; what synced as the old one stops here.
+            sync::forget_sync(&tx)?;
         }
         tx.execute(
             "INSERT INTO remote_host
@@ -5508,12 +5517,13 @@ impl Store {
         Ok(())
     }
 
-    /// Turn Remote off: the host and every grant go, in one step.
+    /// Turn Remote off: the host, every grant and everything kept for sync go, in one step.
     pub fn forget_remote_host(&self) -> StoreResult<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM remote_grants", [])?;
         tx.execute("DELETE FROM remote_host", [])?;
+        sync::forget_sync(&tx)?;
         tx.commit()?;
         Ok(())
     }
@@ -6589,9 +6599,9 @@ steps:
             assert!(MIGRATIONS[30].contains("CREATE TABLE workflow_approval_decisions"));
             // 0037 adds nullable device columns and an empty actions table, 0039 two
             // nullable columns to the notice outbox, 0040 an empty table of the pull
-            // requests runs made, and 0041 three columns with defaults to schedules and an
-            // empty table of the workspaces schedules made.
-            assert_eq!(MIGRATIONS.len(), 41);
+            // requests runs made, 0041 three columns with defaults to schedules and an empty
+            // table of the workspaces schedules made, and 0042 sync's three empty tables.
+            assert_eq!(MIGRATIONS.len(), 42);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -6660,9 +6670,9 @@ steps:
             assert!(MIGRATIONS[31].contains("code_rounds"));
             // 0037 adds nullable device columns and an empty actions table, 0039 two
             // nullable columns to the notice outbox, 0040 an empty table of the pull
-            // requests runs made, and 0041 three columns with defaults to schedules and an
-            // empty table of the workspaces schedules made.
-            assert_eq!(MIGRATIONS.len(), 41);
+            // requests runs made, 0041 three columns with defaults to schedules and an empty
+            // table of the workspaces schedules made, and 0042 sync's three empty tables.
+            assert_eq!(MIGRATIONS.len(), 42);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs

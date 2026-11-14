@@ -3,6 +3,17 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Sync a project with your other computers** (Remote, under development). **Sync** in Project
+  settings shows what turning it on sends, the project's name and its Git remote without any
+  password, and turns it on; on your other computer, **Link to a synced project…** offers it, the
+  one with the same remote first, and links nothing until you choose. **Stop syncing** unlinks
+  one computer; **Remove from the server** removes it for all, each keeping its own copy. Only
+  the project itself syncs for now; its approved notes and workspaces come next. On a computer
+  with no screen, `yardsort-host sync`; `ys sync status` says what syncs and changes nothing. See
+  [Syncing projects](docs/guide/remote.md#syncing-projects).
+
 ## 0.34.0
 
 - **On the phone, a conversation opens as Chat.** One column at the phone's width, scrolled up

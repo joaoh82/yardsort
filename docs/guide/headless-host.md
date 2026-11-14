@@ -301,6 +301,30 @@ yardsort-host revoke "My phone"  # by its name, or the id `devices` shows
 
 Taking a device's access away needs no check: it is always safe. Its channel closes at once.
 
+## Syncing projects
+
+A project here can sync with your other computers signed in to the same account, as
+[Syncing projects](remote.md#syncing-projects) describes for the app. With the host running:
+
+```sh
+yardsort-host sync status                     # what syncs, the last pass, and what you could link
+yardsort-host sync on my-service              # shows what it sends, and asks
+yardsort-host sync link my-service fa737444   # to one another computer syncs
+yardsort-host sync stop my-service            # unlink this computer; the others keep it
+yardsort-host sync remove my-service          # from the server, for every computer; asks first
+```
+
+A project is named as `ys project list` shows it, or by its id. `sync on` prints the project's
+name and its remote's address, without any user or password, says the server keeps them in plain
+text, and asks before sending. `status` lists the projects your other computers sync that this one
+does not, each by the start of its id, its name and its remote, and says which project here has
+the same remote; `link` takes that id or the name. Nothing is linked by itself. `--yes` skips the
+question `on` and `remove` ask.
+
+Like `pair`, `on`, `link`, `stop` and `remove` are refused from a terminal Yardsort started, from
+anything an agent runs, and from input that is not a terminal ([the guard](#only-a-person-can-pair-a-device)).
+`status` is not; nor is [`ys sync status`](cli.md#ys-sync-status), which is all `ys` offers of sync.
+
 ## Upgrading
 
 Replace the two programs and restart `serve`:

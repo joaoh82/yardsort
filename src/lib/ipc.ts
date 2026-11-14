@@ -62,6 +62,8 @@ import {
   type NewWorkspace,
   type Preflight,
   type Project,
+  type ProjectSyncStatus,
+  type SyncOffer,
   type ProjectAutomation,
   type ProjectPullRequests,
   type ProjectTasks,
@@ -308,6 +310,8 @@ export type {
   NewWorkspace,
   Preflight,
   Project,
+  ProjectSyncStatus,
+  SyncOffer,
   ProjectPullRequests,
   ProjectTasks,
   OtherComputers,
@@ -850,6 +854,24 @@ export const ipc = {
   /** The relay told this host a device asks to be let in, and the server has it waiting. */
   onRemotePairingRequested: (handler: (request: RemoteRequest) => void) =>
     events.remotePairingRequested.listen((event) => handler(event.payload.request)),
+
+  /**
+   * Sync between this computer and the account's others, a project at a time, while Remote is
+   * on. Only the person turns it on, links, stops or removes, here. See
+   * `src-tauri/src/remote/sync.rs`.
+   */
+  projectSyncGet: (projectId: string) => unwrap(commands.projectSyncGet(projectId)),
+  /** Its name and remote hint go to the server: what `projectSyncGet`'s preview showed. */
+  projectSyncOn: (projectId: string) => unwrap(commands.projectSyncOn(projectId)),
+  /** The account's synced projects this one could be linked to; matching remotes first. */
+  projectSyncOffers: (projectId: string) => unwrap(commands.projectSyncOffers(projectId)),
+  projectSyncLink: (projectId: string, synced: string) =>
+    unwrap(commands.projectSyncLink(projectId, synced)),
+  projectSyncStop: (projectId: string) => unwrap(commands.projectSyncStop(projectId)),
+  /** Remove its records from the server, for every computer. Each keeps its own copy. */
+  projectSyncRemove: (projectId: string) => unwrap(commands.projectSyncRemove(projectId)),
+  /** Sync changed something it shows: a project stopped syncing, or a pass failed or recovered. */
+  onSyncChanged: (handler: () => void) => events.syncChanged.listen(() => handler()),
 
   /**
    * Remote the other way round: this computer as a client of other hosts, a device of its own at

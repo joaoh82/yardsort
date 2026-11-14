@@ -334,6 +334,20 @@ export const commands = {
 	 */
 	workspaceHandoff: (workspaceId: string) => typedError<HandoffPacket, IpcError>(__TAURI_INVOKE("workspace_handoff", { workspaceId })),
 	remoteStatus: () => typedError<RemoteStatus, IpcError>(__TAURI_INVOKE("remote_status")),
+	projectSyncGet: (projectId: string) => typedError<ProjectSyncStatus, IpcError>(__TAURI_INVOKE("project_sync_get", { projectId })),
+	/**  Turn sync on for a project: its name and remote hint go up on the next pass. */
+	projectSyncOn: (projectId: string) => typedError<ProjectSyncStatus, IpcError>(__TAURI_INVOKE("project_sync_on", { projectId })),
+	/**
+	 *  The synced projects another computer of the account has, that this one could link
+	 *  `project_id` to. Those whose remote is this project's come first.
+	 */
+	projectSyncOffers: (projectId: string) => typedError<SyncOffer[], IpcError>(__TAURI_INVOKE("project_sync_offers", { projectId })),
+	/**  Link a project here to the synced one the person chose. */
+	projectSyncLink: (projectId: string, synced: string) => typedError<ProjectSyncStatus, IpcError>(__TAURI_INVOKE("project_sync_link", { projectId, synced })),
+	/**  Stop syncing a project here. Its records stay on the server for the account's other hosts. */
+	projectSyncStop: (projectId: string) => typedError<ProjectSyncStatus, IpcError>(__TAURI_INVOKE("project_sync_stop", { projectId })),
+	/**  Remove a project's records from the server, for every host. Each keeps its own copy. */
+	projectSyncRemove: (projectId: string) => typedError<ProjectSyncStatus, IpcError>(__TAURI_INVOKE("project_sync_remove", { projectId })),
 	/**
 	 *  Turn Remote on with the server at `server_url`, as `name`: sign in through the browser, then
 	 *  register this computer as a host. Waits for the browser, for up to ten minutes, unless
@@ -806,6 +820,7 @@ export const events = {
 	remotePairingRequested: makeEvent<RemotePairingRequested>("remote-pairing-requested"),
 	schedulesChanged: makeEvent<SchedulesChanged>("schedules-changed"),
 	sessionStarted: makeEvent<SessionStarted>("session-started"),
+	syncChanged: makeEvent<SyncChanged>("sync-changed"),
 	testResultSent: makeEvent<TestResultSent>("test-result-sent"),
 	testRunOutput: makeEvent<TestRunOutput>("test-run-output"),
 	testRunsChanged: makeEvent<TestRunsChanged>("test-runs-changed"),
@@ -2446,6 +2461,30 @@ export type ProjectPullRequests = {
 	tracked: TrackedPullRequest[],
 };
 
+/**  How a project stands for sync on this installation. */
+export type ProjectSync = 
+/**  Remote is off here, so nothing syncs. */
+{ state: "remoteOff" } | 
+/**  It does not sync. Turning it on sends what `preview` shows. */
+{ state: "off"; preview: SyncPreview } | 
+/**  It syncs, or is on its way to. */
+{ state: "on"; 
+/**  The server has its record. */
+reached: boolean; 
+/**  Being removed from the server. */
+removing: boolean; 
+/**  Why the server refused something of it, when it did. */
+refused: string | null };
+
+/**  How a project stands for sync, and how the last pass went. */
+export type ProjectSyncStatus = {
+	sync: ProjectSync,
+	/**  When a pass last went through, in milliseconds. */
+	syncedAt: number | null,
+	/**  Why the last pass did not. */
+	problem: string | null,
+};
+
 /**  What a project's source says about its tasks. */
 export type ProjectTasks = {
 	/**  `gh` is installed. Without it there are no tasks anywhere in the app. */
@@ -3444,6 +3483,24 @@ export type Suggestion = {
 	harnessId: string | null,
 	/**  The effort to offer, per harness id — the level depends on what each harness offers. */
 	effortByHarness: { [key in string]: string },
+};
+
+/**  Something sync shows changed: refresh what shows it. */
+export type SyncChanged = Record<string, never>;
+
+/**  A project another computer syncs, offered for linking. */
+export type SyncOffer = {
+	id: string,
+	name: string,
+	remote: string | null,
+	/**  Its remote is this project's. */
+	matches: boolean,
+};
+
+/**  What turning sync on for a project sends. */
+export type SyncPreview = {
+	name: string,
+	remote: string | null,
 };
 
 export type SystemLoad = {

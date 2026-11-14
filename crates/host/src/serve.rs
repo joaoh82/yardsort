@@ -161,6 +161,9 @@ async fn answer(home: &Arc<HostHome>, stream: UnixStream) {
             None => return pair(home, &mut line).await,
             Some(message) => Reply::Failed { message },
         },
+        Ok(Some(ask)) if ask.guarded() && refusal.is_some() => Reply::Failed {
+            message: refusal.unwrap_or_default(),
+        },
         Ok(Some(ask)) => one(home, ask)
             .await
             .unwrap_or_else(|f| Reply::Failed { message: f.message }),
@@ -203,6 +206,12 @@ async fn one(home: &Arc<HostHome>, ask: Ask) -> account::Result<Reply> {
             account::disable(home.as_ref()).await?;
             Reply::SignedOut
         }
+        Ask::SyncStatus => Reply::Sync(crate::sync::status(home).await),
+        Ask::SyncPreview { project } => crate::sync::preview(home, &project)?,
+        Ask::SyncOn { project } => crate::sync::turn_on(home, &project)?,
+        Ask::SyncLink { project, synced } => crate::sync::link(home, &project, &synced).await?,
+        Ask::SyncStop { project } => crate::sync::stop(home, &project).await?,
+        Ask::SyncRemove { project } => crate::sync::remove(home, &project)?,
         Ask::Pair | Ask::Answer { .. } => Reply::Failed {
             message: "Not here.".into(),
         },
