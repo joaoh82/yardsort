@@ -22,8 +22,8 @@ Components, Screens and App icon. Names in it are made up.
   `#b77a00`, because here it fills buttons under dark text. Amber words use `accentText`, a darker
   `#8a5c00` in light. The phone's colours are in `apps/mobile/src/ui/parts.tsx` and in the Figma file's
   variables under the same names: a change to one goes in the other. The desktop's are separate.
-- **Light, dark or automatic** is a choice in the app's Settings, reached from the account screen and
-  from Connect. Automatic, the default, follows the phone. It changes the screens at once and tells the
+- **Light, dark or automatic** is a choice in the app's Settings, reached by the gear at the top right
+  of the account screen and of Connect. Automatic, the default, follows the phone. It changes the screens at once and tells the
   system too, for alerts and the keyboard. It is kept in a small file in the app's documents folder, read
   before the first screen is drawn so the other mode never flashes, and is never sent to a server. It may
   go along in a phone's backup, since it says nothing about anyone.
@@ -98,7 +98,7 @@ older build of the app cannot run this code. Use staging and your real computer,
 3. **The fonts.** This is the check most likely to fail on iOS. On the account screen, the server's
    address and the small section headings should be visibly monospaced, and everything else Inter. If
    the headings look like ordinary system text, the fonts were not found.
-4. **Dark and light.** On the account screen, open **Settings** and choose **Dark**: the app changes
+4. **Dark and light.** On the account screen, open **Settings** (the gear at the top right) and choose **Dark**: the app changes
    at once, header and status bar included, and stays dark after force-quitting it. Choose **Light**
    too, then **Automatic**, which follows iOS Settings, Display & Brightness. Everything stays readable
    and the terminal stays dark throughout. Sign out's question should match the mode, as should the

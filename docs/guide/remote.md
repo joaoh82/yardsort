@@ -122,6 +122,7 @@ when it was read. Nothing typed or chosen while it cannot be reached is kept to 
 
 ## Diagnostics on the phone
 
+The phone's **Settings** is the gear at the top right of its first screen, Connect or your account.
 **Settings → Diagnostics** shows what happened to the phone's connections since the app started:
 
 - the app's version, the phone's system and the protocol it speaks;

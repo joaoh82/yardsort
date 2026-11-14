@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { Secret } from "@yardsort/remote-client";
 import { router, Stack } from "expo-router";
-import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { Alert, type AlertButton, AppState, Linking, Share } from "react-native";
 
 import Account from "../../src/app/account";
@@ -433,16 +433,25 @@ describe("Computers", () => {
     return app;
   }
 
+  /** Settings is a gear in the header's corner, not a button at the foot of the screen. */
+  async function openSettingsFromTheCorner() {
+    const corner = await screen.findByRole("button", { name: "Settings" });
+    expect(
+      within(screen.getByTestId("screen")).queryByRole("button", { name: "Settings" }),
+    ).toBeNull();
+    await fireEvent.press(corner);
+  }
+
   test("settings can be reached before there is any server", async () => {
     await start();
-    await fireEvent.press(await screen.findByRole("button", { name: "Settings" }));
+    await openSettingsFromTheCorner();
     expect(await screen.findByRole("radio", { name: "Dark" })).toBeTruthy();
   });
 
   test("settings can be reached signed in", async () => {
     await start();
     await signIn();
-    await fireEvent.press(await screen.findByRole("button", { name: "Settings" }));
+    await openSettingsFromTheCorner();
     expect(await screen.findByRole("radio", { name: "Dark" })).toBeTruthy();
   });
 
