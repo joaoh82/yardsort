@@ -361,6 +361,122 @@ pub fn moved_past(hook: &Value) -> Option<Option<String>> {
     }
 }
 
+/// How much of a transcript's end is read to find the tool call a permission is about: it was
+/// written just before Claude Code asked.
+const CALL_TAIL_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Whether a permission was answered at the terminal, from Claude Code's own transcript: a "No"
+/// or Esc there runs no hook at all, but the transcript gets the call's result. The call is the
+/// newest `tool_use` with the question's tool and input; once a `tool_result` names it, the
+/// question has its answer. Reads what was appended since it last looked, never the whole file.
+pub struct CallWatch {
+    path: std::path::PathBuf,
+    offset: u64,
+    partial: Vec<u8>,
+    tool: String,
+    input: Value,
+    call: Option<String>,
+}
+
+impl CallWatch {
+    /// For a `PermissionRequest` payload that names its transcript.
+    pub fn new(hook: &Value) -> Option<Self> {
+        let path = std::path::PathBuf::from(hook.get("transcript_path").and_then(Value::as_str)?);
+        let length = std::fs::metadata(&path).ok()?.len();
+        Some(Self {
+            path,
+            offset: length.saturating_sub(CALL_TAIL_BYTES),
+            partial: Vec::new(),
+            tool: hook.get("tool_name").and_then(Value::as_str)?.to_owned(),
+            input: hook.get("tool_input").cloned().unwrap_or(Value::Null),
+            call: None,
+        })
+    }
+
+    /// Whether the call has had its result since this last looked.
+    pub fn answered(&mut self) -> bool {
+        use std::io::{Read, Seek, SeekFrom};
+        let Ok(mut file) = std::fs::File::open(&self.path) else {
+            return false;
+        };
+        if file.seek(SeekFrom::Start(self.offset)).is_err() {
+            return false;
+        }
+        let mut more = Vec::new();
+        let Ok(read) = file.read_to_end(&mut more) else {
+            return false;
+        };
+        self.offset += read as u64;
+        self.partial.extend_from_slice(&more);
+        // Whole lines only: the last one may still be being written.
+        let Some(end) = self.partial.iter().rposition(|&b| b == b'\n') else {
+            return false;
+        };
+        let lines: Vec<u8> = self.partial.drain(..=end).collect();
+        // A later call with the same input is the one asking: only a result after it counts.
+        let mut answered = false;
+        for line in lines.split(|&b| b == b'\n') {
+            let Ok(line) = std::str::from_utf8(line) else {
+                continue;
+            };
+            match self.seen(line) {
+                Seen::Call => answered = false,
+                Seen::Result => answered = true,
+                Seen::Nothing => {}
+            }
+        }
+        answered
+    }
+
+    fn seen(&mut self, line: &str) -> Seen {
+        let use_line = line.contains("\"tool_use\"");
+        let result_line = self
+            .call
+            .as_ref()
+            .is_some_and(|id| line.contains("\"tool_result\"") && line.contains(id.as_str()));
+        if !use_line && !result_line {
+            return Seen::Nothing;
+        }
+        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+            return Seen::Nothing;
+        };
+        let blocks = entry
+            .pointer("/message/content")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut seen = Seen::Nothing;
+        for block in blocks {
+            match block.get("type").and_then(Value::as_str) {
+                Some("tool_use")
+                    if block.get("name").and_then(Value::as_str) == Some(self.tool.as_str())
+                        && block.get("input") == Some(&self.input) =>
+                {
+                    self.call = block.get("id").and_then(Value::as_str).map(str::to_owned);
+                    seen = Seen::Call;
+                }
+                Some("tool_result")
+                    if self.call.is_some()
+                        && block.get("tool_use_id").and_then(Value::as_str)
+                            == self.call.as_deref() =>
+                {
+                    seen = Seen::Result;
+                }
+                _ => {}
+            }
+        }
+        seen
+    }
+}
+
+enum Seen {
+    Nothing,
+    /// The call the question is about, or a newer one with the same input.
+    Call,
+    /// That call's result.
+    Result,
+}
+
 /// What the hook prints to answer a permission.
 pub fn decision_output(decision: super::asks::Decision) -> Value {
     let decision = match decision {
@@ -856,5 +972,53 @@ mod tests {
         assert_eq!(theirs.len(), 2, "untouched");
         let mut bare = vec!["--bare".to_owned()];
         assert!(arm(&mut bare, dir.path()).is_err());
+    }
+
+    #[test]
+    fn a_permission_answered_at_the_terminal_is_seen_in_the_transcript_by_its_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("t.jsonl");
+        let input = json!({"command": "curl -sI https://example.com", "description": "Fetch"});
+        let tool_use = |id: &str, command: &str| {
+            json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": id, "name": "Bash", "input": {"command": command, "description": "Fetch"}}]}}).to_string()
+        };
+        let result = |id: &str| {
+            json!({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": id, "content": "The user doesn't want to proceed with this tool use.", "is_error": true}]}}).to_string()
+        };
+        std::fs::write(
+            &transcript,
+            format!(
+                "{}\n{}\n{}\n",
+                tool_use("toolu_old", "curl -sI https://example.com"),
+                result("toolu_old"),
+                tool_use("toolu_new", "curl -sI https://example.com")
+            ),
+        )
+        .unwrap();
+        let hook = json!({
+            "hook_event_name": "PermissionRequest",
+            "transcript_path": transcript.to_string_lossy(),
+            "tool_name": "Bash",
+            "tool_input": input,
+        });
+        let mut watch = CallWatch::new(&hook).unwrap();
+        // The older call's result is not this one's.
+        assert!(!watch.answered());
+        let append = |text: String| {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&transcript)
+                .unwrap();
+            file.write_all(text.as_bytes()).unwrap();
+        };
+        // Another call's result, and half a line still being written, are not it either.
+        append(format!("{}\n", result("toolu_other")));
+        let whole = result("toolu_new");
+        let (first, rest) = whole.split_at(20);
+        append(first.to_owned());
+        assert!(!watch.answered());
+        append(format!("{rest}\n"));
+        assert!(watch.answered());
     }
 }

@@ -36,6 +36,8 @@ import { pastedPath } from "../lib/attach";
 import {
   type ChatState,
   ConversationFeed,
+  type Seen,
+  settled,
   type Step,
   span,
   stateOf,
@@ -57,6 +59,8 @@ const WHILE_WORKING_MS = 4_000;
 /** Read again this long after the agent's hooks said something, and once more after that: an
  * agent writes its reply just after the hook that says its turn ended. */
 const AFTER_EVENT_MS = [400, 2_500];
+/** How often to ask whether the conversation's terminal ended or went quiet. */
+const SEEN_EVERY_MS = 5_000;
 /** Near enough the bottom to stay there as more comes. */
 const AT_BOTTOM_PX = 48;
 
@@ -96,7 +100,37 @@ export function ChatView({
     [activity.events, target.session],
   );
   const now = useClock();
-  const current = useMemo(() => stateOf(events, chat.asks), [events, chat.asks]);
+  // What the conversation's terminal shows: whether it ended, and how long it has been quiet.
+  const [seen, setSeen] = useState<Seen | null>(null);
+  useEffect(() => {
+    if (!channel) return;
+    let stale = false;
+    const look = async () => {
+      try {
+        const page = await channel.sessions({ workspace: target.workspace });
+        const running = page.sessions.find((s) => s.id === target.session);
+        const terminal = running?.terminal ?? null;
+        if (!stale) {
+          setSeen({
+            ended: !running || !terminal || terminal.activity === "exited",
+            quietMs: terminal?.activity === "quiet" ? terminal.idleMs : 0,
+          });
+        }
+      } catch {
+        // Said by the reach, and asked again in a moment.
+      }
+    };
+    void look();
+    const every = setInterval(() => void look(), SEEN_EVERY_MS);
+    return () => {
+      stale = true;
+      clearInterval(every);
+    };
+  }, [channel, target.workspace, target.session]);
+  const current = useMemo(
+    () => settled(stateOf(events, chat.asks, chat.answersAsks), seen, now),
+    [events, chat.asks, chat.answersAsks, seen, now],
+  );
   const steps = useMemo(() => stepsOf(events, chat.turns), [events, chat.turns]);
 
   useEffect(() => state(current), [current, state]);
@@ -145,7 +179,7 @@ export function ChatView({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [said, setSaid] = useState<Said | null>(null);
-  const ended = target.terminal === null;
+  const ended = target.terminal === null || current.kind === "ended";
 
   const type = async (
     text: string,
@@ -268,8 +302,11 @@ export function ChatView({
                       });
                       feed.answered(ask.id);
                     } catch (error) {
-                      feed.answered(ask.id);
-                      if (!(error instanceof ClientError && error.code === "not_found")) {
+                      // Answered already, or the agent moved on: it goes. Anything else may not
+                      // have reached the computer, so the question stays to be answered.
+                      if (error instanceof ClientError && error.code === "not_found") {
+                        feed.answered(ask.id);
+                      } else {
                         setSaid({ kind: "refused", why: messageOf(error) });
                       }
                     }

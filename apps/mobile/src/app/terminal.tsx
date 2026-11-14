@@ -24,6 +24,7 @@ import {
   ChannelClosed,
   type Controller,
   type HostId,
+  type SessionPage,
   type SessionRecordId,
   type SessionSummary,
   type TerminalId,
@@ -98,11 +99,21 @@ function useConversation(
     let stale = false;
     const look = async () => {
       for (const includeEnded of [false, true]) {
-        const page = await channel.sessions({ workspace, includeEnded });
-        const match = page.sessions.find((s) =>
-          session ? s.id === session : s.terminal?.id === terminal,
-        );
-        if (match) return match;
+        let cursor: SessionPage["next"] = null;
+        // Every page: an old conversation can be far down a long list of ended ones.
+        for (let pages = 0; pages < 50; pages++) {
+          const page: SessionPage = await channel.sessions({
+            workspace,
+            includeEnded,
+            ...(cursor ? { cursor } : {}),
+          });
+          const match = page.sessions.find((s) =>
+            session ? s.id === session : s.terminal?.id === terminal,
+          );
+          if (match) return match;
+          cursor = page.next;
+          if (!cursor) break;
+        }
       }
       return null;
     };
@@ -180,6 +191,18 @@ function Conversation({
     );
   }
   if (!chatOffered || !found) {
+    // Opened by its conversation, with the computer out of reach: not known yet, not gone.
+    if (!termId && found === undefined) {
+      return (
+        <Screen>
+          <Stack.Screen options={{ title: label }} />
+          <Problem attention>
+            {describeReach(link.reach, link.lastSeenAt)}. The conversation shows once the computer
+            can be reached.
+          </Problem>
+        </Screen>
+      );
+    }
     if (!termId) {
       return (
         <Screen>
@@ -350,6 +373,8 @@ function stateWords(state: ChatState, summary: SessionSummary, now: number): str
       return "The turn failed";
     case "ended":
       return "Ended";
+    case "idle":
+      return "Idle";
     case "unknown":
       return summary.process === "running" ? "Running" : "Ended";
   }

@@ -29,6 +29,12 @@ pub const ASK_TTL_MS: i64 = 590_000;
 pub const POLL: Duration = Duration::from_millis(250);
 /// Longest command kept, in characters.
 pub const MAX_COMMAND: usize = 2_000;
+/// How often a waiting hook says it is still there, by touching its question's file.
+pub const HEARTBEAT: Duration = Duration::from_secs(2);
+/// A question whose file has not been touched in this long has nobody waiting on it: Claude Code
+/// ends its hook when the question is answered "No" or with Esc at the terminal, before the hook
+/// can take it away.
+pub const ABANDONED: Duration = Duration::from_secs(10);
 
 const ASK_EXT: &str = "json";
 const ANSWER_EXT: &str = "answer";
@@ -119,6 +125,21 @@ pub fn close(dir: &Path, id: &str) {
     }
 }
 
+/// Whether a hook still waits on the question in `path`: it touched it lately.
+fn waited_on(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|at| at.elapsed().ok())
+        .is_none_or(|age| age <= ABANDONED)
+}
+
+fn touch(path: &Path) {
+    if let Ok(file) = std::fs::OpenOptions::new().write(true).open(path) {
+        let _ = file.set_modified(std::time::SystemTime::now());
+    }
+}
+
 fn read(path: &Path) -> Option<Ask> {
     let bytes = std::fs::read(path).ok()?;
     serde_json::from_slice(&bytes).ok()
@@ -136,12 +157,37 @@ fn all(dir: &Path) -> Vec<Ask> {
         .collect()
 }
 
+/// Answers left with no question beside them — the question closed as the answer was written —
+/// once they are a minute old: nothing will read them.
+fn sweep_orphans(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for path in entries.flatten().map(|entry| entry.path()) {
+        if !path.extension().is_some_and(|ext| ext == ANSWER_EXT)
+            || path.with_extension(ASK_EXT).exists()
+        {
+            continue;
+        }
+        let old = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|at| at.elapsed().ok())
+            .is_some_and(|age| age > Duration::from_secs(60));
+        if old {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 /// The questions `session` has open, oldest first. Stale ones are removed on the way.
 pub fn open(dir: &Path, session: &str, now_ms: i64) -> Vec<Ask> {
+    sweep_orphans(dir);
     let mut found: Vec<Ask> = all(dir)
         .into_iter()
         .filter(|ask| {
-            let stale = now_ms - ask.at_ms > ASK_TTL_MS;
+            let abandoned = path_of(dir, &ask.id, ASK_EXT).is_some_and(|path| !waited_on(&path));
+            let stale = now_ms - ask.at_ms > ASK_TTL_MS || abandoned;
             if stale {
                 close(dir, &ask.id);
             }
@@ -167,7 +213,10 @@ pub fn answer(
         return Ok(false);
     };
     match read(&ask_path) {
-        Some(ask) if ask.session_record_id == session && now_ms - ask.at_ms <= ASK_TTL_MS => {}
+        Some(ask)
+            if ask.session_record_id == session
+                && now_ms - ask.at_ms <= ASK_TTL_MS
+                && waited_on(&ask_path) => {}
         _ => return Ok(false),
     }
     // The first answer stands: a second device's is refused, not swapped in.
@@ -183,23 +232,47 @@ pub fn answer(
     use std::io::Write;
     file.write_all(&serde_json::to_vec(&decision)?)?;
     file.sync_all()?;
+    // Closed while this was written: the waiting hook is gone, so nothing will take it.
+    if !ask_path.exists() {
+        let _ = std::fs::remove_file(&answer_path);
+        return Ok(false);
+    }
     Ok(true)
 }
 
-/// Wait for an answer to `id` until `deadline`. `None` when the question was closed, or nobody
-/// answered in time. Either way the question is gone when this returns.
-pub fn wait(dir: &Path, id: &str, deadline: Instant, poll: Duration) -> Option<Decision> {
+/// Wait for an answer to `id` until `deadline`, or until `moved_on` says the agent went past the
+/// question without one (it was answered at the terminal). `None` when the question was closed,
+/// nobody answered in time, or the agent moved on. Either way the question is gone when this
+/// returns.
+pub fn wait(
+    dir: &Path,
+    id: &str,
+    deadline: Instant,
+    poll: Duration,
+    moved_on: &mut dyn FnMut() -> bool,
+) -> Option<Decision> {
     let (ask_path, answer_path) = (path_of(dir, id, ASK_EXT)?, path_of(dir, id, ANSWER_EXT)?);
-    let decided = loop {
-        // An answer file that is still being written reads as nothing yet.
-        if let Some(decision) = std::fs::read(&answer_path)
+    // An answer file that is still being written reads as nothing yet.
+    let answered = || {
+        std::fs::read(&answer_path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Decision>(&bytes).ok())
-        {
+    };
+    let mut touched = Instant::now();
+    let decided = loop {
+        if let Some(decision) = answered() {
             break Some(decision);
         }
-        if !ask_path.exists() || Instant::now() >= deadline {
+        if touched.elapsed() >= HEARTBEAT {
+            touch(&ask_path);
+            touched = Instant::now();
+        }
+        if moved_on() {
             break None;
+        }
+        if !ask_path.exists() || Instant::now() >= deadline {
+            // An answer written just before the question closed still counts.
+            break answered();
         }
         std::thread::sleep(poll);
     };
@@ -249,7 +322,13 @@ mod tests {
         assert!(!answer(dir.path(), "s1", "a1", Decision::Allow, 2_000).unwrap());
         let deadline = Instant::now() + Duration::from_secs(5);
         assert_eq!(
-            wait(dir.path(), "a1", deadline, Duration::from_millis(5)),
+            wait(
+                dir.path(),
+                "a1",
+                deadline,
+                Duration::from_millis(5),
+                &mut || false
+            ),
             Some(Decision::Deny)
         );
         assert!(open(dir.path(), "s1", 2_000).is_empty());
@@ -269,7 +348,13 @@ mod tests {
         });
         let deadline = Instant::now() + Duration::from_secs(5);
         assert_eq!(
-            wait(dir.path(), "a1", deadline, Duration::from_millis(5)),
+            wait(
+                dir.path(),
+                "a1",
+                deadline,
+                Duration::from_millis(5),
+                &mut || false
+            ),
             None
         );
         closer.join().unwrap();
@@ -277,7 +362,13 @@ mod tests {
         post(dir.path(), &ask("a2", "s1", 1_000)).unwrap();
         let started = Instant::now();
         assert_eq!(
-            wait(dir.path(), "a2", started, Duration::from_millis(5)),
+            wait(
+                dir.path(),
+                "a2",
+                started,
+                Duration::from_millis(5),
+                &mut || false
+            ),
             None
         );
         assert!(open(dir.path(), "s1", 1_000).is_empty());
@@ -309,5 +400,73 @@ mod tests {
         assert!(!dir.path().join("a1.json").exists());
         assert!(post(dir.path(), &ask("../x", "s1", 0)).is_err());
         assert!(!answer(dir.path(), "s1", "../x", Decision::Allow, 0).unwrap());
+    }
+
+    #[test]
+    fn a_wait_ends_when_the_agent_moved_on_and_an_answer_to_a_closed_question_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        post(dir.path(), &ask("a1", "s1", 1_000)).unwrap();
+        let mut asked = 0;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut moved_on = || {
+            asked += 1;
+            asked > 2
+        };
+        assert_eq!(
+            wait(
+                dir.path(),
+                "a1",
+                deadline,
+                Duration::from_millis(1),
+                &mut moved_on
+            ),
+            None
+        );
+        assert!(open(dir.path(), "s1", 1_000).is_empty());
+        // Nothing waits for it now, so a device is told it is not open.
+        assert!(!answer(dir.path(), "s1", "a1", Decision::Allow, 1_000).unwrap());
+        assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn a_question_nobody_waits_on_any_more_is_closed_and_not_answerable() {
+        let dir = tempfile::tempdir().unwrap();
+        post(dir.path(), &ask("a1", "s1", 1_000)).unwrap();
+        // The hook was ended before it could take the question away.
+        let path = dir.path().join("a1.json");
+        let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.set_modified(std::time::SystemTime::now() - ABANDONED - Duration::from_secs(1))
+            .unwrap();
+        drop(file);
+        assert!(!answer(dir.path(), "s1", "a1", Decision::Allow, 1_000).unwrap());
+        assert!(open(dir.path(), "s1", 1_000).is_empty());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_waiting_hook_keeps_its_question_alive() {
+        let dir = tempfile::tempdir().unwrap();
+        post(dir.path(), &ask("a1", "s1", 1_000)).unwrap();
+        let path = dir.path().join("a1.json");
+        let old = std::time::SystemTime::now() - ABANDONED + Duration::from_secs(1);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        let waiting = {
+            let dir = dir.path().to_path_buf();
+            std::thread::spawn(move || {
+                let deadline = Instant::now() + HEARTBEAT + Duration::from_millis(500);
+                wait(&dir, "a1", deadline, Duration::from_millis(50), &mut || {
+                    false
+                })
+            })
+        };
+        std::thread::sleep(HEARTBEAT + Duration::from_millis(200));
+        // Touched since: still open, though it was nearly abandoned when the wait began.
+        assert_eq!(open(dir.path(), "s1", 1_000).len(), 1);
+        assert_eq!(waiting.join().unwrap(), None);
     }
 }

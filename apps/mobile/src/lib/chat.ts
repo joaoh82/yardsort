@@ -133,12 +133,30 @@ export class ConversationFeed {
         session: this.session,
         ...(last ? { from: last.n } : {}),
       });
-      // A conversation that went back (cleared, or rewound) is read again from its newest.
-      const rewound = last !== undefined && page.total < last.n;
-      const fresh = rewound
+      // A conversation that went back (cleared, or rewound) is read again from its newest: it has
+      // fewer turns than held, or the turn held last is not the one there now.
+      const there = page.turns.find((turn) => turn.n === last?.n);
+      const rewound =
+        last !== undefined &&
+        (page.total < last.n ||
+          (there !== undefined && (there.at !== last.at || there.user !== last.user)));
+      let fresh = rewound
         ? await channel.conversation({ workspace: this.workspace, session: this.session })
         : page;
-      const turns = rewound || !last ? fresh.turns : joined(held, fresh.turns);
+      let turns = rewound || !last ? fresh.turns : joined(held, fresh.turns);
+      // More came than one page holds: read on to the newest.
+      for (let pages = 0; !rewound && pages < 20; pages++) {
+        const reached = turns.at(-1)?.n ?? 0;
+        if (reached >= fresh.total) break;
+        const next = await channel.conversation({
+          workspace: this.workspace,
+          session: this.session,
+          from: reached + 1,
+        });
+        if (next.turns.length === 0) break;
+        turns = joined(turns, next.turns);
+        fresh = next;
+      }
       this.#update({
         turns,
         total: fresh.total,
@@ -197,7 +215,28 @@ export type ChatState =
   | { kind: "done"; at: number }
   | { kind: "failed"; at: number }
   | { kind: "ended"; at: number }
+  /** Its activity says working, but its terminal has been quiet: stopped with Esc, say. */
+  | { kind: "idle" }
   | { kind: "unknown" };
+
+/** How long a terminal stays quiet before an agent said to be working is taken to have stopped. */
+export const QUIET_MS = 15_000;
+
+/** What the conversation's terminal says of it, from the computer's list of conversations. */
+export interface Seen {
+  ended: boolean;
+  /** How long its terminal has printed nothing, when the computer says. */
+  quietMs: number | null;
+}
+
+/** The state, corrected by what the terminal shows: an ended one, or one that went quiet. */
+export function settled(state: ChatState, seen: Seen | null, now: number): ChatState {
+  if (seen?.ended && state.kind !== "ended") return { kind: "ended", at: now };
+  if (state.kind === "working" && seen?.quietMs != null && seen.quietMs > QUIET_MS) {
+    return { kind: "idle" };
+  }
+  return state;
+}
 
 const WORKING = new Set([
   "prompt.submitted",
@@ -210,17 +249,29 @@ const WORKING = new Set([
   "session.compacted",
 ]);
 
-/** The conversation's state, from its newest event that says one. Open questions come first. */
-export function stateOf(events: readonly ActivityEvent[], asks: readonly Ask[]): ChatState {
+/**
+ * The conversation's state, from its newest event that says one. Open questions come first; for an
+ * agent whose questions are answered through Yardsort they are the only word on needing you, since
+ * a question answered at the terminal leaves its `approval.requested` the newest event.
+ */
+export function stateOf(
+  events: readonly ActivityEvent[],
+  asks: readonly Ask[],
+  answersAsks = false,
+): ChatState {
   const first = asks[0];
   if (first) return { kind: "needsYou", since: first.askedAt };
   let since: number | null = null;
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i] as ActivityEvent;
     const kind = event.kind;
-    if (kind === "approval.requested") return { kind: "needsYou", since: event.occurredAt };
-    if (kind === "agent.notified" && event.detail.notification === "permission_prompt") {
-      return { kind: "needsYou", since: event.occurredAt };
+    const asking =
+      kind === "approval.requested" ||
+      (kind === "agent.notified" && event.detail.notification === "permission_prompt");
+    // Something the agent did after asking means it was answered: then it is passed over.
+    if (asking) {
+      if (since === null && !answersAsks) return { kind: "needsYou", since: event.occurredAt };
+      continue;
     }
     if (WORKING.has(kind)) {
       since = event.occurredAt;

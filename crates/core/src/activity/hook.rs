@@ -135,7 +135,10 @@ fn claude_asks(inbox: &Path, hook: &serde_json::Value, entry: &InboxEntry) {
     }
     let deadline = std::time::Instant::now()
         + std::time::Duration::from_millis(asks::ASK_TTL_MS.unsigned_abs());
-    if let Some(decision) = asks::wait(&dir, &ask.id, deadline, asks::POLL) {
+    // Answered at the terminal, "No" and Esc included, the call gets its result in the transcript.
+    let mut watch = claude::CallWatch::new(hook);
+    let mut moved_on = || watch.as_mut().is_some_and(claude::CallWatch::answered);
+    if let Some(decision) = asks::wait(&dir, &ask.id, deadline, asks::POLL, &mut moved_on) {
         use std::io::Write;
         let mut out = std::io::stdout().lock();
         let _ = out.write_all(claude::decision_output(decision).to_string().as_bytes());

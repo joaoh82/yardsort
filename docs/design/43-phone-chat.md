@@ -29,13 +29,13 @@ The owner's choices, on 2026-11-14:
 
 Nothing is read from the terminal. `AGENTS.md`'s _never parse agent output_ holds.
 
-| Chat shows                     | From                                                                                                                                                                                                                                      |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| What you typed and the replies | The harness's own transcript, through the readers that build `ys workspace context` ([29](29-conversation-context.md)): Claude Code, Codex, Cursor, OpenCode, Grok, OMP and Pi. Read on the computer each time it is asked, kept nowhere. |
-| The steps of a turn            | The activity the phone already follows: `tool.started`, `tool.completed` and `tool.failed`, with the tool, the file and how long it took ([10](10-agent-events-stage-1.md)).                                                              |
-| Working, Done, Needs you       | The same activity: a prompt or a tool since the last `turn.completed` is working; `approval.requested`, or an open question, is needs you.                                                                                                |
-| The question's card            | The question the agent's `PermissionRequest` hook wrote, below.                                                                                                                                                                           |
-| Sending a message              | Typed into the terminal, as the desktop's composer does: control is taken, the text and Enter sent, and control given back at once. The terminal is not resized.                                                                          |
+| Chat shows                     | From                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What you typed and the replies | The harness's own transcript, through the readers that build `ys workspace context` ([29](29-conversation-context.md)): Claude Code, Codex, Cursor, OpenCode, Grok, OMP and Pi. Read on the computer each time it is asked, kept nowhere.                                                                                                                                                                                                            |
+| The steps of a turn            | The activity the phone already follows: `tool.started`, `tool.completed` and `tool.failed`, with the tool, the file and how long it took ([10](10-agent-events-stage-1.md)).                                                                                                                                                                                                                                                                         |
+| Working, Done, Needs you       | The same activity: a prompt or a tool since the last `turn.completed` is working; an open question is needs you, and for an agent not answered through Yardsort so is an `approval.requested` nothing came after. Working whose terminal has been quiet for 15 seconds is **Idle** (Esc ends a turn with no hook), and a conversation whose terminal is gone is ended: both from the terminal's activity in `session.list`, checked every 5 seconds. |
+| The question's card            | The question the agent's `PermissionRequest` hook wrote, below.                                                                                                                                                                                                                                                                                                                                                                                      |
+| Sending a message              | Typed into the terminal, as the desktop's composer does: control is taken, the text and Enter sent, and control given back at once. The terminal is not resized.                                                                                                                                                                                                                                                                                     |
 
 A conversation of a custom harness has no reader, so it opens on its terminal and offers no Chat.
 So does any conversation on a computer from before this change, which does not answer
@@ -67,8 +67,12 @@ waited before answering:
 
 - **The terminal shows its question at once**, while the hook is still running. Nobody at the
   computer waits on the hook.
-- **A key pressed in the terminal answers it**, and Claude Code goes on. The hook is not stopped,
+- **Yes pressed in the terminal answers it**, and Claude Code goes on. The hook is not stopped,
   and what it prints later is ignored.
+- **No, or Esc, pressed in the terminal ends the hook** — and runs no other hook: no
+  `PermissionDenied` (that one is for denials Claude Code makes itself) and, for Esc, no `Stop`.
+  The transcript gets the call's `tool_result` (_The user doesn't want to proceed…_) either way.
+  Found by the code review of this change, and measured after it.
 - **The hook's answer, when it comes first, closes the terminal's question.** Claude Code reports
   _Denied by PermissionRequest hook_ for a denial.
 
@@ -81,10 +85,18 @@ So the hook waits for a device, and whichever answer comes first is the one Clau
    given Claude Code's own 600-second timeout; every other keeps 5.
 2. `approval.answer` writes the answer file, once: a second answer is refused.
 3. The hook prints Claude Code's decision (`allow`, or `deny` with a message) and exits 0.
-4. **When the agent moves on without it**, the question is closed: the agent's next hook about the
-   same tool call (`PostToolUse`, `PostToolUseFailure` or `PermissionDenied`, matched by a digest
-   of the tool and its input) or the end of its turn removes the file, and the waiting hook exits
-   without printing anything. A question older than 590 seconds is stale whatever happened.
+4. **When the agent moves on without it**, the question is closed, three ways:
+   - the agent's next hook about the same tool call (`PostToolUse`, `PostToolUseFailure` or
+     `PermissionDenied`, matched by a digest of the tool and its input), or the end of its turn,
+     removes the file;
+   - the waiting hook reads what Claude Code appends to its own transcript, finds the newest
+     `tool_use` with the question's tool and input, and stops waiting once a `tool_result` names
+     it — Yes, No or Esc at the terminal;
+   - the waiting hook touches its file every 2 seconds, and a file untouched for 10 is a question
+     nobody waits on: Claude Code ended the hook. The next read or answer removes it.
+
+   A question older than 590 seconds is stale whatever happened. An answer written just as its
+   question closed is refused, not reported as taken.
 
 The command is the one thing here that is not metadata. It is held in that file only while the
 question is open, is never written to the database, and goes only to a device that may type into
@@ -147,6 +159,8 @@ from this change, an answer file written as `approval.answer` writes it:
 - **Allow from the phone:** the command ran, and the file it wrote was there.
 - **Answered at the terminal** (1, Yes): the command ran, its `PostToolUse` closed the question,
   and no hook was left waiting.
+- **No, or Esc, at the terminal:** Claude Code ended the hook, and its question's file was left
+  untouched from then on, so the next read closed it.
 
 ## What is left
 

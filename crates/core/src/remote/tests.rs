@@ -1904,7 +1904,13 @@ fn a_question_the_agent_asked_is_listed_and_answered_once_by_a_grant_that_may_ty
     // The waiting hook takes it.
     let deadline = Instant::now() + Duration::from_secs(5);
     assert_eq!(
-        asks::wait(&dir, "ask-1", deadline, Duration::from_millis(5)),
+        asks::wait(
+            &dir,
+            "ask-1",
+            deadline,
+            Duration::from_millis(5),
+            &mut || false
+        ),
         Some(asks::Decision::Allow)
     );
     // Then it is gone: a second answer is told so.

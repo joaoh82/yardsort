@@ -39,13 +39,7 @@ impl HostFacade<'_> {
     ) -> Answer<ConversationPage> {
         let conversations = self.conversations.ok_or_else(not_here)?;
         let (workspace, _) = self.reachable_workspace(grant, &params.workspace)?;
-        let record = self
-            .store
-            .sessions(&workspace.id)
-            .map_err(|_| unreadable())?
-            .into_iter()
-            .find(|row| row.id == params.session.as_str())
-            .ok_or_else(RemoteError::not_found)?;
+        let record = self.record(&workspace.id, params.session.as_str())?;
         let now = crate::store::now_ms();
         let read = digest::one(
             self.store,
@@ -91,11 +85,8 @@ impl HostFacade<'_> {
         let conversations = self.conversations.ok_or_else(not_here)?;
         let (workspace, _) = self.reachable_workspace(grant, &params.workspace)?;
         let running = self
-            .store
-            .sessions(&workspace.id)
-            .map_err(|_| unreadable())?
-            .into_iter()
-            .any(|row| row.id == params.session.as_str() && row.running);
+            .record(&workspace.id, params.session.as_str())
+            .is_ok_and(|row| row.running);
         let decision = match params.decision {
             ApprovalDecision::Allow => asks::Decision::Allow,
             ApprovalDecision::Deny => asks::Decision::Deny,
@@ -117,6 +108,17 @@ impl HostFacade<'_> {
                 "That question is not open any more: it was answered, or the agent moved on.",
             ))
         }
+    }
+}
+
+impl HostFacade<'_> {
+    /// One conversation's record, when it is `workspace`'s: any other is `not_found`.
+    fn record(&self, workspace: &str, session: &str) -> Answer<crate::store::SessionRow> {
+        self.store
+            .session(session)
+            .map_err(|_| unreadable())?
+            .filter(|row| row.workspace_id == workspace)
+            .ok_or_else(RemoteError::not_found)
     }
 }
 

@@ -141,7 +141,8 @@ with its code, lists and tables drawn to fit. A reply longer than a screen or tw
 working and **Stop**, which sends Esc. Scrolled up, **Latest** takes you back to the bottom, and
 **Show earlier turns** at the top reads further back.
 
-The header says which agent it is and what it is doing — working, done, or needing you — and
+The header says which agent it is and what it is doing — working, done, needing you, or idle when
+it says it is working but its terminal has been still for a while, as after Esc — and
 **Chat | Terminal** switches to the conversation's terminal. The phone remembers which of the two
 you last used for each conversation and opens it there next time.
 
@@ -163,7 +164,7 @@ still be read.
 When Claude Code asks to run a command or edit a file, Chat shows what it wants — the command, or
 the file — with **Allow once** and **Deny**. Its terminal on this computer asks at the same time,
 and whichever is answered first is the one Claude Code takes: answer here, and the card goes from
-the phone. For any other answer, such as allowing it from now on, **Other answers: open the
+the phone; answer there, Yes, No or Esc, and it goes from the phone within a few seconds. For any other answer, such as allowing it from now on, **Other answers: open the
 terminal**. The phone needs to be allowed to type for this.
 
 The command is kept on this computer only while the question is open, and never in its records.

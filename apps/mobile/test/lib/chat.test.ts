@@ -18,7 +18,16 @@ import type {
   WorkspaceId,
 } from "@yardsort/remote-client";
 
-import { ConversationFeed, joined, span, stateOf, stepsOf, stepSummary } from "../../src/lib/chat";
+import {
+  ConversationFeed,
+  joined,
+  QUIET_MS,
+  settled,
+  span,
+  stateOf,
+  stepsOf,
+  stepSummary,
+} from "../../src/lib/chat";
 import { inline, readMarkdown } from "../../src/lib/markdown";
 import { MAX_REMEMBERED, ViewChoices } from "../../src/lib/views";
 
@@ -181,6 +190,30 @@ describe("steps and state", () => {
     expect(stateOf([], [])).toEqual({ kind: "unknown" });
   });
 
+  test("a question answered and gone past is working again, and an agent that answers through Yardsort needs you only while it asks", () => {
+    const asked = [
+      event("prompt.submitted", T0),
+      event("tool.started", T0 + 1_000, { tool: "Bash" }),
+      event("approval.requested", T0 + 1_100, { tool: "Bash" }),
+    ];
+    expect(stateOf(asked, []).kind).toBe("needsYou");
+    const goneOn = [...asked, event("tool.completed", T0 + 5_000, { tool: "Bash" })];
+    expect(stateOf(goneOn, [])).toEqual({ kind: "working", since: T0 });
+    // Answered "No" at the terminal: no event after it, and no question open any more.
+    expect(stateOf(asked, [], true)).toEqual({ kind: "working", since: T0 });
+  });
+
+  test("working with a quiet terminal is idle, and an ended terminal is ended", () => {
+    const working = { kind: "working", since: T0 } as const;
+    expect(settled(working, { ended: false, quietMs: QUIET_MS + 1 }, T0)).toEqual({ kind: "idle" });
+    expect(settled(working, { ended: false, quietMs: 2_000 }, T0)).toEqual(working);
+    expect(settled(working, { ended: true, quietMs: null }, T0)).toEqual({ kind: "ended", at: T0 });
+    expect(settled({ kind: "done", at: T0 }, { ended: false, quietMs: QUIET_MS * 2 }, T0)).toEqual({
+      kind: "done",
+      at: T0,
+    });
+  });
+
   test("a span of time is said briefly", () => {
     expect(span(9_400)).toBe("9s");
     expect(span(72_000)).toBe("1m 12s");
@@ -248,6 +281,29 @@ describe("reading a conversation", () => {
     short.length = 2;
     await chat.read(channel);
     expect(chat.getSnapshot().turns.map((t) => t.n)).toEqual([1, 2]);
+  });
+
+  test("more new turns than a page holds are read on to the newest", async () => {
+    const chat = feed();
+    const many = Array.from({ length: 4 }, (_, i) => turn(i + 1, T0 + i));
+    const { channel } = reading(many, 2);
+    await chat.read(channel);
+    for (let n = 5; n <= 12; n++) many.push(turn(n, T0 + n));
+    await chat.read(channel);
+    expect(chat.getSnapshot().turns.map((t) => t.n)).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  });
+
+  test("a conversation cleared and grown past where it was is not mixed with the old one", async () => {
+    const chat = feed();
+    const now = Array.from({ length: 5 }, (_, i) => turn(i + 1, T0 + i));
+    const { channel } = reading(now, 50);
+    await chat.read(channel);
+    now.length = 0;
+    for (let n = 1; n <= 6; n++) now.push({ ...turn(n, T0 + 100_000 + n), user: `new ${n}` });
+    await chat.read(channel);
+    expect(chat.getSnapshot().turns.map((t) => t.user)).toEqual(
+      Array.from({ length: 6 }, (_, i) => `new ${i + 1}`),
+    );
   });
 
   test("turns laid over held ones replace them by number", () => {

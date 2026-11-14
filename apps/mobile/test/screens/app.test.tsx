@@ -1926,6 +1926,25 @@ describe("A computer", () => {
       expect(screen.queryByText("npm test -- --run render")).toBeNull();
     });
 
+    test("an answer that did not reach the computer leaves the question to answer again", async () => {
+      const server = new FakeServer();
+      server.computer.asks = [
+        {
+          id: "ask-1",
+          askedAt: 1_700_000_100_000,
+          tool: "Bash",
+          command: "npm test -- --run render",
+        },
+      ];
+      server.computer.refuses.set("approval.answer", "Not now.");
+      await chatting(server);
+      await screen.findByText("npm test -- --run render");
+      await fireEvent.press(screen.getByRole("button", { name: "Deny" }));
+      await settle();
+      expect(screen.getByText("Not now.")).toBeTruthy();
+      expect(screen.getByText("npm test -- --run render")).toBeTruthy();
+    });
+
     test("a message is typed into its terminal with Enter, and control given back at once", async () => {
       const { server } = await chatting();
       await fireEvent.changeText(screen.getByLabelText("Message claude"), "commit this");

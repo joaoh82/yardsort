@@ -94,7 +94,8 @@ question to `activity/asks/` and waits up to ten minutes for an answer from your
 the terminal asks it too ([When an agent asks for a permission](remote.md#when-an-agent-asks-for-a-permission)).
 Whichever answer comes first is the one Claude Code takes. Once the agent moves past the question
 — you answered in the terminal, it ran, or its turn ended — the file goes and the hook exits
-without answering. That file holds the command Claude Code wants to run, for the phone to show,
+without answering; it looks at Claude Code's own record of the conversation for that, and a
+question whose hook Claude Code ended is dropped a few seconds later. That file holds the command Claude Code wants to run, for the phone to show,
 and only while the question is open.
 
 **What is kept, and what is not.** Names, ids, relative paths, durations, counts, kinds. Not the
