@@ -1,6 +1,8 @@
 -- Sync between an account's hosts (docs/design/42-remote-r6.md). Records are kept at their
--- latest revision, a deleted one as a tombstone without its body. Every change takes the
--- account's next cursor. Bodies are the hosts' own JSON, kept as text and never logged.
+-- latest revision, a deleted one as a tombstone without its body. A pruned tombstone stays as a
+-- marker that pulls and snapshots no longer return, so an old create cannot bring it back. Every
+-- change takes the account's next cursor. Bodies are the hosts' own JSON, kept as text and never
+-- logged.
 
 -- One row per account that has synced: the last change's cursor, and the floor below which a
 -- cursor may have missed a tombstone that has since been pruned.
@@ -24,12 +26,13 @@ CREATE TABLE sync_records (
     host TEXT NOT NULL,
     changed_at BIGINT NOT NULL,
     cursor BIGINT NOT NULL,
+    pruned BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (account, id)
 );
 
 CREATE INDEX sync_records_by_cursor ON sync_records (account, cursor);
 CREATE INDEX sync_records_by_project ON sync_records (account, project, id);
-CREATE INDEX sync_tombstones ON sync_records (changed_at) WHERE deleted;
+CREATE INDEX sync_tombstones ON sync_records (changed_at) WHERE deleted AND NOT pruned;
 
 -- The record of every change applied: what, by which host, and when. Never a body.
 CREATE TABLE sync_changes (

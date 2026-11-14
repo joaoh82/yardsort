@@ -1788,6 +1788,12 @@ async fn sync_ops_follow_revisions_and_a_revoke_wins(records: Arc<impl Records>)
         applied(&apply(&*records, &alice, &here, &restore).await).0,
         4
     );
+    // The revoke that changed nothing, retried after a lost answer: answered as it was, and the
+    // restore stands.
+    assert_eq!(
+        applied(&apply(&*records, &alice, &here, &revoked).await).0,
+        3
+    );
     let now = pulled(&*records, &alice, &here, 0).await;
     let note_now = now.iter().find(|r| r.id == note).unwrap();
     assert!(!note_now.revoked && note_now.revision == 4 && note_now.host == here);
@@ -2170,11 +2176,10 @@ async fn pruning_raises_the_floor_and_forgets_old_ops(records: Arc<impl Records>
         .unwrap()
         .unwrap();
     assert!(snapshot.records.iter().all(|r| r.id != gone));
-    // The forgotten op, retried, is decided again: a create of a record that is gone is a create.
-    assert_eq!(
-        applied(&apply(&*records, &alice, &here, &create).await).0,
-        1
-    );
+    // The forgotten op, retried, is decided again, and the tombstone's marker still refuses it:
+    // a host away past retention cannot bring the record back.
+    let marker = conflict(&apply(&*records, &alice, &here, &create).await).clone();
+    assert!(marker.deleted && marker.body.is_none() && marker.revision == 2);
 
     // A link to a project whose record is gone is pruned too.
     assert!(records
@@ -2205,6 +2210,109 @@ async fn pruning_raises_the_floor_and_forgets_old_ops(records: Arc<impl Records>
         .await
         .unwrap();
     assert!(!relinked, "no such project any more");
+    assert!(records
+        .sync_snapshot(&alice, &here, Some(&project), None, MAX_PAGE)
+        .await
+        .unwrap()
+        .is_none());
+    // Nor can its old create bring the project back, links pruned or not.
+    let again = put(RecordKind::Project, &project, &project, None, "widgets");
+    assert!(conflict(&apply(&*records, &alice, &here, &again).await).deleted);
+}
+
+/// A pull that read the floor before a prune committed still sees what that prune touched.
+#[tokio::test]
+async fn a_pull_racing_the_pruner_misses_nothing() {
+    let Some(db) = common::pg::database().await else {
+        return;
+    };
+    let records = db.records.clone();
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    let here = sync_host(&*records, &alice, "here").await;
+    let project = synced_project(&*records, &alice, &here).await;
+    let old = T - 100 * 24 * 60 * 60_000;
+    let gone = sid();
+    records
+        .apply_sync_op(
+            &alice,
+            &here,
+            &put(RecordKind::Workspace, &gone, &project, None, "old"),
+            old,
+        )
+        .await
+        .unwrap();
+    let delete = act(
+        Action::Delete,
+        RecordKind::Workspace,
+        &gone,
+        &project,
+        Some(1),
+    );
+    records
+        .apply_sync_op(&alice, &here, &delete, old)
+        .await
+        .unwrap();
+    apply(
+        &*records,
+        &alice,
+        &here,
+        &put(RecordKind::Note, &sid(), &project, None, "kept"),
+    )
+    .await;
+
+    // Hold the links: the pull reads its floor, then waits to read its records.
+    let (mut holder, connection) = db.config.connect(tokio_postgres::NoTls).await.unwrap();
+    tokio::spawn(connection);
+    let hold = holder.transaction().await.unwrap();
+    hold.batch_execute("LOCK TABLE sync_links IN ACCESS EXCLUSIVE MODE")
+        .await
+        .unwrap();
+    let (watcher, connection) = db.config.connect(tokio_postgres::NoTls).await.unwrap();
+    tokio::spawn(connection);
+    let waiting = |n: i64| {
+        let watcher = &watcher;
+        async move {
+            for _ in 0..500 {
+                let count: i64 = watcher
+                    .query_one(
+                        "SELECT COUNT(*) FROM pg_locks
+                         WHERE relation = 'sync_links'::regclass AND NOT granted",
+                        &[],
+                    )
+                    .await
+                    .unwrap()
+                    .get(0);
+                if count >= n {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            panic!("{n} never waited on the links");
+        }
+    };
+    let pull = tokio::spawn({
+        let (records, alice, here) = (records.clone(), alice.clone(), here.clone());
+        async move { records.sync_pull(&alice, &here, 2, MAX_PAGE).await.unwrap() }
+    });
+    waiting(1).await;
+    // The pruner marks the tombstone and raises the floor past it, then waits on the links too.
+    let prune = tokio::spawn({
+        let records = records.clone();
+        async move { records.prune_sync(T - 1, T - 1, 10).await.unwrap() }
+    });
+    waiting(2).await;
+    hold.rollback().await.unwrap();
+
+    match pull.await.unwrap() {
+        Pulled::Expired => {}
+        Pulled::Page { records: seen, .. } => assert!(
+            seen.iter().any(|r| r.id == gone && r.deleted),
+            "the tombstone went missing: {seen:?}"
+        ),
+    }
+    prune.await.unwrap();
+    drop(records);
+    db.drop().await;
 }
 
 async fn racing_ops_on_one_record_apply_one(records: Arc<impl Records + 'static>) {

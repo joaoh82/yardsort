@@ -871,6 +871,8 @@ struct AccountSync {
     /// Ops applied: the revision and cursor each made, and when.
     ops: HashMap<OpId, (Revision, Cursor, i64)>,
     links: BTreeSet<(SyncId, HostId)>,
+    /// Tombstones past retention, kept as markers that pulls and snapshots no longer return.
+    pruned: BTreeSet<SyncId>,
 }
 
 impl AccountSync {
@@ -1704,11 +1706,12 @@ impl Records for MemoryRecords {
                     })
                 }
                 Verdict::Unchanged { revision, cursor } => {
+                    sync.ops.insert(op.op.clone(), (revision, cursor, now));
                     return nothing(OpResult::Applied {
                         op: op.op.clone(),
                         revision,
                         cursor,
-                    })
+                    });
                 }
                 Verdict::Write(write) => write,
             };
@@ -1818,13 +1821,17 @@ impl Records for MemoryRecords {
             let empty = AccountSync::default();
             let sync = s.sync.get(&account.0).unwrap_or(&empty);
             if let Some(project) = project {
-                if sync.project(project).is_none() || !sync.linked(project, host) {
+                if sync.project(project).is_none()
+                    || sync.pruned.contains(project)
+                    || !sync.linked(project, host)
+                {
                     return None;
                 }
             }
             let mut records: Vec<SyncRecord> = sync
                 .records
                 .values()
+                .filter(|r| !sync.pruned.contains(&r.id))
                 .filter(|r| project.is_none_or(|p| r.project == *p))
                 .filter(|r| sync.linked(&r.project, host))
                 .filter(|r| after.is_none_or(|after| r.id > *after))
@@ -1869,7 +1876,10 @@ impl Records for MemoryRecords {
             let Some(sync) = s.sync.get_mut(&account.0) else {
                 return false;
             };
-            let Some(record) = sync.project(project) else {
+            let Some(record) = sync
+                .project(project)
+                .filter(|_| !sync.pruned.contains(project))
+            else {
                 return false;
             };
             let key = (project.clone(), host.clone());
@@ -1894,17 +1904,18 @@ impl Records for MemoryRecords {
         self.with(|s| {
             let mut most = 0;
             for sync in s.sync.values_mut() {
-                let tombstones: Vec<SyncId> = sync
+                let tombstones: Vec<(SyncId, Cursor)> = sync
                     .records
                     .values()
-                    .filter(|r| r.deleted && r.changed_at < changes_before)
+                    .filter(|r| {
+                        r.deleted && r.changed_at < changes_before && !sync.pruned.contains(&r.id)
+                    })
                     .take(batch)
-                    .map(|r| r.id.clone())
+                    .map(|r| (r.id.clone(), r.cursor))
                     .collect();
-                for id in &tombstones {
-                    if let Some(gone) = sync.records.remove(id) {
-                        sync.floor = sync.floor.max(gone.cursor);
-                    }
+                for (id, cursor) in &tombstones {
+                    sync.pruned.insert(id.clone());
+                    sync.floor = sync.floor.max(*cursor);
                 }
                 let changes = sync.changes.len();
                 let mut left = batch;
@@ -1929,7 +1940,9 @@ impl Records for MemoryRecords {
                 let orphans: Vec<(SyncId, HostId)> = sync
                     .links
                     .iter()
-                    .filter(|(project, _)| !sync.records.contains_key(project))
+                    .filter(|(project, _)| {
+                        !sync.records.contains_key(project) || sync.pruned.contains(project)
+                    })
                     .take(batch)
                     .cloned()
                     .collect();

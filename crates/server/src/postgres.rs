@@ -27,10 +27,12 @@ use std::collections::BTreeSet;
 use remote_proto::account::{DeviceKind, Secret};
 use remote_proto::notify::{NotificationPreferences, FLUSH_CAP};
 use remote_proto::pairing::MAX_OFFER_MISSES;
-use remote_proto::sync::{Cursor, OpResult, RecordKind, SyncId, SyncOp, SyncProject, SyncRecord};
+use remote_proto::sync::{
+    Cursor, OpResult, RecordKind, Revision, SyncId, SyncOp, SyncProject, SyncRecord,
+};
 use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, Scope, ServerId};
 use tokio::sync::{broadcast, mpsc};
-use tokio_postgres::{AsyncMessage, Client, Row};
+use tokio_postgres::{AsyncMessage, Client, IsolationLevel, Row};
 
 use crate::records::{
     allowance, category_allowed, AccountId, Allowance, Decision, DeliveryEnd, Device, GrantFilter,
@@ -1732,11 +1734,13 @@ impl Records for PgRecords {
                 }))
             }
             Verdict::Unchanged { revision, cursor } => {
+                remember_op(&tx, account, op, revision, cursor, now).await?;
+                tx.commit().await.map_err(failed)?;
                 return Ok(nothing(OpResult::Applied {
                     op: op.op.clone(),
                     revision,
                     cursor,
-                }))
+                }));
             }
             Verdict::Write(write) => write,
         };
@@ -1764,18 +1768,7 @@ impl Records for PgRecords {
             now,
         )
         .await?;
-        tx.execute(
-            "INSERT INTO sync_ops (account, op, revision, cursor, at) VALUES ($1, $2, $3, $4, $5)",
-            &[
-                &account.0,
-                &op.op.as_str(),
-                &(write.revision as i64),
-                &(cursor as i64),
-                &now,
-            ],
-        )
-        .await
-        .map_err(failed)?;
+        remember_op(&tx, account, op, write.revision, cursor, now).await?;
         if op.kind == RecordKind::Project && current.is_none() {
             tx.execute(
                 "INSERT INTO sync_links (account, project, host, linked_at) VALUES ($1, $2, $3, $4)
@@ -1846,8 +1839,10 @@ impl Records for PgRecords {
         after: Cursor,
         limit: usize,
     ) -> Result<Pulled> {
-        let client = self.client().await?;
-        let (head, floor) = client
+        let mut client = self.client().await?;
+        // One snapshot for the floor and the records, so pruning between them cannot hide a change.
+        let tx = consistent(&mut client).await?;
+        let (head, floor) = tx
             .query_opt(
                 "SELECT head, floor FROM sync_heads WHERE account = $1",
                 &[&account.0],
@@ -1861,7 +1856,7 @@ impl Records for PgRecords {
         if after < floor || after > head {
             return Ok(Pulled::Expired);
         }
-        let mut records = client
+        let mut records = tx
             .query(
                 &format!(
                     "SELECT {RECORD} FROM sync_records r
@@ -1890,8 +1885,10 @@ impl Records for PgRecords {
         after: Option<&SyncId>,
         limit: usize,
     ) -> Result<Option<Snapshot>> {
-        let client = self.client().await?;
-        let head = client
+        let mut client = self.client().await?;
+        // One snapshot for the head and the records it is the head of.
+        let tx = consistent(&mut client).await?;
+        let head = tx
             .query_opt(
                 "SELECT head FROM sync_heads WHERE account = $1",
                 &[&account.0],
@@ -1901,11 +1898,12 @@ impl Records for PgRecords {
             .map_or(0, |row| row.get::<_, i64>(0));
         let project = project.map(SyncId::as_str);
         if let Some(project) = project {
-            let linked: bool = client
+            let linked: bool = tx
                 .query_one(
                     "SELECT EXISTS (
                          SELECT 1 FROM sync_links l JOIN sync_records r
                            ON r.account = l.account AND r.id = l.project AND r.kind = 'project'
+                              AND NOT r.pruned
                          WHERE l.account = $1 AND l.project = $2 AND l.host = $3
                      )",
                     &[&account.0, &project, &host.as_str()],
@@ -1917,13 +1915,13 @@ impl Records for PgRecords {
                 return Ok(None);
             }
         }
-        let mut records = client
+        let mut records = tx
             .query(
                 &format!(
                     "SELECT {RECORD} FROM sync_records r
                      JOIN sync_links l
                        ON l.account = r.account AND l.project = r.project AND l.host = $2
-                     WHERE r.account = $1
+                     WHERE r.account = $1 AND NOT r.pruned
                        AND ($3::TEXT IS NULL OR r.project = $3)
                        AND ($4::TEXT IS NULL OR r.id > $4)
                      ORDER BY r.id LIMIT $5"
@@ -1989,7 +1987,7 @@ impl Records for PgRecords {
         let Some(row) = client
             .query_opt(
                 "SELECT deleted FROM sync_records
-                 WHERE account = $1 AND id = $2 AND kind = 'project'",
+                 WHERE account = $1 AND id = $2 AND kind = 'project' AND NOT pruned",
                 &[&account.0, &project.as_str()],
             )
             .await
@@ -2032,9 +2030,9 @@ impl Records for PgRecords {
         let tombstones: i64 = client
             .query_one(
                 "WITH gone AS (
-                     DELETE FROM sync_records WHERE (account, id) IN (
+                     UPDATE sync_records SET pruned = TRUE WHERE (account, id) IN (
                          SELECT account, id FROM sync_records
-                         WHERE deleted AND changed_at < $1 LIMIT $2
+                         WHERE deleted AND NOT pruned AND changed_at < $1 LIMIT $2
                      )
                      RETURNING account, cursor
                  ), raised AS (
@@ -2072,7 +2070,7 @@ impl Records for PgRecords {
                      SELECT l.account, l.project, l.host FROM sync_links l
                      WHERE NOT EXISTS (
                          SELECT 1 FROM sync_records r
-                         WHERE r.account = l.account AND r.id = l.project
+                         WHERE r.account = l.account AND r.id = l.project AND NOT r.pruned
                      )
                      LIMIT $1
                  )",
@@ -2085,6 +2083,41 @@ impl Records for PgRecords {
             .max()
             .unwrap_or_default() as usize)
     }
+}
+
+/// A read-only transaction that sees one snapshot throughout.
+async fn consistent(client: &mut deadpool_postgres::Object) -> Result<Transaction<'_>> {
+    client
+        .build_transaction()
+        .isolation_level(IsolationLevel::RepeatableRead)
+        .read_only(true)
+        .start()
+        .await
+        .map_err(failed)
+}
+
+/// Remember that `op` was applied, so a retry is answered as it was.
+async fn remember_op(
+    tx: &Transaction<'_>,
+    account: &AccountId,
+    op: &SyncOp,
+    revision: Revision,
+    cursor: Cursor,
+    now: i64,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO sync_ops (account, op, revision, cursor, at) VALUES ($1, $2, $3, $4, $5)",
+        &[
+            &account.0,
+            &op.op.as_str(),
+            &(revision as i64),
+            &(cursor as i64),
+            &now,
+        ],
+    )
+    .await
+    .map_err(failed)?;
+    Ok(())
 }
 
 /// A sync record's columns, as every query that returns one selects them.

@@ -168,8 +168,8 @@ which hosts are linked to which project. `POST /v1/sync/push`, `GET /v1/sync/pul
 `GET /v1/sync/snapshot` for a host that is new to a project or whose cursor fell behind the retention
 floor. Host devices only; their own body limit (256 KiB) and rate gate. One transaction per op:
 check the account and the link, deduplicate the op id, check the base revision, write the record,
-append the change. A pruner loop removes changes, tombstones and op ids past retention with bounded
-deletes, safe on several instances.
+append the change. A pruner loop removes changes and op ids past retention with bounded deletes,
+and turns tombstones past it into markers (§9), safe on several instances.
 
 **Retention.** Changes and tombstones 90 days; op ids 30 days, the offline retry window. A host whose
 cursor is older than the floor takes a snapshot; its pending ops are kept and pushed against the
@@ -281,8 +281,8 @@ applies as it starts (28). Staging's Neon free tier has room for records this si
   (put, revoke or delete, with its base revision, and a put's schema and body), its four answers
   (applied, conflict with the record as it is, refused with the reason, and one from a newer
   server), and the pull, snapshot and project pages. The limits are there too: 100 ops a push,
-  256 KiB a push, 16 KiB a record's body, 200 records a page, 90 days for changes and tombstones,
-  30 for op ids. Its fixtures are in `crates/remote-proto/fixtures/sync-v1/`, apart from the remote
+  256 KiB a push, 16 KiB a record's body, 200 records a page, 90 days for changes and for
+  returning tombstones, 30 for op ids. Its fixtures are in `crates/remote-proto/fixtures/sync-v1/`, apart from the remote
   protocol's: only hosts sync, and every host is Rust, so the TypeScript client does not read them.
 - **The server's tables** (migration 10): the records at their latest revision, each account's
   head and floor, the change log, the applied op ids and the links. All cascade from the account,
@@ -322,11 +322,19 @@ applies as it starts (28). Staging's Neon free tier has room for records this si
   written to it.
 - **A revoke of a revoked note, and a delete of a deleted record**, answer applied, at the
   revision that did it, and write nothing.
-- **Only applied ops are remembered.** A refused one changed nothing, so retrying it is decided
-  again. So is an op retried more than 30 days later, which most likely comes to a conflict.
+- **Only applied ops are remembered**, including a revoke or delete that changed nothing, so a
+  retried one cannot undo a restore made since. A refused one changed nothing, so retrying it is
+  decided again. So is an op retried more than 30 days later, which comes to a conflict.
+- **A pruned tombstone stays as a marker**: the record's id, kind, project and last revision,
+  without a body, kept for as long as the account. Pulls and snapshots no longer return it, but it
+  still answers an op, so a create retried after its op id was forgotten is a conflict, not the
+  deleted record back (proposal §10.3). A project's marker refuses anything more in that project.
+  The markers are small and only grow with deletions; R7's account deletion takes them.
 - **A cursor is expired** when it is below the account's floor, which pruning a tombstone raises to
   that tombstone's change, or past its head, as after a server lost its records. Pruning the change
-  log does not expire a cursor: a pull reads the records, not the log.
+  log does not expire a cursor: a pull reads the records, not the log. A pull reads its floor and
+  its records in one snapshot, as a snapshot reads its head and records, so a prune committing
+  between them hides nothing.
 - **What is logged** is each request's method, path and status, as for every route. A path can hold
   a project's logical id, as other routes' hold a grant's or a host's; never a body, a name or a
   hint.
@@ -335,7 +343,9 @@ applies as it starts (28). Staging's Neon free tier has room for records this si
 own. The server's `tests/records.rs` holds both stores to the same seven cases: revisions, a
 duplicate op, a stale base, revoke over a stale edit, a tombstone refusing a stale create or edit,
 a project's removal and its hosts hearing of it, two accounts and linked hosts, paging, pruning and
-the floor, and eight ops racing on one record, of which one applies. `tests/sync.rs` goes through
+the floor, a create retried past retention, and eight ops racing on one record, of which one
+applies. On PostgreSQL, a pull held between its floor and its records while the pruner commits
+still returns the tombstone. `tests/sync.rs` goes through
 HTTP on both stores: a phone, a computer acting as a client and an unregistered host refused; two
 hosts syncing with the hint reaching only the other's link; a push over 256 KiB refused as too large
 while one past every other route's 16 KiB goes through, a wrong op refused alone among good ones;

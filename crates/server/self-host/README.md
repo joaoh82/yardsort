@@ -210,7 +210,8 @@ Sync between a person's computers is being built
 ([design 42](../../../docs/design/42-remote-r6.md)). The server already has its tables, and keeps
 what a computer syncs there in plain text, so whoever runs the server can read it: a project's
 name and Git remote address, its approved memory notes, its workspaces' names and branches. No
-computer syncs anything yet. A deleted record leaves a tombstone, without its contents, for 90 days.
+computer syncs anything yet. A deleted record leaves a tombstone, without its contents; after 90 days it shrinks to a marker of
+its id and revision, kept so that a computer away for months cannot bring the record back.
 A sync push is up to 256 KiB, so a proxy of your own must allow request bodies at least that large
 (nginx allows 1 MB unless told otherwise).
 

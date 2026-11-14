@@ -25,7 +25,8 @@
 //! whose base is not. Times are shown, never compared. Two exceptions, both so that a stale copy
 //! cannot undo what a person did: a **revoke** applies over any base, and a **deleted** record
 //! keeps a tombstone with its last revision, so a stale create or edit is a conflict rather than
-//! bringing it back.
+//! bringing it back. The tombstone outlives its retention as a marker, so this holds however long
+//! a host was away.
 //!
 //! **What a record says** is its body: the fields its kind syncs, as JSON, at most
 //! [`MAX_RECORD_BODY`] bytes. The server keeps a body as it came and reads nothing in it; each
@@ -37,10 +38,10 @@
 //! record carries the number of the change that made its revision. A pull returns the records of
 //! linked projects changed after the host's cursor, oldest change first. A cursor older than the
 //! oldest tombstone the server still keeps, or newer than any change it made, is answered with
-//! `cursorExpired`: take a snapshot. Tombstones are pruned after [`CHANGE_RETENTION_MS`], so a host
-//! away longer than that takes one.
+//! `cursorExpired`: take a snapshot. Tombstones are pruned from pulls and snapshots after
+//! [`CHANGE_RETENTION_MS`], so a host away longer than that takes one.
 //!
-//! **Snapshots** page through a project's records, tombstones included, by id. The first page's
+//! **Snapshots** page through a project's records, tombstones not yet pruned included, by id. The first page's
 //! cursor is where pulling carries on: read before the records were, so a change made while
 //! paging comes again in the next pull, and applying a record twice at one revision changes
 //! nothing.
@@ -64,7 +65,7 @@ pub const MAX_SYNC_BODY: usize = 256 * 1024;
 pub const MAX_RECORD_BODY: usize = 16 * 1024;
 /// The most records in one pull or snapshot page.
 pub const MAX_PAGE: usize = 200;
-/// How long the server keeps the change log and tombstones: 90 days.
+/// How long the server keeps the change log, and returns tombstones: 90 days.
 pub const CHANGE_RETENTION_MS: i64 = 90 * 24 * 60 * 60_000;
 /// How long the server remembers an op it applied, so a retry is answered as the first was: 30
 /// days, the longest a host may stay offline with a push waiting.

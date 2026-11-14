@@ -44,7 +44,8 @@ pub enum ProjectState {
 pub enum Verdict {
     /// Write the record at this new revision. The store gives it its cursor.
     Write(Write),
-    /// Applied already: a revoke of a revoked note, a delete of a deleted record.
+    /// Applied already: a revoke of a revoked note, a delete of a deleted record. The op is
+    /// remembered all the same, so a retry after a later restore does not revoke again.
     Unchanged {
         revision: Revision,
         cursor: Cursor,
@@ -84,17 +85,19 @@ pub fn decide(op: &SyncOp, current: Option<&SyncRecord>, project: ProjectState) 
     if !creates_project {
         match project {
             ProjectState::Missing => return Verdict::Refused(RemoteError::not_found()),
-            ProjectState::Present { linked: false, .. } => {
-                return Verdict::Refused(RemoteError::new(
-                    ErrorCode::Forbidden,
-                    "This computer is not linked to that project.",
-                ))
-            }
             // A record of a deleted project is a tombstone already, or about to be one.
             ProjectState::Present { deleted: true, .. } if op.kind != RecordKind::Project => {
                 return Verdict::Refused(RemoteError::new(
                     ErrorCode::NotFound,
                     "That project was removed from the server.",
+                ))
+            }
+            // The project's own tombstone answers, below, even once its links are pruned.
+            ProjectState::Present { deleted: true, .. } => {}
+            ProjectState::Present { linked: false, .. } => {
+                return Verdict::Refused(RemoteError::new(
+                    ErrorCode::Forbidden,
+                    "This computer is not linked to that project.",
                 ))
             }
             ProjectState::Present { .. } => {}
