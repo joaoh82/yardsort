@@ -273,10 +273,10 @@ export function Ideas() {
             workspace&apos;s menu: a second agent reviews the pull request in the same worktree and
             posts on GitHub, then you are told, and the agent that wrote it is told to address the
             review. The built-in <strong className={strong}>Software factory</strong> takes a task
-            from a brief you clarify, through a plan you approve, implementation, a smoke test and a
-            review, and stops when you say it is ready to release. It does not merge or deploy.{" "}
-            <code className={code}>ys workflow run</code> does the same from a terminal, and the
-            open app carries it out in the background.
+            from a brief you clarify, through a plan you approve, implementation, a smoke test it
+            writes itself and a second agent&apos;s code review, and stops when you say it is ready
+            to release. It does not merge or deploy. <code className={code}>ys workflow run</code>{" "}
+            does the same from a terminal, and the open app carries it out in the background.
           </p>
         </Idea>
 

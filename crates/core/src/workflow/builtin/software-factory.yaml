@@ -1,5 +1,9 @@
 # Built into Yardsort. To change it, duplicate it: a file in your workflows folder with the same
 # id is used instead of this one, and removing that file brings this one back.
+# The pull request is opened by the implement step, so no text here uses `pr.*`: the steps
+# after implement find the pull request from `{{ workspace.branch }}` instead. `run_test` takes
+# a fixed test id or an input, so the evaluate step always leaves a test with the id
+# `factory-smoke` for verify to run.
 id: software-factory
 name: Software factory
 description: >
@@ -21,9 +25,9 @@ inputs:
     kind: harness
     label: Who does the work
     required: true
-  - id: suite
-    kind: test
-    label: Smoke test to run
+  - id: reviewer
+    kind: harness
+    label: Who reviews the code
     required: true
 
 steps:
@@ -161,33 +165,97 @@ steps:
     until: settled
     timeout: 4h
 
-  - id: verify
+  - id: evaluate
     needs: [implement-ready]
+    action: start_session
+    harness: "{{ inputs.agent }}"
+    consumes: [plan]
+    prompt: |
+      Decide whether this change needs a smoke test, and make sure one is ready for the
+      next step to run. You are in the worktree of `{{ workspace.branch }}`. Do not change
+      product code, and do not commit.
+
+      The task:
+
+      {{ inputs.task }}
+
+      The approved plan is attached. Read the diff against `{{ workspace.base_branch }}`
+      and the workspace's existing smoke tests. A smoke test is needed when the change
+      affects behaviour a person would notice by running the app: a flow, a screen, a
+      command, an endpoint.
+
+      The next step always runs the Yardsort smoke test with the id `factory-smoke`. Use
+      Yardsort's `ys` command (see `ys --help`) to create it, or to update it if it is
+      already there:
+      - If a smoke test is needed, make `factory-smoke` exercise the changed behaviour
+        and check the acceptance criteria in the plan.
+      - If it is not needed, make `factory-smoke` the smallest test that checks the
+        project still builds and starts.
+
+      Delete `factory/smoke-test.md` if it is already there, then write to
+      `factory/smoke-test.md` whether a smoke test is needed, why, and what
+      `factory-smoke` now checks. Then stop. This step fails if that file is missing.
+
+  - id: evaluate-ready
+    needs: [evaluate]
+    action: wait_session
+    session: "{{ steps.evaluate.session }}"
+    until: settled
+    timeout: 2h
+    produces:
+      - name: smoke-test
+        path: factory/smoke-test.md
+
+  - id: verify
+    needs: [evaluate-ready]
     action: run_test
-    test: "{{ inputs.suite }}"
+    test: factory-smoke
     gate: true
     timeout: 30m
     on:
-      passed: await-review
+      passed: code-review
       failed: implement
     max_attempts: 3
 
-  - id: await-review
+  - id: code-review
     needs: [verify]
-    action: wait_pr_activity
-    kind: review
-    # No timeout: a review can take longer than a week, and this wait survives a restart.
-    # A comment that is not a review does not count.
+    action: start_session
+    harness: "{{ inputs.reviewer }}"
+    consumes: [plan]
+    prompt: |
+      Review the open pull request for the branch `{{ workspace.branch }}`, based on
+      `{{ workspace.base_branch }}`. You are in its worktree. Another agent opened it earlier
+      in this run, following the approved plan, which is attached. Find it with
+      `gh pr view {{ workspace.branch }}`, which shows its number and URL; if the branch has
+      no open pull request, say so and stop. The task:
+
+      {{ inputs.task }}
+
+      Read the whole diff against `{{ workspace.base_branch }}` and run the project's checks.
+      Do not edit, commit or push anything, and do not touch `factory/`.
+
+      When you are done, post your review on that pull request with `gh pr review
+      <number>`: approve, comment or request changes. Put each finding that is
+      about particular lines on those lines. Say what is wrong, why, and how you know. GitHub
+      does not let the author of a pull request approve it or request changes on it; if you are
+      posting as its author, post the same review with `--comment`. Then stop.
+
+  - id: code-review-done
+    needs: [code-review]
+    action: wait_session
+    session: "{{ steps.code-review.session }}"
+    until: settled
+    timeout: 2h
 
   - id: accept-review
-    needs: [await-review]
+    needs: [code-review-done]
     action: approve
     consumes: [plan]
     prompt: |
-      A review is on pull request #{{ pr.number }} ({{ steps.await-review.latest_url }}).
-      Read it. Approve to go on to the release check. Request changes to send your note
-      back to implementation. Reject to stop the run. This reads that a review appeared;
-      it does not read GitHub's own approve or request-changes state.
+      The reviewer has posted its review on the pull request for `{{ workspace.branch }}`:
+      `gh pr view {{ workspace.branch }} --web` opens it. Read it. Approve to go on to the
+      release check. Request changes to send your note back to implementation. Reject to stop
+      the run. This does not read GitHub's own approve or request-changes state.
     on:
       approved: release
       changes_requested: implement
@@ -220,5 +288,5 @@ steps:
     action: notify
     title: "{{ workspace.name }} is ready to release"
     body: >
-      Pull request #{{ pr.number }} ({{ pr.url }}) passed the smoke test and the review
+      The pull request for `{{ workspace.branch }}` passed the smoke test and the review
       gate. Merging and deploying are still yours to do.
