@@ -3,6 +3,16 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Software factory writes its own smoke test and has its code reviewed by an agent.** After
+  implementation, an agent decides whether the change needs a smoke test and leaves one,
+  `factory-smoke`, for the verify step to run; then a second agent, the new **Who reviews the
+  code** input, reviews the pull request and posts on GitHub before the review gate. The
+  **Smoke test to run** input is gone, and the run no longer waits for a review to appear on
+  GitHub. A copy of the factory in your workflows folder still replaces the built-in. See
+  [The software factory](docs/guide/workflows.md#the-software-factory).
+
 ## 0.33.0
 
 - **A workflow's page has two views: Runs and Definition.** **Runs** puts the run list, the

@@ -1031,7 +1031,7 @@ sunday = lambda day: day.weekday() == 6
 schedule("upkeep", "Weekly upkeep", "workflow", "software-factory", "api-gateway", "upkeep",
          {"kind": "weekly", "days": ["sun"], "time": clock(3)}, after(sunday, 3),
          inputs={"task": "Update the dependencies and fix what breaks", "agent": "claude",
-                 "suite": "readme"},
+                 "reviewer": "claude"},
          keep=3)
 for index, due in enumerate(before(sunday, 3, 3)):
     line("upkeep", due, "failed" if index == 1 else "succeeded")

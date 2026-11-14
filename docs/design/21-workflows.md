@@ -1087,3 +1087,27 @@ The workflow writer's standing instruction (`describe::SYSTEM`) and the Floor Ma
 `AGENTS.md` say both, so an agent writing or changing a workflow, or answering about a run, knows
 them. The built-in software factory has a `result` report between `release` and `ready`, so the
 chart stays one column and the notification comes once the result is written.
+
+## The factory's own smoke test and code review
+
+_Built 2026-11-14, from the owner's edited copy._ The factory asked for a smoke test as an input,
+so a task whose change no existing test covered was verified by one that did not exercise it, and
+the only review was whoever came to the pull request. The built-in now carries the owner's
+version:
+
+- **`evaluate`, then `evaluate-ready`, before `verify`.** An agent decides whether the change
+  needs a smoke test and always leaves one with the fixed id `factory-smoke`, because `run_test`
+  takes a fixed id or an input and the test does not exist when the run is queued. When none is
+  needed it is the smallest build-and-start check. Its reasons go to `factory/smoke-test.md`, the
+  `smoke-test` artifact. The `suite` input is gone. A file the agent writes or changes waits on
+  the approval card like any other, so the gate stays with the person.
+- **`code-review`, then `code-review-done`, before `accept-review`,** with a `reviewer` harness
+  input. The reviewer finds the pull request from `{{ workspace.branch }}` with `gh`, not from
+  `pr.*`.
+- **No `await-review`.** A `wait_pr_activity` counts only posts made after it starts, and the
+  reviewer posts before any wait after it could start, so the wait would have sat until someone
+  else reviewed. `accept-review` follows the reviewer's session directly.
+- **No step uses `pr.*` or waits on the forge,** so `needs_pull_request` is false: the Run dialog
+  and `queue` do not look a pull request up, and the factory is no longer the case that tests a
+  workflow deferring its pull request — an inline `open-and-wait` workflow does, in
+  `runs::tests` and the Run dialog's tests.

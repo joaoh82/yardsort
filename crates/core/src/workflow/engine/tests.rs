@@ -2822,13 +2822,17 @@ fn software_factory() -> Run {
     run.inputs = [
         ("task".into(), "Add a logout button".into()),
         ("agent".into(), "claude".into()),
-        ("suite".into(), "login".into()),
+        ("reviewer".into(), "codex".into()),
     ]
     .into();
     run
 }
 
 fn started(effects: &[Effect], step: &str) -> String {
+    started_by(effects, step, "claude")
+}
+
+fn started_by(effects: &[Effect], step: &str, by: &str) -> String {
     effects
         .iter()
         .find_map(|effect| match effect {
@@ -2838,7 +2842,7 @@ fn started(effects: &[Effect], step: &str) -> String {
                 harness,
                 ..
             } if id == step => {
-                assert_eq!(harness, "claude");
+                assert_eq!(harness, by, "{step}");
                 Some(prompt.clone().unwrap_or_default())
             }
             _ => None,
@@ -2849,6 +2853,12 @@ fn started(effects: &[Effect], step: &str) -> String {
 fn spawn(run: &mut Run, step: &str, pty: &str) -> String {
     let effects = run.advance();
     let prompt = started(&effects, step);
+    attach(run, step, pty);
+    prompt
+}
+
+/// The session `step` started is up, as `pty`, and busy.
+fn attach(run: &mut Run, step: &str, pty: &str) {
     assert!(run.apply(&done(
         step,
         &Outputs::from([
@@ -2864,7 +2874,6 @@ fn spawn(run: &mut Run, step: &str, pty: &str) -> String {
             settled_at: None,
         },
     );
-    prompt
 }
 
 /// The wait is open. A clarifying one finishes when its summary is recorded. Any other
@@ -2975,15 +2984,29 @@ fn to_plan_gate(run: &mut Run) -> String {
     prompt
 }
 
+/// Implementation, then the step that leaves `factory-smoke` ready for verify.
 fn implement_once(run: &mut Run, pty: &str) -> String {
     let prompt = spawn(run, "implement", pty);
     let effects = finish_wait(run, "implement-ready", pty, None);
+    let evaluate = started(&effects, "evaluate");
     assert!(
-        effects.iter().any(|effect| matches!(
-            effect,
-            Effect::RunTest { step, test, .. } if step == "verify" && test == "login"
+        evaluate.contains("`factory-smoke`") && evaluate.contains("factory/smoke-test.md"),
+        "settling implementation should start the smoke-test decision: {evaluate}"
+    );
+    assert!(
+        evaluate.contains("beside the avatar"),
+        "the smoke-test decision did not read the plan: {evaluate}"
+    );
+    let evaluating = format!("{pty}-evaluate");
+    attach(run, "evaluate", &evaluating);
+    finish_wait(
+        run,
+        "evaluate-ready",
+        &evaluating,
+        Some((
+            "smoke-test",
+            "Needed: factory-smoke clicks the logout button.",
         )),
-        "settling implementation should start the smoke test: {effects:?}"
     );
     prompt
 }
@@ -2995,7 +3018,7 @@ fn queue_verify(run: &mut Run, run_id: &str) {
         assert!(
             effects.iter().any(|effect| matches!(
                 effect,
-                Effect::RunTest { step, test, .. } if step == "verify" && test == "login"
+                Effect::RunTest { step, test, .. } if step == "verify" && test == "factory-smoke"
             )),
             "{effects:?}"
         );
@@ -3005,6 +3028,26 @@ fn queue_verify(run: &mut Run, run_id: &str) {
         "verify",
         &Outputs::from([("run".into(), run_id.into())])
     )));
+}
+
+/// The smoke test passes, and the reviewer's session runs and settles, which opens the review
+/// gate. Returns what the reviewer was told.
+fn pass_verify(run: &mut Run, run_id: &str) -> String {
+    run.world.test_runs.insert(
+        run_id.into(),
+        TestRun {
+            status: "passed".into(),
+            summary: "factory-smoke: ok".into(),
+        },
+    );
+    let effects = run.advance();
+    assert_eq!(run.status("verify"), "succeeded");
+    let prompt = started_by(&effects, "code-review", "codex");
+    let pty = format!("pty-review-{run_id}");
+    attach(run, "code-review", &pty);
+    finish_wait(run, "code-review-done", &pty, None);
+    assert_eq!(run.status("accept-review"), "waiting");
+    prompt
 }
 
 fn fail_verify(run: &mut Run, run_id: &str, summary: &str) {
@@ -3033,22 +3076,16 @@ fn the_software_factory_walks_the_happy_path_to_ready() {
         "implementation did not open a pull request when the branch has none: {prompt}"
     );
     queue_verify(&mut run, "tr-1");
-    run.world.test_runs.insert(
-        "tr-1".into(),
-        TestRun {
-            status: "passed".into(),
-            summary: "login: ok".into(),
-        },
+    let review = pass_verify(&mut run, "tr-1");
+    assert!(
+        review.contains("gh pr review"),
+        "the reviewer was not told to post on the pull request: {review}"
     );
-    run.advance();
-    assert_eq!(run.status("verify"), "succeeded");
-    assert_eq!(run.status("await-review"), "waiting");
+    assert!(
+        review.contains("beside the avatar"),
+        "the reviewer did not read the plan: {review}"
+    );
     assert_eq!(attempts(&run, "verify"), 1);
-
-    run.post(PrActivity::Review);
-    run.advance();
-    assert_eq!(run.status("await-review"), "succeeded");
-    assert_eq!(run.status("accept-review"), "waiting");
 
     approve(&mut run, "accept-review", ApprovalDecision::Approved, None);
     run.advance();
@@ -3166,7 +3203,8 @@ fn a_failed_verdict_loops_back_to_implement_and_stops_at_the_limit() {
     assert_eq!(run.status("verify"), "failed");
     assert_eq!(attempts(&run, "verify"), 3);
     assert_eq!(run.status("implement"), "succeeded");
-    assert_eq!(run.status("await-review"), "skipped");
+    assert_eq!(run.status("code-review"), "skipped");
+    assert_eq!(run.status("accept-review"), "skipped");
     let Finish::Failed(error) = run.finished.clone().unwrap() else {
         panic!("the run should stop: {:?}", run.finished);
     };
@@ -3184,18 +3222,7 @@ fn review_changes_requested_loops_back_to_implement() {
     approve(&mut run, "approve-plan", ApprovalDecision::Approved, None);
     implement_once(&mut run, "pty-1");
     queue_verify(&mut run, "tr-1");
-    run.world.test_runs.insert(
-        "tr-1".into(),
-        TestRun {
-            status: "passed".into(),
-            summary: "login: ok".into(),
-        },
-    );
-    run.advance();
-    assert_eq!(run.status("await-review"), "waiting");
-    run.post(PrActivity::Review);
-    run.advance();
-    assert_eq!(run.status("accept-review"), "waiting");
+    pass_verify(&mut run, "tr-1");
     approve(
         &mut run,
         "accept-review",
@@ -3205,8 +3232,10 @@ fn review_changes_requested_loops_back_to_implement() {
     run.advance();
     assert_eq!(run.status("implement"), "pending");
     assert_eq!(run.status("implement-ready"), "pending");
+    assert_eq!(run.status("evaluate"), "pending");
     assert_eq!(run.status("verify"), "pending");
-    assert_eq!(run.status("await-review"), "pending");
+    assert_eq!(run.status("code-review"), "pending");
+    assert_eq!(run.status("code-review-done"), "pending");
     assert_eq!(run.status("accept-review"), "pending");
     assert_eq!(run.status("release"), "pending");
     assert_eq!(run.status("approve-plan"), "succeeded");
@@ -3234,25 +3263,15 @@ fn review_changes_requested_loops_back_to_implement() {
     );
 }
 
-/// A review from the first pass does not finish the wait that starts after the work went back.
+/// Work sent back from the review gate is reviewed again, by a new session of the reviewer.
 #[test]
-fn a_second_review_wait_ignores_the_review_from_before_it() {
+fn work_sent_back_from_review_is_reviewed_again() {
     let mut run = software_factory();
     to_plan_gate(&mut run);
     approve(&mut run, "approve-plan", ApprovalDecision::Approved, None);
     implement_once(&mut run, "pty-1");
     queue_verify(&mut run, "tr-1");
-    run.world.test_runs.insert(
-        "tr-1".into(),
-        TestRun {
-            status: "passed".into(),
-            summary: "login: ok".into(),
-        },
-    );
-    run.advance();
-    assert_eq!(run.status("await-review"), "waiting");
-    run.post(PrActivity::Review);
-    run.advance();
+    pass_verify(&mut run, "tr-1");
     approve(
         &mut run,
         "accept-review",
@@ -3260,31 +3279,82 @@ fn a_second_review_wait_ignores_the_review_from_before_it() {
         Some("rename the button"),
     );
     run.advance();
+    assert_eq!(run.status("code-review"), "pending");
     implement_once(&mut run, "pty-2");
     queue_verify(&mut run, "tr-2");
-    run.world.test_runs.insert(
-        "tr-2".into(),
-        TestRun {
-            status: "passed".into(),
-            summary: "login: ok".into(),
-        },
+    let review = pass_verify(&mut run, "tr-2");
+    assert!(review.contains("gh pr review"), "{review}");
+    assert_eq!(attempts(&run, "accept-review"), 2);
+    approve(&mut run, "accept-review", ApprovalDecision::Approved, None);
+    run.advance();
+    assert_eq!(run.status("release"), "waiting");
+}
+
+/// A review from the first pass does not finish the wait that starts after the work went back.
+#[test]
+fn a_second_review_wait_ignores_the_review_from_before_it() {
+    let source = r#"
+version: 1
+id: loop-review
+name: Waits for a review each pass
+trigger: { kind: manual }
+steps:
+  - id: work
+    action: notify
+    title: work
+    body: work
+  - id: wait
+    needs: [work]
+    action: wait_pr_activity
+    kind: review
+  - id: gate
+    needs: [wait]
+    action: approve
+    prompt: Read the review.
+    on:
+      approved: done
+      changes_requested: work
+      rejected: stop
+    max_attempts: 3
+  - id: done
+    needs: [gate]
+    action: notify
+    title: done
+    body: done
+"#;
+    let mut run = Run::from(source);
+    run.advance();
+    finish_notify(&mut run, "work");
+    run.advance();
+    assert_eq!(run.status("wait"), "waiting");
+    run.post(PrActivity::Review);
+    run.advance();
+    assert_eq!(run.status("gate"), "waiting");
+    approve(
+        &mut run,
+        "gate",
+        ApprovalDecision::ChangesRequested,
+        Some("rename the button"),
     );
+    run.advance();
     // The new wait starts after the first review. The clock has to move, or the two share a second
     // and the floor would still count the old one.
     run.later(2_000);
     run.advance();
-    assert_eq!(run.status("await-review"), "waiting");
+    finish_notify(&mut run, "work");
+    run.advance();
+    assert_eq!(run.status("wait"), "waiting");
     run.advance();
     assert_eq!(
-        run.status("await-review"),
+        run.status("wait"),
         "waiting",
         "the review from the first pass finished the second wait"
     );
 
     run.post(PrActivity::Review);
     run.advance();
-    assert_eq!(run.status("await-review"), "succeeded");
-    assert_eq!(run.status("accept-review"), "waiting");
+    assert_eq!(run.status("wait"), "succeeded");
+    assert_eq!(run.status("gate"), "waiting");
 }
 
 #[test]
@@ -3317,16 +3387,7 @@ fn rejecting_the_review_stops_the_factory() {
     approve(&mut run, "approve-plan", ApprovalDecision::Approved, None);
     implement_once(&mut run, "pty-1");
     queue_verify(&mut run, "tr-1");
-    run.world.test_runs.insert(
-        "tr-1".into(),
-        TestRun {
-            status: "passed".into(),
-            summary: "login: ok".into(),
-        },
-    );
-    run.advance();
-    run.post(PrActivity::Review);
-    run.advance();
+    pass_verify(&mut run, "tr-1");
     approve(
         &mut run,
         "accept-review",
@@ -3357,16 +3418,7 @@ fn the_release_gate_stops_on_changes_or_a_rejection() {
         approve(&mut run, "approve-plan", ApprovalDecision::Approved, None);
         implement_once(&mut run, "pty-1");
         queue_verify(&mut run, "tr-1");
-        run.world.test_runs.insert(
-            "tr-1".into(),
-            TestRun {
-                status: "passed".into(),
-                summary: "login: ok".into(),
-            },
-        );
-        run.advance();
-        run.post(PrActivity::Review);
-        run.advance();
+        pass_verify(&mut run, "tr-1");
         approve(&mut run, "accept-review", ApprovalDecision::Approved, None);
         run.advance();
         assert_eq!(run.status("release"), "waiting");

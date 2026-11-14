@@ -165,8 +165,8 @@ You can also ask the [Floor Manager](floor-manager.md#changing-a-workflow) to ch
   as its last message; then the workspace's own agent is told to read them with
   [`ys workspace context`](cli.md#ys-workspace-context-workspace) and address them. **Software
   factory** (`software-factory`) takes a task from a brief you clarify, through a plan you
-  approve, implementation, a smoke test and a review, and stops when you say it is ready to
-  release. See [The software factory](#the-software-factory). Each is
+  approve, implementation, a smoke test it writes itself and a second agent's code review, and
+  stops when you say it is ready to release. See [The software factory](#the-software-factory). Each is
   read-only; `ys workflow show <id>` prints the whole file.
 - **Yours.** Every `.yaml` or `.yml` file in the `workflows` folder of Yardsort's data directory.
   [Where Yardsort keeps things](troubleshooting.md#where-yardsort-keeps-things) says where that
@@ -296,7 +296,7 @@ same two things:
 
 ```sh
 ys workflow run software-factory --project app \
-  --input task="Add a logout button" --input agent=claude --input suite=login
+  --input task="Add a logout button" --input agent=claude --input reviewer=codex
 ys workflow run fix-tests --project app --name nightly-fix --base release --input fixer=claude
 ```
 
@@ -837,10 +837,11 @@ below. Open it in **Workflows** and the chart shows every step, top to bottom, w
 back where a phase repeats. The file beside the chart is the workflow. It is read-only;
 `ys workflow copy software-factory` is how you change a timeout or a limit.
 
-The run starts from the task. It does not need an open pull request first: the steps that name
-`{{ pr.* }}` come after the review wait, and that wait looks the pull request up. `gh` has to be
-installed and logged in, because Yardsort asks it when you press **Run** and looks again while
-the run is going. The smoke test you name has to be one of the workspace's.
+The run starts from the task. It does not need an open pull request first: no step names
+`{{ pr.* }}`, and the steps after implementation find the pull request from the workspace's
+branch. Yardsort does not look the pull request up when you press **Run**, but the agents use
+`gh`, so it has to be installed and logged in. You do not name a smoke test: the run writes its
+own, `factory-smoke`, in the workspace.
 
 With `--project app` in place of `--workspace`, or **new workspace** in the Run dialog, the run
 makes the workspace it works in: see [In a new workspace](#in-a-new-workspace).
@@ -849,11 +850,11 @@ makes the workspace it works in: see [In a new workspace](#in-a-new-workspace).
 ys workflow run software-factory --workspace fix-login \
   --input task="Add a logout button" \
   --input agent=claude \
-  --input suite=login
+  --input reviewer=codex
 ```
 
-`task` is what to build. `agent` is who does the work, one of your agents. `suite` is the
-[smoke test](smoke-tests.md) the verify phase runs. There is no input for how many times a
+`task` is what to build. `agent` is who does the work, one of your agents. `reviewer` is who
+reviews the pull request before you do; it can be the same agent. There is no input for how many times a
 phase may repeat: that number is `max_attempts` in the file, 3 everywhere it loops, and it is
 not a variable. Copy the workflow to change it. The range is 2 to 10.
 
@@ -894,25 +895,40 @@ What happens:
    `factory/.gitignore` in that worktree, so the notes stay out of commits there and not in
    every other worktree of the repository, and the agent is told not to commit them. The wait
    is 4 hours.
-5. **Verify** (`verify`). Runs the smoke test you named, with `gate: true`, and waits up to 30
+5. **Decide the smoke test** (`evaluate`, then `evaluate-ready`). An agent reads the plan, the
+   diff against the base branch and the workspace's smoke tests, and decides whether the change
+   needs a smoke test: whether it affects something a person would notice by running the app.
+   Either way it creates or updates the [smoke test](smoke-tests.md) `factory-smoke` with `ys`:
+   one that exercises the change and checks the plan's acceptance criteria, or, when none is
+   needed, the smallest test that the project still builds and starts. It writes why to
+   `factory/smoke-test.md`, deleting that file first when one is already there, and is told not
+   to change product code or commit. The step fails if the file is not there. The wait is 2
+   hours.
+6. **Verify** (`verify`). Runs `factory-smoke`, with `gate: true`, and waits up to 30
    minutes. A pass goes on to review. A failure runs implementation again and gives it
    `failure-verify`, the report. A file you have not approved waits for you, and the step
    waits with it. The enforced verdict is that smoke test. There is no step that runs an
    arbitrary project command such as `cargo test`; the implement agent can run those itself,
    and this phase is the one Yardsort records. The step can run 3 times in the whole run,
    including the first. The count is not reset when review sends the work back, so a failure
-   after a review uses one of the same three. The third failure stops the run.
-6. **Review** (`await-review`, then `accept-review`). `await-review` waits until a review
-   appears on the pull request, posted after this wait began. A review from an earlier pass
-   does not count. While the branch still has no open pull request, the step keeps waiting;
-   it does not fail. It has no timeout, and it keeps waiting if you quit and open Yardsort
-   again. A comment that is not a review does not count.
-   Then an approval gate. **Approve** goes on. **Request changes** needs a note, runs
-   implementation again, and gives it `changes-accept-review`. **Reject** stops the run. The
-   gate can be entered 3 times, including the first. The third request for changes stops the
-   run. The wait sees that a review appeared. It does not read
-   whether GitHub recorded an approval or a request for changes. That decision is yours, at
-   this gate.
+   after a review uses one of the same three. The third failure stops the run. `factory-smoke`
+   is new, or changed, each time `evaluate` writes it, so expect the
+   [approval card](smoke-tests.md#the-approval-card) before it runs.
+7. **Code review** (`code-review`, then `code-review-done`). The `reviewer` agent finds the
+   pull request with `gh pr view` on the workspace's branch, reads the whole diff, runs the
+   project's checks, and posts its review with `gh pr review`, with each finding on its lines.
+   It is told not to edit, commit or push. GitHub does not let a pull request's author approve
+   it or request changes, so when the reviewer posts as the author it posts the same review as
+   a comment. The wait is 2 hours.
+8. **Accept the review** (`accept-review`). An approval gate, once the reviewer's session
+   settles. Read the review on GitHub; the prompt says how to open it. **Approve** goes on.
+   **Request changes** needs a note, runs implementation again, and gives it
+   `changes-accept-review`; the smoke test and the reviewer then run again. **Reject** stops the
+   run. The gate can be entered 3 times, including the first. The third request for changes
+   stops the run. Yardsort does not read the review, or whether GitHub recorded an approval or
+   a request for changes. That decision is yours, at this gate. No step waits for a review on
+   GitHub: the reviewer posts before such a wait could start, and a wait counts only reviews
+   posted after it starts.
 
 The run ends at **release**. The prompt says the work is ready to release. **Approve** finishes
 the run: `result`, a [report](#a-runs-result), leaves the run's result — the pull requests it
@@ -928,10 +944,10 @@ box.
 What this workflow does not do:
 
 - It does not open the pull request itself. Implementation is told to open a draft with
-  `gh pr create --draft` when the branch has none, or to update the one already open.
-  `await-review` follows that pull request once Yardsort can see it. Until then the wait
-  continues. The run can start without one because the steps that name `{{ pr.* }}` come after
-  that wait. A workflow that names the pull request earlier still needs one open first.
+  `gh pr create --draft` when the branch has none, or to update the one already open, and the
+  reviewer finds it from the branch. The run can start without one because no step names
+  `{{ pr.* }}`. A workflow that names the pull request before a review wait still needs one
+  open first.
 - It does not take the retry limits as inputs. Copy the file to change `max_attempts`.
 - It does not branch on the text of a note, or on GitHub's own review state.
 - It does not merge, deploy, or roll back.

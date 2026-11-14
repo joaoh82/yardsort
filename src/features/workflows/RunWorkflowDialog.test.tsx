@@ -352,15 +352,15 @@ describe("RunWorkflowDialog", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 
-  it("starts the software factory with no pull request, and says the run will open one", async () => {
-    const factory: WorkflowItem = {
+  it("starts a workflow that waits for its pull request with none open, and says the run will open one", async () => {
+    const opensOne: WorkflowItem = {
       ...review,
-      id: "software-factory",
-      name: "Software factory",
+      id: "open-and-wait",
+      name: "Open a pull request and wait",
       workflow: {
         ...review.workflow!,
-        id: "software-factory",
-        name: "Software factory",
+        id: "open-and-wait",
+        name: "Open a pull request and wait",
         inputs: [
           {
             id: "task",
@@ -389,7 +389,7 @@ describe("RunWorkflowDialog", () => {
         ],
       },
     };
-    useWorkflowStore.setState({ items: [factory], loaded: true });
+    useWorkflowStore.setState({ items: [opensOne], loaded: true });
     core.testList.mockResolvedValue([
       {
         id: "login",
@@ -411,7 +411,7 @@ describe("RunWorkflowDialog", () => {
     });
     const user = userEvent.setup();
     render(
-      <RunWorkflowDialog workflowId="software-factory" workspace={fixLogin} onClose={() => {}} />,
+      <RunWorkflowDialog workflowId="open-and-wait" workspace={fixLogin} onClose={() => {}} />,
     );
     expect(await screen.findByText("Will use the PR the run opens.")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();

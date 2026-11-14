@@ -116,7 +116,11 @@ fn the_built_in_software_factory_parses_with_its_phases_and_loops() {
     let input = |id: &str| workflow.inputs.iter().find(|input| input.id == id).unwrap();
     assert!(input("task").required && matches!(input("task").kind, InputKind::Text));
     assert!(input("agent").required && matches!(input("agent").kind, InputKind::Harness));
-    assert!(input("suite").required && matches!(input("suite").kind, InputKind::Test));
+    assert!(input("reviewer").required && matches!(input("reviewer").kind, InputKind::Harness));
+    assert!(
+        !workflow.inputs.iter().any(|input| input.id == "suite"),
+        "the factory names its own smoke test"
+    );
 
     let ids: Vec<&str> = workflow.steps.iter().map(|step| step.id.as_str()).collect();
     assert_eq!(
@@ -131,8 +135,11 @@ fn the_built_in_software_factory_parses_with_its_phases_and_loops() {
             "approve-plan",
             "implement",
             "implement-ready",
+            "evaluate",
+            "evaluate-ready",
             "verify",
-            "await-review",
+            "code-review",
+            "code-review-done",
             "accept-review",
             "release",
             "result",
@@ -221,31 +228,53 @@ fn the_built_in_software_factory_parses_with_its_phases_and_loops() {
         ["plan", "failure-verify", "changes-accept-review"]
     );
 
+    let evaluate = prompt("evaluate");
+    assert!(
+        evaluate.contains("Delete `factory/smoke-test.md`") && evaluate.contains("`factory-smoke`"),
+        "evaluate does not leave the smoke test verify runs: {evaluate}"
+    );
+    assert_eq!(
+        step("evaluate-ready").produces[0].source,
+        ArtifactSource::File {
+            path: "factory/smoke-test.md".into(),
+        }
+    );
+    assert!(matches!(
+        &step("code-review").action,
+        Action::StartSession { harness, .. } if harness == "{{ inputs.reviewer }}"
+    ));
+    let review = prompt("code-review");
+    assert!(
+        review.contains("gh pr review") && !review.contains("pr.number"),
+        "code review must find the pull request from the branch: {review}"
+    );
+
     let verify = step("verify");
     assert!(verify.gate);
     assert_eq!(verify.max_attempts, Some(3));
     assert!(matches!(
         &verify.action,
-        Action::RunTest { test, .. } if test == "{{ inputs.suite }}"
+        Action::RunTest { test, .. } if test == "factory-smoke"
     ));
     assert!(verify
         .routes
         .iter()
-        .any(|route| route.when == OutcomeName::Passed && route.to == "await-review"));
+        .any(|route| route.when == OutcomeName::Passed && route.to == "code-review"));
     assert!(verify
         .routes
         .iter()
         .any(|route| route.when == OutcomeName::Failed && route.to == "implement"));
 
-    assert!(matches!(
-        step("await-review").action,
-        Action::WaitPrActivity {
-            kind: PrActivity::Review,
-            timeout_secs: None,
-        }
-    ));
+    assert!(
+        !workflow
+            .steps
+            .iter()
+            .any(|step| matches!(step.action, Action::WaitPrActivity { .. })),
+        "the reviewer posts before any wait could begin, so a wait would never see it"
+    );
 
     let review_gate = step("accept-review");
+    assert_eq!(review_gate.needs, ["code-review-done"]);
     assert_eq!(review_gate.max_attempts, Some(3));
     assert!(review_gate
         .routes
