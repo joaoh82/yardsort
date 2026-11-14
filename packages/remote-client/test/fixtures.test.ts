@@ -121,6 +121,23 @@ const FIXTURES: Record<string, (name: string) => void> = {
     expect(decide.op).toBe("workflow.decide");
     expect(scopeOf(decide.op)).toBe("workflow:decide");
   },
+  "request-conversation-read.json": (name) => {
+    const read = pinned<Request>(request, name);
+    expect(read.op).toBe("conversation.read");
+    expect(scopeOf(read.op)).toBe("terminal:read");
+  },
+  "request-approval-answer.json": (name) => {
+    const answer = pinned<Request>(request, name);
+    expect(answer.op).toBe("approval.answer");
+    expect(scopeOf(answer.op)).toBe("terminal:control");
+  },
+  "response-conversation.json": (name) => {
+    const page = result(name);
+    if (page.kind !== "conversation") throw new Error("not a conversation");
+    expect(page.turns.map((turn) => turn.n)).toEqual([12, 13]);
+    expect(page.asks[0]?.command).toBe("npm test -- --run render");
+    expect(page.answersAsks).toBe(true);
+  },
   "request-workflow-challenge.json": (name) => {
     expect(scopeOf(pinned<Request>(request, name).op)).toBe("workflow:decide");
   },

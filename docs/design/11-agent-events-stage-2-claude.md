@@ -150,6 +150,9 @@ dev` rebuild, a running Claude Code still names the old path; a missing executab
   interactive session seen by hand produced the same shapes for what both have, but
   `Notification` and `PermissionRequest` are interactive-only and documented-only here. The
   first pass through 08 §12 should re-record from an interactive session.
+- **Since [43](43-phone-chat.md), the `PermissionRequest` hook waits** (timeout 600 rather than 5) for a phone to answer the question, and prints Claude Code's decision when one does. Claude
+  Code shows its own question meanwhile and takes whichever answer comes first, measured with
+  2.1.325.
 - **Volume.** A busy conversation is two entries per tool call; the inbox cap is 10 000 with a
   counted overflow, and retention (20 000 events, 90 days) prunes at startup. Both may need
   raising once real usage is seen.

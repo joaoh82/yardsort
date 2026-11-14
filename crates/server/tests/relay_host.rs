@@ -102,6 +102,7 @@ impl Serving for Here {
             interactive: true,
             starting: None,
             workflow: None,
+            conversations: None,
         });
     }
 }

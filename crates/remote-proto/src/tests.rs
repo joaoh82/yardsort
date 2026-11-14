@@ -56,8 +56,48 @@ fn requests_match_their_fixtures() {
     let request: Request = pinned("request-workflow-challenge.json");
     assert_eq!(request.operation.scope(), Some(Scope::WorkflowDecide));
     assert!(request.operation.validate().is_ok());
+    let request: Request = pinned("request-conversation-read.json");
+    assert_eq!(request.operation.name(), "conversation.read");
+    assert_eq!(request.operation.scope(), Some(Scope::TerminalRead));
+    assert!(request.operation.validate().is_ok());
+    let request: Request = pinned("request-approval-answer.json");
+    assert_eq!(request.operation.name(), "approval.answer");
+    assert_eq!(request.operation.scope(), Some(Scope::TerminalControl));
+    assert!(request.operation.validate().is_ok());
     let hello: Hello = pinned("hello.json");
     assert_eq!(negotiate(&hello), Ok(ProtocolVersion::CURRENT));
+}
+
+#[test]
+fn a_conversation_is_read_from_turn_one_and_an_answer_names_a_question_yardsort_asked() {
+    let read = |from: Option<u32>| {
+        Operation::ConversationRead(conversation::ConversationReadParams {
+            workspace: WorkspaceId::new("8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f").unwrap(),
+            session: SessionRecordId::new("3d4e5f6a-7b8c-4d9e-8f0a-1b2c3d4e5f6a").unwrap(),
+            from,
+        })
+        .validate()
+    };
+    assert!(read(None).is_ok());
+    assert!(read(Some(1)).is_ok());
+    assert_eq!(read(Some(0)).unwrap_err().code, ErrorCode::InvalidRequest);
+    let answer = |ask: &str| {
+        Operation::ApprovalAnswer(conversation::ApprovalAnswerParams {
+            workspace: WorkspaceId::new("8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f").unwrap(),
+            session: SessionRecordId::new("3d4e5f6a-7b8c-4d9e-8f0a-1b2c3d4e5f6a").unwrap(),
+            ask: ask.to_owned(),
+            decision: conversation::ApprovalDecision::Allow,
+        })
+        .validate()
+    };
+    assert!(answer("7f6e5d4c-3b2a-4190-8f7e-6d5c4b3a2918").is_ok());
+    for bad in ["", "../asks/x", "a b", &"x".repeat(65)] {
+        assert_eq!(
+            answer(bad).unwrap_err().code,
+            ErrorCode::InvalidRequest,
+            "{bad}"
+        );
+    }
 }
 
 #[test]
@@ -79,6 +119,7 @@ fn responses_match_their_fixtures() {
         "response-workflow-run.json",
         "response-workflow-decision.json",
         "response-workflow-challenge.json",
+        "response-conversation.json",
     ] {
         let _: Response = pinned(name);
     }
@@ -328,6 +369,17 @@ fn every_operation_has_the_name_it_is_sent_under() {
             decision_id: "d-1".into(),
             attempt: 1,
             round: 0,
+        }),
+        Operation::ConversationRead(conversation::ConversationReadParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            session: SessionRecordId::new("s").unwrap(),
+            from: None,
+        }),
+        Operation::ApprovalAnswer(conversation::ApprovalAnswerParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            session: SessionRecordId::new("s").unwrap(),
+            ask: "a".into(),
+            decision: conversation::ApprovalDecision::Deny,
         }),
     ];
     assert_eq!(all.len(), OPERATIONS.len());

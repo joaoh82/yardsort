@@ -29,6 +29,7 @@ import type { PickImage } from "../../src/lib/attach";
 import { AppProvider } from "../../src/lib/context";
 import { Diagnostics } from "../../src/lib/diagnostics";
 import { Incoming } from "../../src/lib/pairing";
+import { viewChoices } from "../../src/lib/views";
 import { MemoryVault } from "../lib/memory-vault";
 import { ADDRESS, envFor, event, FakeServer } from "./fake-server";
 
@@ -1855,6 +1856,113 @@ describe("A computer", () => {
     expect(server.sockets.open).toBe(1);
   });
 
+  describe("a conversation in Chat", () => {
+    /** What a computer answers that reads conversations and takes answers to their questions. */
+    const READS = ["conversation.read", "approval.answer"];
+
+    beforeEach(() => {
+      // Which view each conversation was last seen in is the app's, and this test's alone.
+      viewChoices.start({ read: () => null, write: () => {} });
+    });
+
+    /** Long enough for every answer to come, and for an Enter after its text. */
+    const settle = () => act(async () => jest.advanceTimersByTimeAsync(500));
+
+    async function chatting(server = new FakeServer()) {
+      server.computer.capabilities = [...READS];
+      const app = await paired(new MemoryVault(), server);
+      await fireEvent.press(await open());
+      await fireEvent.press(
+        await screen.findByRole("button", { name: "The login page times out" }),
+      );
+      await screen.findByTestId("chat");
+      return app;
+    }
+
+    test("a conversation opens as Chat, what was said and written back, with no terminal", async () => {
+      const { server } = await chatting();
+      expect(await screen.findByText("Add an --imperial option to weather-cli")).toBeTruthy();
+      expect(screen.getByText("Units go through render.js.")).toBeTruthy();
+      expect(screen.getByText(/flag\.$/)).toBeTruthy();
+      expect(screen.getByText("src/cli.js")).toBeTruthy();
+      expect(screen.queryByTestId("terminal")).toBeNull();
+      const asked = server.operations.map((o) => o.op);
+      expect(asked).toContain("conversation.read");
+      // Nothing of the terminal is asked for, and its size is the computer's.
+      expect(asked).not.toContain("terminal.attach");
+      expect(server.resizes).toEqual([]);
+    });
+
+    test("Terminal shows the terminal, and is where the conversation opens next time", async () => {
+      await chatting();
+      await fireEvent.press(screen.getByRole("tab", { name: "Terminal" }));
+      await screen.findByTestId("terminal");
+      expect(screen.queryByTestId("chat")).toBeNull();
+      await act(async () => router.back());
+      await fireEvent.press(
+        await screen.findByRole("button", { name: "The login page times out" }),
+      );
+      await screen.findByTestId("terminal");
+      await fireEvent.press(screen.getByRole("tab", { name: "Chat" }));
+      await screen.findByTestId("chat");
+    });
+
+    test("a question the agent asked shows what it would run, and Allow once answers it", async () => {
+      const server = new FakeServer();
+      server.computer.asks = [
+        {
+          id: "ask-1",
+          askedAt: 1_700_000_100_000,
+          tool: "Bash",
+          command: "npm test -- --run render",
+        },
+      ];
+      await chatting(server);
+      expect(await screen.findByText("npm test -- --run render")).toBeTruthy();
+      expect(screen.getByText("claude asks to use Bash")).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Allow once" }));
+      await settle();
+      expect(server.answers).toEqual([{ ask: "ask-1", decision: "allow" }]);
+      expect(screen.queryByText("npm test -- --run render")).toBeNull();
+    });
+
+    test("a message is typed into its terminal with Enter, and control given back at once", async () => {
+      const { server } = await chatting();
+      await fireEvent.changeText(screen.getByLabelText("Message claude"), "commit this");
+      await fireEvent.press(screen.getByRole("button", { name: "Send" }));
+      await settle();
+      expect(server.releases).toBe(1);
+      expect(server.acquires).toEqual([false]);
+      expect(server.inputs.map((i) => i.data)).toEqual(["commit this", "\r"]);
+      expect(server.resizes).toEqual([]);
+      expect(screen.getByLabelText("Message claude").props.value).toBe("");
+    });
+
+    test("a terminal the person at the computer is typing in keeps the message, and says so", async () => {
+      const server = new FakeServer();
+      server.refuseControl = true;
+      await chatting(server);
+      await fireEvent.changeText(screen.getByLabelText("Message claude"), "commit this");
+      await fireEvent.press(screen.getByRole("button", { name: "Send" }));
+      await settle();
+      expect(screen.getByText("Held.")).toBeTruthy();
+      expect(server.inputs).toEqual([]);
+      expect(screen.getByLabelText("Message claude").props.value).toBe("commit this");
+    });
+
+    test("a computer from before Chat opens the terminal, with no switch", async () => {
+      const server = new FakeServer();
+      await paired(new MemoryVault(), server);
+      await fireEvent.press(await open());
+      await fireEvent.press(
+        await screen.findByRole("button", { name: "The login page times out" }),
+      );
+      await screen.findByTestId("terminal");
+      expect(screen.queryByRole("tab", { name: "Chat" })).toBeNull();
+      expect(server.operations.map((o) => o.op)).not.toContain("conversation.read");
+    });
+  });
+
   describe("no longer reached", () => {
     for (const [where, go] of [
       ["a computer", async () => {}],
@@ -2296,8 +2404,10 @@ describe("A computer", () => {
         await fireEvent.press(
           await screen.findByRole("button", { name: "The login page times out" }),
         );
+        // Once the computer has said which conversation this is.
+        const page = await screen.findByTestId("terminal");
         await act(async () =>
-          fireEvent(screen.getByTestId("terminal"), "message", {
+          fireEvent(page, "message", {
             nativeEvent: { data: JSON.stringify({ t: "ready" }) },
           }),
         );

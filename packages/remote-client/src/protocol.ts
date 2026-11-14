@@ -39,7 +39,10 @@ import {
 } from "./decode.ts";
 import {
   MAX_ARTIFACT_PREVIEW,
+  MAX_ASK_ID,
+  MAX_ASKS,
   MAX_CLIENT_NAME,
+  MAX_COMMAND,
   MAX_CODE_LEN,
   MAX_CURSOR_LEN,
   MAX_ID_LEN,
@@ -49,9 +52,11 @@ import {
   MAX_NOTE,
   MAX_PAGE,
   MAX_PROMPT,
+  MAX_SAID,
   MAX_TASKS,
   MAX_TERMINALS,
   MAX_TEXT,
+  MAX_TURN_TEXT,
   MAX_UPLOAD,
   MAX_UPLOAD_CHUNK,
   MAX_UPLOAD_NAME,
@@ -956,6 +961,86 @@ const workflowRunDetailFields = {
   artifacts: array(object(workflowArtifactFields)),
 };
 
+// --- conversations (minor 8) ------------------------------------------------------------------
+
+/** `conversation.read`: without `from`, the newest turns that fit; with it, from that turn on. */
+export interface ConversationReadParams {
+  workspace: WorkspaceId;
+  session: SessionRecordId;
+  /** A turn's number, from 1. */
+  from?: number;
+}
+
+/** One turn: the user's message and every text the agent wrote back, its reply last. */
+export interface ConversationTurn {
+  n: number;
+  at: number;
+  user: string;
+  said: string[];
+  /** Some of it was left out; the rest is on the computer. */
+  cut: boolean;
+}
+
+/** A permission the agent asked for that nobody has answered yet. */
+export interface Ask {
+  id: string;
+  askedAt: number;
+  tool: string;
+  command?: string;
+  path?: string;
+}
+
+export interface ConversationPage {
+  session: SessionRecordId;
+  total: number;
+  /** Oldest first. */
+  turns: ConversationTurn[];
+  unreadable?: string;
+  asks: Ask[];
+  /** Its questions can be answered with `approval.answer`. */
+  answersAsks: boolean;
+}
+
+export type ApprovalDecision = "allow" | "deny";
+
+export interface ApprovalAnswerParams {
+  workspace: WorkspaceId;
+  session: SessionRecordId;
+  ask: string;
+  decision: ApprovalDecision;
+}
+
+const ASK_ID = /^[A-Za-z0-9_-]+$/;
+
+const conversationPageFields = {
+  session: id<SessionRecordId>(),
+  total: u32,
+  turns: array(
+    object({
+      n: u32,
+      at: i64,
+      user: text(MAX_TURN_TEXT),
+      said: array(text(MAX_TURN_TEXT), MAX_SAID),
+      cut: orElse(bool, () => false),
+    }),
+  ),
+  unreadable: optional(text(MAX_TEXT)),
+  asks: orElse(
+    array(
+      object({
+        id: text(MAX_ASK_ID),
+        askedAt: i64,
+        tool: text(MAX_TEXT),
+        command: optional(text(MAX_COMMAND)),
+        path: optional(text(MAX_TEXT)),
+      }),
+      MAX_ASKS,
+    ),
+    () => [],
+  ),
+  answersAsks: orElse(bool, () => false),
+};
+
 /** Everything a client can ask a host: `op` names it, `params` carries its parameters. */
 export type Operation =
   | { op: "host.describe" }
@@ -991,7 +1076,9 @@ export type Operation =
       op: "workflow.challenge";
       params: { runId: RunId; stepId: RunId; attempt: number; round: number };
     }
-  | { op: "workflow.decide"; params: WorkflowDecideParams };
+  | { op: "workflow.decide"; params: WorkflowDecideParams }
+  | { op: "conversation.read"; params: ConversationReadParams }
+  | { op: "approval.answer"; params: ApprovalAnswerParams };
 
 export type OperationName = Operation["op"];
 
@@ -1022,6 +1109,8 @@ export const OPERATIONS: readonly OperationName[] = [
   "workflow.run.get",
   "workflow.challenge",
   "workflow.decide",
+  "conversation.read",
+  "approval.answer",
 ];
 
 const leaseRefFields = { terminal: id<TerminalId>(), lease: id<LeaseId>(), generation: u64 };
@@ -1099,6 +1188,17 @@ const params: Record<string, Decoder<unknown>> = {
     attempt: u32,
     round: u32,
   }),
+  "conversation.read": object({
+    workspace: id<WorkspaceId>(),
+    session: id<SessionRecordId>(),
+    from: optional(u32),
+  }),
+  "approval.answer": object({
+    workspace: id<WorkspaceId>(),
+    session: id<SessionRecordId>(),
+    ask: text(MAX_ASK_ID),
+    decision: oneOf(["allow", "deny"] as const),
+  }),
 };
 
 /** The scope a caller needs for an operation. `null` for `host.describe`, which any grant may ask. */
@@ -1114,7 +1214,9 @@ export function scopeOf(op: OperationName): Scope | null {
   }
   if (op.startsWith("activity.")) return "activity:read";
   if (op === "memory.list") return "memory:read";
-  if (op === "terminal.attach" || op === "terminal.detach") return "terminal:read";
+  if (op === "terminal.attach" || op === "terminal.detach" || op === "conversation.read") {
+    return "terminal:read";
+  }
   if (op === "workflow.run.list" || op === "workflow.run.get") return "workflow:read";
   if (op === "workflow.challenge" || op === "workflow.decide") return "workflow:decide";
   return "terminal:control";
@@ -1189,6 +1291,12 @@ export function validate(operation: Operation): string | null {
       return operation.params.prompt === undefined ? null : promptTooLong(operation.params.prompt);
     case "workflow.decide":
       return decideInvalid(operation.params);
+    case "conversation.read":
+      return operation.params.from === 0 ? "numbers turns from 0, not 1" : null;
+    case "approval.answer":
+      return ASK_ID.test(operation.params.ask) && operation.params.ask.length <= MAX_ASK_ID
+        ? null
+        : "names a question Yardsort did not ask";
     default:
       return null;
   }
@@ -1281,6 +1389,7 @@ export type Reply =
   | ({ kind: "workflowRun" } & WorkflowRunDetail)
   | ({ kind: "workflowChallenge" } & WorkflowChallenge)
   | ({ kind: "workflowDecision" } & WorkflowDecision)
+  | ({ kind: "conversation" } & ConversationPage)
   | { kind: "done" };
 
 export const reply: Decoder<Reply> = tagged<Reply>("kind", {
@@ -1308,6 +1417,7 @@ export const reply: Decoder<Reply> = tagged<Reply>("kind", {
     outcome: text(64),
     message: text(MAX_TEXT),
   }),
+  conversation: variant("kind", "conversation", conversationPageFields),
   done: variant("kind", "done", {}),
 });
 

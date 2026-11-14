@@ -1310,6 +1310,26 @@ nested clone and it appears on the workspace's row with its checks without anyon
 link; its review, posted by a second agent working in the clone, is waited on and announced like
 a project's own.
 
+## M32 — Chat on the phone
+
+Proposed in Figma and approved on 2026-11-14 ([43-phone-chat](43-phone-chat.md)), after real use
+found the phone's terminal hard to read: it scrolled sideways, and going back meant the terminal's
+history a line at a time.
+
+- [x] Remote protocol minor 8: `conversation.read` (`terminal:read`) and `approval.answer`
+      (`terminal:control`), with fixtures read by Rust and the TypeScript client.
+- [x] Claude Code's `PermissionRequest` hook waits for a device's answer while the terminal asks
+      too, closed when the agent moves past it. Measured with Claude Code 2.1.325.
+- [x] The phone: Chat by default, remembered per conversation; steps and state from activity;
+      the question's card; sending through the terminal; the terminal zoomed out to fit.
+- [ ] Run on an iPhone and on Android: Chat against a real conversation, a question answered from
+      the phone, and the pinch in each WebView.
+- [ ] OpenCode's and Pi's questions, through their plugin and extension.
+
+_Exit:_ on a phone, a person reads an agent's whole conversation without scrolling sideways,
+answers its permission question, and sends it the next message, while the computer's terminal
+stays as it was.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

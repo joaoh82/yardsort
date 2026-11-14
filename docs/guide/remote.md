@@ -18,12 +18,12 @@ Neither end listens for connections: this computer and your phone each reach out
 
 ## What the server can see
 
-**Whoever runs the server can see what passes through it**, your terminals and what you type into them
-included. The connection is encrypted on the way, but not end to end. Use a server you run yourself, or
+**Whoever runs the server can see what passes through it**, your terminals, your agents'
+conversations as Chat shows them, and what you type into them included. The connection is encrypted on the way, but not end to end. Use a server you run yourself, or
 one run by someone you trust with that.
 
 Neither the server nor this computer writes any of it in a log: not what a terminal shows or is sent,
-not a conversation's title, and not a memory note. Their logs say which device and which computer, and
+not what a conversation says or its title, and not a memory note. Their logs say which device and which computer, and
 when, and the errors.
 
 ## Turning it on
@@ -131,7 +131,49 @@ It holds no names, titles, paths or addresses, nothing a terminal showed and not
 there, then **Share** sends that same text through the phone's share sheet, to whoever you choose.
 Nothing is sent otherwise. Only the last 200 changes are kept, and only while the app runs.
 
+## Chat on the phone
+
+A conversation opens as **Chat**: one column at the phone's width, scrolled up and down, never
+sideways. Each turn is what you asked, the agent's steps folded to one line — _6 steps · read 2 ·
+edit 3 · bash 1 · 1m 12s_, tap it for each step and its file — and what the agent wrote back,
+with its code, lists and tables drawn to fit. A reply longer than a screen or two is folded behind
+**Show all**. While the agent works, its steps appear as it takes them, with how long it has been
+working and **Stop**, which sends Esc. Scrolled up, **Latest** takes you back to the bottom, and
+**Show earlier turns** at the top reads further back.
+
+The header says which agent it is and what it is doing — working, done, or needing you — and
+**Chat | Terminal** switches to the conversation's terminal. The phone remembers which of the two
+you last used for each conversation and opens it there next time.
+
+The field at the bottom types your message into the agent's terminal on this computer, then
+presses Enter, as the composer here does. The phone takes control only for that, and gives it
+back at once; the terminal keeps this computer's size. If someone at this computer is typing,
+the message waits in the field and the phone says so. **+** gives the agent a picture, and
+**Keys** opens the terminal, for Esc, the arrows and the rest.
+
+What Chat shows is read from the agent's own record of the conversation, on this computer, each
+time the phone asks: Claude Code, Codex, Cursor, OpenCode, Grok, OMP and Pi. Nothing is read from
+the terminal, and nothing is kept. A conversation with an agent you added yourself opens on its
+terminal, as does every conversation while this computer runs a version from before Chat. A turn
+too long to send to a phone says so, and the terminal shows the rest. An ended conversation can
+still be read.
+
+## When an agent asks for a permission
+
+When Claude Code asks to run a command or edit a file, Chat shows what it wants — the command, or
+the file — with **Allow once** and **Deny**. Its terminal on this computer asks at the same time,
+and whichever is answered first is the one Claude Code takes: answer here, and the card goes from
+the phone. For any other answer, such as allowing it from now on, **Other answers: open the
+terminal**. The phone needs to be allowed to type for this.
+
+The command is kept on this computer only while the question is open, and never in its records.
+For other agents, Chat says the agent is waiting and opens its terminal.
+
 ## Scrolling on the phone
+
+A terminal wider than the phone, as one is at this computer's size, is zoomed out to fit the
+phone's width; pinch to read it closer. Once the phone has control the terminal is drawn to fit
+the phone, at its normal size.
 
 Drag down on a terminal to go back through what scrolled off its screen, as far as this computer keeps
 it, and up to come back. A terminal taller than the phone moves first; the history follows on in the same
@@ -240,7 +282,9 @@ With Remote on, this computer can tell your phone when something needs a look.
   approve, while this computer is online. The action is not sent, and is not sent later, when
   this computer is offline.
 - An agent needs you: it asked for a permission, such as Claude Code wanting to run a command.
-  Open it on the phone and it opens that agent's terminal, where you can take control and answer.
+  Open it on the phone and it opens that conversation, where Claude Code's question can be
+  answered in Chat ([When an agent asks for a permission](#when-an-agent-asks-for-a-permission)),
+  and any agent's in its terminal.
   If the agent asks again before anyone answers, that is the same notification, not a new one.
   Claude Code, OpenCode and Pi say when they ask; the notification says nothing of what was
   asked. A computer with no screen, running `yardsort-host`, sends it too.

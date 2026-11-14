@@ -3,6 +3,21 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **On the phone, a conversation opens as Chat.** One column at the phone's width, scrolled up
+  and down: what you asked, the agent's steps folded to one line, and what it wrote back, read on
+  the computer from the agent's own record. Type a message, stop the agent, or give it a picture
+  from there; **Terminal** in the header shows the terminal, and the phone remembers which you
+  last used for each conversation. Needs this version on the computer. See
+  [Chat on the phone](docs/guide/remote.md#chat-on-the-phone).
+- **Answer Claude Code's permission questions from the phone.** When Claude Code asks to run a
+  command, Chat shows the command with **Allow once** and **Deny**. The terminal on the computer
+  asks at the same time, and whichever answers first is the one taken. See
+  [When an agent asks for a permission](docs/guide/remote.md#when-an-agent-asks-for-a-permission).
+- **The phone's terminal fits the screen while you watch.** A terminal wider than the phone is
+  zoomed out to fit its width instead of scrolling sideways; pinch to read it closer.
+
 ## 0.33.0
 
 - **A workflow's page has two views: Runs and Definition.** **Runs** puts the run list, the

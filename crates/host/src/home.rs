@@ -109,6 +109,13 @@ impl Home for HostHome {
         let Ok(id) = remote_proto::HostId::new(row.host_id) else {
             return;
         };
+        let env = self.env();
+        let conversations = yardsort_core::remote::Conversations {
+            sources: yardsort_core::usage::logs::Sources::from_env(&|name| {
+                env.vars.get(name).cloned()
+            }),
+            data_dir: self.profile.data_dir.clone(),
+        };
         f(&Context {
             store: &self.store,
             git,
@@ -117,6 +124,7 @@ impl Home for HostHome {
             interactive: terminals.host.shares_control(),
             starting: Some(Arc::clone(&self.starting) as Arc<dyn Starting>),
             workflow: None,
+            conversations: Some(&conversations),
         });
     }
 

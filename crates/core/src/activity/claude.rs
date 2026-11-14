@@ -30,6 +30,9 @@ pub const FIDELITY: &str = "reported";
 pub const FIXTURE_VERSION: &str = "2.1.280";
 /// A hook that has not written its file in this long is not going to; Claude Code moves on.
 pub const HOOK_TIMEOUT_SECS: u32 = 5;
+/// The `PermissionRequest` hook waits for a device to answer ([`super::asks`]): Claude Code's own
+/// default for a command hook, a little past how long the question stays open.
+pub const ASK_TIMEOUT_SECS: u32 = 600;
 
 /// The hook events subscribed to, in the settings file.
 pub const EVENTS: &[&str] = &[
@@ -80,9 +83,16 @@ pub fn settings_json(hook: &Path, inbox_dir: &Path) -> Value {
         "args": [super::hook::HOOK_FLAG, HARNESS_ID, inbox_dir.to_string_lossy()],
         "timeout": HOOK_TIMEOUT_SECS,
     });
+    let mut asking = command.clone();
+    asking["timeout"] = json!(ASK_TIMEOUT_SECS);
     let mut hooks = serde_json::Map::new();
     for event in EVENTS {
-        hooks.insert((*event).to_owned(), json!([{ "hooks": [command] }]));
+        let hook = if *event == "PermissionRequest" {
+            &asking
+        } else {
+            &command
+        };
+        hooks.insert((*event).to_owned(), json!([{ "hooks": [hook] }]));
     }
     json!({ "hooks": hooks })
 }
@@ -314,6 +324,61 @@ fn created_pull_request(hook: &Value) -> Option<String> {
         return crate::tracked::link_in_tool_result(response);
     }
     None
+}
+
+/// What a `PermissionRequest` asks, for a device to answer: the tool, the command it would run,
+/// the file it would touch, and which call it is. `None` for any other event.
+pub fn ask_of(hook: &Value) -> Option<(String, Option<String>, Option<String>, String)> {
+    if hook.get("hook_event_name").and_then(Value::as_str) != Some("PermissionRequest") {
+        return None;
+    }
+    let tool = hook.get("tool_name").and_then(Value::as_str)?.to_owned();
+    let input = hook.get("tool_input");
+    let command = input
+        .and_then(|input| input.get("command"))
+        .and_then(Value::as_str)
+        .map(|command| remote_clip(command, super::asks::MAX_COMMAND));
+    let (path, _) = tool_path(input, hook.get("cwd").and_then(Value::as_str));
+    Some((
+        tool.clone(),
+        command,
+        path,
+        super::asks::call_of(&tool, input),
+    ))
+}
+
+/// Which tool call a hook that follows a permission is about: `PostToolUse`,
+/// `PostToolUseFailure` or `PermissionDenied`. `Some(None)` for a hook that ends the turn, after
+/// which no question of it is open. `None` for any other.
+pub fn moved_past(hook: &Value) -> Option<Option<String>> {
+    match hook.get("hook_event_name").and_then(Value::as_str)? {
+        "PostToolUse" | "PostToolUseFailure" | "PermissionDenied" => {
+            let tool = hook.get("tool_name").and_then(Value::as_str)?;
+            Some(Some(super::asks::call_of(tool, hook.get("tool_input"))))
+        }
+        "Stop" | "StopFailure" | "UserPromptSubmit" | "SessionEnd" => Some(None),
+        _ => None,
+    }
+}
+
+/// What the hook prints to answer a permission.
+pub fn decision_output(decision: super::asks::Decision) -> Value {
+    let decision = match decision {
+        super::asks::Decision::Allow => json!({ "behavior": "allow" }),
+        super::asks::Decision::Deny => {
+            json!({ "behavior": "deny", "message": "Denied from Yardsort on a phone." })
+        }
+    };
+    json!({
+        "hookSpecificOutput": { "hookEventName": "PermissionRequest", "decision": decision }
+    })
+}
+
+fn remote_clip(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) {
+        None => text.to_owned(),
+        Some((at, _)) => format!("{}…", &text[..at]),
+    }
 }
 
 /// The file a tool is about, relative to the workspace — or nothing, and a flag, when it is
@@ -716,7 +781,13 @@ mod tests {
                 json!(["--yardsort-hook", "claude", "/d/inbox"]),
                 "an argument list: spaces in a path are nobody's problem"
             );
-            assert_eq!(hook["timeout"], HOOK_TIMEOUT_SECS);
+            // The one that waits for a device's answer has as long as Claude Code gives any.
+            let timeout = if *event == "PermissionRequest" {
+                ASK_TIMEOUT_SECS
+            } else {
+                HOOK_TIMEOUT_SECS
+            };
+            assert_eq!(hook["timeout"], timeout, "{event}");
             assert!(hook.get("matcher").is_none(), "everything of that event");
         }
     }

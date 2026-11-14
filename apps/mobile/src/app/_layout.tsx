@@ -19,12 +19,15 @@ import {
   suggestedDeviceName,
   systemBrowser,
   systemVersion,
+  viewsFile,
 } from "../lib/native";
 import { incoming } from "../lib/pairing";
+import { viewChoices } from "../lib/views";
 import { installPushHandlers, registerGrantedPush } from "../lib/push-token";
 import { Button, FONTS, Problem, Screen, useColors, useScheme } from "../ui/parts";
 
 appearance.start(appearanceFile);
+viewChoices.start(viewsFile);
 
 const app = {
   accounts: new Accounts(nativeEnv, secureVault),

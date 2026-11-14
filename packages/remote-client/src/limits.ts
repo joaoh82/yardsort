@@ -8,8 +8,8 @@
 
 /** The major this client speaks. */
 export const PROTOCOL_MAJOR = 1;
-/** The minor this client speaks: 7, a phone deciding a workflow the computer is running. */
-export const PROTOCOL_MINOR = 7;
+/** The minor this client speaks: 8, reading a conversation and answering its agent's questions. */
+export const PROTOCOL_MINOR = 8;
 
 /** The largest JSON message either side reads, in bytes. */
 export const MAX_CONTROL_FRAME = 64 * 1024;
@@ -78,3 +78,14 @@ export const MAX_GRANT_PROJECTS = 200;
 export const TICKET_TTL_MS = 60_000;
 /** The longest route: letters, digits, `-` and `_`. */
 export const MAX_ROUTE_LEN = 64;
+
+/** Longest single text of a conversation's turn, in characters. Minor 8. */
+export const MAX_TURN_TEXT = 16_000;
+/** The most of the agent's texts one turn carries. Minor 8. */
+export const MAX_SAID = 24;
+/** Longest command in an open question, in characters. Minor 8. */
+export const MAX_COMMAND = 2_000;
+/** The most open questions a conversation page lists. Minor 8. */
+export const MAX_ASKS = 8;
+/** Longest question id, in bytes. Minor 8. */
+export const MAX_ASK_ID = 64;

@@ -558,6 +558,7 @@ mod serving {
                 interactive: self.terminals.shares_control(),
                 starting: None,
                 workflow: None,
+                conversations: None,
             });
         }
 

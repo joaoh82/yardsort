@@ -89,6 +89,14 @@ only watches. The app takes the inbox in as files land, on start, and on every e
 it in before it lists anything. It works while the window is closed, exactly like the exit
 spool.
 
+One hook stays a while: when Claude Code asks for a permission, Yardsort's hook writes the
+question to `activity/asks/` and waits up to ten minutes for an answer from your phone, while
+the terminal asks it too ([When an agent asks for a permission](remote.md#when-an-agent-asks-for-a-permission)).
+Whichever answer comes first is the one Claude Code takes. Once the agent moves past the question
+— you answered in the terminal, it ran, or its turn ended — the file goes and the hook exits
+without answering. That file holds the command Claude Code wants to run, for the phone to show,
+and only while the question is open.
+
 **What is kept, and what is not.** Names, ids, relative paths, durations, counts, kinds. Not the
 prompt, not a command, not a tool's input or output, not what Claude wrote back, not a path
 outside the workspace. One exception: a tool call that **opened a pull request** — Claude Code

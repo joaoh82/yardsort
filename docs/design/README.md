@@ -47,6 +47,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 40  | [Mobile notifications](40-mobile-notifications.md)                      | Built: the phone is told about tasks, reviews, failures, desktop updates, and workflow questions. The notice opens the item. Answering and installing stay on the computer                  |
 | 41  | [Mobile workflow controls](41-mobile-workflow-controls.md)              | Built: a signed-in phone can see a workflow run and decide it while the computer is online. The one-time code stays off the notification                                                    |
 | 42  | [Remote, R6](42-remote-r6.md)                                           | Planned: durable sync between an account's hosts, a project at a time: approved notes and workspace records, never files or processes                                                       |
+| 43  | [Chat on the phone](43-phone-chat.md)                                   | Built: a conversation on the phone is a column read from the agent's own record; its permissions answered through the hook; the terminal zoomed to fit                                      |
 
 ## Vocabulary
 

@@ -612,6 +612,7 @@ impl Serving for Here {
             // core's to test (`remote::serve::tests::start`).
             starting: None,
             workflow: None,
+            conversations: None,
         });
     }
 }

@@ -63,6 +63,8 @@ use crate::projects::{self, Projects};
 use crate::store::{EventBound, EventFilter, ProjectRow, SessionRow, Store, WorkspaceRow};
 use crate::tasks::delegate::TaskRef;
 
+pub use conversation::Conversations;
+
 /// The operations this host answers. Advertised in [`HostDescription::capabilities`]; anything
 /// else is `unsupported`.
 pub const ANSWERED: &[&str] = &[
@@ -109,6 +111,10 @@ pub const START_OPERATIONS: &[&str] = &[
     "session.resume",
 ];
 
+/// Reading conversations and answering their agents' questions, answered when the facade knows
+/// where agents keep them ([`Conversations`]).
+pub const CONVERSATION_OPERATIONS: &[&str] = &["conversation.read", "approval.answer"];
+
 /// Who this host is, to remote clients. Supplied by whoever builds the facade: no host identity
 /// is stored before Remote is enabled, so nothing is created for people who never use it.
 #[derive(Debug, Clone)]
@@ -139,6 +145,9 @@ pub struct HostFacade<'a> {
     /// Workflow runs are answered. The desktop sets this. A headless host does not drive
     /// workflows, so it leaves this false and the operations are unsupported.
     pub workflow: bool,
+    /// Where agents keep their conversations and open questions. Without it, `conversation.read`
+    /// and `approval.answer` are unsupported.
+    pub conversations: Option<&'a Conversations>,
 }
 
 /// What a device is told of terminals in a daemon from before leases, which the app keeps for the
@@ -229,6 +238,12 @@ impl HostFacade<'_> {
             Operation::SessionList(params) => self.sessions(grant, params).map(Reply::Sessions),
             Operation::ActivityList(params) => self.activity(grant, params).map(Reply::Activity),
             Operation::MemoryList(params) => self.memory(grant, params).map(Reply::Memory),
+            Operation::ConversationRead(params) => {
+                self.conversation(grant, params).map(Reply::Conversation)
+            }
+            Operation::ApprovalAnswer(params) => {
+                self.answer_ask(grant, params).map(|()| Reply::Done)
+            }
             Operation::TerminalAttach(_)
             | Operation::TerminalDetach(_)
             | Operation::TerminalAcquire(_)
@@ -296,6 +311,11 @@ impl HostFacade<'_> {
                 })
                 .chain(if self.workflow {
                     WORKFLOW_OPERATIONS
+                } else {
+                    &[]
+                })
+                .chain(if self.conversations.is_some() {
+                    CONVERSATION_OPERATIONS
                 } else {
                     &[]
                 })
@@ -1121,6 +1141,7 @@ fn encoded_len(value: &impl Serialize) -> usize {
 }
 
 mod activity;
+mod conversation;
 pub mod host;
 pub mod serve;
 pub mod start;

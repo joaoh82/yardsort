@@ -254,36 +254,38 @@ describe.skipIf(!browserPath)("the terminal's page", () => {
     expect(await screenText()).not.toContain("old-screen");
   });
 
-  test("is drawn at the computer's size, wider than the phone, and moves sideways", async () => {
+  test("is drawn at the computer's size, zoomed out to fit the phone's width, and pinched to read", async () => {
     await load();
     await post({ t: "reset", cols: 200, rows: 10 });
     await print(`${"x".repeat(199)}END`);
+    // The whole width is on the phone at once: nothing to move sideways to.
+    const fitted = await until(
+      "zoomed out to fit",
+      () =>
+        tab.read<{ scale: number; wide: number; seen: number }>(
+          "({scale:visualViewport.scale,wide:document.documentElement.scrollWidth,seen:visualViewport.width})",
+        ),
+      (v) => v.scale < 0.9,
+    );
+    const terminalWide = await tab.read<number>(
+      "document.querySelector('.xterm-screen').getBoundingClientRect().width",
+    );
+    expect(terminalWide).toBeGreaterThan(390 * 2);
+    expect(fitted.seen).toBeGreaterThanOrEqual(terminalWide - 1);
+    expect(fitted.wide).toBeLessThanOrEqual(Math.ceil(fitted.seen) + 1);
+    // Two fingers spread zoom in, up to four times the terminal's own size: a headless browser
+    // pinches no page, so what is checked is that the page lets one.
+    const content = await tab.read<string>("document.querySelector('meta[name=viewport]').content");
+    expect(content).toContain("maximum-scale=4");
+    expect(content).not.toContain("user-scalable=no");
+    // A terminal that fits the phone, as it does with the phone in control, is the phone's width.
+    await post({ t: "reset", cols: 40, rows: 10 });
+    await print("narrow");
     await until(
-      "grew wider than the phone",
-      () => tab.read<number>("document.documentElement.scrollWidth"),
-      (wide) => wide > 390 * 2,
+      "back to the phone's width",
+      () => tab.read<string>("document.querySelector('meta[name=viewport]').content"),
+      (content) => content.startsWith("width=device-width"),
     );
-    // By a finger, sideways, and with no empty page to wander off into below the terminal.
-    await tab.send("Input.dispatchTouchEvent", {
-      type: "touchStart",
-      touchPoints: [{ x: 300, y: 60 }],
-    });
-    for (let i = 1; i <= 10; i += 1) {
-      await tab.send("Input.dispatchTouchEvent", {
-        type: "touchMove",
-        touchPoints: [{ x: 300 - 20 * i, y: 60 }],
-      });
-    }
-    await tab.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-    await until(
-      "moved sideways",
-      () => tab.read<number>("document.documentElement.scrollLeft"),
-      (left) => left > 0,
-    );
-    const { pageHeight, phoneHeight } = await tab.read<{ pageHeight: number; phoneHeight: number }>(
-      "({pageHeight:document.documentElement.scrollHeight,phoneHeight:window.innerHeight})",
-    );
-    expect(pageHeight).toBeLessThanOrEqual(phoneHeight);
   });
 
   test("says how large a character is, and what fits by that leaves nothing to move to", async () => {
