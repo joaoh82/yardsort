@@ -28,6 +28,9 @@
 //! upload a file for one, and since minor 6 resume an ended conversation: see [`start`]. Since
 //! minor 8 a client may read a conversation's turns and answer the permissions its agent asks
 //! for: see [`conversation`]. A host lists what it answers in [`HostDescription::capabilities`].
+//!
+//! Sync between hosts ([`sync`]) is not part of this protocol: it is between a host and the
+//! server, over HTTPS, with its own schema version. Only its hint to a host is a relay notice.
 
 pub mod account;
 pub mod conversation;
@@ -38,6 +41,7 @@ pub mod notify;
 pub mod pairing;
 pub mod relay;
 pub mod start;
+pub mod sync;
 pub mod terminal;
 pub mod workflow;
 
@@ -73,7 +77,9 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// - 6: `session.resume`, and `resumable` in a session's summary.
 /// - 7: `workflow.run.list`, `workflow.run.get`, `workflow.challenge` and `workflow.decide`.
 /// - 8: `conversation.read` and `approval.answer`.
-pub const PROTOCOL_MINOR: u16 = 8;
+/// - 9: the relay's `syncChanged` notice to a host ([`relay::HostNotice::SyncChanged`]). Sync's
+///   records are versioned apart from this ([`sync::SYNC_SCHEMA`]).
+pub const PROTOCOL_MINOR: u16 = 9;
 /// `workflow:read` and `workflow:decide` arrived in this minor. A host is shown
 /// those scope names when it stated this minor or a newer minor of this major.
 pub const WORKFLOW_SCOPES_MINOR: u16 = 7;

@@ -8,8 +8,8 @@
 
 /** The major this client speaks. */
 export const PROTOCOL_MAJOR = 1;
-/** The minor this client speaks: 8, reading a conversation and answering its agent's questions. */
-export const PROTOCOL_MINOR = 8;
+/** The minor this client speaks: 9, the relay's notice to a host that a synced project changed. */
+export const PROTOCOL_MINOR = 9;
 
 /** The largest JSON message either side reads, in bytes. */
 export const MAX_CONTROL_FRAME = 64 * 1024;

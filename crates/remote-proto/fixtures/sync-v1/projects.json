@@ -1,0 +1,18 @@
+{
+  "projects": [
+    {
+      "record": {
+        "kind": "project",
+        "id": "5f0c8a52-6a1e-4d3b-8c2f-1e9d7b6a5c40",
+        "project": "5f0c8a52-6a1e-4d3b-8c2f-1e9d7b6a5c40",
+        "revision": 1,
+        "schema": 1,
+        "body": { "name": "widgets", "remote": "https://example.com/widgets.git" },
+        "host": "host-workstation",
+        "changedAt": 1762990000000,
+        "cursor": 41
+      },
+      "linked": false
+    }
+  ]
+}

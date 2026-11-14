@@ -30,6 +30,7 @@ pub mod push;
 pub mod records;
 pub mod relay;
 mod service;
+pub mod sync;
 pub mod tokens;
 
 pub use service::{Caller, ControlService, LoginFinish, ServerConfig};

@@ -304,6 +304,9 @@ const FIXTURES: Record<string, (name: string) => void> = {
     // A newer server's notice reads as one to ignore, not as a broken link.
     expect(decode(hostNotice, { kind: "hostRenamed", name: "x" })).toEqual({ kind: "unknown" });
   },
+  "relay-notice-sync.json": (name) => {
+    expect(pinned(hostNotice, name)).toEqual({ kind: "syncChanged" });
+  },
   "relay-greeting.json": (name) => {
     expect("connected" in pinned(greeting, name)).toBe(true);
   },

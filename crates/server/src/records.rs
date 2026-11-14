@@ -14,7 +14,7 @@
 //! [`crate::LOGIN_TTL_MS`]. A phone's push token has to be handed to APNs or FCM as it is. It is
 //! never returned by an API and never written to a log.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -22,9 +22,13 @@ use std::time::Duration;
 use remote_proto::account::{DeviceKind, Secret};
 use remote_proto::notify::NotificationPreferences;
 use remote_proto::pairing::MAX_OFFER_MISSES;
+use remote_proto::sync::{
+    Cursor, OpId, OpResult, RecordKind, Revision, SyncId, SyncOp, SyncProject, SyncRecord,
+};
 use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, Scope};
 use tokio::sync::broadcast;
 
+use crate::sync::{decide, Applied, ProjectState, Pulled, Snapshot, Verdict};
 use crate::tokens::{self, TokenHash};
 
 /// An account on this server: one identity provider subject. Never an email address, and never
@@ -279,6 +283,8 @@ pub enum Signal {
     /// This host's link was just noted ([`LinkPlace`]): an instance holding an earlier one closes
     /// it, once the records say a later one took its place.
     Linked(HostId),
+    /// A project this host syncs changed: tell it on its link, to pull.
+    Synced(HostId),
 }
 
 impl Signal {
@@ -289,6 +295,7 @@ impl Signal {
             Self::RecheckAll => "recheck-all".into(),
             Self::Pairing(host, grant) => format!("pairing {host} {grant}"),
             Self::Linked(host) => format!("linked {host}"),
+            Self::Synced(host) => format!("synced {host}"),
         }
     }
 
@@ -305,6 +312,7 @@ impl Signal {
                 GrantId::new(*grant).ok()?,
             )),
             ["linked", host] => Some(Self::Linked(HostId::new(*host).ok()?)),
+            ["synced", host] => Some(Self::Synced(HostId::new(*host).ok()?)),
             _ => None,
         }
     }
@@ -607,6 +615,68 @@ pub trait Records: Send + Sync {
         account: &AccountId,
         id: &str,
     ) -> impl Future<Output = Result<Option<NoticePage>>> + Send;
+
+    /// Apply one sync op from `host`, in one step: an op applied before is answered as it was;
+    /// otherwise [`crate::sync::decide`] says what it comes to, and a write takes the account's
+    /// next cursor, is entered in the change log, and remembers the op. Creating a project links
+    /// `host` to it; deleting one deletes every record of it, each with a cursor of its own.
+    fn apply_sync_op(
+        &self,
+        account: &AccountId,
+        host: &HostId,
+        op: &SyncOp,
+        now: i64,
+    ) -> impl Future<Output = Result<Applied>> + Send;
+
+    /// At most `limit` records of the projects `host` is linked to, changed after `after`,
+    /// oldest change first. Expired when `after` is below the account's floor or past its head.
+    fn sync_pull(
+        &self,
+        account: &AccountId,
+        host: &HostId,
+        after: Cursor,
+        limit: usize,
+    ) -> impl Future<Output = Result<Pulled>> + Send;
+
+    /// At most `limit` records of `project`, or of every project `host` is linked to, with ids
+    /// after `after`, by id, tombstones included. The head is read first. `None` when `project`
+    /// is named and `host` is not linked to it.
+    fn sync_snapshot(
+        &self,
+        account: &AccountId,
+        host: &HostId,
+        project: Option<&SyncId>,
+        after: Option<&SyncId>,
+        limit: usize,
+    ) -> impl Future<Output = Result<Option<Snapshot>>> + Send;
+
+    /// The account's projects that are not deleted, by id, and whether `host` is linked to each.
+    fn sync_projects(
+        &self,
+        account: &AccountId,
+        host: &HostId,
+    ) -> impl Future<Output = Result<Vec<SyncProject>>> + Send;
+
+    /// Link `host` to `project`, or unlink it. False when there is no such project, or, to link,
+    /// when it is deleted.
+    fn sync_link(
+        &self,
+        account: &AccountId,
+        host: &HostId,
+        project: &SyncId,
+        linked: bool,
+        now: i64,
+    ) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Delete at most `batch` of each: tombstones and changes older than `changes_before`
+    /// (raising each account's floor past the tombstones), ops older than `ops_before`, and links
+    /// to projects whose record is gone. The most any one of them deleted.
+    fn prune_sync(
+        &self,
+        changes_before: i64,
+        ops_before: i64,
+        batch: usize,
+    ) -> impl Future<Output = Result<usize>> + Send;
 }
 
 /// Records kept in this process. A restart forgets every account, device and credential: for
@@ -787,6 +857,43 @@ struct State {
     preferences: HashMap<String, NotificationPreferences>,
     notices: Vec<NoticeRow>,
     deliveries: Vec<DeliveryRow>,
+    sync: HashMap<String, AccountSync>,
+}
+
+/// One account's synced records.
+#[derive(Default)]
+struct AccountSync {
+    head: Cursor,
+    floor: Cursor,
+    records: BTreeMap<SyncId, SyncRecord>,
+    /// The change log: each change's cursor and when it was made.
+    changes: Vec<(Cursor, i64)>,
+    /// Ops applied: the revision and cursor each made, and when.
+    ops: HashMap<OpId, (Revision, Cursor, i64)>,
+    links: BTreeSet<(SyncId, HostId)>,
+    /// Tombstones past retention, kept as markers that pulls and snapshots no longer return.
+    pruned: BTreeSet<SyncId>,
+}
+
+impl AccountSync {
+    fn linked(&self, project: &SyncId, host: &HostId) -> bool {
+        self.links.contains(&(project.clone(), host.clone()))
+    }
+
+    fn project(&self, id: &SyncId) -> Option<&SyncRecord> {
+        self.records
+            .get(id)
+            .filter(|record| record.kind == RecordKind::Project)
+    }
+
+    /// Write `record` at the next cursor.
+    fn write(&mut self, mut record: SyncRecord, now: i64) -> Cursor {
+        self.head += 1;
+        record.cursor = self.head;
+        self.changes.push((self.head, now));
+        self.records.insert(record.id.clone(), record);
+        self.head
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1548,6 +1655,307 @@ impl Records for MemoryRecords {
                     terminal_id: n.terminal_id.clone(),
                     host_id: n.host_id.clone(),
                 })
+        })
+    }
+
+    async fn apply_sync_op(
+        &self,
+        account: &AccountId,
+        host: &HostId,
+        op: &SyncOp,
+        now: i64,
+    ) -> Result<Applied> {
+        self.with(|s| {
+            let live: BTreeSet<HostId> = s
+                .hosts
+                .iter()
+                .filter(|(h, removed)| removed.is_none() && h.account == *account)
+                .map(|(h, _)| h.id.clone())
+                .collect();
+            let sync = s.sync.entry(account.0.clone()).or_default();
+            let nothing = |result| Applied {
+                result,
+                linked: Vec::new(),
+            };
+            if let Some(&(revision, cursor, _)) = sync.ops.get(&op.op) {
+                return nothing(OpResult::Applied {
+                    op: op.op.clone(),
+                    revision,
+                    cursor,
+                });
+            }
+            let current = sync.records.get(&op.id).cloned();
+            let project = match sync.project(&op.project) {
+                None => ProjectState::Missing,
+                Some(record) => ProjectState::Present {
+                    deleted: record.deleted,
+                    linked: sync.linked(&op.project, host),
+                },
+            };
+            let write = match decide(op, current.as_ref(), project) {
+                Verdict::Refused(error) => {
+                    return nothing(OpResult::Refused {
+                        op: op.op.clone(),
+                        error,
+                    })
+                }
+                Verdict::Conflict(current) => {
+                    return nothing(OpResult::Conflict {
+                        op: op.op.clone(),
+                        current,
+                    })
+                }
+                Verdict::Unchanged { revision, cursor } => {
+                    sync.ops.insert(op.op.clone(), (revision, cursor, now));
+                    return nothing(OpResult::Applied {
+                        op: op.op.clone(),
+                        revision,
+                        cursor,
+                    });
+                }
+                Verdict::Write(write) => write,
+            };
+            let cursor = sync.write(
+                SyncRecord {
+                    kind: op.kind,
+                    id: op.id.clone(),
+                    project: op.project.clone(),
+                    revision: write.revision,
+                    schema: write.schema,
+                    body: write.body,
+                    revoked: write.revoked,
+                    deleted: write.deleted,
+                    host: host.clone(),
+                    changed_at: now,
+                    cursor: 0,
+                },
+                now,
+            );
+            sync.ops
+                .insert(op.op.clone(), (write.revision, cursor, now));
+            if op.kind == RecordKind::Project && current.is_none() {
+                sync.links.insert((op.id.clone(), host.clone()));
+            }
+            if write.cascade {
+                let doomed: Vec<SyncRecord> = sync
+                    .records
+                    .values()
+                    .filter(|r| r.project == op.project && r.id != op.project && !r.deleted)
+                    .cloned()
+                    .collect();
+                for record in doomed {
+                    sync.write(
+                        SyncRecord {
+                            revision: record.revision + 1,
+                            body: None,
+                            revoked: false,
+                            deleted: true,
+                            host: host.clone(),
+                            changed_at: now,
+                            ..record
+                        },
+                        now,
+                    );
+                }
+            }
+            let linked = sync
+                .links
+                .iter()
+                .filter(|(project, linked)| *project == op.project && live.contains(linked))
+                .map(|(_, linked)| linked.clone())
+                .collect();
+            Applied {
+                result: OpResult::Applied {
+                    op: op.op.clone(),
+                    revision: write.revision,
+                    cursor,
+                },
+                linked,
+            }
+        })
+    }
+
+    async fn sync_pull(
+        &self,
+        account: &AccountId,
+        host: &HostId,
+        after: Cursor,
+        limit: usize,
+    ) -> Result<Pulled> {
+        self.with(|s| {
+            let Some(sync) = s.sync.get(&account.0) else {
+                return if after == 0 {
+                    Pulled::Page {
+                        records: Vec::new(),
+                        more: false,
+                    }
+                } else {
+                    Pulled::Expired
+                };
+            };
+            if after < sync.floor || after > sync.head {
+                return Pulled::Expired;
+            }
+            let mut records: Vec<SyncRecord> = sync
+                .records
+                .values()
+                .filter(|r| r.cursor > after && sync.linked(&r.project, host))
+                .cloned()
+                .collect();
+            records.sort_by_key(|r| r.cursor);
+            let more = records.len() > limit;
+            records.truncate(limit);
+            Pulled::Page { records, more }
+        })
+    }
+
+    async fn sync_snapshot(
+        &self,
+        account: &AccountId,
+        host: &HostId,
+        project: Option<&SyncId>,
+        after: Option<&SyncId>,
+        limit: usize,
+    ) -> Result<Option<Snapshot>> {
+        self.with(|s| {
+            let empty = AccountSync::default();
+            let sync = s.sync.get(&account.0).unwrap_or(&empty);
+            if let Some(project) = project {
+                if sync.project(project).is_none()
+                    || sync.pruned.contains(project)
+                    || !sync.linked(project, host)
+                {
+                    return None;
+                }
+            }
+            let mut records: Vec<SyncRecord> = sync
+                .records
+                .values()
+                .filter(|r| !sync.pruned.contains(&r.id))
+                .filter(|r| project.is_none_or(|p| r.project == *p))
+                .filter(|r| sync.linked(&r.project, host))
+                .filter(|r| after.is_none_or(|after| r.id > *after))
+                .take(limit + 1)
+                .cloned()
+                .collect();
+            let more = records.len() > limit;
+            records.truncate(limit);
+            Some(Snapshot {
+                records,
+                head: sync.head,
+                more,
+            })
+        })
+    }
+
+    async fn sync_projects(&self, account: &AccountId, host: &HostId) -> Result<Vec<SyncProject>> {
+        self.with(|s| {
+            let Some(sync) = s.sync.get(&account.0) else {
+                return Vec::new();
+            };
+            sync.records
+                .values()
+                .filter(|r| r.kind == RecordKind::Project && !r.deleted)
+                .map(|r| SyncProject {
+                    record: r.clone(),
+                    linked: sync.linked(&r.id, host),
+                })
+                .collect()
+        })
+    }
+
+    async fn sync_link(
+        &self,
+        account: &AccountId,
+        host: &HostId,
+        project: &SyncId,
+        linked: bool,
+        _now: i64,
+    ) -> Result<bool> {
+        self.with(|s| {
+            let Some(sync) = s.sync.get_mut(&account.0) else {
+                return false;
+            };
+            let Some(record) = sync
+                .project(project)
+                .filter(|_| !sync.pruned.contains(project))
+            else {
+                return false;
+            };
+            let key = (project.clone(), host.clone());
+            if !linked {
+                sync.links.remove(&key);
+                return true;
+            }
+            if record.deleted {
+                return false;
+            }
+            sync.links.insert(key);
+            true
+        })
+    }
+
+    async fn prune_sync(
+        &self,
+        changes_before: i64,
+        ops_before: i64,
+        batch: usize,
+    ) -> Result<usize> {
+        self.with(|s| {
+            let mut most = 0;
+            for sync in s.sync.values_mut() {
+                let tombstones: Vec<(SyncId, Cursor)> = sync
+                    .records
+                    .values()
+                    .filter(|r| {
+                        r.deleted && r.changed_at < changes_before && !sync.pruned.contains(&r.id)
+                    })
+                    .take(batch)
+                    .map(|r| (r.id.clone(), r.cursor))
+                    .collect();
+                for (id, cursor) in &tombstones {
+                    sync.pruned.insert(id.clone());
+                    sync.floor = sync.floor.max(*cursor);
+                }
+                let changes = sync.changes.len();
+                let mut left = batch;
+                sync.changes.retain(|(_, at)| {
+                    let keep = *at >= changes_before || left == 0;
+                    if !keep {
+                        left -= 1;
+                    }
+                    keep
+                });
+                let changes = changes - sync.changes.len();
+                let old: Vec<OpId> = sync
+                    .ops
+                    .iter()
+                    .filter(|(_, (_, _, at))| *at < ops_before)
+                    .take(batch)
+                    .map(|(op, _)| op.clone())
+                    .collect();
+                for op in &old {
+                    sync.ops.remove(op);
+                }
+                let orphans: Vec<(SyncId, HostId)> = sync
+                    .links
+                    .iter()
+                    .filter(|(project, _)| {
+                        !sync.records.contains_key(project) || sync.pruned.contains(project)
+                    })
+                    .take(batch)
+                    .cloned()
+                    .collect();
+                for link in &orphans {
+                    sync.links.remove(link);
+                }
+                most = most
+                    .max(tombstones.len())
+                    .max(changes)
+                    .max(old.len())
+                    .max(orphans.len());
+            }
+            most
         })
     }
 }

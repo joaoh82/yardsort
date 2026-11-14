@@ -79,11 +79,15 @@ export const greeting: Decoder<Greeting> = (value, path) => {
 };
 
 /** What the relay tells a host on its link's own channel: a hint to ask the server again. */
-export type HostNotice = { kind: "pairingRequested"; grant: GrantId } | { kind: "unknown" };
+export type HostNotice =
+  { kind: "pairingRequested"; grant: GrantId } | { kind: "syncChanged" } | { kind: "unknown" };
 
 export const hostNotice: Decoder<HostNotice> = tagged<HostNotice>(
   "kind",
-  { pairingRequested: variant("kind", "pairingRequested", { grant: id<GrantId>() }) },
+  {
+    pairingRequested: variant("kind", "pairingRequested", { grant: id<GrantId>() }),
+    syncChanged: variant("kind", "syncChanged", {}),
+  },
   () => ({ kind: "unknown" }),
 );
 

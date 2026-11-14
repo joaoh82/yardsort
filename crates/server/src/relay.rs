@@ -351,6 +351,16 @@ impl Relay {
         }
     }
 
+    /// Tell `host`'s link here, if there is one, that a project it syncs changed.
+    pub fn tell_synced(&self, host: &HostId) {
+        let link = lock(&self.hub.hosts).get(host).cloned();
+        if let Some(link) = link {
+            let text = serde_json::to_vec(&HostNotice::SyncChanged).expect("serialises");
+            link.out
+                .push(link_message(&LinkFrame::Text(NOTICE_CHANNEL, &text)));
+        }
+    }
+
     /// Take `link` away, if it is still the host's current one, and close its devices.
     fn detach_host(&self, link: &HostLink) {
         {
@@ -1047,6 +1057,10 @@ pub(crate) fn start_rechecks<R: Records + 'static>(service: Arc<ControlService<R
                     }
                     Some(Ok(Signal::Linked(host))) => {
                         keep_place(&service, &host).await;
+                        Vec::new()
+                    }
+                    Some(Ok(Signal::Synced(host))) => {
+                        service.relay.tell_synced(&host);
                         Vec::new()
                     }
                     // Started listening, or missed some: everything, as a round does.

@@ -1,5 +1,5 @@
-//! A device's side of the Yardsort server's HTTP API ([`remote_proto::account`] and
-//! [`remote_proto::pairing`]).
+//! A device's side of the Yardsort server's HTTP API ([`remote_proto::account`],
+//! [`remote_proto::pairing`], and a host's [`remote_proto::sync`]).
 //!
 //! **Signing in** goes through the system browser and comes back to a listener on this machine's
 //! loopback address, on whichever port was free ([`SignIn`]). The browser never carries a
@@ -266,6 +266,67 @@ impl Client {
     /// `POST /v1/grants/{grant}/revoke`.
     pub async fn revoke_grant(&self, access: &Secret, grant: &GrantId) -> Result<()> {
         let url = self.url(&format!("v1/grants/{grant}/revoke"))?;
+        self.send_empty(self.authed(self.http.post(url), access))
+            .await
+    }
+
+    /// `POST /v1/sync/push`: a host's ops, answered one by one.
+    pub async fn sync_push(
+        &self,
+        access: &Secret,
+        push: &remote_proto::sync::PushRequest,
+    ) -> Result<remote_proto::sync::PushReply> {
+        let request = self.http.post(self.url("v1/sync/push")?).json(push);
+        self.send(self.authed(request, access)).await
+    }
+
+    /// `GET /v1/sync/pull?after=`: what changed in the linked projects after `after`.
+    pub async fn sync_pull(
+        &self,
+        access: &Secret,
+        after: remote_proto::sync::Cursor,
+    ) -> Result<remote_proto::sync::SyncPage> {
+        let mut url = self.url("v1/sync/pull")?;
+        url.query_pairs_mut()
+            .append_pair("after", &after.to_string());
+        self.send(self.authed(self.http.get(url), access)).await
+    }
+
+    /// `GET /v1/sync/snapshot`: a page of one linked project's records, or of all of them, by id.
+    pub async fn sync_snapshot(
+        &self,
+        access: &Secret,
+        project: Option<&remote_proto::sync::SyncId>,
+        after: Option<&remote_proto::sync::SyncId>,
+    ) -> Result<remote_proto::sync::SnapshotPage> {
+        let mut url = self.url("v1/sync/snapshot")?;
+        {
+            let mut query = url.query_pairs_mut();
+            if let Some(project) = project {
+                query.append_pair("project", project.as_str());
+            }
+            if let Some(after) = after {
+                query.append_pair("after", after.as_str());
+            }
+        }
+        self.send(self.authed(self.http.get(url), access)).await
+    }
+
+    /// `GET /v1/sync/projects`: the account's synced projects, to link one.
+    pub async fn sync_projects(&self, access: &Secret) -> Result<remote_proto::sync::SyncProjects> {
+        self.send(self.authed(self.http.get(self.url("v1/sync/projects")?), access))
+            .await
+    }
+
+    /// `POST /v1/sync/projects/{project}/link`, or `…/unlink`.
+    pub async fn sync_link(
+        &self,
+        access: &Secret,
+        project: &remote_proto::sync::SyncId,
+        linked: bool,
+    ) -> Result<()> {
+        let verb = if linked { "link" } else { "unlink" };
+        let url = self.url(&format!("v1/sync/projects/{project}/{verb}"))?;
         self.send_empty(self.authed(self.http.post(url), access))
             .await
     }

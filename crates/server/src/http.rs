@@ -9,7 +9,8 @@
 //! proxy, the address is the one the proxy names in [`Options::client_ip_header`]; otherwise the
 //! connection's own, which needs the router served with `into_make_service_with_connect_info`.
 //! Submitting a notice, registering a push token and saying the phone is reachable are limited
-//! per device, by a hash of its id. A request with no usable access token is limited by address.
+//! per device, by a hash of its id, and so is every sync call ([`crate::sync`]). A sync push may be
+//! up to [`MAX_SYNC_BODY`]; every other body, [`MAX_BODY`]. A request with no usable access token is limited by address.
 //!
 //! Nothing secret is logged: a request is logged by method, path and status, never its query
 //! (where sign-in codes travel) or its headers (where access credentials do).
@@ -32,6 +33,7 @@ use remote_proto::account::{LoginParams, TokenRequest};
 use remote_proto::notify::{NoticeSubmission, NotificationPreferences, PushRegistration};
 use remote_proto::pairing::{GrantDecision, HostRegistration, PairingRequest};
 use remote_proto::relay::{TicketRequest, MAX_MESSAGE};
+use remote_proto::sync::{Cursor, PushRequest, SyncId, MAX_SYNC_BODY};
 use remote_proto::{DeviceId, ErrorCode, GrantId, HostId, RemoteError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -64,6 +66,9 @@ pub const PAIRINGS_PER_MINUTE: u32 = 10;
 pub const TICKETS_PER_MINUTE: u32 = 60;
 /// Notices, token registrations and reachable calls one device may make a minute.
 pub const NOTICES_PER_MINUTE: u32 = 60;
+/// Sync calls one host may make a minute. A host pushes after each change and pulls when told,
+/// in batches; catching up after a long time offline is a few dozen pages.
+pub const SYNC_PER_MINUTE: u32 = 120;
 
 pub struct Options {
     /// The header a trusted proxy puts the client's address in (`Fly-Client-IP` on Fly.io). Set
@@ -75,6 +80,7 @@ pub struct Options {
     pub pairings_per_minute: u32,
     pub tickets_per_minute: u32,
     pub notices_per_minute: u32,
+    pub sync_per_minute: u32,
 }
 
 impl Default for Options {
@@ -87,6 +93,7 @@ impl Default for Options {
             pairings_per_minute: PAIRINGS_PER_MINUTE,
             tickets_per_minute: TICKETS_PER_MINUTE,
             notices_per_minute: NOTICES_PER_MINUTE,
+            sync_per_minute: SYNC_PER_MINUTE,
         }
     }
 }
@@ -115,8 +122,16 @@ pub fn router<R: Records + Clone + 'static>(
     let pairings = gate("pairings", options.pairings_per_minute, Answer::Json, false);
     let tickets = gate("tickets", options.tickets_per_minute, Answer::Json, false);
     let notices = gate("notices", options.notices_per_minute, Answer::Json, true);
+    let sync = gate("sync", options.sync_per_minute, Answer::Json, true);
+    let synced = |route: axum::routing::MethodRouter<Service<R>>| {
+        route.route_layer(middleware::from_fn_with_state(
+            Arc::clone(&sync),
+            limited::<R>,
+        ))
+    };
     crate::relay::start_rechecks(Arc::clone(&service));
     crate::limit::start_sweeping(Arc::downgrade(&service));
+    crate::sync::start_pruning(Arc::downgrade(&service));
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/v1/server", get(describe::<R>))
@@ -176,6 +191,18 @@ pub fn router<R: Records + Clone + 'static>(
                 .route_layer(middleware::from_fn_with_state(notices, limited::<R>)),
         )
         .route("/v1/notifications/{id}", get(read_notice::<R>))
+        .route(
+            "/v1/sync/push",
+            synced(post(sync_push::<R>)).route_layer(DefaultBodyLimit::max(MAX_SYNC_BODY)),
+        )
+        .route("/v1/sync/pull", synced(get(sync_pull::<R>)))
+        .route("/v1/sync/snapshot", synced(get(sync_snapshot::<R>)))
+        .route("/v1/sync/projects", synced(get(sync_projects::<R>)))
+        .route("/v1/sync/projects/{id}/link", synced(post(sync_link::<R>)))
+        .route(
+            "/v1/sync/projects/{id}/unlink",
+            synced(post(sync_unlink::<R>)),
+        )
         .fallback(|| async { failure(RemoteError::not_found()) })
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .layer(middleware::from_fn(guard))
@@ -827,6 +854,143 @@ async fn read_notice<R: Records>(
         Err(error) => return failure(error),
     };
     answer(service.read_notice(&caller, &id).await)
+}
+
+/// The caller a per-device gate already authenticated, or the one the request's token names.
+async fn known_caller<R: Records>(
+    service: &ControlService<R>,
+    known: Option<Extension<Caller>>,
+    headers: &HeaderMap,
+) -> Result<Caller, RemoteError> {
+    match known {
+        Some(Extension(caller)) => Ok(caller),
+        None => caller(service, headers).await,
+    }
+}
+
+async fn sync_push<R: Records>(
+    State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
+    headers: HeaderMap,
+    body: Result<Json<PushRequest>, JsonRejection>,
+) -> Response {
+    let caller = match known_caller(&service, known, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    let request = match body_of(body, "The request is not a sync push.") {
+        Ok(request) => request,
+        Err(error) => return error.into_response(),
+    };
+    answer(service.sync_push(&caller, request).await)
+}
+
+#[derive(Deserialize)]
+struct PullQuery {
+    after: Option<Cursor>,
+}
+
+async fn sync_pull<R: Records>(
+    State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
+    headers: HeaderMap,
+    query: Result<Query<PullQuery>, QueryRejection>,
+) -> Response {
+    let caller = match known_caller(&service, known, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    let Ok(Query(query)) = query else {
+        return failure(RemoteError::new(
+            ErrorCode::InvalidRequest,
+            "A pull names the cursor to start after.",
+        ));
+    };
+    answer(service.sync_pull(&caller, query.after.unwrap_or(0)).await)
+}
+
+#[derive(Deserialize)]
+struct SnapshotQuery {
+    project: Option<String>,
+    after: Option<String>,
+}
+
+async fn sync_snapshot<R: Records>(
+    State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
+    headers: HeaderMap,
+    query: Result<Query<SnapshotQuery>, QueryRejection>,
+) -> Response {
+    let caller = match known_caller(&service, known, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    let not_it = || {
+        failure(RemoteError::new(
+            ErrorCode::InvalidRequest,
+            "A snapshot names a project and a record by their sync ids.",
+        ))
+    };
+    let Ok(Query(query)) = query else {
+        return not_it();
+    };
+    let (Ok(project), Ok(after)) = (
+        query.project.map(SyncId::new).transpose(),
+        query.after.map(SyncId::new).transpose(),
+    ) else {
+        return not_it();
+    };
+    answer(service.sync_snapshot(&caller, project, after).await)
+}
+
+async fn sync_projects<R: Records>(
+    State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
+    headers: HeaderMap,
+) -> Response {
+    let caller = match known_caller(&service, known, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    answer(service.sync_projects(&caller).await)
+}
+
+async fn sync_link<R: Records>(
+    State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    linking(&service, known, &headers, &id, true).await
+}
+
+async fn sync_unlink<R: Records>(
+    State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    linking(&service, known, &headers, &id, false).await
+}
+
+async fn linking<R: Records>(
+    service: &ControlService<R>,
+    known: Option<Extension<Caller>>,
+    headers: &HeaderMap,
+    id: &str,
+    linked: bool,
+) -> Response {
+    let caller = match known_caller(service, known, headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    let Ok(project) = SyncId::new(id) else {
+        return failure(RemoteError::not_found());
+    };
+    match service.sync_link(&caller, &project, linked).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => failure(error),
+    }
 }
 
 /// The device behind `Authorization: Bearer …`.

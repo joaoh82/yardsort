@@ -256,6 +256,9 @@ pub enum HostNotice {
     /// A device redeemed one of this host's pairing offers and waits for its person's answer:
     /// the grant is among the host's, pending.
     PairingRequested { grant: GrantId },
+    /// A project this host syncs changed on another host: pull ([`crate::sync`]). It says
+    /// nothing about what changed. Since minor 9.
+    SyncChanged,
     /// A notice from a newer server. Ignored.
     #[serde(other)]
     Unknown,

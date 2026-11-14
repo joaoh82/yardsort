@@ -1086,7 +1086,9 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       account's hosts, a project at a time and only where the person turns it on or links it, in
       five slices (the server's records; turning a project on and linking it; approved notes with
       their conflicts; workspaces seen elsewhere; checking a branch out here). The owner took the
-      defaults for its four questions the same day.
+      defaults for its four questions the same day. Slice 1, the server's records, was built on
+      2026-11-14: the sync routes, tables and pruner, and the relay's hint as protocol minor 9; its
+      local smoke test passed, and its staging run waits on a deploy.
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is
