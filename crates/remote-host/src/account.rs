@@ -66,6 +66,9 @@ pub struct Remote {
     notices: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// The sync loop, while the link is kept.
     sync: Mutex<Option<Syncer>>,
+    /// Held by a sync pass, and by linking and stopping, so that one never runs while another
+    /// has a request out: a stop must not forget a project whose create is on its way.
+    sync_turn: tokio::sync::Mutex<()>,
 }
 
 impl Remote {
@@ -73,6 +76,10 @@ impl Remote {
         self.sync
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(crate) async fn sync_turn(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.sync_turn.lock().await
     }
 }
 

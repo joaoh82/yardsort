@@ -107,12 +107,19 @@ fn set(state: &Mutex<Loop>, to: Loop) {
 async fn run<H: Home>(home: Arc<H>, wake: Arc<Notify>, stop: Arc<Notify>, state: Arc<Mutex<Loop>>) {
     let mut backoff = FIRST_BACKOFF;
     loop {
+        let failing = matches!(
+            *state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            Loop::Waiting { .. }
+        );
         set(&state, Loop::Syncing);
         let wait = match pass(home.as_ref()).await {
             Ok(changed) => {
                 backoff = FIRST_BACKOFF;
                 set(&state, Loop::Idle);
-                if changed {
+                // A pass that went through after one that failed clears the failure shown.
+                if changed || failing {
                     home.synced();
                 }
                 EVERY
@@ -163,6 +170,7 @@ async fn signed_in(home: &impl Home) -> Result<(Client, Secret)> {
 /// One pass: what was removed here, then the outbox, then any project linked since the last
 /// pass, then everything that changed. True when anything a person sees changed.
 pub async fn pass(home: &impl Home) -> Result<bool> {
+    let _turn = home.remote().sync_turn().await;
     let store = home.store();
     let synced = store.synced_projects().map_err(store_failed)?;
     if synced.is_empty() && store.sync_waiting().map_err(store_failed)? == 0 {
@@ -347,7 +355,9 @@ pub fn turn_on(home: &impl Home, project_id: &str, hint: Option<String>) -> Resu
     Ok(())
 }
 
-/// The account's synced projects this host could link: not linked here, not removed.
+/// The account's synced projects this host could link: none of its projects is linked to it
+/// here, and it is not removed. One the server says this host is linked to is offered too when
+/// no project here is: a link whose answer was lost, or one from before Remote was turned off.
 pub async fn offered(home: &impl Home) -> Result<Vec<Offer>> {
     let (client, access) = signed_in(home).await?;
     let mine: BTreeSet<SyncId> = home
@@ -364,7 +374,7 @@ pub async fn offered(home: &impl Home) -> Result<Vec<Offer>> {
         .projects;
     Ok(projects
         .into_iter()
-        .filter(|p| !p.linked && !p.record.deleted && !mine.contains(&p.record.id))
+        .filter(|p| !p.record.deleted && !mine.contains(&p.record.id))
         .filter(|p| p.record.schema <= SYNC_SCHEMA)
         .filter_map(|p| {
             let body = ProjectBody::of(&p.record)?;
@@ -379,9 +389,10 @@ pub async fn offered(home: &impl Home) -> Result<Vec<Offer>> {
 
 /// Link a local project to one of the account's synced projects, as the person chose.
 pub async fn link(home: &impl Home, project_id: &str, synced: &SyncId) -> Result<()> {
+    let _turn = home.remote().sync_turn().await;
     let (client, access) = signed_in(home).await?;
-    if home
-        .store()
+    let store = home.store();
+    if store
         .synced_project(project_id)
         .map_err(store_failed)?
         .is_some()
@@ -391,14 +402,24 @@ pub async fn link(home: &impl Home, project_id: &str, synced: &SyncId) -> Result
             "That project syncs already. Stop syncing it first.",
         ));
     }
-    let record = client
+    if store
+        .synced_projects()
+        .map_err(store_failed)?
+        .iter()
+        .any(|row| row.sync_id == *synced)
+    {
+        return Err(Failure::new(
+            "sync_refused",
+            "Another project here is linked to that synced project already.",
+        ));
+    }
+    let found = client
         .sync_projects(&access)
         .await
         .map_err(refused_here)?
         .projects
         .into_iter()
-        .map(|p| p.record)
-        .find(|r| r.id == *synced && !r.deleted)
+        .find(|p| p.record.id == *synced && !p.record.deleted)
         .ok_or_else(|| {
             Failure::new(
                 "sync_refused",
@@ -409,9 +430,11 @@ pub async fn link(home: &impl Home, project_id: &str, synced: &SyncId) -> Result
         .sync_link(&access, synced, true)
         .await
         .map_err(refused_here)?;
-    if let Err(error) = home.store().link_synced_project(project_id, &record) {
-        // Leave the server as it was.
-        let _ = unlink(&client, &access, synced).await;
+    if let Err(error) = store.link_synced_project(project_id, &found.record) {
+        // Leave the server as it was: unlink only what this call linked.
+        if !found.linked {
+            let _ = unlink(&client, &access, synced).await;
+        }
         return Err(refused(error));
     }
     wake(home);
@@ -421,6 +444,8 @@ pub async fn link(home: &impl Home, project_id: &str, synced: &SyncId) -> Result
 
 /// Stop syncing a project here. The records stay on the server for the other hosts.
 pub async fn stop(home: &impl Home, project_id: &str) -> Result<()> {
+    // After any pass under way, so a create it has out settles first and is unlinked here.
+    let _turn = home.remote().sync_turn().await;
     let row = home
         .store()
         .synced_project(project_id)

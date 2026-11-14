@@ -426,8 +426,17 @@ workspaces are slices 3 and 4.
   for the other hosts.
 - **Removing a project from Yardsort** stops it syncing here at the next pass, which unlinks it at
   the server; its records stay for the others.
-- **Linking** calls the server first and writes the id after; if the write fails, it unlinks again,
-  so the server never holds a link this host does not know of.
+- **One act at a time.** A pass, a link and a stop take turns, so a stop never forgets a project
+  whose create is on its way: it waits, the create settles, and the stop unlinks what the server
+  now has. Turning on and removing only queue, and need no turn.
+- **Linking** calls the server first and writes the id after. If the write fails, it unlinks
+  again, but only a link this call made: one the server had already is left. A synced project
+  another project here is linked to is refused before the server is asked.
+- **A link the server has and this host does not**, after a link whose answer was lost or a
+  Remote turned off while away, is offered for linking like any other; the person still picks the
+  project.
+- **The window is told** when a pass changed what it shows: a project reaching the server, one
+  forgotten or refused, and a pass going through after one that failed.
 - **Removing from the server** needs the server to have the project first: until its create has
   gone up, it is refused with a reason saying so.
 
@@ -435,7 +444,11 @@ workspaces are slices 3 and 4.
 turning on and settling; a conflict on a create; a refused op held and not sent again; removal
 rebased after a conflict, and ending; removal by another host; linking once, either way, and the
 snapshot after; a snapshot keeping an unsent create; Remote off and a server move clearing
-everything; and a pass's state. `yardsort-host`'s control test pins which asks are guarded. The
+everything; and a pass's state. `crates/remote-host/tests/sync.rs`, 4, against a stand-in server on a
+real socket: a stop held behind a create on its way and nothing left linked, a lost link offered and
+not undone by a link that failed here, a second clone refused with the first kept, and reaching
+the server and recovering from a failed pass both telling the window. `yardsort-host`'s control
+test pins which asks are guarded. The
 app's `ProjectSyncSection` and `LinkSyncedProjectDialog` tests, 16, and one in Project settings:
 the preview shown before turning on, nothing chosen until the person picks, the same-remote mark,
 Remove asking first and its "Keep it" respected, Escape closing only the link dialog.
@@ -446,7 +459,7 @@ answered "no", with nothing sent either time; the preview shows the remote witho
 test's `origin` has, and the password shows nowhere. The other is offered it, matched to a clone
 whose `origin` is the SSH address, links nothing by itself, and links it when told. It stops there,
 while the first keeps syncing; then the first removes it from the server, it is offered nowhere,
-and both keep their projects. Passed on 2026-11-14 with its steps run by hand, 32 checks; like
+and both keep their projects. Passed on 2026-11-14 with its steps run by hand, all 26 steps; like
 `sync-server.yaml`, it waits for the owner's approval in the app before `ys test run` runs it.
 
 **The owner run**, this computer and the box through staging, waits on the same deploy as slice

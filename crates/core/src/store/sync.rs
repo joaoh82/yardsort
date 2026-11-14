@@ -525,12 +525,19 @@ fn set_cursor(tx: &Transaction<'_>, cursor: Cursor) -> StoreResult<()> {
     Ok(())
 }
 
-fn set_revision(tx: &Transaction<'_>, id: &SyncId, revision: Revision) -> StoreResult<()> {
+/// Note the server's revision of a record. True when the server had not been heard to have it
+/// before, which a person sees: the project has reached the server.
+fn set_revision(tx: &Transaction<'_>, id: &SyncId, revision: Revision) -> StoreResult<bool> {
+    let reached = tx.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sync_ids WHERE sync_id = ? AND revision IS NULL)",
+        [id.as_str()],
+        |r| r.get::<_, bool>(0),
+    )?;
     tx.execute(
         "UPDATE sync_ids SET revision = MAX(COALESCE(revision, 0), ?) WHERE sync_id = ?",
         params![revision as i64, id.as_str()],
     )?;
-    Ok(())
+    Ok(reached)
 }
 
 fn settle_one(tx: &Transaction<'_>, op: &SyncOp, result: &OpResult) -> StoreResult<bool> {
@@ -546,9 +553,9 @@ fn settle_one(tx: &Transaction<'_>, op: &SyncOp, result: &OpResult) -> StoreResu
             Ok(true)
         }
         OpResult::Applied { revision, .. } => {
-            set_revision(tx, &op.id, *revision)?;
+            let reached = set_revision(tx, &op.id, *revision)?;
             done(tx)?;
-            Ok(false)
+            Ok(reached)
         }
         // Removed already, by another host.
         OpResult::Conflict { current, .. }
@@ -559,7 +566,7 @@ fn settle_one(tx: &Transaction<'_>, op: &SyncOp, result: &OpResult) -> StoreResu
         }
         // Changed since: the person's removal stands, against the revision as it is now.
         OpResult::Conflict { current, .. } if removal => {
-            set_revision(tx, &op.id, current.revision)?;
+            let _ = set_revision(tx, &op.id, current.revision)?;
             tx.execute(
                 "UPDATE sync_outbox SET base = ? WHERE op = ?",
                 params![current.revision as i64, op.op.as_str()],
@@ -569,9 +576,9 @@ fn settle_one(tx: &Transaction<'_>, op: &SyncOp, result: &OpResult) -> StoreResu
         // A project's own record is only ever created here. A conflict on that create is the
         // record there already, as when the answer to an earlier push was lost.
         OpResult::Conflict { current, .. } => {
-            set_revision(tx, &op.id, current.revision)?;
+            let reached = set_revision(tx, &op.id, current.revision)?;
             done(tx)?;
-            Ok(false)
+            Ok(reached)
         }
         OpResult::Refused { error, .. } => {
             tx.execute(
@@ -604,6 +611,5 @@ fn take_one(tx: &Transaction<'_>, record: &SyncRecord) -> StoreResult<bool> {
         forget_project(tx, record.id.as_str())?;
         return Ok(true);
     }
-    set_revision(tx, &record.id, record.revision)?;
-    Ok(false)
+    set_revision(tx, &record.id, record.revision)
 }

@@ -122,14 +122,15 @@ fn turning_sync_on_queues_the_project_and_its_answer_settles_it() {
         }
     );
 
-    assert!(!store.settle_sync(&[applied(create, 1)]).unwrap());
+    // Reaching the server is a change the person sees.
+    assert!(store.settle_sync(&[applied(create, 1)]).unwrap());
     assert!(store.sync_outbox(100).unwrap().is_empty());
     assert_eq!(
         store.synced_project(&project.id).unwrap().unwrap().revision,
         Some(1)
     );
     // The same answer again, as after a retried push, changes nothing.
-    store.settle_sync(&[applied(create, 1)]).unwrap();
+    assert!(!store.settle_sync(&[applied(create, 1)]).unwrap());
     assert_eq!(store.sync_waiting().unwrap(), 0);
 }
 
