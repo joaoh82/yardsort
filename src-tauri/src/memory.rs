@@ -39,11 +39,38 @@ pub struct MemoryEntry {
     pub state: String,
     /// `user` or `agent`.
     pub author: String,
-    /// Where it came from, in words: "the user", or "claude in fix-login".
+    /// Where it came from, in words: "the user", or "claude in fix-login", and the host for one
+    /// synced from another: "the user, on Build box".
     pub from: String,
+    /// The other host it was written or approved on, for a synced note.
+    pub host: Option<String>,
+    /// Two hosts changed it at once: the other text, until the person settles it.
+    pub conflict: Option<MemoryEntryConflict>,
     pub created_at: f64,
     pub updated_at: f64,
     pub history: Vec<MemoryHistoryItem>,
+}
+
+/// Another host's text for a note, beside the one that stands.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryEntryConflict {
+    pub text: String,
+    /// The host it is from, by name.
+    pub from: String,
+    pub at: f64,
+}
+
+/// How the person settles a conflict.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Type)]
+#[serde(rename_all = "camelCase", tag = "keep", content = "text")]
+pub enum MemorySettle {
+    /// The text that stands.
+    Standing,
+    /// The other host's.
+    Other,
+    /// A third, written now.
+    Text(String),
 }
 
 /// A project's memory, as the view shows it.
@@ -94,6 +121,12 @@ fn entry(state: &AppState, row: MemoryRow) -> IpcResult<MemoryEntry> {
     Ok(MemoryEntry {
         short_id: memory::short_id(&row.id).to_owned(),
         from: memory::citation(&row),
+        host: row.from_host,
+        conflict: row.conflict.map(|c| MemoryEntryConflict {
+            text: c.text,
+            from: c.from,
+            at: c.at as f64,
+        }),
         id: row.id,
         text: row.text,
         state: row.state,
@@ -143,22 +176,52 @@ pub async fn memory_write(
     project_id: String,
     text: String,
 ) -> IpcResult<ProjectMemory> {
-    blocking(app, move |state| {
+    let handle = app.clone();
+    let memory = blocking(app, move |state| {
         memory::write(&state.store, &project_id, &text)?;
         project_memory(state, &project_id)
     })
-    .await
+    .await?;
+    crate::remote::wake_sync(&handle);
+    Ok(memory)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn memory_edit(app: AppHandle, id: String, text: String) -> IpcResult<ProjectMemory> {
-    blocking(app, move |state| {
+    let handle = app.clone();
+    let memory = blocking(app, move |state| {
         let project = project_of(state, &id)?;
         memory::edit(&state.store, &id, &text)?;
         project_memory(state, &project)
     })
-    .await
+    .await?;
+    crate::remote::wake_sync(&handle);
+    Ok(memory)
+}
+
+/// Settle a note two hosts changed at once: keep one of the texts, or write a third.
+#[tauri::command]
+#[specta::specta]
+pub async fn memory_settle(
+    app: AppHandle,
+    id: String,
+    how: MemorySettle,
+) -> IpcResult<ProjectMemory> {
+    let handle = app.clone();
+    let memory = blocking(app, move |state| {
+        let project = project_of(state, &id)?;
+        let how = match how {
+            MemorySettle::Standing => memory::Settle::Standing,
+            MemorySettle::Other => memory::Settle::Other,
+            MemorySettle::Text(text) => memory::Settle::Text(text),
+        };
+        memory::settle(&state.store, &id, how)?;
+        project_memory(state, &project)
+    })
+    .await?;
+    crate::remote::wake_sync(&handle);
+    Ok(memory)
 }
 
 #[tauri::command]
@@ -168,7 +231,8 @@ pub async fn memory_decide(
     id: String,
     decision: MemoryDecision,
 ) -> IpcResult<ProjectMemory> {
-    blocking(app, move |state| {
+    let handle = app.clone();
+    let memory = blocking(app, move |state| {
         let project = project_of(state, &id)?;
         let decision = match decision {
             MemoryDecision::Approve => Decision::Approve,
@@ -179,7 +243,9 @@ pub async fn memory_decide(
         memory::decide(&state.store, &id, decision)?;
         project_memory(state, &project)
     })
-    .await
+    .await?;
+    crate::remote::wake_sync(&handle);
+    Ok(memory)
 }
 
 /// Turn sharing a project's approved entries with its agents on or off.

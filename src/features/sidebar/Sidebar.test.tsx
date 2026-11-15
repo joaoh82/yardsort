@@ -43,6 +43,7 @@ const core = vi.hoisted(() => ({
   ptyClose: vi.fn(),
   memoryWaiting: vi.fn(),
   memoryGet: vi.fn(),
+  onSyncChanged: vi.fn(async () => () => {}),
   outcomeLabel: vi.fn(),
   onActivityChanged: vi.fn(),
   onTrackedPullRequestsChanged: vi.fn(),

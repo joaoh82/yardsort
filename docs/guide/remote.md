@@ -309,14 +309,15 @@ again makes a new pairing, which shows.
 ## Syncing projects
 
 Your computers can share a project through the server: two computers with Remote on, signed in to
-the same account on the same server. For now that is the project itself, its name and its remote;
-its approved notes and its workspaces will follow in later updates. Nothing syncs until you turn it
-on for a project, and **never its files, its path or its terminals**.
+the same account on the same server. That is the project itself, its name and its remote, and its
+[approved notes](memory.md#on-your-other-computers), which reach every computer's agents; its
+workspaces will follow in a later update. Nothing syncs until you turn it on for a project, and
+**never its files, its path or its terminals**.
 
 Open **Project settings…** from the project's menu. Its **Sync** section shows what turning sync on
-sends: the project's name, and the address of its Git remote (`origin`) without any user or
-password in it, or none for a remote that is a folder. **The server keeps synced records in plain
-text, readable by whoever runs it.** Press **Turn on sync**. The section says _Waiting to reach the
+sends: the project's name, the address of its Git remote (`origin`) without any user or password in
+it, or none for a remote that is a folder, and how many approved notes go with it. **The server
+keeps synced records in plain text, readable by whoever runs it.** Press **Turn on sync**. The section says _Waiting to reach the
 server…_ until the server has it, then _Syncing with your other computers_, and when it last
 synced. With Remote off, the section says sync needs it and links to **Settings → Remote**.
 
@@ -325,7 +326,8 @@ synced. With Remote off, the section says sync needs it and links to **Settings 
 computers sync that this one does not, each with its remote; one whose remote is this project's
 is marked **Same remote** and listed first. Nothing is chosen for you: pick the one this project
 is and press **Link**. Link only to the same repository, since what syncs of it will be shared
-with this one.
+with this one: the notes synced from there arrive here, and this project's own approved notes go
+there.
 
 Yardsort syncs while it runs with Remote on: right after a change here, when the server says
 another computer changed something, and every five minutes otherwise. When the server cannot be
@@ -333,8 +335,8 @@ reached, it tries again by itself, waiting longer each time, up to five minutes,
 says why the last attempt failed. When the server refuses something, the section says why, and it
 is not sent again.
 
-- **Stop syncing** unlinks this computer. The project stays here as it is, and your other computers
-  keep syncing it.
+- **Stop syncing** unlinks this computer. The project stays here as it is, its notes included, and
+  your other computers keep syncing it.
 - **Remove from the server…** asks first, then removes the project's records from the server for
   every computer. Each keeps its own copy of the project, and stops syncing it.
 - **Turning Remote off**, or moving this computer to another server, stops every project syncing

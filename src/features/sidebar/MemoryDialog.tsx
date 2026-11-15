@@ -5,6 +5,7 @@ import {
   type MemoryCheck,
   type MemoryDecision,
   type MemoryEntry,
+  type MemorySettle,
   type Project,
   type ProjectMemory,
 } from "@/lib/ipc";
@@ -44,8 +45,13 @@ export function MemoryDialog({ project, onClose }: { project: Project; onClose: 
   }, [onClose]);
 
   useEffect(() => {
-    void ipc.memoryGet(project.id).then(setMemory, (reason) => setError(errorMessage(reason)));
+    const load = () =>
+      void ipc.memoryGet(project.id).then(setMemory, (reason) => setError(errorMessage(reason)));
+    load();
     void useAssistStore.getState().load();
+    // A note can arrive from, or be settled on, another computer this project syncs with.
+    const unlisten = ipc.onSyncChanged(load);
+    return () => void unlisten.then((stop) => stop());
   }, [project.id]);
 
   // Jev's word on each proposal, when the switch is on: advisory, and silent when it fails. A
@@ -93,7 +99,9 @@ export function MemoryDialog({ project, onClose }: { project: Project; onClose: 
   const decide = (id: string, decision: MemoryDecision) =>
     void run(() => ipc.memoryDecide(id, decision));
 
-  const approved = memory?.entries.filter((entry) => entry.state === "approved") ?? [];
+  const conflicts = memory?.entries.filter((entry) => entry.conflict !== null) ?? [];
+  const approved =
+    memory?.entries.filter((entry) => entry.state === "approved" && entry.conflict === null) ?? [];
   const setAside =
     memory?.entries.filter((entry) => entry.state === "rejected" || entry.state === "revoked") ??
     [];
@@ -188,6 +196,14 @@ export function MemoryDialog({ project, onClose }: { project: Project; onClose: 
             <p role="alert" className="mt-2 text-red-400 select-text">
               {error}
             </p>
+          )}
+
+          {conflicts.length > 0 && (
+            <Section title="Conflicts" count={conflicts.length}>
+              {conflicts.map((entry) => (
+                <Conflict key={entry.id} entry={entry} busy={busy} onSettle={run} />
+              ))}
+            </Section>
           )}
 
           <Section title="Waiting for you" count={candidates.length}>
@@ -363,6 +379,112 @@ function Entry({
             </>
           ))}
         {editing === null && children}
+      </div>
+    </li>
+  );
+}
+
+/**
+ * A synced note two computers changed at once: the text that stands, which agents get, and the
+ * other computer's beside it, until the person keeps one, writes a third or revokes it. Settling
+ * it here settles it on every computer.
+ */
+function Conflict({
+  entry,
+  busy,
+  onSettle,
+}: {
+  entry: MemoryEntry;
+  busy: boolean;
+  onSettle: (action: () => Promise<ProjectMemory>) => Promise<boolean>;
+}) {
+  const [writing, setWriting] = useState<string | null>(null);
+  const other = entry.conflict;
+  if (!other) return null;
+  const settle = (how: MemorySettle) => onSettle(() => ipc.memorySettle(entry.id, how));
+  return (
+    <li className="rounded border border-amber-400/40 bg-canvas/40 p-2.5">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <figure className="min-w-0">
+          <figcaption className="text-small text-ink-faint">
+            Stands now · agents get this
+          </figcaption>
+          <p className="mt-0.5 select-text">{entry.text}</p>
+        </figure>
+        <figure className="min-w-0">
+          <figcaption className="text-small text-ink-faint">From {other.from}</figcaption>
+          <p className="mt-0.5 select-text">{other.text}</p>
+        </figure>
+      </div>
+      {writing !== null && (
+        <textarea
+          aria-label="Write another text"
+          value={writing}
+          maxLength={MAX_CHARS}
+          rows={2}
+          onChange={(event) => setWriting(event.target.value)}
+          className="mt-2 w-full resize-none rounded border border-line bg-canvas px-2 py-1 outline-none select-text focus:border-accent"
+        />
+      )}
+      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1 text-small text-ink-faint">
+          from {entry.from} · {entry.shortId}
+        </span>
+        {writing === null ? (
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void settle({ keep: "standing" })}
+              className={button}
+            >
+              Keep this one
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void settle({ keep: "other" })}
+              className={button}
+            >
+              Keep {other.from}&rsquo;s
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setWriting(entry.text)}
+              className={button}
+            >
+              Write another
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void onSettle(() => ipc.memoryDecide(entry.id, "revoke"))}
+              className={button}
+              title="Stop giving this to agents, on every computer. It is kept, with its history."
+            >
+              Revoke
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              disabled={busy || writing.trim() === ""}
+              onClick={() =>
+                void settle({ keep: "text", text: writing }).then(
+                  (saved) => saved && setWriting(null),
+                )
+              }
+              className={button}
+            >
+              Save
+            </button>
+            <button type="button" onClick={() => setWriting(null)} className={button}>
+              Cancel
+            </button>
+          </>
+        )}
       </div>
     </li>
   );

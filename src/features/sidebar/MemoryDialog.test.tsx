@@ -8,11 +8,13 @@ const core = vi.hoisted(() => ({
   memoryWrite: vi.fn(),
   memoryEdit: vi.fn(),
   memoryDecide: vi.fn(),
+  memorySettle: vi.fn(),
   memoryShare: vi.fn(),
   conversationsShare: vi.fn(),
   memoryWaiting: vi.fn(),
   memoryCheck: vi.fn(),
   assistStatus: vi.fn(),
+  onSyncChanged: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -31,6 +33,8 @@ const entry = (id: string, text: string, extra: Partial<MemoryEntry> = {}): Memo
   state: "approved",
   author: "user",
   from: "the user",
+  host: null,
+  conflict: null,
   createdAt: 0,
   updatedAt: 0,
   history: [],
@@ -54,6 +58,13 @@ const proposal = entry("cand0001", "Run just check before committing.", {
 });
 const kept = entry("appr0001", "The tests need TZ=UTC.");
 const gone = entry("revk0001", "Use npm.", { state: "revoked" });
+const torn = entry("conf0001", "Deploy after noon.", {
+  conflict: { text: "Deploy before noon.", from: "Build box", at: 0 },
+});
+const synced = entry("sync0001", "Never edit bindings.ts.", {
+  from: "the user, on Build box",
+  host: "Build box",
+});
 
 function status(checkMemory: boolean) {
   return {
@@ -89,6 +100,7 @@ describe("MemoryDialog", () => {
     core.memoryWaiting.mockResolvedValue([]);
     core.memoryCheck.mockResolvedValue([]);
     core.assistStatus.mockResolvedValue(status(false));
+    core.onSyncChanged.mockResolvedValue(() => {});
     useAssistStore.setState({ status: status(false) });
   });
 
@@ -168,6 +180,59 @@ describe("MemoryDialog", () => {
     await user.type(screen.getByRole("textbox", { name: "New memory entry" }), "x");
     await user.click(screen.getByRole("button", { name: "Add" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("at most 500 characters");
+  });
+
+  it("shows both texts of a conflict apart from the approved ones, and settles it as chosen", async () => {
+    core.memoryGet.mockResolvedValue(memory([kept, torn, synced]));
+    const user = await open();
+    const conflicts = screen.getByRole("region", { name: "Conflicts" });
+    expect(conflicts).toHaveTextContent("Stands now · agents get thisDeploy after noon.");
+    expect(conflicts).toHaveTextContent("From Build boxDeploy before noon.");
+    expect(screen.getByRole("region", { name: "Approved" })).not.toHaveTextContent(
+      "Deploy after noon.",
+    );
+
+    core.memorySettle.mockResolvedValue(memory([kept, synced]));
+    await user.click(within(conflicts).getByRole("button", { name: "Keep this one" }));
+    expect(core.memorySettle).toHaveBeenLastCalledWith("conf0001", { keep: "standing" });
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Conflicts" })).toBeNull());
+  });
+
+  it("keeps the other text, writes a third or revokes it, and the change elsewhere shows", async () => {
+    let changed = () => {};
+    core.onSyncChanged.mockImplementation(async (handler: () => void) => {
+      changed = handler;
+      return () => {};
+    });
+    core.memoryGet.mockResolvedValue(memory([kept, torn, synced]));
+    const user = await open();
+    // A note from another computer says which.
+    expect(screen.getByRole("region", { name: "Approved" })).toHaveTextContent(
+      "from the user, on Build box",
+    );
+    core.memorySettle.mockResolvedValue(memory([kept, torn, synced]));
+    const conflicts = () => screen.getByRole("region", { name: "Conflicts" });
+    await user.click(within(conflicts()).getByRole("button", { name: "Keep Build box’s" }));
+    expect(core.memorySettle).toHaveBeenLastCalledWith("conf0001", { keep: "other" });
+
+    await user.click(within(conflicts()).getByRole("button", { name: "Write another" }));
+    const box = screen.getByRole("textbox", { name: "Write another text" });
+    await user.clear(box);
+    await user.type(box, "Deploy at noon.");
+    await user.click(within(conflicts()).getByRole("button", { name: "Save" }));
+    expect(core.memorySettle).toHaveBeenLastCalledWith("conf0001", {
+      keep: "text",
+      text: "Deploy at noon.",
+    });
+
+    core.memoryDecide.mockResolvedValue(memory([kept, torn, synced]));
+    await user.click(within(conflicts()).getByRole("button", { name: "Revoke" }));
+    expect(core.memoryDecide).toHaveBeenLastCalledWith("conf0001", "revoke");
+
+    // Settled on the other computer: a pass says so, and the view reads it again.
+    core.memoryGet.mockResolvedValue(memory([kept, synced]));
+    changed();
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Conflicts" })).toBeNull());
   });
 
   it("marks a proposal Jev reads as a repeat or a contradiction, only with the switch on", async () => {

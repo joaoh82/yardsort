@@ -1,5 +1,6 @@
 //! The control socket: how this computer's own commands (`pair`, `devices`, `revoke`, `status`,
-//! `sign-out`, `sync`) ask the running host, which alone holds the sign-in. One JSON message per line.
+//! `sign-out`, `sync`, `memory`) ask the running host, which alone holds the sign-in. One JSON
+//! message per line.
 //!
 //! It is `<data dir>/host.sock`, readable and writable by this user only. Nothing listens on the
 //! network: not this, and not the daemon.
@@ -62,6 +63,35 @@ pub enum Ask {
     SyncRemove {
         project: String,
     },
+    /// A project's memory, every note in every state, shared with its agents or not. Refused
+    /// unless a person at a terminal asked: an agent reads only `ys memory`'s approved, shared
+    /// notes.
+    MemoryList {
+        project: String,
+    },
+    /// Write a note, approved as written. Refused unless a person at a terminal asked.
+    MemoryWrite {
+        project: String,
+        text: String,
+    },
+    /// Approve, reject, revoke or restore a note, by the id `memory list` shows. Refused unless a
+    /// person at a terminal asked.
+    MemoryDecide {
+        entry: String,
+        decision: String,
+    },
+    /// Rewrite a note's text. Refused unless a person at a terminal asked.
+    MemoryEdit {
+        entry: String,
+        text: String,
+    },
+    /// Settle a note two hosts changed at once: keep `standing` or `other`, or write `text`.
+    /// Refused unless a person at a terminal asked.
+    MemorySettle {
+        entry: String,
+        keep: String,
+        text: Option<String>,
+    },
 }
 
 impl Ask {
@@ -74,6 +104,11 @@ impl Ask {
                 | Ask::SyncLink { .. }
                 | Ask::SyncStop { .. }
                 | Ask::SyncRemove { .. }
+                | Ask::MemoryList { .. }
+                | Ask::MemoryWrite { .. }
+                | Ask::MemoryDecide { .. }
+                | Ask::MemoryEdit { .. }
+                | Ask::MemorySettle { .. }
         )
     }
 }
@@ -113,6 +148,9 @@ pub enum Reply {
     SignedOut,
     Sync(SyncStatus),
     Preview(yardsort_core::sync::SyncPreview),
+    Memory {
+        notes: Vec<Note>,
+    },
     /// Done, in words.
     Done {
         message: String,
@@ -153,6 +191,20 @@ pub struct Offered {
     pub remote: Option<String>,
     /// The project here whose remote matches, by name.
     pub matches: Option<String>,
+}
+
+/// One of a project's notes, as `memory list` shows it.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Note {
+    /// The first 8 characters of its id.
+    pub id: String,
+    pub text: String,
+    /// `candidate`, `approved`, `rejected` or `revoked`.
+    pub state: String,
+    /// Where it came from, in words, with the other host for one synced from there.
+    pub from: String,
+    /// Two hosts changed it at once: the other text, and the host it is from.
+    pub conflict: Option<(String, String)>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -303,7 +355,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_reading_sync_is_left_unguarded() {
+    fn only_reading_sync_is_left_unguarded_and_all_of_memory_is_guarded() {
         let project = || "widgets".to_owned();
         for ask in [
             Ask::Pair,
@@ -314,6 +366,28 @@ mod tests {
             },
             Ask::SyncStop { project: project() },
             Ask::SyncRemove { project: project() },
+        ] {
+            assert!(ask.guarded(), "{ask:?}");
+        }
+        for ask in [
+            Ask::MemoryList { project: project() },
+            Ask::MemoryWrite {
+                project: project(),
+                text: "Use bun.".into(),
+            },
+            Ask::MemoryDecide {
+                entry: "4a1b2c3d".into(),
+                decision: "approve".into(),
+            },
+            Ask::MemoryEdit {
+                entry: "4a1b2c3d".into(),
+                text: "Use bun.".into(),
+            },
+            Ask::MemorySettle {
+                entry: "4a1b2c3d".into(),
+                keep: "other".into(),
+                text: None,
+            },
         ] {
             assert!(ask.guarded(), "{ask:?}");
         }

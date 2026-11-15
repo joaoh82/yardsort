@@ -16,10 +16,17 @@ has the downloads and the full commit lists.
   settings shows what turning it on sends, the project's name and its Git remote without any
   password, and turns it on; on your other computer, **Link to a synced project…** offers it, the
   one with the same remote first, and links nothing until you choose. **Stop syncing** unlinks
-  one computer; **Remove from the server** removes it for all, each keeping its own copy. Only
-  the project itself syncs for now; its approved notes and workspaces come next. On a computer
-  with no screen, `yardsort-host sync`; `ys sync status` says what syncs and changes nothing. See
-  [Syncing projects](docs/guide/remote.md#syncing-projects).
+  one computer; **Remove from the server** removes it for all, each keeping its own copy. On a
+  computer with no screen, `yardsort-host sync`; `ys sync status` says what syncs and changes
+  nothing. See [Syncing projects](docs/guide/remote.md#syncing-projects).
+- **A synced project's approved notes reach your other computers' agents** (Remote, under
+  development), approved, saying which computer they are from; proposals stay where they were made
+  until you approve them. Revoking a note revokes it everywhere, over any edit made meanwhile. Two
+  computers that edit one note apart both keep their text: one stands, the other waits under the
+  Memory view's new **Conflicts** section on both, until you keep one or write another, once for
+  all. On a computer with no screen, `yardsort-host memory` lists, writes, approves, revokes and
+  settles notes, at a terminal of your own. Workspaces sync next. See
+  [On your other computers](docs/guide/memory.md#on-your-other-computers).
 - **On the phone, Settings is a gear at the top right** of Connect and the account screen, in place
   of the button at the foot of the screen. **Servers on this phone** moved into Settings too, at
   the top, once the phone is signed in to a server.
