@@ -64,8 +64,46 @@ fn requests_match_their_fixtures() {
     assert_eq!(request.operation.name(), "approval.answer");
     assert_eq!(request.operation.scope(), Some(Scope::TerminalControl));
     assert!(request.operation.validate().is_ok());
+    let request: Request = pinned("request-test-waiting.json");
+    assert_eq!(request.operation.name(), "test.waiting");
+    assert_eq!(request.operation.scope(), Some(Scope::TerminalRead));
+    assert!(request.operation.validate().is_ok());
+    let request: Request = pinned("request-test-decide.json");
+    assert_eq!(request.operation.name(), "test.decide");
+    assert_eq!(request.operation.scope(), Some(Scope::TerminalControl));
+    assert!(request.operation.validate().is_ok());
     let hello: Hello = pinned("hello.json");
     assert_eq!(negotiate(&hello), Ok(ProtocolVersion::CURRENT));
+}
+
+#[test]
+fn a_test_is_decided_by_its_run_and_the_hash_of_the_file_that_was_shown() {
+    let decide = |run: &str, hash: &str| {
+        Operation::TestDecide(smoke::TestDecideParams {
+            workspace: WorkspaceId::new("8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f").unwrap(),
+            run: run.to_owned(),
+            content_hash: hash.to_owned(),
+            decision: smoke::TestDecision::Run,
+        })
+        .validate()
+    };
+    let run = "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e";
+    let hash = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    assert!(decide(run, hash).is_ok());
+    for bad in ["", "a b", "../runs/x"] {
+        assert_eq!(
+            decide(bad, hash).unwrap_err().code,
+            ErrorCode::InvalidRequest,
+            "{bad}"
+        );
+    }
+    for bad in ["", "not-hex", &"a".repeat(65)] {
+        assert_eq!(
+            decide(run, bad).unwrap_err().code,
+            ErrorCode::InvalidRequest,
+            "{bad}"
+        );
+    }
 }
 
 #[test]
@@ -120,6 +158,7 @@ fn responses_match_their_fixtures() {
         "response-workflow-decision.json",
         "response-workflow-challenge.json",
         "response-conversation.json",
+        "response-tests-waiting.json",
     ] {
         let _: Response = pinned(name);
     }
@@ -382,6 +421,15 @@ fn every_operation_has_the_name_it_is_sent_under() {
             session: SessionRecordId::new("s").unwrap(),
             ask: "a".into(),
             decision: conversation::ApprovalDecision::Deny,
+        }),
+        Operation::TestWaiting(smoke::TestWaitingParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+        }),
+        Operation::TestDecide(smoke::TestDecideParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            run: "r".into(),
+            content_hash: "ab".into(),
+            decision: smoke::TestDecision::Refuse,
         }),
     ];
     assert_eq!(all.len(), OPERATIONS.len());

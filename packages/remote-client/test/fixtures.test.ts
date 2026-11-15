@@ -138,6 +138,24 @@ const FIXTURES: Record<string, (name: string) => void> = {
     expect(page.asks[0]?.command).toBe("npm test -- --run render");
     expect(page.answersAsks).toBe(true);
   },
+  "request-test-waiting.json": (name) => {
+    const waiting = pinned<Request>(request, name);
+    expect(waiting.op).toBe("test.waiting");
+    expect(scopeOf(waiting.op)).toBe("terminal:read");
+  },
+  "request-test-decide.json": (name) => {
+    const decide = pinned<Request>(request, name);
+    expect(decide.op).toBe("test.decide");
+    expect(scopeOf(decide.op)).toBe("terminal:control");
+  },
+  "response-tests-waiting.json": (name) => {
+    const page = result(name);
+    if (page.kind !== "testsWaiting") throw new Error("not a page of tests");
+    expect(page.behind).toBe(1);
+    expect(page.first?.steps.map((step) => step.id)).toEqual(["server", "ready", "sign-in"]);
+    expect(page.first?.askedBy).toBe("agent");
+    expect(page.first?.whole).toBe(true);
+  },
   "request-workflow-challenge.json": (name) => {
     expect(scopeOf(pinned<Request>(request, name).op)).toBe("workflow:decide");
   },

@@ -27,7 +27,9 @@
 //! type into a terminal may also start an agent, in a new workspace or an existing one, and
 //! upload a file for one, and since minor 6 resume an ended conversation: see [`start`]. Since
 //! minor 8 a client may read a conversation's turns and answer the permissions its agent asks
-//! for: see [`conversation`]. A host lists what it answers in [`HostDescription::capabilities`].
+//! for: see [`conversation`]. Since minor 10 it may see a smoke test run waiting for its person
+//! and let it go or refuse it: see [`smoke`]. A host lists what it answers in
+//! [`HostDescription::capabilities`].
 //!
 //! Sync between hosts ([`sync`]) is not part of this protocol: it is between a host and the
 //! server, over HTTPS, with its own schema version. Only its hint to a host is a relay notice.
@@ -40,6 +42,7 @@ pub mod model;
 pub mod notify;
 pub mod pairing;
 pub mod relay;
+pub mod smoke;
 pub mod start;
 pub mod sync;
 pub mod terminal;
@@ -79,7 +82,8 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// - 8: `conversation.read` and `approval.answer`.
 /// - 9: the relay's `syncChanged` notice to a host ([`relay::HostNotice::SyncChanged`]). Sync's
 ///   records are versioned apart from this ([`sync::SYNC_SCHEMA`]).
-pub const PROTOCOL_MINOR: u16 = 9;
+/// - 10: `test.waiting` and `test.decide` ([`smoke`]).
+pub const PROTOCOL_MINOR: u16 = 10;
 /// `workflow:read` and `workflow:decide` arrived in this minor. A host is shown
 /// those scope names when it stated this minor or a newer minor of this major.
 pub const WORKFLOW_SCOPES_MINOR: u16 = 7;
@@ -459,6 +463,12 @@ pub enum Operation {
     /// Since minor 8.
     #[serde(rename = "approval.answer")]
     ApprovalAnswer(conversation::ApprovalAnswerParams),
+    /// Since minor 10.
+    #[serde(rename = "test.waiting")]
+    TestWaiting(smoke::TestWaitingParams),
+    /// Since minor 10.
+    #[serde(rename = "test.decide")]
+    TestDecide(smoke::TestDecideParams),
 }
 
 /// Every operation's wire name, in [`Operation`]'s order.
@@ -490,6 +500,8 @@ pub const OPERATIONS: &[&str] = &[
     "workflow.decide",
     "conversation.read",
     "approval.answer",
+    "test.waiting",
+    "test.decide",
 ];
 
 impl Operation {
@@ -522,6 +534,8 @@ impl Operation {
             Self::WorkflowDecide(_) => 24,
             Self::ConversationRead(_) => 25,
             Self::ApprovalAnswer(_) => 26,
+            Self::TestWaiting(_) => 27,
+            Self::TestDecide(_) => 28,
         };
         OPERATIONS[index]
     }
@@ -539,9 +553,10 @@ impl Operation {
                 Scope::ActivityRead
             }
             Self::MemoryList(_) => Scope::MemoryRead,
-            Self::TerminalAttach(_) | Self::TerminalDetach(_) | Self::ConversationRead(_) => {
-                Scope::TerminalRead
-            }
+            Self::TerminalAttach(_)
+            | Self::TerminalDetach(_)
+            | Self::ConversationRead(_)
+            | Self::TestWaiting(_) => Scope::TerminalRead,
             Self::TerminalAcquire(_)
             | Self::TerminalRenew(_)
             | Self::TerminalRelease(_)
@@ -552,7 +567,8 @@ impl Operation {
             | Self::UploadBegin(_)
             | Self::UploadChunk(_)
             | Self::SessionResume(_)
-            | Self::ApprovalAnswer(_) => Scope::TerminalControl,
+            | Self::ApprovalAnswer(_)
+            | Self::TestDecide(_) => Scope::TerminalControl,
             Self::WorkflowRunList(_) | Self::WorkflowRunGet(_) => Scope::WorkflowRead,
             Self::WorkflowChallenge(_) | Self::WorkflowDecide(_) => Scope::WorkflowDecide,
         })
@@ -610,6 +626,10 @@ impl Operation {
                 Some(message) => invalid(message),
                 None => Ok(()),
             },
+            Self::TestDecide(params) => match params.invalid() {
+                Some(message) => invalid(message),
+                None => Ok(()),
+            },
             _ => Ok(()),
         }
     }
@@ -660,6 +680,8 @@ pub enum Reply {
     WorkflowDecision(workflow::WorkflowDecision),
     /// Since minor 8.
     Conversation(conversation::ConversationPage),
+    /// Since minor 10.
+    TestsWaiting(smoke::TestWaitingPage),
     Done,
 }
 

@@ -37,7 +37,7 @@ use yardsort_core::remote::host::{self, CredentialStore, FileCredentials, LocalG
 use yardsort_core::remote::serve::Context;
 use yardsort_core::remote::start::{Starter, Starting};
 use yardsort_core::remote::workflow::WorkflowGate;
-use yardsort_core::remote::HostIdentity;
+use yardsort_core::remote::{HostIdentity, TestGate};
 use yardsort_core::settings::SettingsFile;
 use yardsort_core::store::Store;
 
@@ -123,6 +123,7 @@ impl Home for AppHome {
             starting: Some(Arc::clone(&self.starting) as Arc<dyn Starting>),
             workflow: Some(Arc::new(AppWorkflows(self.app.clone())) as Arc<dyn WorkflowGate>),
             conversations: Some(&conversations),
+            tests: Some(Arc::new(AppTests(self.app.clone())) as Arc<dyn TestGate>),
         });
     }
 
@@ -159,6 +160,16 @@ impl WorkflowGate for AppWorkflows {
         if let Some(driver) = self.0.try_state::<crate::workflows::Driver>() {
             driver.wake();
         }
+    }
+}
+
+/// The app's smoke test runner, as a device's answer reaches it: the window reloads its runs,
+/// and the driver looks at them now, so a run let go starts at once.
+struct AppTests(AppHandle);
+
+impl TestGate for AppTests {
+    fn decided(&self) {
+        crate::smoke::changed(&self.0);
     }
 }
 

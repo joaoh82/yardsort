@@ -75,6 +75,22 @@ export const viewsFile: ChoiceFile = {
   },
 };
 
+/**
+ * Which projects are folded on each computer's screen, beside the views. It holds computers' and
+ * projects' ids and none of their names.
+ */
+export const foldsFile: ChoiceFile = {
+  read: () => {
+    const file = new File(Paths.document, "folds.json");
+    return file.exists ? file.textSync() : null;
+  },
+  write: (folded) => {
+    const file = new File(Paths.document, "folds.json");
+    if (!file.exists) file.create();
+    file.writeSync(folded);
+  },
+};
+
 /** In the documents folder, as the system never clears it. It says nothing about anyone. */
 export const appearanceFile: ChoiceFile = {
   read: () => {

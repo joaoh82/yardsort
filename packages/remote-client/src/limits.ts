@@ -9,7 +9,7 @@
 /** The major this client speaks. */
 export const PROTOCOL_MAJOR = 1;
 /** The minor this client speaks: 9, the relay's notice to a host that a synced project changed. */
-export const PROTOCOL_MINOR = 9;
+export const PROTOCOL_MINOR = 10;
 
 /** The largest JSON message either side reads, in bytes. */
 export const MAX_CONTROL_FRAME = 64 * 1024;
@@ -89,3 +89,16 @@ export const MAX_COMMAND = 2_000;
 export const MAX_ASKS = 8;
 /** Longest question id, in bytes. Minor 8. */
 export const MAX_ASK_ID = 64;
+
+/** The most steps a waiting smoke test's card lists. Minor 10. */
+export const MAX_TEST_STEPS = 60;
+/** Longest sentence for one step of a smoke test, in characters. Minor 10. */
+export const MAX_STEP_WORDS = 400;
+/** The most environment names, and the most inputs, a smoke test's card lists. Minor 10. */
+export const MAX_TEST_NAMES = 40;
+/** Longest input value of a smoke test's run, in characters. Minor 10. */
+export const MAX_TEST_INPUT = 256;
+/** Longest smoke test file a card carries, in characters. Minor 10. */
+export const MAX_TEST_DEFINITION = 10_000;
+/** Longest content hash of a smoke test file, in bytes. Minor 10. */
+export const MAX_TEST_HASH = 64;

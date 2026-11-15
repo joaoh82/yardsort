@@ -69,6 +69,15 @@ go straight to the terminal instead, wherever the field is:
 move through an agent's menu or a shell's history. While something is in the field, they edit it.
 Shortcuts with **Cmd** are left to the phone, and so are Ctrl-Tab and Alt-Tab.
 
+## A computer's workspaces
+
+On the phone, a computer's screen lists its workspaces under their projects, each with its branch
+and how many of its conversations are running. Press a project's name to fold it: its workspaces
+are put away, and the line keeps the count and, when agents are at work inside, how many are
+running — _api-gateway 3 · 2 running_. Press it again to open it. The phone remembers which
+projects you folded, for each computer, as this window remembers its own sidebar; nothing about
+it is sent anywhere.
+
 ## Starting work from the phone
 
 A device you let type can start work here too. It is no more than it could do by typing into a terminal,
@@ -174,6 +183,27 @@ terminal**. The phone needs to be allowed to type for this.
 
 The command is kept on this computer only while the question is open, and never in its records.
 For other agents, Chat says the agent is waiting and opens its terminal.
+
+## When a smoke test waits for you
+
+A [smoke test](smoke-tests.md) from the repository runs only once you have seen what it does. When
+one waits in a workspace — an agent ran `ys test run` on a file that is new or has changed, or the
+project asks to see every run — Chat in any of that workspace's conversations shows
+[the approval card](smoke-tests.md#the-approval-card) this window shows: who asked and with what
+inputs, every step in words, the names of the project's test environment it can read, and, for a
+file you approved before, the lines that changed. Values of the test environment are never sent.
+
+**Run** approves that version of the file for the project and starts the run here; **Don't run**
+ends it as refused and records nothing against the file. The card here goes once the phone has
+answered, and one answered here goes from the phone within a few seconds. Several waiting in one workspace
+show one at a time, oldest first. When the run was asked for by the conversation you are reading,
+its header says **Needs you** until you answer.
+
+The phone needs to be allowed to type for this: letting a test run is running programs on this
+computer, which is what typing into a terminal does. A phone that may only watch sees the card
+and is told so when it answers. A file too long to show whole on the phone says so and offers
+only **Don't run**; let that one run from here. A computer with no screen runs no smoke tests, so
+there is nothing to answer there.
 
 ## Scrolling on the phone
 

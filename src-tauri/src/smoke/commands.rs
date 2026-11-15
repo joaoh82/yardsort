@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Manager};
 use yardsort_core::smoke::deliver::{try_deliver, Delivery, Tried};
-use yardsort_core::smoke::words::{test_words, StepWords};
+use yardsort_core::smoke::runs::TestReview;
 use yardsort_core::smoke::{self, exec, report, runs, InputKind, Problem};
 use yardsort_core::store::{Store, TestRunRow, TestStepRow};
 
@@ -161,37 +161,6 @@ pub struct TestSettings {
 
 /// The longest a project may keep its runs: ten years, which is to say "keep them".
 const MAX_KEEP_DAYS: u32 = 3650;
-
-/// A file as the person approving it reads it: every step in words, the environment names it
-/// uses, and what it was before, when it was approved before and has changed since.
-#[derive(Debug, Clone, Serialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct TestReview {
-    pub steps: Vec<StepWords>,
-    pub env: Vec<EnvUse>,
-    /// This exact file is approved for the project already.
-    pub approved: bool,
-    /// The project asks to see every run.
-    pub ask_every_time: bool,
-    /// The file as it was when it was last approved, when that is not this file.
-    pub previous: Option<String>,
-    /// The hash of the file these words are of: what [`test_run_start`] must still see to run
-    /// without the approval card, so a later edit is never approved unseen.
-    pub content_hash: String,
-    /// A step runs a program (`run`, `shell` or `start`), which is given the whole test
-    /// environment as `YS_ENV_*` — not only the names templated in the file.
-    pub runs_a_program: bool,
-    /// Every name in the project's test environment: what a program step can read, in full.
-    pub environment: Vec<String>,
-}
-
-/// One `{{ env.NAME }}` a test uses, and whether the project's test environment sets it.
-#[derive(Debug, Clone, Serialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct EnvUse {
-    pub name: String,
-    pub set: bool,
-}
 
 /// A piece of a step's output, from where the last piece ended.
 #[derive(Debug, Clone, Serialize, Type)]
@@ -640,7 +609,7 @@ pub async fn test_review(
                 format!("`{}` has problems and cannot run.", entry.id),
             )
         })?;
-        review(
+        runs::review(
             &state.store,
             &workspace.project_id,
             &entry.id,
@@ -658,29 +627,7 @@ pub async fn test_review(
 #[specta::specta]
 pub async fn test_run_review(app: AppHandle, run_id: String) -> IpcResult<TestReview> {
     blocking(app, move |state| {
-        let row = run_row(&state.store, &run_id)?;
-        let test = smoke::parse(&row.definition).map_err(|invalid| {
-            IpcError::new(
-                "test_invalid",
-                format!(
-                    "The run's file does not check out: {}",
-                    invalid
-                        .problems
-                        .first()
-                        .map(|p| p.message.clone())
-                        .unwrap_or_default()
-                ),
-            )
-        })?;
-        let project_id = row.project_id.clone().unwrap_or_default();
-        review(
-            &state.store,
-            &project_id,
-            &row.test_id,
-            &test,
-            &row.definition,
-            &row.content_hash,
-        )
+        runs::run_review(&state.store, &run_row(&state.store, &run_id)?)
     })
     .await
 }
@@ -689,49 +636,6 @@ fn run_row(store: &Store, run_id: &str) -> IpcResult<TestRunRow> {
     store
         .test_run(run_id)?
         .ok_or_else(|| IpcError::new("test_run_not_found", "That run is not there."))
-}
-
-fn review(
-    store: &Store,
-    project_id: &str,
-    test_id: &str,
-    test: &smoke::Test,
-    text: &str,
-    hash: &str,
-) -> IpcResult<TestReview> {
-    let set: BTreeSet<String> = store
-        .project_test_env(project_id)?
-        .into_iter()
-        .map(|(name, _)| name)
-        .collect();
-    let settings = store.project_test_settings(project_id)?;
-    let previous = store
-        .last_approved_definition(project_id, test_id)?
-        .filter(|before| before != text);
-    // Any `run`/`shell`/`start` step gets the whole test environment, so if the test runs a
-    // program the card has to say the exposure is the whole of it, not only the templated names.
-    let runs_a_program = test.all_steps().any(|(_, step)| {
-        matches!(
-            step.action,
-            smoke::Action::Run { .. } | smoke::Action::Shell { .. } | smoke::Action::Start { .. }
-        )
-    });
-    Ok(TestReview {
-        steps: test_words(test),
-        env: runs::env_names(test)
-            .into_iter()
-            .map(|name| EnvUse {
-                set: set.contains(&name),
-                name,
-            })
-            .collect(),
-        approved: store.test_approved(project_id, test_id, hash)?,
-        ask_every_time: settings.ask_every_time,
-        previous,
-        content_hash: hash.to_owned(),
-        runs_a_program,
-        environment: set.into_iter().collect(),
-    })
 }
 
 /// A piece of a step's stdout or stderr, from `from`: the run tab tails the file with this,

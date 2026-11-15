@@ -3,7 +3,8 @@
 
 /**
  * One computer: its workspaces, by project. What was last seen shows, marked as such, until the
- * computer answers, or for as long as it cannot.
+ * computer answers, or for as long as it cannot. A project's heading folds its workspaces away,
+ * and this phone remembers which are folded (`lib/folds.ts`).
  */
 
 import type {
@@ -20,11 +21,12 @@ import { Alert } from "react-native";
 
 import { messageOf } from "../lib/accounts";
 import { useApp } from "../lib/context";
+import { folds } from "../lib/folds";
 import { moment } from "../lib/format";
 import type { ObservedComputer, ObservedWorkspaces } from "../lib/observed";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
 import { canStart } from "./start";
-import { Body, Button, Group, Problem, Row, Screen, Section, Waiting } from "../ui/parts";
+import { Body, Button, Fold, Group, Problem, Row, Screen, Waiting } from "../ui/parts";
 
 /** A workspace as this screen shows it, from the computer or from what was last seen. */
 interface Shown {
@@ -32,7 +34,8 @@ interface Shown {
   project: ProjectId;
   name: string;
   detail: string;
-  running?: string | undefined;
+  /** How many of its conversations are running, when the computer said. */
+  running: number;
 }
 
 export default function ComputerScreen() {
@@ -55,6 +58,12 @@ function Computer({ host }: { host: HostId }) {
   const [more, setMore] = useState<WorkspacePage | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [unpairing, setUnpairing] = useState(false);
+  // Which projects are folded is the phone's to remember: this only draws again after a press.
+  const [, setFolded] = useState(0);
+  const fold = (project: ProjectId) => {
+    folds.toggle(host, project);
+    setFolded((n) => n + 1);
+  };
 
   const unpair = async () => {
     setUnpairing(true);
@@ -137,6 +146,7 @@ function Computer({ host }: { host: HostId }) {
           project: workspace.project,
           name: workspace.name,
           detail: workspace.missing ? "Its folder is gone" : (workspace.branch ?? ""),
+          running: 0,
         }))
       : null;
   const projects = page?.projects ?? seen?.projects ?? [];
@@ -168,32 +178,42 @@ function Computer({ host }: { host: HostId }) {
       {projects.map((project) => {
         const here = shown?.filter((workspace) => workspace.project === project.id) ?? [];
         if (here.length === 0) return null;
+        const open = !folds.has(host, project.id);
+        // What a folded project would otherwise hide: that agents are at work inside it.
+        const running = here.reduce((sum, workspace) => sum + workspace.running, 0);
         return (
-          <Section key={project.id} title={project.name} note={here.length}>
+          <Fold
+            key={project.id}
+            title={project.name}
+            note={here.length}
+            attention={!open && running > 0 ? `${running} running` : undefined}
+            open={open}
+            onToggle={() => fold(project.id)}
+          >
             <Group>
-              {here.map((workspace) => (
-                <Row
-                  key={workspace.id}
-                  title={workspace.name}
-                  {...(workspace.detail ? { detail: workspace.detail } : {})}
-                  monoDetail
-                  {...(workspace.running ? { badge: workspace.running } : {})}
-                  label={[
-                    workspace.name,
-                    [workspace.detail, workspace.running].filter(Boolean).join(" · "),
-                  ]
-                    .filter(Boolean)
-                    .join(", ")}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/workspace",
-                      params: { host, workspace: workspace.id },
-                    })
-                  }
-                />
-              ))}
+              {here.map((workspace) => {
+                const badge = workspace.running > 0 ? `${workspace.running} running` : "";
+                return (
+                  <Row
+                    key={workspace.id}
+                    title={workspace.name}
+                    {...(workspace.detail ? { detail: workspace.detail } : {})}
+                    monoDetail
+                    {...(badge ? { badge } : {})}
+                    label={[workspace.name, [workspace.detail, badge].filter(Boolean).join(" · ")]
+                      .filter(Boolean)
+                      .join(", ")}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/workspace",
+                        params: { host, workspace: workspace.id },
+                      })
+                    }
+                  />
+                );
+              })}
             </Group>
-          </Section>
+          </Fold>
         );
       })}
       {page?.next && (
@@ -240,6 +260,6 @@ function shownFromComputer(workspace: WorkspaceSummary): Shown {
     project: workspace.project,
     name: workspace.name,
     detail: (workspace.missing ? "Its folder is gone" : on) ?? "",
-    running: running > 0 ? `${running} running` : undefined,
+    running,
   };
 }

@@ -130,6 +130,7 @@ impl Home for HostHome {
             starting: Some(Arc::clone(&self.starting) as Arc<dyn Starting>),
             workflow: None,
             conversations: Some(&conversations),
+            tests: None,
         });
     }
 

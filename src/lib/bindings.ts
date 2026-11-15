@@ -3765,7 +3765,7 @@ export type TestReview = {
 	/**  The file as it was when it was last approved, when that is not this file. */
 	previous: string | null,
 	/**
-	 *  The hash of the file these words are of: what [`test_run_start`] must still see to run
+	 *  The hash of the file these words are of: what the app's `test_run_start` must still see to run
 	 *  without the approval card, so a later edit is never approved unseen.
 	 */
 	contentHash: string,

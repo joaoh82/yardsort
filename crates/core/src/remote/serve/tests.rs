@@ -178,6 +178,7 @@ impl Fixture {
             starting: None,
             workflow: None,
             conversations: None,
+            tests: None,
         }
     }
 

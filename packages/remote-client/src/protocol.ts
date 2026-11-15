@@ -53,8 +53,14 @@ import {
   MAX_PAGE,
   MAX_PROMPT,
   MAX_SAID,
+  MAX_STEP_WORDS,
   MAX_TASKS,
   MAX_TERMINALS,
+  MAX_TEST_DEFINITION,
+  MAX_TEST_HASH,
+  MAX_TEST_INPUT,
+  MAX_TEST_NAMES,
+  MAX_TEST_STEPS,
   MAX_TEXT,
   MAX_TURN_TEXT,
   MAX_UPLOAD,
@@ -1041,6 +1047,93 @@ const conversationPageFields = {
   answersAsks: orElse(bool, () => false),
 };
 
+// --- smoke tests waiting for a person (minor 10) ------------------------------------------------
+
+/** Who asked for a run. One from a newer host is `other`. */
+export type TestAskedBy = "agent" | "app" | "workflow" | "other";
+
+/** One step of a smoke test, in a sentence. */
+export interface TestStep {
+  id: string;
+  /** `setup`, `steps` or `teardown`. */
+  phase: string;
+  words: string;
+}
+
+/**
+ * A smoke test run waiting for a person, as the computer's approval card shows it: every step in
+ * words, the names of the project's test environment it can read (never a value), and the file
+ * before and now when it changed since it was approved.
+ */
+export interface WaitingTest {
+  run: string;
+  name: string;
+  askedBy: TestAskedBy;
+  /** The conversation whose agent asked, when one did. */
+  session?: SessionRecordId;
+  askedAt: number;
+  inputs: { name: string; value: string }[];
+  steps: TestStep[];
+  env: { name: string; set: boolean }[];
+  /** A step runs a program, which is handed the project's whole test environment. */
+  runsAProgram: boolean;
+  environment: string[];
+  /** This exact file was approved before, and the project asks to see every run. */
+  approvedBefore: boolean;
+  previous?: string;
+  definition?: string;
+  contentHash: string;
+  /** Everything the card says is here, uncut. When false, it can only be refused from here. */
+  whole: boolean;
+  whyNot?: string;
+}
+
+/** The oldest run waiting in a workspace, and how many wait behind it. */
+export interface TestWaitingPage {
+  first?: WaitingTest;
+  behind: number;
+}
+
+export type TestDecision = "run" | "refuse";
+
+/** `test.decide`: an answer to the card that showed the file at `contentHash`. */
+export interface TestDecideParams {
+  workspace: WorkspaceId;
+  run: string;
+  contentHash: string;
+  decision: TestDecision;
+}
+
+const TEST_HASH = /^[0-9A-Fa-f]+$/;
+const TEST_RUN_ID = /^[A-Za-z0-9_.:-]+$/;
+
+const testWaitingPageFields = {
+  first: optional(
+    object({
+      run: text(MAX_ID_LEN),
+      name: text(MAX_TEXT),
+      askedBy: oneOf(["agent", "app", "workflow", "other"] as const, "other"),
+      session: optional(id<SessionRecordId>()),
+      askedAt: i64,
+      inputs: array(object({ name: text(MAX_LABEL), value: text(MAX_TEST_INPUT) }), MAX_TEST_NAMES),
+      steps: array(
+        object({ id: text(MAX_LABEL), phase: text(MAX_LABEL), words: text(MAX_STEP_WORDS) }),
+        MAX_TEST_STEPS,
+      ),
+      env: array(object({ name: text(MAX_LABEL), set: bool }), MAX_TEST_NAMES),
+      runsAProgram: bool,
+      environment: array(text(MAX_LABEL), MAX_TEST_NAMES),
+      approvedBefore: bool,
+      previous: optional(text(MAX_TEST_DEFINITION)),
+      definition: optional(text(MAX_TEST_DEFINITION)),
+      contentHash: text(MAX_TEST_HASH),
+      whole: bool,
+      whyNot: optional(text(MAX_TEXT)),
+    }),
+  ),
+  behind: u32,
+};
+
 /** Everything a client can ask a host: `op` names it, `params` carries its parameters. */
 export type Operation =
   | { op: "host.describe" }
@@ -1078,7 +1171,9 @@ export type Operation =
     }
   | { op: "workflow.decide"; params: WorkflowDecideParams }
   | { op: "conversation.read"; params: ConversationReadParams }
-  | { op: "approval.answer"; params: ApprovalAnswerParams };
+  | { op: "approval.answer"; params: ApprovalAnswerParams }
+  | { op: "test.waiting"; params: { workspace: WorkspaceId } }
+  | { op: "test.decide"; params: TestDecideParams };
 
 export type OperationName = Operation["op"];
 
@@ -1111,6 +1206,8 @@ export const OPERATIONS: readonly OperationName[] = [
   "workflow.decide",
   "conversation.read",
   "approval.answer",
+  "test.waiting",
+  "test.decide",
 ];
 
 const leaseRefFields = { terminal: id<TerminalId>(), lease: id<LeaseId>(), generation: u64 };
@@ -1199,6 +1296,13 @@ const params: Record<string, Decoder<unknown>> = {
     ask: text(MAX_ASK_ID),
     decision: oneOf(["allow", "deny"] as const),
   }),
+  "test.waiting": object({ workspace: id<WorkspaceId>() }),
+  "test.decide": object({
+    workspace: id<WorkspaceId>(),
+    run: text(MAX_ID_LEN),
+    contentHash: text(MAX_TEST_HASH),
+    decision: oneOf(["run", "refuse"] as const),
+  }),
 };
 
 /** The scope a caller needs for an operation. `null` for `host.describe`, which any grant may ask. */
@@ -1214,7 +1318,12 @@ export function scopeOf(op: OperationName): Scope | null {
   }
   if (op.startsWith("activity.")) return "activity:read";
   if (op === "memory.list") return "memory:read";
-  if (op === "terminal.attach" || op === "terminal.detach" || op === "conversation.read") {
+  if (
+    op === "terminal.attach" ||
+    op === "terminal.detach" ||
+    op === "conversation.read" ||
+    op === "test.waiting"
+  ) {
     return "terminal:read";
   }
   if (op === "workflow.run.list" || op === "workflow.run.get") return "workflow:read";
@@ -1297,6 +1406,9 @@ export function validate(operation: Operation): string | null {
       return ASK_ID.test(operation.params.ask) && operation.params.ask.length <= MAX_ASK_ID
         ? null
         : "names a question Yardsort did not ask";
+    case "test.decide":
+      if (!TEST_RUN_ID.test(operation.params.run)) return "names a run Yardsort did not queue";
+      return TEST_HASH.test(operation.params.contentHash) ? null : "names no test file's hash";
     default:
       return null;
   }
@@ -1390,6 +1502,7 @@ export type Reply =
   | ({ kind: "workflowChallenge" } & WorkflowChallenge)
   | ({ kind: "workflowDecision" } & WorkflowDecision)
   | ({ kind: "conversation" } & ConversationPage)
+  | ({ kind: "testsWaiting" } & TestWaitingPage)
   | { kind: "done" };
 
 export const reply: Decoder<Reply> = tagged<Reply>("kind", {
@@ -1418,6 +1531,7 @@ export const reply: Decoder<Reply> = tagged<Reply>("kind", {
     message: text(MAX_TEXT),
   }),
   conversation: variant("kind", "conversation", conversationPageFields),
+  testsWaiting: variant("kind", "testsWaiting", testWaitingPageFields),
   done: variant("kind", "done", {}),
 });
 

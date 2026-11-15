@@ -16,6 +16,20 @@ has the downloads and the full commit lists.
 - **On the phone, Settings is a gear at the top right** of Connect and the account screen, in place
   of the button at the foot of the screen. **Servers on this phone** moved into Settings too, at
   the top, once the phone is signed in to a server.
+- **Let a smoke test run from the phone.** When a smoke test waits for you — an agent ran
+  `ys test run` on a file you have not seen, or one that changed — Chat shows the same card this
+  computer does: every step in words, the names of the test environment it can read, and what
+  changed since the version you approved, with **Run** and **Don't run**. The phone needs to be
+  allowed to type, and this version on the computer. See
+  [When a smoke test waits for you](docs/guide/remote.md#when-a-smoke-test-waits-for-you).
+- **Fold a project on the phone.** On a computer's screen, press a project's name to put its
+  workspaces away, and again to bring them back. A folded project still says how many it has and
+  how many agents are running in it, and the phone remembers which you folded. See
+  [A computer's workspaces](docs/guide/remote.md#a-computers-workspaces).
+- **Fixed: on an iPhone, the message field stood well above the keyboard.** In Chat, typing left
+  empty room between the field and the keyboard, and the bar with the agent's name and
+  **Chat | Terminal** was drawn under the status bar. Both are in their place now, in Chat and in
+  a conversation's terminal.
 
 ## 0.34.1
 

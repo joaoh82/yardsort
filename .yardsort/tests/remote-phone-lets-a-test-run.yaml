@@ -1,0 +1,99 @@
+id: remote-phone-lets-a-test-run
+name: A phone lets a waiting smoke test run
+description: >-
+  Turns Remote on in the real window against the stand-in server and pairs a pretend phone that
+  may type. A smoke test nobody has approved is asked for with `ys test run` in the project's own
+  checkout, and waits. The phone reads its card, with the step in words, is refused when it names
+  another file's hash, and lets the one it was shown run. The app then carries the run out, and
+  `ys test wait` says it passed. Linux only, since it stands in for the browser with xdg-open. A
+  window opens while it runs; nothing needs clicking.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_app
+    action: run
+    program: bun
+    args: [tauri, build, --debug, --no-bundle]
+    timeout: 20m
+  - id: build_ys
+    action: run
+    program: cargo
+    args: [build, -q, -p, yardsort-cli]
+    timeout: 15m
+  - id: build_stand_in
+    action: run
+    program: cargo
+    args: [build, -q, -p, yardsort-server, --example, stand-in]
+    timeout: 15m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: seed
+    action: shell
+    line: sh .yardsort/tests/support/app.sh seed
+  - id: seed_a_test
+    action: shell
+    line: sh .yardsort/tests/support/app.sh seed-a-test
+  - id: open_app
+    action: shell
+    line: sh .yardsort/tests/support/app.sh open
+  - id: window_up
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+
+steps:
+  - id: add_the_project
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", add-project, "{{ run.dir }}"]
+    timeout: 60s
+  - id: turn_on
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", turn-on, "{{ run.dir }}"]
+    timeout: 90s
+  - id: show_a_code
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", pairing-code, "{{ run.dir }}"]
+  - id: phone_asks
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", ask]
+  - id: let_it_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", let-it-in]
+  - id: a_run_is_asked_for
+    action: shell
+    line: sh .yardsort/tests/support/app.sh ys test run hello
+    expect:
+      stdout_contains: waiting for you to approve it in Yardsort
+  - id: phone_lets_it_run
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", lets-a-test-run, Smoke computer]
+    timeout: 60s
+    expect:
+      stdout_contains: let it run
+  - id: the_run_passes
+    action: shell
+    line: sh .yardsort/tests/support/app.sh ys test wait "$(cat "$YS_RUN_DIR/test-run")" --timeout 2m
+    expect:
+      stdout_contains: passed
+
+teardown:
+  - id: close_everything
+    action: shell
+    line: sh .yardsort/tests/support/app.sh stop-everything
