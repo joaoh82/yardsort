@@ -138,6 +138,10 @@ enum Command {
     /// Custom events: a name raised in a workspace, for a trigger on `custom.<name>` there.
     #[command(subcommand)]
     Event(commands::event::Command),
+    /// Which projects sync with your other computers. Read only: sync is turned on and off in
+    /// the app, or with `yardsort-host sync`.
+    #[command(subcommand)]
+    Sync(commands::sync::Command),
     /// Put a running session on this terminal. Detaching leaves it running.
     Attach {
         /// Which one: a workspace name, or the start of an id from `ys session list`. With one
@@ -220,6 +224,9 @@ fn run(cli: Cli, out: &Output) -> Result<(), Failure> {
         }
         Command::Event(command) => {
             Yardsort::open(cli.data_dir).and_then(|ys| commands::event::run(&ys, command, out))
+        }
+        Command::Sync(command) => {
+            Yardsort::open(cli.data_dir).and_then(|ys| commands::sync::run(&ys, command, out))
         }
         // `validate` needs no profile, so this one opens it only when it has to.
         Command::Workflow(command) => commands::workflow::run(cli.data_dir, command, out),

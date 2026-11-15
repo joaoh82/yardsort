@@ -1143,7 +1143,7 @@ the rest. A sign-in does come back at that address, so step 9 needs no Simulator
 8. **A computer gone.** Open this computer's shell on the phone. At the computer, Settings → Remote → **Turn off**. Within
    about 15 seconds the phone says **This computer is no longer on this account.**, not that it took the phone back.
    **Back to the account**: a card says the same. Turn Remote on again at the computer, and pair again.
-9. **A second server.** Account → **Servers on this phone** → **Add a server**: `https://yardsort-remote-staging.fly.dev`.
+9. **A second server.** Account → **Settings** (the gear) → **Servers on this phone** → **Add a server**: `https://yardsort-remote-staging.fly.dev`.
    Look it up and sign in. Its account screen says no computer lets this phone in yet, with none of the computers from
    before. **Servers on this phone** lists both, with their addresses. Press the first: its computers are back, with no
    sign-in. Press the second again: none.
@@ -1154,7 +1154,7 @@ the rest. A sign-in does come back at that address, so step 9 needs no Simulator
     `just client-pair devices https://remote-staging.yardsort.sh`, sign in, and note the id beside the phone. Then
     `just client-pair devices https://remote-staging.yardsort.sh --revoke ID`, and sign in again. The phone leaves the
     terminal for Connect, saying **This phone was signed out of Yardsort staging. Nothing from it is kept here.**, not
-    that a computer took it back. **Servers on this phone** is gone if it was the last. Force-quit and open: Connect, with
+    that a computer took it back. **Servers on this phone** is gone from Settings if it was the last. Force-quit and open: Connect, with
     nothing shown.
 
 ## 16 · Android in an emulator

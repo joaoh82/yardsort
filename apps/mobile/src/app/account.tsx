@@ -4,7 +4,7 @@
 /** The active profile: where it stands, its computers, the account's devices, and signing out. */
 
 import type { DevicePage, DeviceSummary } from "@yardsort/remote-client";
-import { Redirect, Stack, useRouter } from "expo-router";
+import { Redirect, Stack } from "expo-router";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Alert } from "react-native";
 
@@ -15,6 +15,7 @@ import type { Profile } from "../lib/profiles";
 import { Computers } from "../ui/computers";
 import { stillSignedIn } from "../ui/leaving";
 import { SeenComputers } from "../ui/live";
+import { SettingsCorner } from "../ui/settings-corner";
 import {
   Body,
   Button,
@@ -31,20 +32,18 @@ import {
 export default function Account() {
   const { accounts } = useApp();
   const snapshot = useSnapshot();
-  const router = useRouter();
   const profile = snapshot.active;
   const standing = snapshot.standing;
 
   if (!snapshot.loaded) return <Screen>{null}</Screen>;
   if (!profile) return <Redirect href="/connect" />;
 
-  const servers = (
+  const title = (
     <>
-      <Button title="Servers on this phone" onPress={() => router.push("/servers")} />
-      <Button title="Settings" onPress={() => router.push("/settings")} />
+      <Stack.Screen options={{ title: profile.serverName }} />
+      <SettingsCorner />
     </>
   );
-  const title = <Stack.Screen options={{ title: profile.serverName }} />;
 
   if (!standing || standing.kind === "opening") {
     return (
@@ -66,7 +65,6 @@ export default function Account() {
         <Body muted>Nothing was changed on this phone. Your computers keep working.</Body>
         <Button title="Try again" kind="primary" onPress={() => void accounts.open()} />
         <SeenComputers key={profile.id} />
-        {servers}
       </Screen>
     );
   }
@@ -87,24 +85,15 @@ export default function Account() {
           kind="danger"
           onPress={() => confirmForget(profile, () => void accounts.forgetHere(profile.id))}
         />
-        {servers}
       </Screen>
     );
   }
 
   // Keyed, so one server's devices never show under another's name, and a late answer lands nowhere.
-  return <SignedIn key={profile.id} profile={profile} title={title} servers={servers} />;
+  return <SignedIn key={profile.id} profile={profile} title={title} />;
 }
 
-function SignedIn({
-  profile,
-  title,
-  servers,
-}: {
-  profile: Profile;
-  title: ReactNode;
-  servers: ReactNode;
-}) {
+function SignedIn({ profile, title }: { profile: Profile; title: ReactNode }) {
   const { accounts } = useApp();
   const [page, setPage] = useState<DevicePage | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -176,7 +165,6 @@ function SignedIn({
         </Group>
       </Section>
 
-      {servers}
       <Button
         title="Sign out"
         kind="danger"

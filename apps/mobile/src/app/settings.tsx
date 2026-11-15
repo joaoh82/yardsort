@@ -2,7 +2,7 @@
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 /**
- * Appearance stays on this phone. Notification choices live on the account, on their own screen.
+ * The servers this phone is signed in to, and appearance, stay on this phone. Notification choices live on the account, on their own screen.
  * Diagnostics are read here, then shared from their own screen.
  */
 
@@ -10,6 +10,7 @@ import { useRouter } from "expo-router";
 import { useSyncExternalStore } from "react";
 
 import { appearance, type Choice, CHOICES } from "../lib/appearance";
+import { useSnapshot } from "../lib/context";
 import { Body, Group, Row, Screen, Section } from "../ui/parts";
 
 const NAMES: Record<Choice, string> = {
@@ -21,8 +22,19 @@ const NAMES: Record<Choice, string> = {
 export default function Settings() {
   const chosen = useSyncExternalStore(appearance.subscribe, appearance.get);
   const router = useRouter();
+  const snapshot = useSnapshot();
   return (
     <Screen>
+      {snapshot.profiles.length > 0 && (
+        <Section title="Servers">
+          <Group>
+            <Row title="Servers on this phone" onPress={() => router.push("/servers")} />
+          </Group>
+          <Body muted>
+            Switch to another server this phone is signed in to, add one, or remove one.
+          </Body>
+        </Section>
+      )}
       <Section title="Notifications">
         <Group>
           <Row title="Notifications" onPress={() => router.push("/notifications")} />

@@ -26,6 +26,7 @@ use yardsort_core::remote::serve::Context;
 use yardsort_core::settings::{LeftHost, RemoteSettings, SettingsFile};
 use yardsort_core::store::{RemoteHostRow, Store};
 
+use crate::sync::Syncer;
 use crate::{Access, AccessError, AccessFuture, Connector, Serving, Status};
 
 /// What viewing gives: everything a device can read, nothing it can type.
@@ -51,6 +52,9 @@ pub trait Home: Send + Sync + 'static {
     /// A device asks to be let in, and the server has it waiting: tell the person here. Never
     /// answers it.
     fn asked(&self, request: Request);
+    /// Sync changed something a person sees here: a project stopped syncing, an op was refused,
+    /// a pass failed or recovered.
+    fn synced(&self) {}
 }
 
 /// The host's session with its server, and the link to the server's relay.
@@ -60,6 +64,23 @@ pub struct Remote {
     connector: Mutex<Option<Connector>>,
     /// Hands queued phone notices to the server. One for the life of the process.
     notices: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// The sync loop, while the link is kept.
+    sync: Mutex<Option<Syncer>>,
+    /// Held by a sync pass, and by linking and stopping, so that one never runs while another
+    /// has a request out: a stop must not forget a project whose create is on its way.
+    sync_turn: tokio::sync::Mutex<()>,
+}
+
+impl Remote {
+    pub(crate) fn syncer(&self) -> std::sync::MutexGuard<'_, Option<Syncer>> {
+        self.sync
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(crate) async fn sync_turn(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.sync_turn.lock().await
+    }
 }
 
 /// Why something failed: a stable code, and words for a person. Signed out at the server is
@@ -243,6 +264,10 @@ pub fn connect<H: Home>(home: &Arc<H>) {
                 }
             }));
         }
+        let mut syncer = home.remote().syncer();
+        if syncer.is_none() {
+            *syncer = Some(Syncer::start(Arc::clone(home)));
+        }
     }
     // An earlier one stops as it is dropped.
     let earlier = match home.remote().connector.lock() {
@@ -354,6 +379,10 @@ pub async fn disconnect(home: &impl Home) {
     if let Some(connector) = connector {
         connector.stop().await;
     }
+    let syncer = home.remote().syncer().take();
+    if let Some(syncer) = syncer {
+        syncer.stop().await;
+    }
 }
 
 /// Where the link stands; `None` when it is not kept.
@@ -417,6 +446,10 @@ impl<H: Home> Serving for HomeServing<H> {
     }
 
     fn told(&self, notice: HostNotice) {
+        if notice == HostNotice::SyncChanged {
+            crate::sync::wake(self.0.as_ref());
+            return;
+        }
         let HostNotice::PairingRequested { grant } = notice else {
             return;
         };
@@ -743,6 +776,14 @@ pub fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
         .unwrap_or(0)
+}
+
+/// The host's client, and an access credential from its session.
+pub(crate) async fn client(home: &impl Home, row: &RemoteHostRow) -> Result<(Client, Secret)> {
+    let mut session = home.remote().session.lock().await;
+    let session = ensure(home, &mut session, row).await?;
+    let access = access(home, session).await?;
+    Ok((session.client.clone(), access))
 }
 
 /// This computer as a host, or why Remote is off.

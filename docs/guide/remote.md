@@ -12,7 +12,8 @@ type can also start a new workspace or another agent, resume a conversation that
 agent a picture. The agents keep
 running on this computer whatever happens to the connection. This computer can also reach another one
 the same way, watch its terminals, type into them and start work there: see
-[Reaching another computer](#reaching-another-computer).
+[Reaching another computer](#reaching-another-computer). Your computers can sync a project with each
+other too: see [Syncing projects](#syncing-projects).
 
 Neither end listens for connections: this computer and your phone each reach out to the server.
 
@@ -20,7 +21,8 @@ Neither end listens for connections: this computer and your phone each reach out
 
 **Whoever runs the server can see what passes through it**, your terminals, your agents'
 conversations as Chat shows them, and what you type into them included. The connection is encrypted on the way, but not end to end. Use a server you run yourself, or
-one run by someone you trust with that.
+one run by someone you trust with that. A project you [sync](#syncing-projects) is kept on the
+server too, in plain text.
 
 Neither the server nor this computer writes any of it in a log: not what a terminal shows or is sent,
 not what a conversation says or its title, and not a memory note. Their logs say which device and which computer, and
@@ -129,6 +131,9 @@ when it was read. Nothing typed or chosen while it cannot be reached is kept to 
 
 ## Diagnostics on the phone
 
+The phone's **Settings** is the gear at the top right of its first screen, Connect or your account.
+Once the phone is signed in to a server, **Settings → Servers on this phone** lists every server it
+is signed in to: switch to another, add one, or remove one.
 **Settings → Diagnostics** shows what happened to the phone's connections since the app started:
 
 - the app's version, the phone's system and the protocol it speaks;
@@ -270,6 +275,45 @@ other computer lists it among its devices let in, where it can be revoked. A pai
 refused stays under **Pairings**, saying so, until you press **Forget**. **Forget** on one still in
 force takes it back from this side. Either way it is no longer listed here; pairing with that computer
 again makes a new pairing, which shows.
+
+## Syncing projects
+
+Your computers can share a project through the server: two computers with Remote on, signed in to
+the same account on the same server. For now that is the project itself, its name and its remote;
+its approved notes and its workspaces will follow in later updates. Nothing syncs until you turn it
+on for a project, and **never its files, its path or its terminals**.
+
+Open **Project settings…** from the project's menu. Its **Sync** section shows what turning sync on
+sends: the project's name, and the address of its Git remote (`origin`) without any user or
+password in it, or none for a remote that is a folder. **The server keeps synced records in plain
+text, readable by whoever runs it.** Press **Turn on sync**. The section says _Waiting to reach the
+server…_ until the server has it, then _Syncing with your other computers_, and when it last
+synced. With Remote off, the section says sync needs it and links to **Settings → Remote**.
+
+**On your other computer**, add the same repository as a project, a clone of it say, open its
+**Project settings…** and press **Link to a synced project…**. It lists the projects your other
+computers sync that this one does not, each with its remote; one whose remote is this project's
+is marked **Same remote** and listed first. Nothing is chosen for you: pick the one this project
+is and press **Link**. Link only to the same repository, since what syncs of it will be shared
+with this one.
+
+Yardsort syncs while it runs with Remote on: right after a change here, when the server says
+another computer changed something, and every five minutes otherwise. When the server cannot be
+reached, it tries again by itself, waiting longer each time, up to five minutes, and the section
+says why the last attempt failed. When the server refuses something, the section says why, and it
+is not sent again.
+
+- **Stop syncing** unlinks this computer. The project stays here as it is, and your other computers
+  keep syncing it.
+- **Remove from the server…** asks first, then removes the project's records from the server for
+  every computer. Each keeps its own copy of the project, and stops syncing it.
+- **Turning Remote off**, or moving this computer to another server, stops every project syncing
+  here. What is on the server stays for your other computers; turn sync on or link again
+  afterwards.
+
+On a computer with no screen, `yardsort-host sync` does the same: see
+[Syncing projects there](headless-host.md#syncing-projects). [`ys sync status`](cli.md#ys-sync-status)
+says what syncs, and nothing more: no agent can turn sync on, link, stop or remove a project.
 
 ## If a phone cannot open any terminal
 

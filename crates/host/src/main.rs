@@ -24,6 +24,8 @@ mod profile;
 mod serve;
 #[cfg(unix)]
 mod sign_in;
+#[cfg(unix)]
+mod sync;
 
 fn main() {
     // Each of these can take over the process entirely: this executable doubles as the
@@ -96,6 +98,9 @@ mod cli {
         Status,
         /// Sign this computer out at the server, which removes it there, and forget its sign-in.
         SignOut,
+        /// Sync projects with your other computers: what syncs, and turning it on or off.
+        #[command(subcommand)]
+        Sync(Sync),
         /// Install an agent, or bring it up to date, into ~/.local, as you.
         ///
         /// Claude Code, Cursor's CLI and Grok come from each vendor's own installer, under the
@@ -108,6 +113,34 @@ mod cli {
             /// read yourself, or a mirror's.
             #[arg(long, value_name = "FILE")]
             installer: Option<PathBuf>,
+        },
+    }
+
+    /// Every one but `status` only from a terminal on this computer that no agent runs in.
+    #[derive(Subcommand)]
+    enum Sync {
+        /// What syncs here, how the last pass went, and the synced projects you could link.
+        Status,
+        /// Turn sync on for a project, by name or id: its name and its remote's address, without
+        /// any user or password, go to the server. Shows them first and asks.
+        On {
+            project: String,
+            /// Do not ask.
+            #[arg(long)]
+            yes: bool,
+        },
+        /// Link a project here to one your other computer syncs, by the id or name `sync status`
+        /// shows. Nothing is linked by itself.
+        Link { project: String, synced: String },
+        /// Stop syncing a project here. Its records stay on the server for your other computers.
+        Stop { project: String },
+        /// Remove a project's records from the server, for every computer. Each keeps its own
+        /// copy of the project.
+        Remove {
+            project: String,
+            /// Do not ask.
+            #[arg(long)]
+            yes: bool,
         },
     }
 
@@ -139,6 +172,7 @@ mod cli {
                 Command::Revoke { device } => revoke(&profile, device).await,
                 Command::Status => status(&profile).await,
                 Command::SignOut => crate::sign_in::sign_out(profile).await,
+                Command::Sync(command) => sync(&profile, command).await,
                 Command::InstallAgent { .. } => unreachable!("handled before the profile"),
             }
         });
@@ -200,6 +234,139 @@ mod cli {
                 Ok(())
             }
             _ => Err("The host answered something else.".into()),
+        }
+    }
+
+    /// Ask, and print what the host says it did.
+    async fn done(profile: &Profile, ask: Ask) -> Result<(), String> {
+        match control::ask_once(profile, ask).await? {
+            Reply::Done { message } => {
+                println!("{message}");
+                Ok(())
+            }
+            Reply::Failed { message } => Err(message),
+            _ => Err("The host answered something else.".into()),
+        }
+    }
+
+    /// A yes from the person at this terminal.
+    fn confirmed(question: &str) -> bool {
+        use std::io::{BufRead, Write};
+        print!("{question} [y/N] ");
+        let _ = std::io::stdout().flush();
+        let mut answer = String::new();
+        let _ = std::io::stdin().lock().read_line(&mut answer);
+        matches!(answer.trim().to_lowercase().as_str(), "y" | "yes")
+    }
+
+    async fn sync(profile: &Profile, command: Sync) -> Result<(), String> {
+        match command {
+            Sync::Status => sync_status(profile).await,
+            Sync::On { project, yes } => {
+                let preview = match control::ask_once(
+                    profile,
+                    Ask::SyncPreview {
+                        project: project.clone(),
+                    },
+                )
+                .await?
+                {
+                    Reply::Preview(preview) => preview,
+                    Reply::Failed { message } => return Err(message),
+                    _ => return Err("The host answered something else.".into()),
+                };
+                println!("Turning sync on sends this to the server:");
+                println!("  Name:   {}", preview.name);
+                println!(
+                    "  Remote: {}",
+                    preview
+                        .remote
+                        .as_deref()
+                        .unwrap_or("none (no remote, or one on this disk)")
+                );
+                println!(
+                    "The server keeps synced records in plain text, readable by whoever runs it. \
+                     Never the project's path or files."
+                );
+                if !yes && !confirmed("Turn sync on?") {
+                    return Err("Nothing was turned on.".into());
+                }
+                done(profile, Ask::SyncOn { project }).await
+            }
+            Sync::Link { project, synced } => {
+                done(profile, Ask::SyncLink { project, synced }).await
+            }
+            Sync::Stop { project } => done(profile, Ask::SyncStop { project }).await,
+            Sync::Remove { project, yes } => {
+                if !yes
+                    && !confirmed(
+                        "Remove this project's records from the server, for every computer?",
+                    )
+                {
+                    return Err("Nothing was removed.".into());
+                }
+                done(profile, Ask::SyncRemove { project }).await
+            }
+        }
+    }
+
+    async fn sync_status(profile: &Profile) -> Result<(), String> {
+        let Reply::Sync(status) = control::ask_once(profile, Ask::SyncStatus).await? else {
+            return Err("The host answered something else.".into());
+        };
+        if !status.remote {
+            println!("Remote is off, so nothing syncs. Sign in with `yardsort-host sign-in`.");
+            return Ok(());
+        }
+        println!("Sync: {}", status.state);
+        match status.synced_at {
+            Some(at) => println!("Last synced: {}", ago(at)),
+            None => println!("Last synced: never"),
+        }
+        if let Some(problem) = status.problem {
+            println!("Last problem: {problem}");
+        }
+        if status.waiting > 0 {
+            println!("Waiting to go up: {}", status.waiting);
+        }
+        if status.projects.is_empty() {
+            println!("Syncing: nothing. Turn a project on with `yardsort-host sync on <project>`.");
+        } else {
+            println!("Syncing:");
+            for project in status.projects {
+                println!("  {}  {}", project.name, project.state);
+            }
+        }
+        if let Some(problem) = status.offered_problem {
+            println!("Could not ask the server what else syncs: {problem}");
+        } else if !status.offered.is_empty() {
+            println!(
+                "Synced elsewhere, not linked here (`yardsort-host sync link <project> <id>`):"
+            );
+            for offer in status.offered {
+                println!(
+                    "  {}  {}  {}{}",
+                    offer.id,
+                    offer.name,
+                    offer.remote.as_deref().unwrap_or("no remote"),
+                    match offer.matches {
+                        Some(name) => format!("  (matches {name} here)"),
+                        None => String::new(),
+                    }
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// How long ago `at` was, roughly.
+    fn ago(at: i64) -> String {
+        let seconds = (yardsort_core::store::now_ms() - at).max(0) / 1000;
+        match seconds {
+            0..=59 => format!("{seconds}s ago"),
+            60..=3599 => format!("{}m ago", seconds / 60),
+            3600..=86_399 => format!("{}h ago", seconds / 3600),
+            _ => format!("{}d ago", seconds / 86_400),
         }
     }
 

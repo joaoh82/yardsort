@@ -409,6 +409,25 @@ so; when an agent Yardsort started runs it, the proposal records which agent and
 workspace. There is no command to approve, edit, reject or revoke: those are yours, in the app,
 because an agent can run anything `ys` offers. `--json` works as everywhere.
 
+### `ys sync status`
+
+Which projects [sync](remote.md#syncing-projects) with your other computers, and how the last pass
+went:
+
+```
+NAME      SYNC
+widgets   syncing
+gadgets   waiting
+Last synced: 2m ago
+```
+
+A project's state is `syncing`, `waiting` (to reach the server), `removing` (from the server) or
+`refused`, with the server's reason. A problem with the last pass, and how many changes wait to go
+up, are shown when there are any. With Remote off it says so. It reads the records only, and that
+is all `ys` offers of sync: turning a project on, linking, stopping and removing are yours, in the
+app's Project settings or with [`yardsort-host sync`](headless-host.md#syncing-projects) at a
+terminal of your own, because an agent can run anything `ys` offers.
+
 ### `ys task`
 
 A project's [tasks](tasks.md) — its GitHub issues — as the Tasks view lists them. Meant as much

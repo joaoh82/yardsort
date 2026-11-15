@@ -1,5 +1,5 @@
 //! The control socket: how this computer's own commands (`pair`, `devices`, `revoke`, `status`,
-//! `sign-out`) ask the running host, which alone holds the sign-in. One JSON message per line.
+//! `sign-out`, `sync`) ask the running host, which alone holds the sign-in. One JSON message per line.
 //!
 //! It is `<data dir>/host.sock`, readable and writable by this user only. Nothing listens on the
 //! network: not this, and not the daemon.
@@ -37,6 +37,45 @@ pub enum Ask {
         projects: Option<Vec<String>>,
     },
     SignOut,
+    /// How sync stands, and the synced projects that could be linked here.
+    SyncStatus,
+    /// What turning sync on for a project would send. Changes nothing.
+    SyncPreview {
+        project: String,
+    },
+    /// Turn sync on for a project, by name or id. Refused unless a person at a terminal asked.
+    SyncOn {
+        project: String,
+    },
+    /// Link a project here to a synced one, by the id or name `sync status` shows. Refused unless
+    /// a person at a terminal asked.
+    SyncLink {
+        project: String,
+        synced: String,
+    },
+    /// Stop syncing a project here. Refused unless a person at a terminal asked.
+    SyncStop {
+        project: String,
+    },
+    /// Remove a project's records from the server, for every host. Refused unless a person at a
+    /// terminal asked.
+    SyncRemove {
+        project: String,
+    },
+}
+
+impl Ask {
+    /// Only a person at a terminal of their own may ask it (`guard`).
+    pub fn guarded(&self) -> bool {
+        matches!(
+            self,
+            Ask::Pair
+                | Ask::SyncOn { .. }
+                | Ask::SyncLink { .. }
+                | Ask::SyncStop { .. }
+                | Ask::SyncRemove { .. }
+        )
+    }
 }
 
 /// What the host answers.
@@ -72,9 +111,48 @@ pub enum Reply {
     /// The offer lapsed with nobody asking.
     Lapsed,
     SignedOut,
+    Sync(SyncStatus),
+    Preview(yardsort_core::sync::SyncPreview),
+    /// Done, in words.
+    Done {
+        message: String,
+    },
     Failed {
         message: String,
     },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SyncStatus {
+    /// Remote is on here.
+    pub remote: bool,
+    /// The loop, in words.
+    pub state: String,
+    pub synced_at: Option<i64>,
+    pub problem: Option<String>,
+    /// Ops waiting to go up, refused ones included.
+    pub waiting: usize,
+    pub projects: Vec<SyncedProject>,
+    /// The account's synced projects not linked here. Empty when the server could not be asked.
+    pub offered: Vec<Offered>,
+    /// Why the server could not be asked for them.
+    pub offered_problem: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SyncedProject {
+    pub name: String,
+    /// How it stands, in words.
+    pub state: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Offered {
+    pub id: String,
+    pub name: String,
+    pub remote: Option<String>,
+    /// The project here whose remote matches, by name.
+    pub matches: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -223,6 +301,26 @@ fn listen_at(path: &Path) -> Result<std::os::unix::net::UnixListener, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_reading_sync_is_left_unguarded() {
+        let project = || "widgets".to_owned();
+        for ask in [
+            Ask::Pair,
+            Ask::SyncOn { project: project() },
+            Ask::SyncLink {
+                project: project(),
+                synced: "fa737444".into(),
+            },
+            Ask::SyncStop { project: project() },
+            Ask::SyncRemove { project: project() },
+        ] {
+            assert!(ask.guarded(), "{ask:?}");
+        }
+        for ask in [Ask::SyncStatus, Ask::SyncPreview { project: project() }] {
+            assert!(!ask.guarded(), "{ask:?}");
+        }
+    }
 
     #[test]
     fn the_socket_is_this_users_alone() {

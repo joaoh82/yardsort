@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { Secret } from "@yardsort/remote-client";
 import { router, Stack } from "expo-router";
-import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import {
   Alert,
   type AlertButton,
@@ -114,6 +114,15 @@ async function signIn(name = "Ana’s phone") {
   await screen.findByText(`Signed in to Example Remote as ${name}.`);
 }
 
+/** The servers on this phone are reached through Settings, not from the screen beneath it. */
+async function openServers() {
+  expect(
+    within(screen.getByTestId("screen")).queryByRole("button", { name: "Servers on this phone" }),
+  ).toBeNull();
+  await fireEvent.press(await screen.findByRole("button", { name: "Settings" }));
+  await fireEvent.press(await screen.findByRole("button", { name: "Servers on this phone" }));
+}
+
 /** Press one of the buttons an alert offers. */
 async function answerAlert(text: string) {
   const buttons = (jest.mocked(Alert.alert).mock.lastCall?.[2] ?? []) as AlertButton[];
@@ -215,7 +224,7 @@ describe("Connect", () => {
     const vault = new MemoryVault();
     await start({ server, vault });
     await signIn();
-    await fireEvent.press(screen.getByRole("button", { name: "Servers on this phone" }));
+    await openServers();
     await fireEvent.press(await screen.findByRole("button", { name: "Add a server" }));
     await fireEvent.changeText(
       await screen.findByLabelText("Server address"),
@@ -364,7 +373,7 @@ describe("Servers", () => {
       );
     });
     await screen.findByText("Signed in to Other Remote as Ana’s phone.");
-    await fireEvent.press(await screen.findByRole("button", { name: "Servers on this phone" }));
+    await openServers();
     await screen.findByRole("button", { name: "Remove Example Remote" });
     return { ...app, server, other };
   }
@@ -428,7 +437,7 @@ describe("Servers", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Example Remote" }));
     await screen.findByText("Only on the first");
     expect(screen.queryByText("Only on the other")).toBeNull();
-    await fireEvent.press(screen.getByRole("button", { name: "Servers on this phone" }));
+    await openServers();
     await fireEvent.press(await screen.findByRole("button", { name: "Other Remote" }));
     await screen.findByText("Only on the other");
     expect(screen.queryByText("Only on the first")).toBeNull();
@@ -457,16 +466,27 @@ describe("Computers", () => {
     return app;
   }
 
+  /** Settings is a gear in the header's corner, not a button at the foot of the screen. */
+  async function openSettingsFromTheCorner() {
+    const corner = await screen.findByRole("button", { name: "Settings" });
+    expect(
+      within(screen.getByTestId("screen")).queryByRole("button", { name: "Settings" }),
+    ).toBeNull();
+    await fireEvent.press(corner);
+  }
+
   test("settings can be reached before there is any server", async () => {
     await start();
-    await fireEvent.press(await screen.findByRole("button", { name: "Settings" }));
+    await openSettingsFromTheCorner();
     expect(await screen.findByRole("radio", { name: "Dark" })).toBeTruthy();
+    // With no server yet, there are none to list.
+    expect(screen.queryByRole("button", { name: "Servers on this phone" })).toBeNull();
   });
 
   test("settings can be reached signed in", async () => {
     await start();
     await signIn();
-    await fireEvent.press(await screen.findByRole("button", { name: "Settings" }));
+    await openSettingsFromTheCorner();
     expect(await screen.findByRole("radio", { name: "Dark" })).toBeTruthy();
   });
 

@@ -5,6 +5,9 @@
 #
 #   sh .yardsort/tests/support/headless.sh <yardsort-host | ys> [args…]
 #
+# The profile is $YS_RUN_DIR/profile, or $YS_PROFILE when set, for a test with two computers;
+# its worktrees go beside it.
+#
 # Built as the tarball, they run with an empty environment: `HOME`, a `PATH` of the tarball's
 # folder and the system's, and the run's profile, nothing else. What they need beyond that, they
 # would not find on a server either.
@@ -21,6 +24,7 @@ bin="$(cat "$YS_RUN_DIR/bin")"
 program="$bin/$1"
 shift
 data="$YS_RUN_DIR/profile" worktrees="$YS_RUN_DIR/worktrees"
+[ -z "$YS_PROFILE" ] || data="$YS_PROFILE" worktrees="$YS_PROFILE-worktrees"
 if [ "$YS_INPUT_BUILD" = package ]; then
   exec env -i HOME="$HOME" PATH="$bin:/usr/bin:/bin" \
     YARDSORT_DATA_DIR="$data" YARDSORT_WORKTREE_ROOT="$worktrees" "$program" "$@"

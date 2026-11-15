@@ -27,6 +27,7 @@
 
 pub mod account;
 pub mod computer;
+pub mod sync;
 
 use std::collections::HashMap;
 use std::future::Future;

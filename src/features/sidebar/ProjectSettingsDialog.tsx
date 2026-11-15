@@ -8,6 +8,7 @@ import {
   type TestSettings,
 } from "@/lib/ipc";
 import { useModalFocus } from "@/lib/useModalFocus";
+import { ProjectSyncSection } from "./ProjectSyncSection";
 
 export function ProjectSettingsDialog({
   project,
@@ -289,6 +290,7 @@ export function ProjectSettingsDialog({
             machine. Set the full path to a Chromium-family browser to use that one instead.
           </p>
         </fieldset>
+        <ProjectSyncSection project={project} onLeave={onClose} />
         {error && (
           <p role="alert" className="mt-3 text-red-400 select-text">
             {error}
