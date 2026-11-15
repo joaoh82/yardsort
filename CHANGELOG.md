@@ -14,7 +14,8 @@ has the downloads and the full commit lists.
   with no screen, `yardsort-host sync`; `ys sync status` says what syncs and changes nothing. See
   [Syncing projects](docs/guide/remote.md#syncing-projects).
 - **On the phone, Settings is a gear at the top right** of Connect and the account screen, in place
-  of the button at the foot of the screen.
+  of the button at the foot of the screen. **Servers on this phone** moved into Settings too, at
+  the top, once the phone is signed in to a server.
 
 ## 0.34.1
 

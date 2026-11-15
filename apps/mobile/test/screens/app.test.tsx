@@ -105,6 +105,15 @@ async function signIn(name = "Ana’s phone") {
   await screen.findByText(`Signed in to Example Remote as ${name}.`);
 }
 
+/** The servers on this phone are reached through Settings, not from the screen beneath it. */
+async function openServers() {
+  expect(
+    within(screen.getByTestId("screen")).queryByRole("button", { name: "Servers on this phone" }),
+  ).toBeNull();
+  await fireEvent.press(await screen.findByRole("button", { name: "Settings" }));
+  await fireEvent.press(await screen.findByRole("button", { name: "Servers on this phone" }));
+}
+
 /** Press one of the buttons an alert offers. */
 async function answerAlert(text: string) {
   const buttons = (jest.mocked(Alert.alert).mock.lastCall?.[2] ?? []) as AlertButton[];
@@ -191,7 +200,7 @@ describe("Connect", () => {
     const vault = new MemoryVault();
     await start({ server, vault });
     await signIn();
-    await fireEvent.press(screen.getByRole("button", { name: "Servers on this phone" }));
+    await openServers();
     await fireEvent.press(await screen.findByRole("button", { name: "Add a server" }));
     await fireEvent.changeText(
       await screen.findByLabelText("Server address"),
@@ -340,7 +349,7 @@ describe("Servers", () => {
       );
     });
     await screen.findByText("Signed in to Other Remote as Ana’s phone.");
-    await fireEvent.press(await screen.findByRole("button", { name: "Servers on this phone" }));
+    await openServers();
     await screen.findByRole("button", { name: "Remove Example Remote" });
     return { ...app, server, other };
   }
@@ -404,7 +413,7 @@ describe("Servers", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Example Remote" }));
     await screen.findByText("Only on the first");
     expect(screen.queryByText("Only on the other")).toBeNull();
-    await fireEvent.press(screen.getByRole("button", { name: "Servers on this phone" }));
+    await openServers();
     await fireEvent.press(await screen.findByRole("button", { name: "Other Remote" }));
     await screen.findByText("Only on the other");
     expect(screen.queryByText("Only on the first")).toBeNull();
@@ -446,6 +455,8 @@ describe("Computers", () => {
     await start();
     await openSettingsFromTheCorner();
     expect(await screen.findByRole("radio", { name: "Dark" })).toBeTruthy();
+    // With no server yet, there are none to list.
+    expect(screen.queryByRole("button", { name: "Servers on this phone" })).toBeNull();
   });
 
   test("settings can be reached signed in", async () => {
