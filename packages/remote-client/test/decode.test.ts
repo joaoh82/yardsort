@@ -14,13 +14,18 @@ import {
   encodeFrame,
   event,
   FrameError,
+  fromBase64,
   id,
   MAX_BRANCH,
   MAX_BRANCHES,
   MAX_CHOICES,
+  MAX_FILE,
+  MAX_FILE_CHUNK,
   MAX_ID_LEN,
   MAX_INPUT_BYTES,
   MAX_LABEL,
+  MAX_LISTED_BYTES,
+  MAX_PATH,
   MAX_PROJECT_NAME,
   MAX_REMOTE,
   MAX_TEXT,
@@ -284,6 +289,55 @@ describe("requests are checked as a host checks them", () => {
     }
   });
 
+  test("a file is named by a path inside the workspace, and read from within any file's length", () => {
+    const read = (path: string, oldPath?: string, offset?: number) =>
+      ask("file.read", { workspace: "w", path, oldPath, of: "working", offset });
+    expect(read("src/login.tsx").op).toBe("file.read");
+    expect(read(".env.example", "old name.txt", MAX_FILE).op).toBe("file.read");
+    // Without one, a read starts at the start, and says so.
+    expect(read("a")).toHaveProperty("params.offset", 0);
+    for (const outside of [
+      "",
+      "/etc/passwd",
+      "../secrets",
+      "src/../../secrets",
+      "src//login.tsx",
+      "src/",
+      "C:\\Users\\me",
+      "C:/Users/me",
+      "\\\\server\\share",
+      "-x",
+      "a\u0000b",
+      "a\u001b[2J",
+    ]) {
+      expect(() => read(outside)).toThrow(/no path inside the workspace/);
+      expect(() => read("ok", outside)).toThrow(/no path inside the workspace/);
+    }
+    // Counted as UTF-8, as the host counts it.
+    expect(read("p".repeat(MAX_PATH)).op).toBe("file.read");
+    expect(() => read("p".repeat(MAX_PATH + 1))).toThrow(/no path inside the workspace/);
+    expect(() => read("é".repeat(MAX_PATH / 2 + 1))).toThrow(/no path inside the workspace/);
+    // A drive's letter is the second byte, as the host reads it: a name may hold a colon later.
+    expect(read("é:x").op).toBe("file.read");
+    expect(read("notes: today.md").op).toBe("file.read");
+    expect(() => read("a", undefined, MAX_FILE + 1)).toThrow(/past the end of any file/);
+    expect(() => read("a", undefined, -1)).toThrow(/out of range/);
+    expect(() => ask("file.read", { workspace: "w", path: "a", of: "stagedOld" })).toThrow(
+      /not one this build knows/,
+    );
+
+    const files = (dir?: string) => ask("workspace.files", { workspace: "w", dir });
+    // The root: no folder, or an empty one, which is left out as Rust writes it.
+    expect(files()).toEqual(files(""));
+    expect("dir" in (files("") as { params: object }).params).toBe(false);
+    expect(files("src/auth")).toHaveProperty("params.dir", "src/auth");
+    for (const outside of ["../up", "/abs", "C:/x", "-x", "src/", "a\u0007"]) {
+      expect(() => files(outside)).toThrow(/no path inside the workspace/);
+    }
+    expect(ask("workspace.changes", { workspace: "w" }).op).toBe("workspace.changes");
+    expect(() => ask("workspace.changes", { workspace: "../w" })).toThrow(/not an id/);
+  });
+
   test("an operation this build does not know is refused", () => {
     expect(() => ask("memory.edit", {})).toThrow(/not an operation/);
   });
@@ -332,6 +386,79 @@ describe("requests are checked as a host checks them", () => {
     expect(() => project("https://example.com/a\u001b[2J")).toThrow(/not an address/);
   });
 
+  test("changes, a folder's entries and a piece of a file are held to their limits", () => {
+    const changes = (more: Record<string, unknown>) =>
+      decode(reply, { kind: "changes", uncommitted: [], committed: [], ...more });
+    expect(changes({})).toEqual({ kind: "changes", uncommitted: [], committed: [] });
+    // What Rust leaves out reads as left out, however it came.
+    expect(changes({ base: null, more: false })).toEqual(changes({}));
+    const file = (path: string, more: Record<string, unknown> = {}) => ({
+      path,
+      kind: "modified",
+      ...more,
+    });
+    expect(changes({ committed: [file("a b/c.txt", { oldPath: "a.txt" })], more: true })).toEqual({
+      kind: "changes",
+      uncommitted: [],
+      committed: [{ path: "a b/c.txt", oldPath: "a.txt", kind: "modified" }],
+      more: true,
+    });
+    // A path no request could give back is not one.
+    for (const bad of ["", "../outside", "/etc/passwd", "C:/x", "-x", "a\u001b[2J"]) {
+      expect(() => changes({ uncommitted: [file(bad)] })).toThrow(/not a path inside/);
+    }
+    for (const bad of ["../outside", "/etc/passwd", "p".repeat(MAX_PATH + 1)]) {
+      expect(() => changes({ committed: [file("a", { oldPath: bad })] })).toThrow(
+        /not a path inside/,
+      );
+    }
+    expect(() => changes({ uncommitted: [file("a", { additions: -1 })] })).toThrow(/out of range/);
+    expect(() => changes({ base: "b".repeat(MAX_BRANCH + 1) })).toThrow(/not a branch's name/);
+    // A list is no longer than a computer cuts one.
+    const long = (n: number) => file(`${"d".repeat(MAX_PATH - 8)}/${n}`);
+    const fits = Math.floor(MAX_LISTED_BYTES / MAX_PATH);
+    expect(changes({ uncommitted: Array.from({ length: fits }, (_, n) => long(n)) }).kind).toBe(
+      "changes",
+    );
+    expect(() =>
+      changes({ uncommitted: Array.from({ length: fits + 2 }, (_, n) => long(n)) }),
+    ).toThrow(/more than a reply carries/);
+
+    const folder = (entries: unknown[], more?: unknown) =>
+      decode(reply, { kind: "files", entries, more });
+    expect(
+      folder(
+        [
+          { name: "src", dir: true },
+          { name: "a.txt", dir: false },
+        ],
+        false,
+      ),
+    ).toEqual({
+      kind: "files",
+      entries: [{ name: "src", dir: true }, { name: "a.txt" }],
+    });
+    expect(folder([{ name: "n".repeat(255) }], true)).toHaveProperty("more", true);
+    for (const bad of ["", "n".repeat(256), "a\u001b[2J", "two\nlines"]) {
+      expect(() => folder([{ name: bad }])).toThrow(/not a file's name/);
+    }
+    const names = (count: number) =>
+      Array.from({ length: count }, (_, n) => ({ name: `${"f".repeat(200)}${n}` }));
+    expect(folder(names(190)).kind).toBe("files");
+    expect(() => folder(names(210))).toThrow(/more than a reply carries/);
+
+    const piece = (more: Record<string, unknown>) =>
+      decode(reply, { kind: "file", state: "text", size: 3, offset: 0, done: true, ...more });
+    // A piece of no bytes says nothing of them, as Rust writes it.
+    expect(piece({ data: "" })).toEqual(piece({}));
+    expect("data" in piece({ data: "" })).toBe(false);
+    const most = "A".repeat(Math.ceil(MAX_FILE_CHUNK / 3) * 4);
+    expect(piece({ data: most })).toHaveProperty("data", most);
+    expect(() => piece({ data: `${most}AAAA` })).toThrow(/longer than/);
+    expect(() => piece({ size: 2 ** 53 })).toThrow(/out of range/);
+    expect(() => piece({ done: undefined })).toThrow(/true or false/);
+  });
+
   test("a response with neither a result nor an error is refused", () => {
     expect(() => decode(response, { requestId: "r" })).toThrow();
     expect(
@@ -372,6 +499,37 @@ describe("output frames", () => {
     const padded = new Uint8Array(wire.length + 8);
     padded.set(wire, 4);
     expect(decodeFrame(padded.subarray(4, 4 + wire.length)).position).toEqual({ epoch: 1, seq: 9 });
+  });
+});
+
+describe("base64", () => {
+  test("reads back what was written, whatever its length", () => {
+    for (let length = 0; length < 70; length++) {
+      const bytes = Uint8Array.from({ length }, (_, n) => (n * 151 + length) % 256);
+      expect(fromBase64(Buffer.from(bytes).toString("base64"))).toEqual(bytes);
+    }
+    expect(fromBase64("")).toEqual(new Uint8Array());
+  });
+
+  test("what is not padded standard base64 is refused, as the host's decoder refuses it", () => {
+    for (const bad of [
+      "QQ",
+      "QUI",
+      "QQ=",
+      "Q===",
+      "====",
+      "QQ==QQ==",
+      "Q=Q=",
+      "QU-_",
+      "QUJ\n",
+      " QUJD",
+      "QUJ\u00e9",
+      // Bits left over after the last byte.
+      "QR==",
+      "QUJ=",
+    ]) {
+      expect(fromBase64(bad)).toBeNull();
+    }
   });
 });
 

@@ -21,12 +21,14 @@
  */
 
 import { ClientError, type Client } from "./client.ts";
-import { base64 } from "./crypto.ts";
+import { base64, fromBase64 } from "./crypto.ts";
 import { DecodeError, isObject, utf8Length } from "./decode.ts";
 import { decodeFrame, FrameError, type OutputFrame } from "./frame.ts";
 import {
   MAX_CLIENT_NAME,
   MAX_CONTROL_FRAME,
+  MAX_FILE,
+  MAX_FILE_CHUNK,
   MAX_OUTPUT_CHUNK,
   MAX_UPLOAD_CHUNK,
   OUTPUT_HEADER_LEN,
@@ -42,6 +44,10 @@ import {
   CURRENT,
   type Cursor,
   EVENTS,
+  type FileChunk,
+  type FileList,
+  type FileReadParams,
+  type FileState,
   type HarnessSummary,
   event as eventDecoder,
   helloReply,
@@ -77,6 +83,8 @@ import {
   type WorkspaceDetail,
   type WorkspaceId,
   type WorkspaceListParams,
+  type WorkspaceChanges,
+  type WorkspaceFilesParams,
   type WorkspacePage,
   type WorkspaceRemoveParams,
   type WorkspaceRenameParams,
@@ -128,6 +136,18 @@ export interface ChannelEnd {
   code: number | null;
   /** A few words for a person. */
   text: string;
+}
+
+/** Which file to read, and which of its contents: `file.read`'s parameters but where to start. */
+export type FileRead = Omit<FileReadParams, "offset">;
+
+/** A file read whole by {@link Channel.wholeFile}. */
+export interface WholeFile {
+  state: FileState;
+  /** Its size in bytes: for one too large to send, how large. */
+  size: number;
+  /** Its contents, to read as UTF-8. Empty unless `state` is `text`. */
+  bytes: Uint8Array;
 }
 
 /** A request that could not be answered because the channel ended first. */
@@ -409,6 +429,98 @@ export class Channel {
    */
   async deleteWorkspace(params: WorkspaceRemoveParams): Promise<void> {
     expect(await this.ask({ op: "workspace.delete", params }), "done");
+  }
+
+  // --- reading a workspace's changes and files -------------------------------------------------
+
+  /**
+   * Which files changed in a workspace: those not committed, and those committed on its branch.
+   * Minor 11.
+   */
+  async changes(workspace: WorkspaceId): Promise<WorkspaceChanges> {
+    const { kind: _, ...changes } = expect(
+      await this.ask({ op: "workspace.changes", params: { workspace } }),
+      "changes",
+    );
+    return changes;
+  }
+
+  /**
+   * One folder of a workspace's file tree, folders first: its root when no `dir` is given.
+   * Minor 11.
+   */
+  async files(params: WorkspaceFilesParams): Promise<FileList> {
+    const { kind: _, ...list } = expect(await this.ask({ op: "workspace.files", params }), "files");
+    return list;
+  }
+
+  /**
+   * One piece of a file in a workspace, from `offset`, or from its start: on disk, or on one side
+   * of a change. {@link Channel.wholeFile} reads all of them. Minor 11.
+   */
+  async readFile(params: FileRead & { offset?: number }): Promise<FileChunk> {
+    const { kind: _, ...chunk } = expect(
+      await this.ask({ op: "file.read", params: { offset: 0, ...params } }),
+      "file",
+    );
+    return chunk;
+  }
+
+  /**
+   * A whole file in a workspace, read piece by piece and put together. A file that changes while
+   * it is read is read again from the start, a few times at most. One that is not text comes with
+   * its state and no bytes. Minor 11.
+   */
+  async wholeFile(params: FileRead): Promise<WholeFile> {
+    for (let reading = 0; reading < 3; reading++) {
+      const whole = await this.#reading(params);
+      if (whole) return whole;
+    }
+    throw new ClientError("unexpected", "The file kept changing while it was read.");
+  }
+
+  /** One reading of a file from its start. `null` when it changed meanwhile. */
+  async #reading(params: FileRead): Promise<WholeFile | null> {
+    const misfit = () =>
+      new ClientError("unexpected", "The computer sent a piece of a file that does not fit.");
+    const pieces: Uint8Array[] = [];
+    let read = 0;
+    let size: number | null = null;
+    for (;;) {
+      const chunk = await this.readFile({ ...params, offset: read });
+      if (chunk.state !== "text") {
+        return { state: chunk.state, size: chunk.size, bytes: new Uint8Array() };
+      }
+      if (chunk.size > MAX_FILE || chunk.offset !== read) throw misfit();
+      // Another size than a moment ago: it was written to meanwhile.
+      if (size !== null && size !== chunk.size) return null;
+      size = chunk.size;
+      const piece = fromBase64(chunk.data ?? "");
+      if (!piece) {
+        throw new ClientError(
+          "unexpected",
+          "The computer sent a piece of a file that is not base64.",
+        );
+      }
+      if (
+        piece.length > MAX_FILE_CHUNK ||
+        read + piece.length > chunk.size ||
+        (piece.length === 0 && !chunk.done)
+      ) {
+        throw misfit();
+      }
+      pieces.push(piece);
+      read += piece.length;
+      if (!chunk.done) continue;
+      if (read !== chunk.size) return null;
+      const bytes = new Uint8Array(read);
+      let at = 0;
+      for (const each of pieces) {
+        bytes.set(each, at);
+        at += each.length;
+      }
+      return { state: chunk.state, size: chunk.size, bytes };
+    }
   }
 
   /** Workflow runs this computer is driving, newest first. */

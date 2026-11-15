@@ -29,7 +29,8 @@
 //! minor 8 a client may read a conversation's turns and answer the permissions its agent asks
 //! for: see [`conversation`]. Since minor 10 a start may say a name, a model, an effort and a
 //! branch, and a client that may type may also look after projects and workspaces: see
-//! [`manage`]. A host lists what it answers in [`HostDescription::capabilities`].
+//! [`manage`]. Since minor 11 such a client may read a workspace's changes and files: see [`look`].
+//! A host lists what it answers in [`HostDescription::capabilities`].
 //!
 //! Sync between hosts ([`sync`]) is not part of this protocol: it is between a host and the
 //! server, over HTTPS, with its own schema version. Only its hint to a host is a relay notice.
@@ -38,6 +39,7 @@ pub mod account;
 pub mod conversation;
 pub mod grant;
 pub mod ids;
+pub mod look;
 pub mod manage;
 pub mod model;
 pub mod notify;
@@ -54,6 +56,10 @@ pub use grant::{Grant, ProjectGrant, Scope};
 pub use ids::{
     AccountRef, DeviceId, EventId, GrantId, HostId, IdError, LeaseId, MemoryId, ProjectId,
     RequestId, RunId, ServerId, SessionRecordId, TerminalId, WorkspaceId,
+};
+pub use look::{
+    ChangeKind, ChangedFile, FileChunk, FileEntry, FileList, FileOf, FileReadParams, FileState,
+    WorkspaceChanges, WorkspaceFilesParams, MAX_FILE, MAX_FILE_CHUNK, MAX_PATH,
 };
 pub use manage::{
     ProjectBranches, ProjectCloneParams, ProjectCloned, ProjectRef, ShellStartParams,
@@ -91,7 +97,8 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 ///   `models` and `efforts` in `harness.list`; `remote` in a project's summary;
 ///   `project.branches`, `project.clone`, `shell.start`, `workspace.rename`, `workspace.archive`
 ///   and `workspace.delete`; and the `uncommitted_work` error.
-pub const PROTOCOL_MINOR: u16 = 10;
+/// - 11: `workspace.changes`, `workspace.files` and `file.read`.
+pub const PROTOCOL_MINOR: u16 = 11;
 /// `workflow:read` and `workflow:decide` arrived in this minor. A host is shown
 /// those scope names when it stated this minor or a newer minor of this major.
 pub const WORKFLOW_SCOPES_MINOR: u16 = 7;
@@ -407,8 +414,8 @@ pub struct MemoryListParams {
 /// parameters.
 ///
 /// There is deliberately no operation that edits or proposes memory, launches a
-/// program the device names, or reads a file. Each of those is its own scoped increment, if it
-/// ever comes. Starting one of the host's own harnesses, and
+/// program the device names, or writes a file. Each of those is its own scoped increment, if it
+/// ever comes. Reading a file inside a workspace came in minor 11 ([`look`]). Starting one of the host's own harnesses, and
 /// putting a file in the host's uploads folder, came in minor 5, and resuming one of its
 /// conversations in minor 6 ([`start`]). Deciding a workflow the desktop is running came in
 /// minor 7 ([`workflow`]): a signed-in phone, with the one-time code, and not a host token.
@@ -495,6 +502,15 @@ pub enum Operation {
     /// Since minor 10.
     #[serde(rename = "workspace.delete")]
     WorkspaceDelete(WorkspaceRemoveParams),
+    /// Since minor 11.
+    #[serde(rename = "workspace.changes")]
+    WorkspaceChanges(WorkspaceRef),
+    /// Since minor 11.
+    #[serde(rename = "workspace.files")]
+    WorkspaceFiles(WorkspaceFilesParams),
+    /// Since minor 11.
+    #[serde(rename = "file.read")]
+    FileRead(FileReadParams),
 }
 
 /// Every operation's wire name, in [`Operation`]'s order.
@@ -532,6 +548,9 @@ pub const OPERATIONS: &[&str] = &[
     "workspace.rename",
     "workspace.archive",
     "workspace.delete",
+    "workspace.changes",
+    "workspace.files",
+    "file.read",
 ];
 
 impl Operation {
@@ -570,6 +589,9 @@ impl Operation {
             Self::WorkspaceRename(_) => 30,
             Self::WorkspaceArchive(_) => 31,
             Self::WorkspaceDelete(_) => 32,
+            Self::WorkspaceChanges(_) => 33,
+            Self::WorkspaceFiles(_) => 34,
+            Self::FileRead(_) => 35,
         };
         OPERATIONS[index]
     }
@@ -606,7 +628,10 @@ impl Operation {
             | Self::ShellStart(_)
             | Self::WorkspaceRename(_)
             | Self::WorkspaceArchive(_)
-            | Self::WorkspaceDelete(_) => Scope::TerminalControl,
+            | Self::WorkspaceDelete(_)
+            | Self::WorkspaceChanges(_)
+            | Self::WorkspaceFiles(_)
+            | Self::FileRead(_) => Scope::TerminalControl,
             Self::WorkflowRunList(_) | Self::WorkflowRunGet(_) => Scope::WorkflowRead,
             Self::WorkflowChallenge(_) | Self::WorkflowDecide(_) => Scope::WorkflowDecide,
         })
@@ -643,6 +668,8 @@ impl Operation {
             Self::SessionResume(resume) => resume.validate(),
             Self::ProjectClone(clone) => clone.validate(),
             Self::WorkspaceRename(rename) => rename.validate(),
+            Self::WorkspaceFiles(files) => files.validate(),
+            Self::FileRead(read) => read.validate(),
             Self::WorkflowRunList(params) if params.limit == Some(0) => {
                 invalid("A page holds at least one item.")
             }
@@ -720,6 +747,12 @@ pub enum Reply {
     Branches(ProjectBranches),
     /// Since minor 10.
     Cloned(ProjectCloned),
+    /// Since minor 11.
+    Changes(WorkspaceChanges),
+    /// Since minor 11.
+    Files(FileList),
+    /// Since minor 11.
+    File(FileChunk),
     Done,
 }
 

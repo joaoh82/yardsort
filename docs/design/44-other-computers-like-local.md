@@ -477,3 +477,84 @@ test itself, which waited on a promise the inspector does not wait for.
 
 Not run: macOS and Windows, a second real computer, and a clone over a network with real
 credentials.
+
+## 11 · Slice 4: changes and files there, read-only
+
+**Built on 2026-11-15**, on Linux. Protocol minor 11 (`remote_proto::look`), carried by the server
+unread. The window offers it to a host that lists `file.read` (`OtherHostView.mayLook`).
+
+**The protocol.** Three operations, all under `terminal:control`, as section 4 proposed and the
+owner did not overturn:
+
+- `workspace.changes`: the files changed and not committed, and those committed on the
+  workspace's branch since its base, each with its kind and its counts. Cut to what a frame
+  carries, the uncommitted first, with `more` when it was cut.
+- `workspace.files`: one folder of the file tree, folders first, without `.git` and what Git
+  ignores. A device has no way to ask for the ignored ones.
+- `file.read`: a file's contents on disk, or on one side of a change (`working`, `uncommittedOld`,
+  `committedOld`, `committedNew`), in pieces of at most 32 KB as base64, each asked for by where it
+  starts. A reply says the whole file's size, so a client that sees it change starts again. Only
+  text is sent: a file over 1 MB, a picture, any other binary and anything that is not a plain
+  file is said to be so, with nothing carried.
+
+**A path is inside the workspace or it is refused.** The protocol refuses one that is absolute,
+climbs with `..`, starts with a drive or a `-`, or holds a control character: this computer's
+client refuses it before it is sent, and a host refuses it before it looks. The host then resolves it as its own window does (`changes::resolve_inside`), which refuses
+a link that leads out. Its refusals name no folder.
+
+**What the host does.** The calls its own right panel makes: `Changes::list` and `Changes::diff`,
+`read_working_file`, and `list_dir`, which moved from the app into the core
+(`crates/core/src/file_tree.rs`) so `yardsort-host` answers it too.
+
+**What the window does.**
+
+- **`RemoteChangesPanel`** takes the right panel for a workspace there: the two tabs, the list
+  drawn as the local one, the tree listed a folder at a time, and a viewer that is the local
+  diff and code views without what writes. It reads when it opens and again whenever this
+  computer reads that one again (`readAt`), what is open included.
+- **The core puts a file together** from its pieces (`Channel::whole_file`) and hands the window
+  the same `Content`, `FileDiff` and `ChangeSet` a local workspace gives, so the viewer does not
+  know where a file came from.
+- **Where it is not offered** (watch only, an older Yardsort there, away, not read yet) the panel
+  keeps its place and says which.
+
+**What building it settled.**
+
+- **Pictures are not sent.** The local viewer shows them; over the relay a picture is said to be
+  binary. They can come later as another state.
+- **Assist's review, who wrote each file, and the file menu are not there.** They are this
+  computer's own, about its own files.
+- **The list stays mounted when a file opens.** A tree mounted again would fold and ask that
+  computer for its folders again, so the viewer's panel folds away instead of being removed.
+- **Nothing is cached.** A file is read when it is opened, and again at the next reading.
+
+**Its tests.** The wire and its bounds in `remote-proto`; the host against a real repository, with
+a file larger than a piece, a binary, an ignored file, a link that leads out and a device that only
+watches, in `crates/core/src/remote/serve/tests/start.rs`; a desktop reading through the real relay
+a file whose pieces end inside a character, in `crates/server/tests/computer.rs`; the panel in
+`RemoteChangesPanel.test.tsx`.
+
+**Its smoke test.** `changes-there.yaml`, new, with the window steps `reads-changes-there`,
+`reads-files-there` and `outside-there`, and the pretend phone's `cannot-read`.
+
+**Run on 2026-11-15**, on Linux, against a `yardsort-host` on the stand-in server with the real
+window on a profile of its own: passed, 25 of 25 steps (run cab1e421).
+
+- With the workspace open, the right panel listed the changed and the new file, opened the change
+  and showed its new line, and offered nothing that writes. When the file changed again on the
+  host, the open change followed at the next reading.
+- The Files tab listed the tree and a folder when it was opened, without `.git` and the ignored
+  file.
+- A file inside the workspace was read. A path that climbs out was refused by this computer's own
+  client before it was sent; a link in the workspace that leads out was refused by the host.
+- A pretend phone let only watch was refused the changes, the tree and a file.
+
+The five earlier tests were run again on this build and passed: `desktop-client` (16 of 16, run
+62f45446), `same-session` (21 of 21, fe13ddbf), `remote-start-and-resume` (25 of 25, 803dd978),
+`run-on` (24 of 24, 61141c6b) and `run-on-full` (35 of 35, 2810d6e2).
+
+What the runs found: nothing in the app. The first run (9289927a) expected the host to refuse the
+climbing path; this computer refuses it first, which is the stricter of the two, and the test and
+the relay test now say so.
+
+Not run: macOS and Windows, a second real computer, and a repository of real size.

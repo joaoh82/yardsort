@@ -97,6 +97,21 @@ fn requests_match_their_fixtures() {
             "workspace.delete",
             Scope::TerminalControl,
         ),
+        (
+            "request-workspace-changes.json",
+            "workspace.changes",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-files.json",
+            "workspace.files",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-file-read.json",
+            "file.read",
+            Scope::TerminalControl,
+        ),
     ] {
         let request: Request = pinned(name);
         assert_eq!(request.operation.name(), op, "{name}");
@@ -185,9 +200,21 @@ fn responses_match_their_fixtures() {
         "response-cloned.json",
         "response-started-shell.json",
         "response-done.json",
+        "response-changes.json",
+        "response-files.json",
+        "response-file.json",
+        "response-file-too-large.json",
     ] {
         let _: Response = pinned(name);
     }
+    // Since minor 11: a file that is not sent says why, and carries nothing.
+    let Outcome::Result(Reply::File(large)) =
+        pinned::<Response>("response-file-too-large.json").outcome
+    else {
+        panic!("not a file");
+    };
+    assert_eq!(large.state, FileState::TooLarge);
+    assert!(large.data.is_empty() && large.done);
     // Since minor 10: why archiving or deleting was refused, for a client to ask again.
     let Outcome::Error(dirty) = pinned::<Response>("response-error-uncommitted.json").outcome
     else {
@@ -490,6 +517,20 @@ fn every_operation_has_the_name_it_is_sent_under() {
         Operation::WorkspaceDelete(WorkspaceRemoveParams {
             workspace: WorkspaceId::new("w").unwrap(),
             force: false,
+        }),
+        Operation::WorkspaceChanges(WorkspaceRef {
+            workspace: WorkspaceId::new("w").unwrap(),
+        }),
+        Operation::WorkspaceFiles(WorkspaceFilesParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            dir: String::new(),
+        }),
+        Operation::FileRead(FileReadParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            path: "a".into(),
+            old_path: None,
+            of: FileOf::Working,
+            offset: 0,
         }),
     ];
     assert_eq!(all.len(), OPERATIONS.len());
@@ -1076,4 +1117,112 @@ fn looking_after_projects_and_workspaces_is_bounded() {
     let odd = manage::bounded_branches(vec!["main".into(), "-x".into()], None, vec![]);
     assert_eq!(odd.branches, ["main"]);
     assert!(odd.more);
+}
+
+#[test]
+fn reading_changes_and_files_is_bounded_and_never_names_a_path_outside() {
+    let read = |path: &str, old: Option<&str>, offset: u64| {
+        Operation::FileRead(FileReadParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            path: path.into(),
+            old_path: old.map(str::to_owned),
+            of: FileOf::Working,
+            offset,
+        })
+        .validate()
+    };
+    assert!(read("src/login.tsx", None, 0).is_ok());
+    assert!(read(".env.example", Some("old name.txt"), MAX_FILE).is_ok());
+    for outside in [
+        "",
+        "/etc/passwd",
+        "../secrets",
+        "src/../../secrets",
+        "src//login.tsx",
+        "src/",
+        "C:\\Users\\me",
+        "C:/Users/me",
+        "\\\\server\\share",
+        "-x",
+        "a\u{0}b",
+    ] {
+        assert!(read(outside, None, 0).is_err(), "{outside:?}");
+        assert!(read("ok", Some(outside), 0).is_err(), "{outside:?}");
+    }
+    assert!(read(&"p".repeat(MAX_PATH + 1), None, 0).is_err());
+    assert!(read("a", None, MAX_FILE + 1).is_err());
+    let files = |dir: &str| {
+        Operation::WorkspaceFiles(WorkspaceFilesParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            dir: dir.into(),
+        })
+        .validate()
+    };
+    assert!(files("").is_ok(), "the root");
+    assert!(files("src/auth").is_ok());
+    assert!(files("../up").is_err());
+
+    // A long list of long paths still fits a frame, the uncommitted first, and says it was cut.
+    let file = |n: usize| ChangedFile {
+        path: format!("{}/{n}", "d".repeat(MAX_PATH - 8)),
+        old_path: None,
+        kind: ChangeKind::Modified,
+        additions: Some(u32::MAX),
+        deletions: Some(u32::MAX),
+    };
+    let listed = look::bounded_changes(
+        (0..100).map(file).collect(),
+        (100..200).map(file).collect(),
+        Some("main".into()),
+    );
+    assert!(listed.more);
+    assert!(!listed.uncommitted.is_empty());
+    assert!(listed.uncommitted.len() + listed.committed.len() < 200);
+    let response = Response {
+        request_id: Some(RequestId::new("r-1").unwrap()),
+        outcome: Outcome::Result(Reply::Changes(listed)),
+    };
+    assert!(encode_response(&response).len() < MAX_CONTROL_FRAME);
+    // A path no request could give back is left out, and counted.
+    let odd = look::bounded_changes(
+        vec![ChangedFile {
+            path: "../outside".into(),
+            old_path: None,
+            kind: ChangeKind::Added,
+            additions: None,
+            deletions: None,
+        }],
+        vec![],
+        None,
+    );
+    assert!(odd.uncommitted.is_empty() && odd.more);
+
+    let entries = (0..2000)
+        .map(|n| FileEntry {
+            name: format!("{}{n:04}", "f".repeat(200)),
+            dir: false,
+        })
+        .collect();
+    let folder = look::bounded_files(entries);
+    assert!(folder.more && !folder.entries.is_empty());
+    let response = Response {
+        request_id: Some(RequestId::new("r-1").unwrap()),
+        outcome: Outcome::Result(Reply::Files(folder)),
+    };
+    assert!(encode_response(&response).len() < MAX_CONTROL_FRAME);
+
+    // The largest piece of a file, as base64, is well within a frame.
+    let piece = FileChunk {
+        state: FileState::Text,
+        size: MAX_FILE,
+        offset: MAX_FILE,
+        data: "A".repeat(MAX_FILE_CHUNK.div_ceil(3) * 4),
+        done: false,
+    };
+    let response = Response {
+        request_id: Some(RequestId::new("r-1").unwrap()),
+        outcome: Outcome::Result(Reply::File(piece)),
+    };
+    assert!(encode_response(&response).len() < MAX_CONTROL_FRAME);
+    assert_eq!(look::not_sent(FileState::Absent, 0).data, "");
 }

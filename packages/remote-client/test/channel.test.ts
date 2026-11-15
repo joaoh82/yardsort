@@ -18,6 +18,8 @@ import {
   type ControlLoss,
   encodeFrame,
   type HostId,
+  MAX_FILE,
+  MAX_FILE_CHUNK,
   MAX_OUTPUT_CHUNK,
   MAX_UPLOAD_CHUNK,
   openChannel,
@@ -677,6 +679,238 @@ describe("looking after projects and workspaces", () => {
         existingBranch: "kept",
         baseBranch: "main",
       }),
+    ]) {
+      expect(((await refused.catch((e: unknown) => e)) as ClientError).kind).toBe("invalid");
+    }
+    expect(asked).toEqual([]);
+    channel.close();
+  });
+});
+
+describe("reading a workspace's changes and files", () => {
+  const WORKSPACE = "w" as WorkspaceId;
+  const FILE = { workspace: WORKSPACE, path: "src/a.txt", of: "working" } as const;
+
+  /**
+   * A computer that sends a file a piece at a time, as a host does: `file` says what the file
+   * holds when the read numbered `nth` arrives.
+   */
+  function serving(file: (nth: number) => Uint8Array): Host {
+    let nth = 0;
+    return (request, socket) => {
+      const bytes = file(++nth);
+      const offset = request.params?.offset as number;
+      const end = Math.min(bytes.length, offset + MAX_FILE_CHUNK);
+      answer(socket, request, {
+        kind: "file",
+        state: "text",
+        size: bytes.length,
+        offset,
+        data: Buffer.from(bytes.subarray(offset, end)).toString("base64"),
+        done: end === bytes.length,
+      });
+    };
+  }
+
+  const offsets = (asked: Request[]) => asked.map((r) => r.params?.offset);
+
+  test("each is asked under its name, and its reply read", async () => {
+    const { client, asked } = relay((request, socket) => {
+      const results: Record<string, unknown> = {
+        "workspace.changes": {
+          kind: "changes",
+          uncommitted: [{ path: "src/a.txt", kind: "modified", additions: 2, deletions: 1 }],
+          committed: [{ path: "b.txt", oldPath: "a.txt", kind: "renamed" }],
+          base: "main",
+        },
+        "workspace.files": {
+          kind: "files",
+          entries: [{ name: "src", dir: true }, { name: "b.txt" }],
+          more: true,
+        },
+        "file.read": {
+          kind: "file",
+          state: "text",
+          size: 5,
+          offset: request.params?.offset,
+          data: "aGVsbG8=",
+          done: true,
+        },
+      };
+      answer(socket, request, results[request.op]);
+    });
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    expect(await channel.changes(WORKSPACE)).toEqual({
+      uncommitted: [{ path: "src/a.txt", kind: "modified", additions: 2, deletions: 1 }],
+      committed: [{ path: "b.txt", oldPath: "a.txt", kind: "renamed" }],
+      base: "main",
+    });
+    expect(await channel.files({ workspace: WORKSPACE })).toEqual({
+      entries: [{ name: "src", dir: true }, { name: "b.txt" }],
+      more: true,
+    });
+    await channel.files({ workspace: WORKSPACE, dir: "src/auth" });
+    // One piece, as it came: from the start unless the request says where.
+    expect(await channel.readFile(FILE)).toEqual({
+      state: "text",
+      size: 5,
+      offset: 0,
+      data: "aGVsbG8=",
+      done: true,
+    });
+    await channel.readFile({ ...FILE, of: "committedOld", oldPath: "src/b.txt", offset: 4 });
+    expect(asked.map(({ op, params }) => ({ op, params }))).toEqual([
+      { op: "workspace.changes", params: { workspace: "w" } },
+      { op: "workspace.files", params: { workspace: "w" } },
+      { op: "workspace.files", params: { workspace: "w", dir: "src/auth" } },
+      { op: "file.read", params: { workspace: "w", path: "src/a.txt", of: "working", offset: 0 } },
+      {
+        op: "file.read",
+        params: {
+          workspace: "w",
+          path: "src/a.txt",
+          oldPath: "src/b.txt",
+          of: "committedOld",
+          offset: 4,
+        },
+      },
+    ]);
+    channel.close();
+  });
+
+  test("a whole file is put together from its pieces, a character cut between two included", async () => {
+    // One byte, then characters of two: every piece but the last ends inside one.
+    const text = `a${"é".repeat(MAX_FILE_CHUNK + 100)}`;
+    const file = new TextEncoder().encode(text);
+    expect(file.length).toBeGreaterThan(MAX_FILE_CHUNK * 2);
+    expect((file[MAX_FILE_CHUNK] as number) & 0xc0).toBe(0x80);
+    const { client, asked } = relay(serving(() => file));
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const whole = await channel.wholeFile(FILE);
+    expect(whole.state).toBe("text");
+    expect(whole.size).toBe(file.length);
+    expect(whole.bytes).toEqual(file);
+    expect(new TextDecoder("utf-8", { fatal: true }).decode(whole.bytes)).toBe(text);
+    expect(offsets(asked)).toEqual([0, MAX_FILE_CHUNK, MAX_FILE_CHUNK * 2]);
+    expect(asked.every((r) => r.op === "file.read" && r.params?.path === "src/a.txt")).toBe(true);
+    channel.close();
+
+    // A file of no bytes is one piece of none, and one of exactly a piece is one piece too.
+    for (const length of [0, MAX_FILE_CHUNK]) {
+      const exact = relay(serving(() => new Uint8Array(length).fill(0x61)));
+      const second = await openChannel(exact.client, access, HOST, { client: "test/1" });
+      const read = await second.wholeFile(FILE);
+      expect([read.state, read.size, read.bytes.length]).toEqual(["text", length, length]);
+      expect(offsets(exact.asked)).toEqual([0]);
+      second.close();
+    }
+  });
+
+  test("a file that changes while it is read is read again from the start", async () => {
+    const before = new Uint8Array(MAX_FILE_CHUNK * 2 + 10).fill(0x62);
+    const after = new Uint8Array(MAX_FILE_CHUNK + 10).fill(0x61);
+    // Written to between the first piece and the second.
+    const { client, asked } = relay(serving((nth) => (nth === 1 ? before : after)));
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const whole = await channel.wholeFile(FILE);
+    expect(whole.size).toBe(after.length);
+    expect(whole.bytes).toEqual(after);
+    expect(offsets(asked)).toEqual([0, MAX_FILE_CHUNK, 0, MAX_FILE_CHUNK]);
+    channel.close();
+
+    // One that never holds still is given up on, after a few readings.
+    const restless = relay(serving((nth) => new Uint8Array(MAX_FILE_CHUNK * 2 + nth)));
+    const second = await openChannel(restless.client, access, HOST, { client: "test/1" });
+    const failed = await second.wholeFile(FILE).catch((e: unknown) => e);
+    expect((failed as ClientError).kind).toBe("unexpected");
+    expect((failed as ClientError).message).toContain("kept changing");
+    expect(offsets(restless.asked)).toEqual([
+      0,
+      MAX_FILE_CHUNK,
+      0,
+      MAX_FILE_CHUNK,
+      0,
+      MAX_FILE_CHUNK,
+    ]);
+    second.close();
+  });
+
+  test("a piece that does not fit is refused", async () => {
+    const piece = (more: Record<string, unknown>) => ({
+      kind: "file",
+      state: "text",
+      size: 6,
+      offset: 0,
+      data: "aGVsbG8=",
+      done: false,
+      ...more,
+    });
+    const full = Buffer.alloc(MAX_FILE_CHUNK).toString("base64");
+    for (const [misfit, why] of [
+      // It starts somewhere other than where the last one ended.
+      [piece({ offset: 3 }), "does not fit"],
+      // It carries more than the file is said to hold.
+      [piece({ size: 4 }), "does not fit"],
+      // It carries nothing, and is not the last.
+      [piece({ data: "" }), "does not fit"],
+      [piece({ data: undefined }), "does not fit"],
+      // A file larger than any a computer sends.
+      [piece({ size: MAX_FILE + 1 }), "does not fit"],
+      [piece({ data: "aGVsbG8" }), "not base64"],
+      [piece({ data: "aGVs*G8=" }), "not base64"],
+      // More than one piece carries does not read at all.
+      [piece({ size: MAX_FILE, data: `${full}AAAA` }), "not understood"],
+    ] as const) {
+      const { client, asked } = relay((request, socket) => answer(socket, request, misfit));
+      const channel = await openChannel(client, access, HOST, { client: "test/1" });
+      const refused = await channel.wholeFile(FILE).catch((e: unknown) => e);
+      expect(refused).toBeInstanceOf(ClientError);
+      expect((refused as ClientError).kind).toBe("unexpected");
+      expect((refused as ClientError).message).toContain(why);
+      // Nothing more is asked for once a piece is refused.
+      expect(asked).toHaveLength(1);
+      channel.close();
+    }
+
+    // The second piece going back over the first is no better than the first not fitting.
+    const { client, asked } = relay((request, socket) =>
+      answer(socket, request, piece({ size: 12, offset: 0 })),
+    );
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const refused = await channel.wholeFile(FILE).catch((e: unknown) => e);
+    expect((refused as ClientError).message).toContain("does not fit");
+    expect(offsets(asked)).toEqual([0, 5]);
+    channel.close();
+  });
+
+  test("a file that is not text comes with its state and no bytes", async () => {
+    for (const [state, size, read] of [
+      ["absent", 0, "absent"],
+      ["binary", 0, "binary"],
+      ["tooLarge", 5 * 1024 * 1024, "tooLarge"],
+      ["notShown", 0, "notShown"],
+      // A state from a newer computer is not text either.
+      ["encrypted", 12, "unknown"],
+    ] as const) {
+      const { client, asked } = relay((request, socket) =>
+        answer(socket, request, { kind: "file", state, size, offset: 0, done: true }),
+      );
+      const channel = await openChannel(client, access, HOST, { client: "test/1" });
+      expect(await channel.wholeFile(FILE)).toEqual({ state: read, size, bytes: new Uint8Array() });
+      expect(asked).toHaveLength(1);
+      channel.close();
+    }
+  });
+
+  test("what no computer would take is refused here, and nothing is sent", async () => {
+    const { client, asked } = relay(() => {});
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    for (const refused of [
+      channel.files({ workspace: WORKSPACE, dir: "../up" }),
+      channel.readFile({ ...FILE, path: "/etc/passwd" }),
+      channel.readFile({ ...FILE, oldPath: "C:\\Users\\me" }),
+      channel.readFile({ ...FILE, offset: MAX_FILE + 1 }),
+      channel.wholeFile({ ...FILE, path: "src/../../secrets" }),
     ]) {
       expect(((await refused.catch((e: unknown) => e)) as ClientError).kind).toBe("invalid");
     }

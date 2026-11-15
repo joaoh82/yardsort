@@ -18,6 +18,7 @@ import {
   encodeFrame,
   event,
   FrameError,
+  fromBase64,
   grantDecision,
   grantPage,
   hello,
@@ -157,6 +158,33 @@ const FIXTURES: Record<string, (name: string) => void> = {
     expect(scopeOf(remove.op)).toBe("terminal:control");
     expect(remove.params.force).toBe(true);
   },
+  "request-workspace-changes.json": (name) => {
+    const changes = pinned<Request>(request, name);
+    expect(changes.op).toBe("workspace.changes");
+    expect(scopeOf(changes.op)).toBe("terminal:control");
+  },
+  "request-workspace-files.json": (name) => {
+    const files = pinned<Request>(request, name);
+    if (files.op !== "workspace.files") throw new Error("not files");
+    expect(scopeOf(files.op)).toBe("terminal:control");
+    expect(files.params.dir).toBe("src/auth");
+    // The root is an empty folder, which is one left out, as Rust writes it.
+    const root = raw(name) as { params: Record<string, unknown> };
+    root.params.dir = "";
+    const written = JSON.parse(JSON.stringify(decode(request, root))) as { params: object };
+    expect(written.params).toEqual({ workspace: files.params.workspace });
+  },
+  "request-file-read.json": (name) => {
+    const read = pinned<Request>(request, name);
+    if (read.op !== "file.read") throw new Error("not a read");
+    expect(scopeOf(read.op)).toBe("terminal:control");
+    expect(read.params.of).toBe("committedOld");
+    expect(read.params.oldPath).toBe("src/session.ts");
+    // A read that says nothing of where it starts is from the start, and is written so.
+    const first = raw(name) as { params: Record<string, unknown> };
+    delete first.params.offset;
+    expect(JSON.parse(JSON.stringify(decode(request, first)))).toEqual(raw(name));
+  },
   "request-session-resume.json": (name) => {
     const resume = pinned<Request>(request, name);
     expect(resume.op).toBe("session.resume");
@@ -234,6 +262,59 @@ const FIXTURES: Record<string, (name: string) => void> = {
     if (cloned.kind !== "cloned") throw new Error("not cloned");
     expect(cloned.name).toBe("example-app");
     expect(cloned.project as string).toBe("7a1e3c2d-4b5f-4a6b-8c9d-0e1f2a3b4c5d");
+  },
+  "response-changes.json": (name) => {
+    const changes = result(name);
+    if (changes.kind !== "changes") throw new Error("not changes");
+    expect(changes.uncommitted.map((file) => file.kind)).toEqual(["modified", "untracked"]);
+    expect(changes.uncommitted[0]).toMatchObject({ additions: 12, deletions: 3 });
+    // An untracked file's lines are not counted.
+    expect(changes.uncommitted[1]).toEqual({ path: "notes.txt", kind: "untracked" });
+    expect(changes.committed[0]?.oldPath).toBe("src/session.ts");
+    expect(changes.base).toBe("main");
+    expect(changes.more).toBeUndefined();
+    // A newer computer's kind reads as unknown, not as a failure.
+    const json = raw(name) as { result: { uncommitted: { kind: string }[] } };
+    (json.result.uncommitted[0] as { kind: string }).kind = "typeChanged";
+    const newer = decode(response, json);
+    if (!("result" in newer) || newer.result.kind !== "changes") throw new Error("not changes");
+    expect(newer.result.uncommitted[0]?.kind).toBe("unknown");
+  },
+  "response-files.json": (name) => {
+    const list = result(name);
+    if (list.kind !== "files") throw new Error("not files");
+    expect(list.entries).toEqual([{ name: "providers", dir: true }, { name: "session.ts" }]);
+    expect(list.more).toBeUndefined();
+    // A file, and a list that is whole, say so by saying nothing, as Rust writes them.
+    const json = raw(name) as { result: { entries: Record<string, unknown>[]; more?: boolean } };
+    (json.result.entries[1] as Record<string, unknown>).dir = false;
+    json.result.more = false;
+    expect(JSON.parse(JSON.stringify(decode(response, json)))).toEqual(raw(name));
+  },
+  "response-file.json": (name) => {
+    const file = result(name);
+    if (file.kind !== "file") throw new Error("not a file");
+    expect(file.state).toBe("text");
+    expect(file.offset).toBe(0);
+    expect(file.done).toBe(true);
+    expect(file.size).toBe(20);
+    const bytes = fromBase64(file.data ?? "");
+    expect(new TextDecoder().decode(bytes ?? undefined)).toBe("export const a = 1;\n");
+  },
+  "response-file-too-large.json": (name) => {
+    // A file that is not sent says why, and carries nothing.
+    const large = result(name);
+    if (large.kind !== "file") throw new Error("not a file");
+    expect(large.state).toBe("tooLarge");
+    expect(large.size).toBe(5 * 1024 * 1024);
+    expect(large.data).toBeUndefined();
+    expect(large.done).toBe(true);
+    // A newer computer's state reads as unknown, not as a failure.
+    const json = raw(name) as { result: { state: string } };
+    json.result.state = "encrypted";
+    const newer = decode(response, json);
+    if (!("result" in newer) || newer.result.kind !== "file") throw new Error("not a file");
+    expect(newer.result.state).toBe("unknown");
   },
   "response-done.json": (name) => {
     expect(result(name)).toEqual({ kind: "done" });
@@ -487,7 +568,7 @@ const FIXTURES: Record<string, (name: string) => void> = {
 describe("the fixtures", () => {
   test("are each read here, and none is left out", () => {
     const names = readdirSync(DIR).sort();
-    expect(names.length).toBeGreaterThanOrEqual(72);
+    expect(names.length).toBeGreaterThanOrEqual(79);
     expect(names).toEqual(Object.keys(FIXTURES).sort());
   });
 

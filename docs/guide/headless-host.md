@@ -248,6 +248,9 @@ clone goes into `~/Projects`, made when it is first needed, or the folder you na
 projects_dir = "~/code"   # a whole path, or one starting with ~ for this user's home
 ```
 
+Such a computer can read a workspace's changes and files too, by paths inside the workspace: see
+[Remote](remote.md#starting-work-from-the-phone).
+
 It is cloned with this host's own Git sign-in, from an HTTPS or SSH address, and never to a path a
 device names. In a container, point `projects_dir` at a folder in a volume if clones should outlast
 the container.

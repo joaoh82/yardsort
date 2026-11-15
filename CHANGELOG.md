@@ -33,6 +33,12 @@ has the downloads and the full commit lists.
   it. Uncommitted work there is lost only after a second confirmation. All of this needs Yardsort
   0.35.0 on the other computer too; an older one keeps what it had and the window does not offer
   the rest.
+- **Changes and files of a workspace on another computer.** The right panel lists what changed
+  there and its file tree, and opens a diff or a file, read from that computer when you look.
+  Read-only: there is no commit box and no editor yet, and nothing read is kept on this computer.
+  A computer you let type into this one can read a workspace's changes and files here the same
+  way, by paths inside the workspace and nothing outside it. See
+  [Reaching another computer](docs/guide/remote.md#reaching-another-computer).
 
 ## 0.34.1
 

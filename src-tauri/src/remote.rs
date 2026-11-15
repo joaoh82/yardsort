@@ -246,6 +246,28 @@ impl Starting for AppStarting {
         Ok(())
     }
 
+    fn changes(&self, workspace: &str) -> IpcResult<yardsort_core::changes::ChangeSet> {
+        self.with(|starter| starter.changes(workspace))
+    }
+
+    fn files(
+        &self,
+        workspace: &str,
+        dir: &str,
+    ) -> IpcResult<Vec<yardsort_core::file_tree::FileEntry>> {
+        self.with(|starter| starter.files(workspace, dir))
+    }
+
+    fn content(
+        &self,
+        workspace: &str,
+        path: &str,
+        old_path: Option<&str>,
+        of: remote_proto::FileOf,
+    ) -> IpcResult<yardsort_core::changes::Content> {
+        self.with(|starter| starter.content(workspace, path, old_path, of))
+    }
+
     fn session(
         &self,
         workspace: &str,

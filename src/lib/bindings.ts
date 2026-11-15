@@ -409,6 +409,11 @@ export const commands = {
 	 *  may type, and that computer's Yardsort is new enough.
 	 */
 	mayManage: boolean,
+	/**
+	 *  Whether this computer may read that computer's changes and files: it may type, and that
+	 *  computer's Yardsort is new enough.
+	 */
+	mayLook: boolean,
 	/**  When it was last read; `None` until it has been. */
 	readAt: number | null,
 	platform: string | null,
@@ -446,6 +451,17 @@ export const commands = {
 	 *  Fails with `remote_uncommitted` unless `force` when it has uncommitted work there.
 	 */
 	otherHostRemoveWorkspace: (hostId: string, workspaceId: string, remove: boolean, force: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("other_host_remove_workspace", { hostId, workspaceId, remove, force })),
+	/**  What changed in one of another computer's workspaces: uncommitted, and on its branch. */
+	otherHostChanges: (hostId: string, workspaceId: string) => typedError<OtherChanges, IpcError>(__TAURI_INVOKE("other_host_changes", { hostId, workspaceId })),
+	/**
+	 *  One folder of the file tree of a workspace on another computer (`dir` is inside it; empty for
+	 *  its root). What Git ignores there is not listed.
+	 */
+	otherHostFiles: (hostId: string, workspaceId: string, dir: string) => typedError<OtherFiles, IpcError>(__TAURI_INVOKE("other_host_files", { hostId, workspaceId, dir })),
+	/**  Both sides of a changed file in a workspace on another computer. */
+	otherHostDiff: (hostId: string, workspaceId: string, path: string, oldPath: string | null, scope: Scope) => typedError<FileDiff, IpcError>(__TAURI_INVOKE("other_host_diff", { hostId, workspaceId, path, oldPath, scope })),
+	/**  A file of a workspace on another computer, as it is on its disk now. */
+	otherHostFile: (hostId: string, workspaceId: string, path: string) => typedError<Content, IpcError>(__TAURI_INVOKE("other_host_file", { hostId, workspaceId, path })),
 	/**  Which repository one of this computer's projects is, read from its `origin`. */
 	projectRepository: (projectId: string) => typedError<LocalRepository, IpcError>(__TAURI_INVOKE("project_repository", { projectId })),
 	/**  Where a repository another device has this computer clone goes. */
@@ -2206,6 +2222,13 @@ export type OtherBranches = {
 	more: boolean,
 };
 
+/**  What changed in a workspace on another computer, as the local panel is given a local one's. */
+export type OtherChanges = {
+	changes: ChangeSet,
+	/**  That computer listed fewer files than changed. */
+	more: boolean,
+};
+
 export type OtherClient = {
 	serverUrl: string,
 	name: string,
@@ -2236,6 +2259,13 @@ export type OtherComputers = {
 
 /**  Something about the other computers changed: the list, a link, or what one shows. */
 export type OtherComputersChanged = Record<string, never>;
+
+/**  One folder of a workspace's file tree on another computer. */
+export type OtherFiles = {
+	entries: FileEntry[],
+	/**  That folder holds more than is listed. */
+	more: boolean,
+};
 
 /**  An agent another computer can start. */
 export type OtherHarness = {
@@ -2277,6 +2307,11 @@ export type OtherHostView = {
 	 *  may type, and that computer's Yardsort is new enough.
 	 */
 	mayManage: boolean,
+	/**
+	 *  Whether this computer may read that computer's changes and files: it may type, and that
+	 *  computer's Yardsort is new enough.
+	 */
+	mayLook: boolean,
 	/**  When it was last read; `None` until it has been. */
 	readAt: number | null,
 	platform: string | null,

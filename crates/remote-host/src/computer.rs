@@ -25,6 +25,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+pub mod look;
 pub mod start;
 pub mod terminal;
 

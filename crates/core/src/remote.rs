@@ -115,6 +115,9 @@ pub const START_OPERATIONS: &[&str] = &[
     "workspace.rename",
     "workspace.archive",
     "workspace.delete",
+    "workspace.changes",
+    "workspace.files",
+    "file.read",
 ];
 
 /// Reading conversations and answering their agents' questions, answered when the facade knows
@@ -287,7 +290,10 @@ impl HostFacade<'_> {
             | Operation::ShellStart(_)
             | Operation::WorkspaceRename(_)
             | Operation::WorkspaceArchive(_)
-            | Operation::WorkspaceDelete(_) => Err(RemoteError::new(
+            | Operation::WorkspaceDelete(_)
+            | Operation::WorkspaceChanges(_)
+            | Operation::WorkspaceFiles(_)
+            | Operation::FileRead(_) => Err(RemoteError::new(
                 ErrorCode::Unsupported,
                 self.terminals_later.as_ref().map_or(
                     "Starting agents from here is not available on this host yet.",

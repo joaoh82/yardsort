@@ -47,6 +47,9 @@ pub(super) fn is_start(operation: &Operation) -> bool {
             | Operation::WorkspaceRename(_)
             | Operation::WorkspaceArchive(_)
             | Operation::WorkspaceDelete(_)
+            | Operation::WorkspaceChanges(_)
+            | Operation::WorkspaceFiles(_)
+            | Operation::FileRead(_)
     )
 }
 
@@ -211,6 +214,46 @@ impl Visitor {
                 });
                 Ok(None)
             }
+            Operation::WorkspaceChanges(remote_proto::WorkspaceRef { workspace }) => {
+                let (row, _) = facade.reachable_workspace(grant, workspace)?;
+                self.later(request, move || {
+                    let set = starting.changes(&row.id).map_err(|e| start_error(&e))?;
+                    Ok(Reply::Changes(remote_proto::look::bounded_changes(
+                        set.uncommitted.into_iter().map(changed).collect(),
+                        set.committed.into_iter().map(changed).collect(),
+                        set.base,
+                    )))
+                });
+                Ok(None)
+            }
+            Operation::WorkspaceFiles(remote_proto::WorkspaceFilesParams { workspace, dir }) => {
+                let (row, _) = facade.reachable_workspace(grant, workspace)?;
+                let dir = dir.clone();
+                self.later(request, move || {
+                    let entries = starting.files(&row.id, &dir).map_err(|e| start_error(&e))?;
+                    Ok(Reply::Files(remote_proto::look::bounded_files(
+                        entries
+                            .into_iter()
+                            .map(|entry| remote_proto::FileEntry {
+                                name: entry.name,
+                                dir: entry.is_dir,
+                            })
+                            .collect(),
+                    )))
+                });
+                Ok(None)
+            }
+            Operation::FileRead(read) => {
+                let (row, _) = facade.reachable_workspace(grant, &read.workspace)?;
+                let read = read.clone();
+                self.later(request, move || {
+                    let content = starting
+                        .content(&row.id, &read.path, read.old_path.as_deref(), read.of)
+                        .map_err(|e| start_error(&e))?;
+                    piece(content, read.offset).map(Reply::File)
+                });
+                Ok(None)
+            }
             Operation::UploadBegin(UploadBeginParams {
                 workspace,
                 name,
@@ -317,6 +360,60 @@ impl Visitor {
             out.text(String::from_utf8(bytes).expect("JSON is UTF-8"));
         });
     }
+}
+
+/// A changed file as a device is told it.
+fn changed(file: crate::changes::FileChange) -> remote_proto::ChangedFile {
+    use crate::changes::ChangeKind as Here;
+    use remote_proto::ChangeKind as There;
+    remote_proto::ChangedFile {
+        path: file.path,
+        old_path: file.old_path,
+        kind: match file.kind {
+            Here::Added => There::Added,
+            Here::Modified => There::Modified,
+            Here::Deleted => There::Deleted,
+            Here::Renamed => There::Renamed,
+            Here::Untracked => There::Untracked,
+            Here::Conflicted => There::Conflicted,
+        },
+        additions: file.additions,
+        deletions: file.deletions,
+    }
+}
+
+/// The piece of a file's contents that starts at `offset`, or why none of it is sent. Only text
+/// is sent: a picture and anything else that is not text is said to be binary.
+fn piece(
+    content: crate::changes::Content,
+    offset: u64,
+) -> Result<remote_proto::FileChunk, RemoteError> {
+    use crate::changes::Content;
+    use remote_proto::look::not_sent;
+    use remote_proto::{FileChunk, FileState, MAX_FILE_CHUNK};
+    let text = match content {
+        Content::Text { text } => text,
+        Content::Absent => return Ok(not_sent(FileState::Absent, 0)),
+        Content::Image { .. } | Content::Binary => return Ok(not_sent(FileState::Binary, 0)),
+        Content::NotEditable { .. } => return Ok(not_sent(FileState::NotShown, 0)),
+        Content::TooLarge { bytes } => return Ok(not_sent(FileState::TooLarge, bytes.into())),
+    };
+    let bytes = text.as_bytes();
+    let start = usize::try_from(offset).unwrap_or(usize::MAX);
+    if start > bytes.len() {
+        return Err(RemoteError::new(
+            ErrorCode::InvalidRequest,
+            "That is past the end of the file.",
+        ));
+    }
+    let end = bytes.len().min(start + MAX_FILE_CHUNK);
+    Ok(FileChunk {
+        state: FileState::Text,
+        size: bytes.len() as u64,
+        offset,
+        data: base64::engine::general_purpose::STANDARD.encode(&bytes[start..end]),
+        done: end == bytes.len(),
+    })
 }
 
 /// The harness a device asked for, if this host can start it, or the host's default.

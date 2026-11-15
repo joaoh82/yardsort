@@ -4,8 +4,8 @@
 /**
  * The remote protocol: what a device asks a computer through the relay, and what it answers. The
  * types follow `crates/remote-proto` (`lib.rs`, `model.rs`, `terminal.rs`, `grant.rs`, `ids.rs`,
- * `start.rs`, `manage.rs`), which is the source; the fixtures in `crates/remote-proto/fixtures/v1/`
- * hold both to the same wire.
+ * `start.rs`, `manage.rs`, `look.rs`), which is the source; the fixtures in
+ * `crates/remote-proto/fixtures/v1/` hold both to the same wire.
  *
  * Every message from a computer is decoded as untrusted, though it comes from one the person
  * paired: ids are checked, and names, labels, notes, links and lists are held to the protocol's
@@ -24,6 +24,7 @@ import {
   hasControl,
   i64,
   isObject,
+  nonEmpty,
   nullable,
   object,
   oneOf,
@@ -50,12 +51,16 @@ import {
   MAX_COMMAND,
   MAX_CODE_LEN,
   MAX_CURSOR_LEN,
+  MAX_FILE,
+  MAX_FILE_CHUNK,
   MAX_ID_LEN,
   MAX_INPUT_BYTES,
   MAX_LABEL,
   MAX_LINK,
+  MAX_LISTED_BYTES,
   MAX_NOTE,
   MAX_PAGE,
+  MAX_PATH,
   MAX_PROJECT_NAME,
   MAX_PROMPT,
   MAX_REMOTE,
@@ -1160,6 +1165,191 @@ const projectBranchesFields = {
   more: flag,
 };
 
+// --- reading a workspace's changes and files (minor 11) ---------------------------------------
+
+// A file is named by its path inside the workspace, with `/` between its parts, never by a path on
+// the computer. All of it needs `terminal:control`: a device that only watches reads none of it.
+
+export const CHANGE_KINDS = [
+  "added",
+  "modified",
+  "deleted",
+  "renamed",
+  /** New, and not yet known to Git. */
+  "untracked",
+  "conflicted",
+  "unknown",
+] as const;
+/** How a file changed. A kind from a newer computer reads as `unknown`. */
+export type ChangeKind = (typeof CHANGE_KINDS)[number];
+
+/** One changed file. */
+export interface ChangedFile {
+  /** Inside the workspace. At most {@link MAX_PATH} bytes. */
+  path: string;
+  /** Where a renamed file was. */
+  oldPath?: string;
+  kind: ChangeKind;
+  /** Lines added and removed. Absent for a binary or an untracked file. */
+  additions?: number;
+  deletions?: number;
+}
+
+/** `workspace.changes`: which files changed in a workspace. */
+export interface WorkspaceChanges {
+  /** Changed and not committed. */
+  uncommitted: ChangedFile[];
+  /** Committed on the workspace's branch since `base`. */
+  committed: ChangedFile[];
+  /** The branch `committed` is measured against. Absent when there is nothing to compare with. */
+  base?: string;
+  /** There are more changed files than are listed. Absent when there are not. */
+  more?: boolean;
+}
+
+/** `workspace.files`: one folder of a workspace's file tree. */
+export interface WorkspaceFilesParams {
+  workspace: WorkspaceId;
+  /** The folder, inside the workspace. Absent for its root. */
+  dir?: string;
+}
+
+/** One entry of a folder. */
+export interface FileEntry {
+  /** Its name within the folder. */
+  name: string;
+  /** It is a folder. Absent for a file. */
+  dir?: boolean;
+}
+
+/** The reply to `workspace.files`: folders first, then files, each by name. */
+export interface FileList {
+  entries: FileEntry[];
+  /** The folder holds more than is listed. Absent when it does not. */
+  more?: boolean;
+}
+
+export const FILE_SIDES = ["working", "uncommittedOld", "committedOld", "committedNew"] as const;
+/**
+ * Which contents of a file `file.read` asks for. `working`: as it is on disk now, a file of the
+ * tree and the new side of an uncommitted change. `uncommittedOld`: before an uncommitted change,
+ * as the last commit has it. `committedOld`: before the workspace's commits, as the base branch
+ * has it. `committedNew`: after them, as the last commit has it.
+ */
+export type FileOf = (typeof FILE_SIDES)[number];
+
+/** `file.read`: a piece of a file in a workspace. */
+export interface FileReadParams {
+  workspace: WorkspaceId;
+  /** Inside the workspace. At most {@link MAX_PATH} bytes. */
+  path: string;
+  /** For one side of a renamed file's change: where it was. */
+  oldPath?: string;
+  of: FileOf;
+  /** Where the piece starts: 0, then each reply's `offset` plus what it carried. */
+  offset: number;
+}
+
+export const FILE_STATES = [
+  /** Text, carried in `data`. */
+  "text",
+  /** There is no such file on that side: it was added, or deleted. */
+  "absent",
+  /** Not text. Nothing is carried. */
+  "binary",
+  /** More than {@link MAX_FILE} bytes: `size` says how many. Nothing is carried. */
+  "tooLarge",
+  /** Something the computer does not show: a folder, a link, a device. */
+  "notShown",
+  "unknown",
+] as const;
+/** What a file's contents are, as a reply can say. One from a newer computer reads as `unknown`. */
+export type FileState = (typeof FILE_STATES)[number];
+
+/** The reply to `file.read`. */
+export interface FileChunk {
+  state: FileState;
+  /**
+   * The whole file's size in bytes. It is the same in every piece of one reading: when it differs,
+   * the file changed meanwhile, and the client reads it again from the start.
+   */
+  size: number;
+  /** Where this piece starts. */
+  offset: number;
+  /**
+   * Standard base64, padded, of at most {@link MAX_FILE_CHUNK} bytes of the file. Absent unless
+   * `state` is `text`, and for a piece of no bytes. A piece may end inside a character: join the
+   * pieces before reading them as UTF-8.
+   */
+  data?: string;
+  /** Nothing comes after this piece. */
+  done: boolean;
+}
+
+/** A path in a reply: one a request could give back. */
+const insidePath: Decoder<string> = (value, path) => {
+  const inside = text()(value, path);
+  if (pathInvalid(inside)) throw new DecodeError(path, "is not a path inside the workspace");
+  return inside;
+};
+
+/** A list of files held to {@link MAX_LISTED_BYTES} of path, as a computer cuts one. */
+function listed<T>(item: Decoder<T>, bytes: (item: T) => number): Decoder<T[]> {
+  const list = array(item);
+  return (value, path) => {
+    const items = list(value, path);
+    let total = 0;
+    for (const one of items) total += bytes(one);
+    if (total > MAX_LISTED_BYTES) throw new DecodeError(path, "lists more than a reply carries");
+    return items;
+  };
+}
+
+const changedFiles = listed(
+  object({
+    path: insidePath,
+    // A computer may say an empty one, which is none.
+    oldPath: optional((value, path) => (value === "" ? "" : insidePath(value, path))),
+    kind: oneOf(CHANGE_KINDS, "unknown"),
+    additions: optional(u32),
+    deletions: optional(u32),
+  }),
+  (file) => utf8Length(file.path) + utf8Length(file.oldPath ?? ""),
+);
+
+const workspaceChangesFields = {
+  uncommitted: changedFiles,
+  committed: changedFiles,
+  base: optional((value, path) => {
+    const base = text()(value, path);
+    if (utf8Length(base) > MAX_BRANCH) throw new DecodeError(path, "is not a branch's name");
+    return base;
+  }),
+  more: flag,
+};
+
+/** A folder's entry's name: of a length a file's can be, and nothing that redraws a screen. */
+const entryName: Decoder<string> = (value, path) => {
+  const name = text()(value, path);
+  if (name === "" || utf8Length(name) > 255 || hasControl(name)) {
+    throw new DecodeError(path, "is not a file's name");
+  }
+  return name;
+};
+
+const fileListFields = {
+  entries: listed(object({ name: entryName, dir: flag }), (entry) => utf8Length(entry.name)),
+  more: flag,
+};
+
+const fileChunkFields = {
+  state: oneOf(FILE_STATES, "unknown"),
+  size: u64,
+  offset: u64,
+  data: nonEmpty(text(Math.ceil(MAX_FILE_CHUNK / 3) * 4)),
+  done: bool,
+};
+
 /** Everything a client can ask a host: `op` names it, `params` carries its parameters. */
 export type Operation =
   | { op: "host.describe" }
@@ -1203,7 +1393,10 @@ export type Operation =
   | { op: "shell.start"; params: { workspace: WorkspaceId } }
   | { op: "workspace.rename"; params: WorkspaceRenameParams }
   | { op: "workspace.archive"; params: WorkspaceRemoveParams }
-  | { op: "workspace.delete"; params: WorkspaceRemoveParams };
+  | { op: "workspace.delete"; params: WorkspaceRemoveParams }
+  | { op: "workspace.changes"; params: { workspace: WorkspaceId } }
+  | { op: "workspace.files"; params: WorkspaceFilesParams }
+  | { op: "file.read"; params: FileReadParams };
 
 export type OperationName = Operation["op"];
 
@@ -1242,6 +1435,9 @@ export const OPERATIONS: readonly OperationName[] = [
   "workspace.rename",
   "workspace.archive",
   "workspace.delete",
+  "workspace.changes",
+  "workspace.files",
+  "file.read",
 ];
 
 const leaseRefFields = { terminal: id<TerminalId>(), lease: id<LeaseId>(), generation: u64 };
@@ -1342,6 +1538,15 @@ const params: Record<string, Decoder<unknown>> = {
   "workspace.rename": object({ workspace: id<WorkspaceId>(), name: text() }),
   "workspace.archive": object(workspaceRemoveFields),
   "workspace.delete": object(workspaceRemoveFields),
+  "workspace.changes": object({ workspace: id<WorkspaceId>() }),
+  "workspace.files": object({ workspace: id<WorkspaceId>(), dir: nonEmpty(text()) }),
+  "file.read": object({
+    workspace: id<WorkspaceId>(),
+    path: text(),
+    oldPath: optional(text()),
+    of: oneOf(FILE_SIDES),
+    offset: orElse(u64, () => 0),
+  }),
 };
 
 /** The scope a caller needs for an operation. `null` for `host.describe`, which any grant may ask. */
@@ -1462,6 +1667,17 @@ export function validate(operation: Operation): string | null {
       return cloneInvalid(operation.params);
     case "workspace.rename":
       return workspaceNameInvalid(operation.params.name);
+    case "workspace.files": {
+      const { dir } = operation.params;
+      // No folder, or an empty one, is the workspace's root.
+      return dir === undefined || dir === "" ? null : pathInvalid(dir);
+    }
+    case "file.read": {
+      const { path, oldPath, offset } = operation.params;
+      const invalid = pathInvalid(path) ?? (oldPath === undefined ? null : pathInvalid(oldPath));
+      if (invalid) return invalid;
+      return offset > MAX_FILE ? "starts past the end of any file a computer sends" : null;
+    }
     default:
       return null;
   }
@@ -1554,6 +1770,22 @@ function cloneInvalid(params: ProjectCloneParams): string | null {
   return null;
 }
 
+/**
+ * A path as a request may give one: relative, within bounds, and never one that climbs out.
+ * Whether it stays inside the workspace on disk, links included, is the computer's to check.
+ */
+function pathInvalid(path: string): string | null {
+  return path === "" ||
+    utf8Length(path) > MAX_PATH ||
+    /^[/\\-]/.test(path) ||
+    hasControl(path) ||
+    // A drive's letter, on a computer that has drives: its second byte, as Rust reads it.
+    (path.charCodeAt(0) < 0x80 && path.charAt(1) === ":") ||
+    path.split(/[/\\]/).some((part) => part === ".." || part === "")
+    ? "names no path inside the workspace"
+    : null;
+}
+
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /** Whether a piece of an upload is padded standard base64 of 1 byte to {@link MAX_UPLOAD_CHUNK}. */
@@ -1633,6 +1865,9 @@ export type Reply =
   | ({ kind: "conversation" } & ConversationPage)
   | ({ kind: "branches" } & ProjectBranches)
   | ({ kind: "cloned" } & ProjectCloned)
+  | ({ kind: "changes" } & WorkspaceChanges)
+  | ({ kind: "files" } & FileList)
+  | ({ kind: "file" } & FileChunk)
   | { kind: "done" };
 
 export const reply: Decoder<Reply> = tagged<Reply>("kind", {
@@ -1663,6 +1898,9 @@ export const reply: Decoder<Reply> = tagged<Reply>("kind", {
   conversation: variant("kind", "conversation", conversationPageFields),
   branches: variant("kind", "branches", projectBranchesFields),
   cloned: variant("kind", "cloned", { project: id<ProjectId>(), name: text(MAX_TEXT) }),
+  changes: variant("kind", "changes", workspaceChangesFields),
+  files: variant("kind", "files", fileListFields),
+  file: variant("kind", "file", fileChunkFields),
   done: variant("kind", "done", {}),
 });
 

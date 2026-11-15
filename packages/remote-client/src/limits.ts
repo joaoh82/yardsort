@@ -8,11 +8,8 @@
 
 /** The major this client speaks. */
 export const PROTOCOL_MAJOR = 1;
-/**
- * The minor this client speaks: 10, a start that says a name, a model, an effort and a branch, and
- * looking after projects and workspaces.
- */
-export const PROTOCOL_MINOR = 10;
+/** The minor this client speaks: 11, reading a workspace's changes and files. */
+export const PROTOCOL_MINOR = 11;
 
 /** The largest JSON message either side reads, in bytes. */
 export const MAX_CONTROL_FRAME = 64 * 1024;
@@ -105,3 +102,15 @@ export const MAX_BRANCHES = 100;
 export const MAX_REMOTE = 512;
 /** Longest name a clone may be given, in bytes. Minor 10. */
 export const MAX_PROJECT_NAME = 100;
+
+/** Longest path inside a workspace a request or a reply carries, in bytes. Minor 11. */
+export const MAX_PATH = 1024;
+/** The largest file a computer sends, in bytes: what its own window shows. Minor 11. */
+export const MAX_FILE = 1024 * 1024;
+/** The most one `file.read` reply carries, in bytes before base64. Minor 11. */
+export const MAX_FILE_CHUNK = 32 * 1024;
+/**
+ * How much of a list of paths one reply carries, in bytes of path. A list cut short says so with
+ * `more`. Minor 11.
+ */
+export const MAX_LISTED_BYTES = 40 * 1024;

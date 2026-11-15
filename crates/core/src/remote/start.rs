@@ -81,6 +81,20 @@ pub trait Starting: Send + Sync {
     /// Remove `workspace`, keeping its branch. Without `force`, uncommitted work fails it with
     /// `worktree_dirty`.
     fn delete(&self, workspace: &str, force: bool) -> IpcResult<()>;
+    /// What changed in `workspace`: uncommitted, and committed on its branch.
+    fn changes(&self, workspace: &str) -> IpcResult<crate::changes::ChangeSet>;
+    /// One folder of `workspace`'s file tree, without `.git` and what Git ignores. `dir` is
+    /// inside the workspace; empty for its root.
+    fn files(&self, workspace: &str, dir: &str) -> IpcResult<Vec<crate::file_tree::FileEntry>>;
+    /// A file of `workspace`, on disk or on one side of a change. `path` is inside the
+    /// workspace, and nothing outside it is read.
+    fn content(
+        &self,
+        workspace: &str,
+        path: &str,
+        old_path: Option<&str>,
+        of: remote_proto::FileOf,
+    ) -> IpcResult<crate::changes::Content>;
     /// Another agent in `workspace`.
     fn session(
         &self,
@@ -242,6 +256,67 @@ impl Starter<'_> {
 
     pub fn delete(&self, workspace: &str, force: bool) -> IpcResult<()> {
         self.workspaces().delete(workspace, force)
+    }
+
+    /// A workspace's folder, when it is there.
+    fn folder(&self, workspace: &str) -> IpcResult<(crate::store::WorkspaceRow, PathBuf)> {
+        let row = self.store.workspace(workspace)?.ok_or_else(|| {
+            IpcError::new("unknown_workspace", "That workspace no longer exists.")
+        })?;
+        let root = PathBuf::from(&row.path);
+        if !root.is_dir() {
+            return Err(IpcError::new(
+                "workspace_missing",
+                "That workspace's folder is gone.",
+            ));
+        }
+        Ok((row, root))
+    }
+
+    pub fn changes(&self, workspace: &str) -> IpcResult<crate::changes::ChangeSet> {
+        let (row, root) = self.folder(workspace)?;
+        crate::changes::Changes {
+            git: self.git,
+            root: &root,
+            base_branch: row.base_branch.as_deref(),
+        }
+        .list()
+    }
+
+    pub fn files(&self, workspace: &str, dir: &str) -> IpcResult<Vec<crate::file_tree::FileEntry>> {
+        let (_, root) = self.folder(workspace)?;
+        crate::file_tree::list_dir(&root, dir, false)
+    }
+
+    pub fn content(
+        &self,
+        workspace: &str,
+        path: &str,
+        old_path: Option<&str>,
+        of: remote_proto::FileOf,
+    ) -> IpcResult<crate::changes::Content> {
+        use crate::changes::Scope;
+        use remote_proto::FileOf;
+        let (row, root) = self.folder(workspace)?;
+        if of == FileOf::Working {
+            return crate::changes::read_working_file(&root, path);
+        }
+        let scope = if of == FileOf::UncommittedOld {
+            Scope::Uncommitted
+        } else {
+            Scope::Committed
+        };
+        let diff = crate::changes::Changes {
+            git: self.git,
+            root: &root,
+            base_branch: row.base_branch.as_deref(),
+        }
+        .diff(path, old_path, scope)?;
+        Ok(if of == FileOf::CommittedNew {
+            diff.new
+        } else {
+            diff.old
+        })
     }
 
     pub fn definitions(&self) -> Vec<HarnessDef> {
@@ -486,6 +561,14 @@ pub fn start_error(error: &IpcError) -> remote_proto::RemoteError {
             "That branch is not in the project on the computer.",
         ),
         "unknown_project" => RemoteError::not_found(),
+        "bad_path" => RemoteError::new(
+            ErrorCode::InvalidRequest,
+            "That is not a path inside the workspace.",
+        ),
+        "not_a_directory" => RemoteError::new(
+            ErrorCode::InvalidRequest,
+            "That is not a folder in the workspace.",
+        ),
         "worktree_dirty" => RemoteError::new(
             ErrorCode::UncommittedWork,
             "This workspace has uncommitted changes, which would be lost.",

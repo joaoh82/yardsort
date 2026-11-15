@@ -658,6 +658,52 @@ impl Starting for Stand {
         self.note(format!("delete {workspace} {force}"));
         self.unless_dirty(force)
     }
+    fn changes(&self, workspace: &str) -> IpcResult<yardsort_core::changes::ChangeSet> {
+        self.note(format!("changes {workspace}"));
+        Ok(yardsort_core::changes::ChangeSet {
+            uncommitted: vec![yardsort_core::changes::FileChange {
+                path: "src/big.txt".into(),
+                old_path: None,
+                kind: yardsort_core::changes::ChangeKind::Modified,
+                additions: Some(3),
+                deletions: Some(1),
+            }],
+            committed: vec![],
+            base: Some("main".into()),
+        })
+    }
+    fn files(
+        &self,
+        workspace: &str,
+        dir: &str,
+    ) -> IpcResult<Vec<yardsort_core::file_tree::FileEntry>> {
+        self.note(format!("files {workspace} {dir:?}"));
+        Ok(vec![yardsort_core::file_tree::FileEntry {
+            name: "big.txt".into(),
+            path: "src/big.txt".into(),
+            is_dir: false,
+            ignored: false,
+        }])
+    }
+    fn content(
+        &self,
+        _workspace: &str,
+        path: &str,
+        _old_path: Option<&str>,
+        of: remote_proto::FileOf,
+    ) -> IpcResult<yardsort_core::changes::Content> {
+        use yardsort_core::changes::Content;
+        Ok(match (path, of) {
+            // Larger than one piece carries, and with a character that a piece may split.
+            ("src/big.txt", remote_proto::FileOf::Working) => Content::Text {
+                text: "é".repeat(40_000),
+            },
+            ("src/big.txt", _) => Content::Absent,
+            ("logo.png", _) => Content::Binary,
+            ("huge.log", _) => Content::TooLarge { bytes: 5_000_000 },
+            _ => return Err(IpcError::new("bad_path", "/home/someone/w is outside")),
+        })
+    }
     fn session(
         &self,
         workspace: &str,
@@ -911,6 +957,52 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
             "clone https://example.com/acme/private.git None".to_owned(),
         ]
     );
+    // Since minor 11: what changed there, its tree, and a file put together from its pieces.
+    use remote_host::computer::look;
+    let changed = look::changes(&desk, host, &workspace.id).await.unwrap();
+    assert_eq!(changed.uncommitted[0].path, "src/big.txt");
+    assert_eq!(changed.base.as_deref(), Some("main"));
+    let tree = look::files(&desk, host, &workspace.id, "src")
+        .await
+        .unwrap();
+    assert_eq!(tree.entries[0].name, "big.txt");
+    let read = |path: &'static str, of| look::file(&desk, host, &workspace.id, path, None, of);
+    let big = read("src/big.txt", remote_proto::FileOf::Working)
+        .await
+        .unwrap();
+    assert_eq!(big.state, remote_proto::FileState::Text);
+    // 80 000 bytes: three pieces, the first two ending inside a character.
+    assert_eq!(String::from_utf8(big.bytes).unwrap(), "é".repeat(40_000));
+    let before = read("src/big.txt", remote_proto::FileOf::UncommittedOld)
+        .await
+        .unwrap();
+    assert_eq!(before.state, remote_proto::FileState::Absent);
+    let picture = read("logo.png", remote_proto::FileOf::Working)
+        .await
+        .unwrap();
+    assert_eq!(picture.state, remote_proto::FileState::Binary);
+    assert!(picture.bytes.is_empty());
+    let huge = read("huge.log", remote_proto::FileOf::Working)
+        .await
+        .unwrap();
+    assert_eq!(
+        (huge.state, huge.size),
+        (remote_proto::FileState::TooLarge, 5_000_000)
+    );
+    // A path the host refuses is refused in its own words, without its folders; one that climbs
+    // out is refused by this computer's client, and never sent.
+    let climbing = read("../up.txt", remote_proto::FileOf::Working)
+        .await
+        .unwrap_err();
+    assert_eq!(climbing.code, "remote_failed");
+    let outside = read("elsewhere.txt", remote_proto::FileOf::Working)
+        .await
+        .unwrap_err();
+    assert_eq!(outside.code, "remote_refused");
+    assert!(!outside.message.contains("/home"), "{}", outside.message);
+    assert!(read("../up.txt", remote_proto::FileOf::Working)
+        .await
+        .is_err());
     for terminal in here.terminals.list() {
         let _ = here.terminals.kill(&terminal.id);
     }

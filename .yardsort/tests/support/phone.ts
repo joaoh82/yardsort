@@ -257,6 +257,30 @@ switch (doing) {
     channel.close();
     break;
   }
+  case "cannot-read": {
+    // A phone let only watch: the changes and the files of a workspace are not its to read.
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    const workspace = (await channel.workspaces()).workspaces.find((w) => w.name === "smoke");
+    if (!workspace) throw new Error("The workspace is not on the phone.");
+    const refusal = (attempt: Promise<unknown>) =>
+      attempt.then(
+        () => {
+          throw new Error("It was let.");
+        },
+        (error: { code?: string }) => {
+          if (error.code !== "forbidden") throw error;
+        },
+      );
+    await refusal(channel.changes(workspace.id));
+    await refusal(channel.files({ workspace: workspace.id, dir: "" }));
+    await refusal(
+      channel.readFile({ workspace: workspace.id, path: "README.md", of: "working", offset: 0 }),
+    );
+    console.log("refused: reading its changes and its files");
+    channel.close();
+    break;
+  }
   case "ends": {
     const phone = await session();
     const channel = await reach(phone, await theComputer(phone));

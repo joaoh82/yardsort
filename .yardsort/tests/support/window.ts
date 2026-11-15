@@ -706,6 +706,95 @@ switch (doing) {
     console.log(`saw: ${String(asked)}`);
     break;
   }
+  case "reads-changes-there": {
+    // Here the last arguments are the host's name, one of its workspaces, and a word its changed
+    // file must hold. The right panel lists what changed there, opens the change, and lists its
+    // files without what Git ignores; nothing in it writes.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    const word = process.argv[6] as string;
+    await openThere(name, workspace);
+    const panel = `aside[aria-label="Changes"]`;
+    await until("its changed files", async () => {
+      const said = await textOf(panel);
+      return said.includes("README.md") && said.includes("notes.txt");
+    });
+    console.log("saw: README.md and notes.txt among its changes");
+    const row = `${panel} section[aria-label="Uncommitted"] button[title="README.md"]`;
+    await until("the change opened", () =>
+      page(`(() => {
+        const button = document.querySelector(${JSON.stringify(row)});
+        button?.click();
+        return Boolean(button);
+      })()`),
+    );
+    await until(
+      `its diff, with ${word}`,
+      async () => (await textOf(`${panel} section[aria-label="Viewing README.md"]`)).includes(word),
+      60_000,
+    );
+    console.log(`saw: the change to README.md, with ${word}`);
+    const writes = await page(
+      `[...document.querySelectorAll(${JSON.stringify(`${panel} button, ${panel} textarea, ${panel} input`)})].map((b) => (b.getAttribute("aria-label") ?? b.textContent ?? "").trim()).filter((t) => /commit|push|edit|save|pull request/i.test(t)).join(",")`,
+    );
+    if (writes !== "") throw new Error(`The panel offers something that writes: ${String(writes)}`);
+    console.log("saw: nothing in the panel that writes");
+    break;
+  }
+  case "reads-files-there": {
+    // Here the last argument is the host's name. With its workspace in view: the Files tab lists
+    // its tree, a folder when it is opened, and leaves out `.git` and what Git ignores there.
+    const name = runDir as string;
+    const panel = `aside[aria-label="Changes"]`;
+    await until("the Files tab", () =>
+      page(`(() => {
+        const tab = [...document.querySelectorAll(${JSON.stringify(`${panel} [role="tab"]`)})].find((t) => t.textContent.trim() === "Files");
+        tab?.click();
+        return Boolean(tab);
+      })()`),
+    );
+    const tree = `${panel} [role="tree"][aria-label="Files"]`;
+    await until("its tree", async () => (await textOf(tree)).includes("README.md"));
+    const listed = await textOf(tree);
+    for (const hidden of [".git", "secret.env"]) {
+      if (listed.replace(".gitignore", "").includes(hidden))
+        throw new Error(`The tree lists ${hidden}: ${listed}`);
+    }
+    await until("the folder opened", () =>
+      page(`(() => {
+        const folder = document.querySelector(${JSON.stringify(`${tree} [role="treeitem"][aria-label="docs"] > button`)});
+        folder?.click();
+        return Boolean(folder);
+      })()`),
+    );
+    await until("what is in it", async () => (await textOf(tree)).includes("guide.md"));
+    console.log(`saw: the files of the workspace on ${name}, a folder opened, nothing ignored`);
+    break;
+  }
+  case "outside-there": {
+    // Here the last arguments are the host's name, one of its workspaces, and a path. The core
+    // is asked for that file as the panel asks: one outside the workspace is refused there.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    const path = process.argv[6] as string;
+    await page(`void (window.__read = "", (async () => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const status = await invoke("other_computers");
+      const host = status.hosts.find((h) => h.name === ${JSON.stringify(name)});
+      const view = await invoke("other_host", { hostId: host.hostId });
+      const found = view.projects.flatMap((p) => p.workspaces).find((w) => w.name === ${JSON.stringify(workspace)});
+      if (!found) return "no such workspace";
+      try {
+        const file = await invoke("other_host_file", { hostId: host.hostId, workspaceId: found.id, path: ${JSON.stringify(path)} });
+        return "read: " + file.type;
+      } catch (error) {
+        return "refused: " + error.code;
+      }
+    })().then((outcome) => { window.__read = outcome; }, (error) => { window.__read = "failed: " + String(error); }))`);
+    const asked = await until("that computer's answer", () => page(`window.__read ?? ""`));
+    console.log(`saw: ${path} ${String(asked)}`);
+    break;
+  }
   default:
     throw new Error(`Nothing called ${doing}.`);
 }

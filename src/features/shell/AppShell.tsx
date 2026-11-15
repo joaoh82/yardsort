@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { ChangesPanel } from "@/features/changes/ChangesPanel";
+import { RemoteChangesPanel } from "@/features/remote/RemoteChangesPanel";
 import { FloorManagerConfirmations } from "@/features/coordinator/Confirmations";
 import { FloorManagerPanel } from "@/features/coordinator/FloorManager";
 import { CommandPalette } from "@/features/keyboard/CommandPalette";
@@ -47,7 +48,8 @@ export function AppShell() {
   const floorOpen = useCoordinatorStore((s) => s.open);
   useUpdateChecks();
   const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen);
-  const thereHostId = useProjectsStore((s) => (s.remote ?? s.composingThere)?.hostId ?? null);
+  const remote = useProjectsStore((s) => s.remote);
+  const composingOn = useProjectsStore((s) => s.composingThere?.hostId ?? null);
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "yardsort.shell",
@@ -137,7 +139,17 @@ export function AppShell() {
           onResize={syncFromPanel("right")}
         >
           <div data-navigation="Changes" tabIndex={-1} className="h-full">
-            {thereHostId ? <ChangesThere hostId={thereHostId} /> : <ChangesPanel />}
+            {remote ? (
+              <RemoteChangesPanel
+                key={`${remote.hostId}/${remote.workspaceId}`}
+                hostId={remote.hostId}
+                workspaceId={remote.workspaceId}
+              />
+            ) : composingOn ? (
+              <ComposingThere hostId={composingOn} />
+            ) : (
+              <ChangesPanel />
+            )}
           </div>
         </Panel>
       </Group>
@@ -157,19 +169,19 @@ export function AppShell() {
 }
 
 /**
- * In place of Changes while a workspace on another computer is open: its files are not this
- * computer's, and nothing of them crosses to it yet. The panel keeps its place and says so.
+ * In place of Changes while a workspace is being composed on another computer: there is nothing
+ * to show of it yet, and this computer's own selection is not what is in view.
  */
-function ChangesThere({ hostId }: { hostId: string }) {
+function ComposingThere({ hostId }: { hostId: string }) {
   const name = useOtherComputersStore(
     (s) => s.views[hostId]?.name || s.status?.hosts.find((h) => h.hostId === hostId)?.name,
   );
   return (
     <aside aria-label="Changes" className="h-full bg-surface p-4">
-      <p className="text-ink-muted">Changes and files stay on {name ?? "that computer"}.</p>
-      <p className="mt-2 text-detail text-ink-faint">
-        This computer shows what runs there: its workspaces, agents and terminals.
+      <p className="text-ink-muted">
+        The new workspace&rsquo;s changes and files will be on {name ?? "that computer"}.
       </p>
+      <p className="mt-2 text-detail text-ink-faint">They are read from it once it is open.</p>
     </aside>
   );
 }

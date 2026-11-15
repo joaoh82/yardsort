@@ -182,6 +182,15 @@ export function unlessEmpty<T>(item: Decoder<T>, max?: number): Optional<T[]> {
   );
 }
 
+/** A string Rust leaves out when it is empty: absent or empty reads as absent. */
+export function nonEmpty(decoder: Decoder<string>): Optional<string> {
+  return Object.assign(
+    (value: unknown, path: string) =>
+      value === undefined ? undefined : decoder(value, path) || undefined,
+    { [OPTIONAL]: true as const },
+  );
+}
+
 /** A field Rust always writes, `null` when empty. Absent reads as `null`. */
 export function nullable<T>(decoder: Decoder<T>): Decoder<T | null> {
   return (value, path) => (value === undefined || value === null ? null : decoder(value, path));

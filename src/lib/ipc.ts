@@ -134,6 +134,8 @@ import {
   type OtherHost,
   type LocalRepository,
   type OtherBranches,
+  type OtherChanges,
+  type OtherFiles,
   type OtherCloned,
   type OtherHarness,
   type OtherNewWorkspace,
@@ -323,7 +325,9 @@ export type {
   OtherHost,
   LocalRepository,
   OtherBranches,
+  OtherChanges,
   OtherCloned,
+  OtherFiles,
   OtherHarness,
   OtherNewWorkspace,
   ProjectsDir,
@@ -924,6 +928,24 @@ export const ipc = {
     remove: boolean,
     force: boolean,
   ) => done(commands.otherHostRemoveWorkspace(hostId, workspaceId, remove, force)),
+  /**
+   * Reading a workspace on another computer: what changed in it, a folder of its file tree, both
+   * sides of a change, and a file as it is on its disk. Each is read from that computer when
+   * asked, by a path inside the workspace, and nothing is kept here.
+   */
+  otherHostChanges: (hostId: string, workspaceId: string) =>
+    unwrap(commands.otherHostChanges(hostId, workspaceId)),
+  otherHostFiles: (hostId: string, workspaceId: string, dir: string) =>
+    unwrap(commands.otherHostFiles(hostId, workspaceId, dir)),
+  otherHostDiff: (
+    hostId: string,
+    workspaceId: string,
+    path: string,
+    oldPath: string | null,
+    scope: Scope,
+  ) => unwrap(commands.otherHostDiff(hostId, workspaceId, path, oldPath, scope)),
+  otherHostFile: (hostId: string, workspaceId: string, path: string) =>
+    unwrap(commands.otherHostFile(hostId, workspaceId, path)),
   /** Which repository one of this computer's projects is, to offer the same one elsewhere. */
   projectRepository: (projectId: string) => unwrap(commands.projectRepository(projectId)),
   /** Where a repository another device has this computer clone goes. */

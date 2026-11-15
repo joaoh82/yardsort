@@ -123,3 +123,11 @@ explorer**. Yardsort asks your system's file manager (Finder on macOS, Explorer 
 reveal it. If the file has been deleted, its nearest existing parent folder opens instead.
 Paths outside the workspace, including symlinks pointing outside it, are refused. Press
 **Escape** or click elsewhere to dismiss the menu.
+
+## A workspace on another computer
+
+When the workspace in view is on [another computer](remote.md#reaching-another-computer), this
+panel shows that computer's changes and files, read from it when you look and not kept here.
+**Changes** and **Files** work as above, without the parts that write: no commit box, no editor,
+no **Edit ↗**, no publishing and no file explorer. See
+[Its changes and files](remote.md#reaching-another-computer).

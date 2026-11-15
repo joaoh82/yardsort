@@ -81,6 +81,13 @@ a device let into only some of your projects cannot clone. Archiving and deletin
 and a workspace with uncommitted work is refused until the person at the other computer has been
 asked a second time. A device you let only watch can do none of this.
 
+Such a computer can also read a workspace's changes and files here: which files changed, the file
+tree without what Git ignores, and the text of a file inside the workspace, up to 1 MB. It is a
+path inside the workspace that is asked for, checked here, links included, and nothing outside a
+workspace is answered. It is what the same device could read by typing `git diff` or `cat` into a
+terminal, so it comes with letting it type and not with a permission of its own. What is read
+passes through the server as terminal output does: carried, and not kept.
+
 - **New workspace**, on a computer's screen, asks for the project, the agent and what it should do. This
   computer makes the workspace as its [composer](workspaces.md#starting-one-the-composer) does: a branch
   named after the message, from the project's default branch, with the project's setup run, and the
@@ -222,8 +229,20 @@ filters this list too, by a computer's name or a project's. The **+** beside the
 opens. The bar across the top names the computer and says how it stands; the tabs are that
 workspace's agents and other terminals; the bottom line says the computer, the project, the
 workspace and its branch. While the other computer is away, it keeps what it last showed and says
-when that was. The right panel says that its changes and files stay on that computer: there is no
-Changes panel, no Git action and no file for another computer's workspace yet.
+when that was.
+
+**Its changes and files.** The right panel shows them as it shows a local workspace's, read from
+that computer when you look: **Changes** lists what is uncommitted and what is on its branch, and
+a file there opens as a diff, inline or side by side; **Files** is its file tree, a folder listed
+when you open it, and a file opens as text. It is read-only. There is no commit box, no editor and
+nothing to publish from here yet, and nothing read is kept on this computer. The panel reads again
+whenever this computer reads that one again, which is when something happens there and every 20
+seconds otherwise.
+
+What it does not show: files Git ignores there, and `.git`, are not in the tree; a picture or any
+other file that is not text is said to be binary; a file over 1 MB is said to be too large. The
+panel needs that computer to let this one type, and Yardsort 0.35.0 there. Otherwise it keeps its
+place and says why it is empty.
 
 **Who has control.** A terminal there shows what it shows on that computer, at its size there, and
 the bar says who has control: nobody, the person at that computer, or a device by its name. Watching

@@ -23,14 +23,15 @@ use remote_proto::terminal::FrameError;
 use remote_proto::{
     AcquireRequest, ActivityBatch, ActivityListParams, ActivityPage, ActivitySubscribeParams,
     ActivityUnsubscribeParams, AttachRequest, AttachStart, Attached, Controller, Cursor,
-    DetachRequest, ErrorCode, Event, HarnessSummary, Hello, HelloReply, HostDescription, HostId,
-    InputRequest, Lease, LeaseRef, Operation, OutputFrame, ProgramExit, ProjectBranches,
-    ProjectCloneParams, ProjectCloned, ProjectRef, ProtocolVersion, RemoteError, Reply, Request,
-    RequestId, ResizeRequest, Response, SessionListParams, SessionPage, SessionResumeParams,
-    SessionStartParams, ShellStartParams, Started, StreamId, StreamPosition, SubscriptionId,
-    TermSize, TerminalId, WorkspaceDetail, WorkspaceId, WorkspaceListParams, WorkspacePage,
-    WorkspaceRef, WorkspaceRemoveParams, WorkspaceRenameParams, WorkspaceStartParams,
-    MAX_CLIENT_NAME, MAX_CONTROL_FRAME, MAX_OUTPUT_CHUNK, PROTOCOL_MAJOR,
+    DetachRequest, ErrorCode, Event, FileChunk, FileList, FileReadParams, HarnessSummary, Hello,
+    HelloReply, HostDescription, HostId, InputRequest, Lease, LeaseRef, Operation, OutputFrame,
+    ProgramExit, ProjectBranches, ProjectCloneParams, ProjectCloned, ProjectRef, ProtocolVersion,
+    RemoteError, Reply, Request, RequestId, ResizeRequest, Response, SessionListParams,
+    SessionPage, SessionResumeParams, SessionStartParams, ShellStartParams, Started, StreamId,
+    StreamPosition, SubscriptionId, TermSize, TerminalId, WorkspaceChanges, WorkspaceDetail,
+    WorkspaceFilesParams, WorkspaceId, WorkspaceListParams, WorkspacePage, WorkspaceRef,
+    WorkspaceRemoveParams, WorkspaceRenameParams, WorkspaceStartParams, MAX_CLIENT_NAME,
+    MAX_CONTROL_FRAME, MAX_OUTPUT_CHUNK, PROTOCOL_MAJOR,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -316,6 +317,88 @@ impl Channel {
         done(self.ask(Operation::WorkspaceDelete(params)).await?)
     }
 
+    /// What changed in a workspace. Minor 11.
+    pub async fn changes(&self, workspace: WorkspaceId) -> Result<WorkspaceChanges> {
+        match self
+            .ask(Operation::WorkspaceChanges(WorkspaceRef { workspace }))
+            .await?
+        {
+            Reply::Changes(changes) => Ok(changes),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// One folder of a workspace's file tree. Minor 11.
+    pub async fn files(&self, params: WorkspaceFilesParams) -> Result<FileList> {
+        match self.ask(Operation::WorkspaceFiles(params)).await? {
+            Reply::Files(files) => Ok(files),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// One piece of a file in a workspace. Minor 11.
+    pub async fn read_file(&self, params: FileReadParams) -> Result<FileChunk> {
+        match self.ask(Operation::FileRead(params)).await? {
+            Reply::File(chunk) => Ok(chunk),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// A whole file in a workspace, read piece by piece and put together. A file that changes
+    /// while it is read is read again from the start, a few times at most. Minor 11.
+    pub async fn whole_file(&self, first: FileReadParams) -> Result<WholeFile> {
+        use base64::Engine;
+        let broken = |why: &str| ChannelError::Unexpected(why.into());
+        'reading: for _ in 0..3 {
+            let mut bytes: Vec<u8> = Vec::new();
+            let mut size = None;
+            loop {
+                let chunk = self
+                    .read_file(FileReadParams {
+                        offset: bytes.len() as u64,
+                        ..first.clone()
+                    })
+                    .await?;
+                if chunk.state != remote_proto::FileState::Text {
+                    return Ok(WholeFile {
+                        state: chunk.state,
+                        size: chunk.size,
+                        bytes: Vec::new(),
+                    });
+                }
+                if chunk.size > remote_proto::MAX_FILE || chunk.offset != bytes.len() as u64 {
+                    return Err(broken("the computer sent a piece that does not fit"));
+                }
+                // Another size than a moment ago: it was written to meanwhile.
+                if size.is_some_and(|before| before != chunk.size) {
+                    continue 'reading;
+                }
+                size = Some(chunk.size);
+                let piece = base64::engine::general_purpose::STANDARD
+                    .decode(&chunk.data)
+                    .map_err(|_| broken("the computer sent a piece that is not base64"))?;
+                if piece.len() > remote_proto::MAX_FILE_CHUNK
+                    || bytes.len() + piece.len() > chunk.size as usize
+                    || (piece.is_empty() && !chunk.done)
+                {
+                    return Err(broken("the computer sent a piece that does not fit"));
+                }
+                bytes.extend_from_slice(&piece);
+                if chunk.done {
+                    if bytes.len() as u64 != chunk.size {
+                        continue 'reading;
+                    }
+                    return Ok(WholeFile {
+                        state: chunk.state,
+                        size: chunk.size,
+                        bytes,
+                    });
+                }
+            }
+        }
+        Err(broken("the file kept changing while it was read"))
+    }
+
     pub async fn activity(&self, params: ActivityListParams) -> Result<ActivityPage> {
         match self.ask(Operation::ActivityList(params)).await? {
             Reply::Activity(page) => Ok(page),
@@ -402,6 +485,16 @@ fn started(reply: Reply) -> Result<Started> {
         Reply::Started(started) => Ok(started),
         _ => Err(something_else()),
     }
+}
+
+/// A file read whole from a host: its bytes when it is text, or why it was not sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WholeFile {
+    pub state: remote_proto::FileState,
+    /// Its size on the host, also when it was not sent.
+    pub size: u64,
+    /// Empty unless `state` is text.
+    pub bytes: Vec<u8>,
 }
 
 fn done(reply: Reply) -> Result<()> {

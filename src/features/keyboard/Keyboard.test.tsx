@@ -101,6 +101,7 @@ const there: OtherHostView = {
   mayStart: true,
   mayResume: true,
   mayManage: false,
+  mayLook: false,
   readAt: 1,
   platform: "Linux",
   appVersion: "0.34.1",

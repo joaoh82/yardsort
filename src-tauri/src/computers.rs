@@ -164,6 +164,9 @@ pub struct OtherHostView {
     /// may clone a project there, start a shell, and rename, archive and delete a workspace: it
     /// may type, and that computer's Yardsort is new enough.
     pub may_manage: bool,
+    /// Whether this computer may read that computer's changes and files: it may type, and that
+    /// computer's Yardsort is new enough.
+    pub may_look: bool,
     /// When it was last read; `None` until it has been.
     pub read_at: Option<f64>,
     pub platform: Option<String>,
@@ -383,6 +386,7 @@ fn view(host_id: &str, name: String, view: HostView, may_type: bool) -> OtherHos
             may_start: false,
             may_resume: false,
             may_manage: false,
+            may_look: false,
             read_at: None,
             platform: None,
             app_version: None,
@@ -493,6 +497,7 @@ fn view(host_id: &str, name: String, view: HostView, may_type: bool) -> OtherHos
         may_start: answers(computer::start::START),
         may_resume: answers(computer::start::RESUME),
         may_manage: answers(computer::start::MANAGE),
+        may_look: answers(computer::look::LOOK),
         link: link(&view.link),
         may_type,
         read_at: Some(shown.read_at_ms as f64),
@@ -838,6 +843,174 @@ pub async fn other_host_remove_workspace(
     computer::start::remove(&home(&app), &host_id, &workspace_id, remove, force)
         .await
         .map_err(ipc)
+}
+
+/// What changed in a workspace on another computer, as the local panel is given a local one's.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherChanges {
+    pub changes: yardsort_core::changes::ChangeSet,
+    /// That computer listed fewer files than changed.
+    pub more: bool,
+}
+
+/// One folder of a workspace's file tree on another computer.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherFiles {
+    pub entries: Vec<crate::changes::files::FileEntry>,
+    /// That folder holds more than is listed.
+    pub more: bool,
+}
+
+fn change_there(file: remote_proto::ChangedFile) -> yardsort_core::changes::FileChange {
+    use remote_proto::ChangeKind as There;
+    use yardsort_core::changes::ChangeKind as Here;
+    yardsort_core::changes::FileChange {
+        path: file.path,
+        old_path: file.old_path,
+        kind: match file.kind {
+            There::Added => Here::Added,
+            There::Deleted => Here::Deleted,
+            There::Renamed => Here::Renamed,
+            There::Untracked => Here::Untracked,
+            There::Conflicted => Here::Conflicted,
+            // A kind from a newer computer: something about the file changed.
+            There::Modified | There::Unknown => Here::Modified,
+        },
+        additions: file.additions,
+        deletions: file.deletions,
+    }
+}
+
+/// What a file read from another computer is, as the viewer takes a local one.
+fn content_there(file: remote_client::channel::WholeFile) -> yardsort_core::changes::Content {
+    use remote_proto::FileState;
+    use yardsort_core::changes::Content;
+    match file.state {
+        FileState::Text => match String::from_utf8(file.bytes) {
+            Ok(text) => Content::Text { text },
+            Err(_) => Content::Binary,
+        },
+        FileState::Absent => Content::Absent,
+        FileState::Binary => Content::Binary,
+        FileState::TooLarge => Content::TooLarge {
+            bytes: u32::try_from(file.size).unwrap_or(u32::MAX),
+        },
+        FileState::NotShown | FileState::Unknown => Content::NotEditable {
+            reason: "That computer does not show this kind of file.".into(),
+        },
+    }
+}
+
+/// What changed in one of another computer's workspaces: uncommitted, and on its branch.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_changes(
+    app: AppHandle,
+    host_id: String,
+    workspace_id: String,
+) -> IpcResult<OtherChanges> {
+    let listed = computer::look::changes(&home(&app), &host_id, &workspace_id)
+        .await
+        .map_err(ipc)?;
+    Ok(OtherChanges {
+        changes: yardsort_core::changes::ChangeSet {
+            uncommitted: listed.uncommitted.into_iter().map(change_there).collect(),
+            committed: listed.committed.into_iter().map(change_there).collect(),
+            base: listed.base,
+        },
+        more: listed.more,
+    })
+}
+
+/// One folder of the file tree of a workspace on another computer (`dir` is inside it; empty for
+/// its root). What Git ignores there is not listed.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_files(
+    app: AppHandle,
+    host_id: String,
+    workspace_id: String,
+    dir: String,
+) -> IpcResult<OtherFiles> {
+    let listed = computer::look::files(&home(&app), &host_id, &workspace_id, &dir)
+        .await
+        .map_err(ipc)?;
+    Ok(OtherFiles {
+        entries: listed
+            .entries
+            .into_iter()
+            .map(|entry| crate::changes::files::FileEntry {
+                path: if dir.is_empty() {
+                    entry.name.clone()
+                } else {
+                    format!("{dir}/{}", entry.name)
+                },
+                name: entry.name,
+                is_dir: entry.dir,
+                ignored: false,
+            })
+            .collect(),
+        more: listed.more,
+    })
+}
+
+/// Both sides of a changed file in a workspace on another computer.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_diff(
+    app: AppHandle,
+    host_id: String,
+    workspace_id: String,
+    path: String,
+    old_path: Option<String>,
+    scope: yardsort_core::changes::Scope,
+) -> IpcResult<yardsort_core::changes::FileDiff> {
+    use remote_proto::FileOf;
+    use yardsort_core::changes::Scope;
+    let (old, new) = match scope {
+        Scope::Uncommitted => (FileOf::UncommittedOld, FileOf::Working),
+        Scope::Committed => (FileOf::CommittedOld, FileOf::CommittedNew),
+    };
+    let home = home(&app);
+    let side = |of| {
+        computer::look::file(
+            &home,
+            &host_id,
+            &workspace_id,
+            &path,
+            old_path.as_deref(),
+            of,
+        )
+    };
+    let (old, new) = tokio::try_join!(side(old), side(new)).map_err(ipc)?;
+    Ok(yardsort_core::changes::FileDiff {
+        old: content_there(old),
+        new: content_there(new),
+    })
+}
+
+/// A file of a workspace on another computer, as it is on its disk now.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_file(
+    app: AppHandle,
+    host_id: String,
+    workspace_id: String,
+    path: String,
+) -> IpcResult<yardsort_core::changes::Content> {
+    computer::look::file(
+        &home(&app),
+        &host_id,
+        &workspace_id,
+        &path,
+        None,
+        remote_proto::FileOf::Working,
+    )
+    .await
+    .map(content_there)
+    .map_err(ipc)
 }
 
 fn projects_dir(state: &AppState) -> ProjectsDir {

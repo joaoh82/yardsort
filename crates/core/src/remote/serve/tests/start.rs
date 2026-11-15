@@ -120,6 +120,25 @@ impl Starting for Lent {
     fn delete(&self, workspace: &str, force: bool) -> crate::error::IpcResult<()> {
         self.with(|s| s.delete(workspace, force))
     }
+    fn changes(&self, workspace: &str) -> crate::error::IpcResult<crate::changes::ChangeSet> {
+        self.with(|s| s.changes(workspace))
+    }
+    fn files(
+        &self,
+        workspace: &str,
+        dir: &str,
+    ) -> crate::error::IpcResult<Vec<crate::file_tree::FileEntry>> {
+        self.with(|s| s.files(workspace, dir))
+    }
+    fn content(
+        &self,
+        workspace: &str,
+        path: &str,
+        old_path: Option<&str>,
+        of: remote_proto::FileOf,
+    ) -> crate::error::IpcResult<crate::changes::Content> {
+        self.with(|s| s.content(workspace, path, old_path, of))
+    }
     fn session(
         &self,
         workspace: &str,
@@ -1141,4 +1160,224 @@ fn a_remote_is_told_only_when_another_computer_could_clone_it_and_never_with_cre
         Some("site")
     );
     assert_eq!(name_from_remote("https://example.com/"), None);
+}
+
+#[test]
+fn a_device_with_control_reads_a_workspaces_changes_its_tree_and_its_files_and_nothing_outside() {
+    use base64::Engine;
+    let fx = Started::new();
+    fx.approve(&CONTROL);
+    let out = Recorded::new(usize::MAX);
+    let visitor = fx.visitor(&out);
+    let reply = fx.ask(
+        &visitor,
+        &out,
+        "s1",
+        "workspace.start",
+        json!({"project": fx.project, "prompt": "echo reading"}),
+    );
+    let workspace = reply["result"]["workspace"].as_str().unwrap().to_owned();
+    let root = PathBuf::from(fx.lent.store.workspace(&workspace).unwrap().unwrap().path);
+    let write = |path: &str, bytes: &[u8]| {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    };
+    // One file committed on the branch and changed since, one new, one ignored, one too big for
+    // a piece, one that is not text, and a secret beside the workspace.
+    write(".gitignore", b"secret.env\n");
+    write("src/app.txt", b"first\n");
+    fx.git.run(&root, &["add", "."]).unwrap();
+    fx.git.run(&root, &["commit", "-m", "add the app"]).unwrap();
+    write("src/app.txt", b"first\nsecond\n");
+    write("notes.txt", b"not committed\n");
+    write("secret.env", b"TOKEN=1\n");
+    let long = "\u{e9}".repeat(remote_proto::MAX_FILE_CHUNK);
+    write("long.txt", long.as_bytes());
+    write("logo.bin", &[0, 159, 146, 150, 0, 1, 2]);
+    std::fs::write(root.parent().unwrap().join("outside.txt"), b"not yours").unwrap();
+
+    let ask = |id: &str, op: &str, mut params: Value| {
+        params["workspace"] = json!(workspace);
+        fx.ask(&visitor, &out, id, op, params)
+    };
+    let changes = ask("c1", "workspace.changes", json!({}));
+    assert_eq!(changes["result"]["kind"], "changes", "{changes}");
+    let paths = |group: &str| -> Vec<String> {
+        changes["result"][group]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| {
+                format!(
+                    "{} {}",
+                    f["kind"].as_str().unwrap(),
+                    f["path"].as_str().unwrap()
+                )
+            })
+            .collect()
+    };
+    let uncommitted = paths("uncommitted");
+    assert!(
+        uncommitted.contains(&"modified src/app.txt".to_owned()),
+        "{uncommitted:?}"
+    );
+    assert!(
+        uncommitted.contains(&"untracked notes.txt".to_owned()),
+        "{uncommitted:?}"
+    );
+    assert!(
+        !uncommitted.iter().any(|p| p.contains("secret.env")),
+        "{uncommitted:?}"
+    );
+    assert_eq!(
+        paths("committed"),
+        ["added .gitignore", "added src/app.txt"]
+    );
+    assert_eq!(changes["result"]["base"], "trunk");
+
+    // The tree: folders first, and neither `.git` nor what Git ignores.
+    let tree = ask("f1", "workspace.files", json!({}));
+    let names: Vec<&str> = tree["result"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names[0], "src", "{tree}");
+    assert_eq!(tree["result"]["entries"][0]["dir"], true);
+    assert!(
+        names.contains(&"notes.txt") && names.contains(&".gitignore"),
+        "{names:?}"
+    );
+    assert!(
+        !names.contains(&".git") && !names.contains(&"secret.env"),
+        "{names:?}"
+    );
+    let inside = ask("f2", "workspace.files", json!({"dir": "src"}));
+    assert_eq!(inside["result"]["entries"], json!([{"name": "app.txt"}]));
+
+    let decode = |reply: &Value| {
+        String::from_utf8(
+            base64::engine::general_purpose::STANDARD
+                .decode(reply["result"]["data"].as_str().unwrap_or(""))
+                .unwrap(),
+        )
+    };
+    // A file on disk, and both sides of each kind of change.
+    let read = |id: &str, path: &str, of: &str, offset: u64| {
+        ask(
+            id,
+            "file.read",
+            json!({"path": path, "of": of, "offset": offset}),
+        )
+    };
+    let now = read("r1", "src/app.txt", "working", 0);
+    assert_eq!(now["result"]["state"], "text", "{now}");
+    assert_eq!(decode(&now).unwrap(), "first\nsecond\n");
+    assert_eq!(now["result"]["done"], true);
+    assert_eq!(
+        decode(&read("r2", "src/app.txt", "uncommittedOld", 0)).unwrap(),
+        "first\n"
+    );
+    assert_eq!(
+        read("r3", "src/app.txt", "committedOld", 0)["result"]["state"],
+        "absent"
+    );
+    assert_eq!(
+        decode(&read("r4", "src/app.txt", "committedNew", 0)).unwrap(),
+        "first\n"
+    );
+    assert_eq!(
+        read("r5", "notes.txt", "uncommittedOld", 0)["result"]["state"],
+        "absent"
+    );
+
+    // A file larger than a piece comes in pieces, each from where the last ended. A piece may
+    // end inside a character, and the pieces together are the file.
+    let first = read("l1", "long.txt", "working", 0);
+    assert_eq!(first["result"]["done"], false, "{first}");
+    assert_eq!(first["result"]["size"], long.len());
+    let mut bytes = base64::engine::general_purpose::STANDARD
+        .decode(first["result"]["data"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(bytes.len(), remote_proto::MAX_FILE_CHUNK);
+    let second = read("l2", "long.txt", "working", bytes.len() as u64);
+    assert_eq!(second["result"]["done"], true, "{second}");
+    bytes.extend(
+        base64::engine::general_purpose::STANDARD
+            .decode(second["result"]["data"].as_str().unwrap())
+            .unwrap(),
+    );
+    assert_eq!(String::from_utf8(bytes).unwrap(), long);
+    let past = read("l3", "long.txt", "working", long.len() as u64 + 1);
+    assert_eq!(past["error"]["code"], "invalid_request", "{past}");
+
+    // What is not text is said to be so and not sent.
+    let binary = read("b1", "logo.bin", "working", 0);
+    assert_eq!(binary["result"]["state"], "binary", "{binary}");
+    assert!(binary["result"].get("data").is_none());
+    assert_eq!(
+        read("b2", "no-such-file.txt", "working", 0)["result"]["state"],
+        "absent"
+    );
+
+    // Nothing outside the workspace: not by climbing, not by a whole path, not through a link.
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        root.parent().unwrap().join("outside.txt"),
+        root.join("link.txt"),
+    )
+    .unwrap();
+    let whole = root.parent().unwrap().join("outside.txt");
+    for (n, path) in [
+        "../outside.txt",
+        &whole.to_string_lossy(),
+        "link.txt",
+        "src/../../outside.txt",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if path == "link.txt" && !cfg!(unix) {
+            continue;
+        }
+        let reply = read(&format!("o{n}"), path, "working", 0);
+        assert_eq!(reply["error"]["code"], "invalid_request", "{path}: {reply}");
+        let message = reply["error"]["message"].as_str().unwrap();
+        assert!(!message.contains(&*root.to_string_lossy()), "{message}");
+    }
+    let up = ask("o9", "workspace.files", json!({"dir": ".."}));
+    assert_eq!(up["error"]["code"], "invalid_request", "{up}");
+
+    // Another project's workspace is not there for this device, and watching alone reads nothing.
+    let elsewhere = fx
+        .lent
+        .store
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.project_id == fx.elsewhere)
+        .unwrap();
+    let other = fx.ask(
+        &visitor,
+        &out,
+        "e1",
+        "workspace.changes",
+        json!({"workspace": elsewhere.id}),
+    );
+    assert_eq!(other["error"]["code"], "not_found", "{other}");
+    fx.approve(&[Scope::WorkspaceRead, Scope::TerminalRead]);
+    for (id, op, params) in [
+        ("w1", "workspace.changes", json!({})),
+        ("w2", "workspace.files", json!({})),
+        (
+            "w3",
+            "file.read",
+            json!({"path": "notes.txt", "of": "working"}),
+        ),
+    ] {
+        let reply = ask(id, op, params);
+        assert_eq!(reply["error"]["code"], "forbidden", "{op}: {reply}");
+    }
 }

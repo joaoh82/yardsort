@@ -213,7 +213,11 @@ fn given(prompt: Option<&str>) -> Option<String> {
 }
 
 /// The channel open to `host` now, if it answers `capability`.
-fn open(home: &impl ComputerHome, host: &str, capability: &str) -> Result<Arc<Channel>, Failure> {
+pub(super) fn open(
+    home: &impl ComputerHome,
+    host: &str,
+    capability: &str,
+) -> Result<Arc<Channel>, Failure> {
     let channel = {
         let known = lock(home.computer());
         let link = known
@@ -243,7 +247,7 @@ fn open(home: &impl ComputerHome, host: &str, capability: &str) -> Result<Arc<Ch
             if capability == RESUME {
                 "That computer's Yardsort is too old to resume a conversation from here. Update it, \
                  then try again."
-            } else if capability == MANAGE {
+            } else if capability == MANAGE || capability == super::look::LOOK {
                 "That computer's Yardsort is too old for this from here. Update it, then try again."
             } else {
                 "That computer's Yardsort is too old to start work from here. Update it, then try \
@@ -271,7 +275,7 @@ fn changed(home: &impl ComputerHome, made: Result<(), ChannelError>) -> Result<(
     Ok(())
 }
 
-fn refused(error: &ChannelError, starting: bool) -> Failure {
+pub(super) fn refused(error: &ChannelError, starting: bool) -> Failure {
     match error {
         ChannelError::Remote(remote) if remote.code == ErrorCode::UncommittedWork => {
             Failure::new("remote_uncommitted", remote.message.clone())
@@ -286,6 +290,6 @@ fn refused(error: &ChannelError, starting: bool) -> Failure {
     }
 }
 
-fn no_such() -> Failure {
+pub(super) fn no_such() -> Failure {
     Failure::new("remote_unknown", "That is not one of that computer's.")
 }
