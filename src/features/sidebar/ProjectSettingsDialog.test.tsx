@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { project } from "@/test/fixtures";
@@ -11,6 +11,9 @@ const core = vi.hoisted(() => ({
   testEnvSave: vi.fn(),
   testSettingsGet: vi.fn(),
   testSettingsSave: vi.fn(),
+  projectSyncGet: vi.fn(),
+  onSyncChanged: vi.fn(),
+  projectSyncOffers: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -24,6 +27,12 @@ beforeEach(() => {
   core.testEnvSave.mockResolvedValue(undefined);
   core.testSettingsGet.mockResolvedValue({ askEveryTime: false, keepDays: 30, browser: "" });
   core.testSettingsSave.mockResolvedValue(undefined);
+  core.projectSyncGet.mockResolvedValue({
+    sync: { state: "remoteOff" },
+    syncedAt: null,
+    problem: null,
+  });
+  core.onSyncChanged.mockResolvedValue(() => {});
 });
 it("saves per-project files and literal command arguments", async () => {
   const user = userEvent.setup();
@@ -94,4 +103,26 @@ it("a removed variable is gone when saved", async () => {
   await user.click(screen.getByRole("button", { name: "Remove variable 1" }));
   await user.click(screen.getByRole("button", { name: "Save" }));
   expect(core.testEnvSave).toHaveBeenCalledWith("p-demo", []);
+});
+it("Escape in the link dialog closes only it, and Linking saves nothing else", async () => {
+  const user = userEvent.setup();
+  core.projectSyncGet.mockResolvedValue({
+    sync: { state: "off", preview: { name: "demo", remote: null, notes: 0, workspaces: 0 } },
+    syncedAt: null,
+    problem: null,
+  });
+  core.projectSyncOffers.mockResolvedValue([
+    { id: "s-1", name: "demo", remote: null, matches: false },
+  ]);
+  const onClose = vi.fn();
+  render(<ProjectSettingsDialog project={project("demo")} onClose={onClose} />);
+  await user.click(await screen.findByRole("button", { name: "Link to a synced project…" }));
+  const link = await screen.findByRole("dialog", { name: "Link “demo” to a synced project" });
+  await within(link).findByRole("radio", { name: "demo" });
+  expect(link).toContainElement(document.activeElement as HTMLElement);
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: /Link/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: /Project settings/ })).toBeInTheDocument();
+  expect(onClose).not.toHaveBeenCalled();
+  expect(core.projectAutomationSave).not.toHaveBeenCalled();
 });

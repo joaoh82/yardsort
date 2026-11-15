@@ -394,6 +394,55 @@ yardsort-host revoke "My phone"  # by its name, or the id `devices` shows
 
 Taking a device's access away needs no check: it is always safe. Its channel closes at once.
 
+## Syncing projects
+
+A project here can sync with your other computers signed in to the same account, as
+[Syncing projects](remote.md#syncing-projects) describes for the app. With the host running:
+
+```sh
+yardsort-host sync status                     # what syncs, the last pass, and what you could link
+yardsort-host sync on my-service              # shows what it sends, and asks
+yardsort-host sync link my-service fa737444   # to one another computer syncs
+yardsort-host sync stop my-service            # unlink this computer; the others keep it
+yardsort-host sync remove my-service          # from the server, for every computer; asks first
+```
+
+A project is named as `ys project list` shows it, or by its id. `sync on` prints the project's
+name, its remote's address, without any user or password, and how many approved notes and
+workspaces go with it,
+says the server keeps them in plain text, and asks before sending. `status` lists the projects your other computers sync that this one
+does not, each by the start of its id, its name and its remote, and says which project here has
+the same remote; `link` takes that id or the name. Nothing is linked by itself. `--yes` skips the
+question `on` and `remove` ask.
+
+Like `pair`, `on`, `link`, `stop` and `remove` are refused from a terminal Yardsort started, from
+anything an agent runs, and from input that is not a terminal ([the guard](#only-a-person-can-pair-a-device)).
+`status` is not; nor is [`ys sync status`](cli.md#ys-sync-status), which is all `ys` offers of sync,
+and which lists your other computers' workspaces of each synced project. None of them is made here.
+
+## Memory there
+
+A project's [memory](memory.md) works here as in the app's Memory view: agents propose notes with
+`ys memory propose`, and you decide. With the host running:
+
+```sh
+yardsort-host memory list my-service                       # every note, by the start of its id
+yardsort-host memory write my-service "The tests need TZ=UTC."
+yardsort-host memory approve 4a1b2c3d                      # or reject, revoke, restore
+yardsort-host memory edit 4a1b2c3d "The tests need TZ=UTC and LANG=C."
+yardsort-host memory settle 4a1b2c3d --other               # or --standing, or --text "…"
+```
+
+`list` shows what waits for you, what is approved and what is set aside, each with where it came
+from, and first any note two computers changed at once: the text that stands, which agents get, and
+the other computer's beside it. `settle` keeps the one that stands (`--standing`), the other
+computer's (`--other`), or a third (`--text`), on every computer the project
+[syncs](memory.md#on-your-other-computers) with. A note from another computer says which.
+
+All of them are behind [the guard](#only-a-person-can-pair-a-device), as `pair` is, `list` included:
+no agent approves its own proposal, and none reads more of the memory than
+[`ys memory`](cli.md#ys-memory) gives it, the approved notes of a project that shares them.
+
 ## Upgrading
 
 Replace the two programs and restart `serve`. The install line does the first, and keeps a service

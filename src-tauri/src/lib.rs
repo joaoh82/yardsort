@@ -162,6 +162,13 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             activity::workspace_provenance,
             activity::workspace_handoff,
             remote::remote_status,
+            remote::sync::project_sync_get,
+            remote::sync::project_sync_on,
+            remote::sync::project_sync_offers,
+            remote::sync::project_sync_link,
+            remote::sync::project_sync_stop,
+            remote::sync::project_sync_remove,
+            remote::sync::project_sync_workspaces,
             remote::remote_enable,
             remote::remote_cancel,
             remote::remote_disable,
@@ -192,6 +199,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             memory::memory_write,
             memory::memory_edit,
             memory::memory_decide,
+            memory::memory_settle,
             memory::memory_share,
             memory::conversations_share,
             conversations::conversation_context,
@@ -310,6 +318,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             schedules::SchedulesChanged,
             triggers::commands::TriggersChanged,
             remote::RemotePairingRequested,
+            remote::sync::SyncChanged,
             computers::OtherComputersChanged
         ])
         // Sent as JSON inside a remote terminal's byte stream, so no command names it.

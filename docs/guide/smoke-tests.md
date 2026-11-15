@@ -385,6 +385,11 @@ against the file, so the same file asked for again waits again. While the card h
 terminal behind it, so an `Esc` meant for the agent refuses nothing. Several runs waiting in one
 workspace are shown one at a time, oldest first.
 
+With [Remote](remote.md) on, a phone you let type shows the same card in Chat and can answer it:
+see [When a smoke test waits for you](remote.md#when-a-smoke-test-waits-for-you). It is still a
+person who answers, on a device you let in at this computer; there is no `ys` command that
+approves.
+
 ### The run tab
 
 A run opens as a tab in its workspace's tab strip, beside the terminals, named after the test

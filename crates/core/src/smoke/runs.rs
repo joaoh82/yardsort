@@ -4,16 +4,20 @@
 //! writes nothing: the test must be in the worktree's own folder and ready, the workspace must
 //! be there, every input must be given and make sense, every `{{ env.NAME }}` must be set in
 //! the project's test environment. What is not checked here is whether the user has seen the
-//! file: a run of a file at a hash nobody approved is queued as `awaiting_approval`, and nothing
-//! but the app moves it on from there.
+//! file: a run of a file at a hash nobody approved is queued as `awaiting_approval`, and only a
+//! person moves it on from there: at the app's approval card, or at the same card on a device
+//! they paired ([`crate::remote::smoke`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use serde::Serialize;
 use sha2::{Digest, Sha256};
+use specta::Type;
 
+use super::words::{test_words, StepWords};
 use super::{find, Action, BrowserAction, InputKind, Test, WaitTarget};
 use crate::error::{IpcError, IpcResult};
-use crate::store::{NewTestRun, Store, TestQueued};
+use crate::store::{NewTestRun, Store, TestQueued, TestRunRow};
 use crate::template;
 
 /// A request for a run.
@@ -295,6 +299,109 @@ pub fn approve_seen(
     };
     store.approve_test(&workspace.project_id, &entry.id, shown_hash)?;
     Ok(true)
+}
+
+/// A file as the person approving it reads it: every step in words, the environment names it
+/// uses, and what it was before, when it was approved before and has changed since.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestReview {
+    pub steps: Vec<StepWords>,
+    pub env: Vec<EnvUse>,
+    /// This exact file is approved for the project already.
+    pub approved: bool,
+    /// The project asks to see every run.
+    pub ask_every_time: bool,
+    /// The file as it was when it was last approved, when that is not this file.
+    pub previous: Option<String>,
+    /// The hash of the file these words are of: what the app's `test_run_start` must still see to run
+    /// without the approval card, so a later edit is never approved unseen.
+    pub content_hash: String,
+    /// A step runs a program (`run`, `shell` or `start`), which is given the whole test
+    /// environment as `YS_ENV_*` — not only the names templated in the file.
+    pub runs_a_program: bool,
+    /// Every name in the project's test environment: what a program step can read, in full.
+    pub environment: Vec<String>,
+}
+
+/// One `{{ env.NAME }}` a test uses, and whether the project's test environment sets it.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvUse {
+    pub name: String,
+    pub set: bool,
+}
+
+/// A file as the approval card and the Run dialog show it, for whoever decides whether it runs:
+/// the window, or a device the host's person paired ([`crate::remote::smoke`]).
+pub fn review(
+    store: &Store,
+    project_id: &str,
+    test_id: &str,
+    test: &Test,
+    text: &str,
+    hash: &str,
+) -> IpcResult<TestReview> {
+    let set: BTreeSet<String> = store
+        .project_test_env(project_id)?
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    let settings = store.project_test_settings(project_id)?;
+    let previous = store
+        .last_approved_definition(project_id, test_id)?
+        .filter(|before| before != text);
+    // Any `run`/`shell`/`start` step gets the whole test environment, so if the test runs a
+    // program the card has to say the exposure is the whole of it, not only the templated names.
+    let runs_a_program = test.all_steps().any(|(_, step)| {
+        matches!(
+            step.action,
+            Action::Run { .. } | Action::Shell { .. } | Action::Start { .. }
+        )
+    });
+    Ok(TestReview {
+        steps: test_words(test),
+        env: env_names(test)
+            .into_iter()
+            .map(|name| EnvUse {
+                set: set.contains(&name),
+                name,
+            })
+            .collect(),
+        approved: store.test_approved(project_id, test_id, hash)?,
+        ask_every_time: settings.ask_every_time,
+        previous,
+        content_hash: hash.to_owned(),
+        runs_a_program,
+        environment: set.into_iter().collect(),
+    })
+}
+
+/// A waiting run's file as the approval card shows it: [`review`] of the file as it was when the
+/// run was asked for.
+pub fn run_review(store: &Store, row: &TestRunRow) -> IpcResult<TestReview> {
+    let test = super::parse(&row.definition).map_err(|invalid| {
+        IpcError::new(
+            "test_invalid",
+            format!(
+                "The run's file does not check out: {}",
+                invalid
+                    .problems
+                    .first()
+                    .map(|p| p.message.clone())
+                    .unwrap_or_default()
+            ),
+        )
+    })?;
+    let project_id = row.project_id.clone().unwrap_or_default();
+    review(
+        store,
+        &project_id,
+        &row.test_id,
+        &test,
+        &row.definition,
+        &row.content_hash,
+    )
 }
 
 /// The inputs a run gets: what was given, defaults for the rest. Refuses unknown inputs,

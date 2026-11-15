@@ -51,6 +51,17 @@ pub enum Decision {
     Restore,
 }
 
+/// How the person settles a conflict between two hosts' texts of one synced note.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Settle {
+    /// Keep the text that stands, the one agents have been getting.
+    Standing,
+    /// Keep the other host's text.
+    Other,
+    /// Write a third.
+    Text(String),
+}
+
 /// What a proposal came to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Proposed {
@@ -178,6 +189,25 @@ pub fn edit(store: &Store, id: &str, text: &str) -> IpcResult<()> {
     Ok(())
 }
 
+/// The person settles a note two hosts changed at once: keeps one of the two texts or writes a
+/// third. It goes up as one more change, so every host settles alike; revoking it settles it too.
+pub fn settle(store: &Store, id: &str, how: Settle) -> IpcResult<()> {
+    let entry = existing(store, id)?;
+    let Some(conflict) = entry.conflict else {
+        return Err(IpcError::new(
+            "memory_state",
+            "This entry has nothing to settle.",
+        ));
+    };
+    let text = match how {
+        Settle::Standing => entry.text,
+        Settle::Other => conflict.text,
+        Settle::Text(text) => clean(&text)?,
+    };
+    store.change_memory(id, &entry.state, Some(&text), "edited")?;
+    Ok(())
+}
+
 fn existing(store: &Store, id: &str) -> IpcResult<MemoryRow> {
     store
         .memory_entry(id)?
@@ -213,15 +243,21 @@ pub fn short_id(id: &str) -> &str {
     id.get(..8).unwrap_or(id)
 }
 
-/// Where an entry came from, in words: "the user", or "claude in fix-login".
+/// Where an entry came from, in words: "the user", or "claude in fix-login", and the other host
+/// for one synced from there: "the user, on Build box".
 pub fn citation(entry: &MemoryRow) -> String {
-    if entry.author == "user" {
-        return "the user".to_owned();
-    }
-    let who = entry.harness_id.as_deref().unwrap_or("an agent");
-    match entry.workspace_name.as_deref() {
-        Some(workspace) => format!("{who} in {workspace}"),
-        None => who.to_owned(),
+    let who = if entry.author == "user" {
+        "the user".to_owned()
+    } else {
+        let who = entry.harness_id.as_deref().unwrap_or("an agent");
+        match entry.workspace_name.as_deref() {
+            Some(workspace) => format!("{who} in {workspace}"),
+            None => who.to_owned(),
+        }
+    };
+    match entry.from_host.as_deref() {
+        Some(host) => format!("{who}, on {host}"),
+        None => who,
     }
 }
 

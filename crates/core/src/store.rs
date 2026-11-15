@@ -52,6 +52,9 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0040_workflow_run_pull_requests.sql"),
     include_str!("../migrations/0041_schedule_new_workspace.sql"),
     include_str!("../migrations/0042_session_label.sql"),
+    include_str!("../migrations/0043_sync.sql"),
+    include_str!("../migrations/0044_sync_notes.sql"),
+    include_str!("../migrations/0045_sync_workspaces.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -62,6 +65,9 @@ pub enum StoreError {
     Io(#[from] std::io::Error),
     #[error("this database was written by a newer version of Yardsort (schema {found}, this build knows {known})")]
     TooNew { found: usize, known: usize },
+    /// A rule of the records, said in words for the person who hit it.
+    #[error("{0}")]
+    Refused(String),
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;
@@ -273,6 +279,23 @@ pub struct MemoryRow {
     pub run_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// The host it was written or approved on, by name, when that is another host of the
+    /// account; `None` for this installation's own.
+    pub from_host: Option<String>,
+    /// Another host's text for it, waiting for the person to settle.
+    pub conflict: Option<MemoryConflict>,
+}
+
+/// Two hosts changed a synced note at once. The note's own text stands, and is what agents get,
+/// until the person keeps one of the two or writes a third. See `migrations/0044_sync_notes.sql`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryConflict {
+    /// The same on every host.
+    pub id: String,
+    pub text: String,
+    /// The host the other text is from, by name.
+    pub from: String,
+    pub at: i64,
 }
 
 /// One change to a memory entry. See `migrations/0010_project_memory.sql`.
@@ -704,6 +727,9 @@ pub use pr_watches::*;
 
 mod triggers;
 pub use triggers::*;
+
+mod sync;
+pub use sync::*;
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -1564,7 +1590,10 @@ impl Store {
 
     /// Record that a workspace was started from a task. Saying so twice changes nothing.
     pub fn link_task(&self, workspace_id: &str, task: &WorkspaceTaskRow) -> StoreResult<()> {
-        self.conn().execute(
+        let at = now_ms();
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let added = tx.execute(
             "INSERT OR IGNORE INTO workspace_tasks
                  (workspace_id, source, repo, key, url, title, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -1575,9 +1604,13 @@ impl Store {
                 task.key,
                 task.url,
                 task.title,
-                now_ms()
+                at
             ],
         )?;
+        if added > 0 {
+            sync::queue_workspace(&tx, workspace_id, at)?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1736,14 +1769,18 @@ impl Store {
         branch: Option<&str>,
         base_branch: Option<&str>,
     ) -> StoreResult<WorkspaceRow> {
-        let conn = self.conn();
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
         let id = new_id();
-        conn.execute(
+        let at = now_ms();
+        tx.execute(
             "INSERT INTO workspaces (id, project_id, kind, name, path, branch, base_branch, sort_order, created_at)
              VALUES (?1, ?2, 'worktree', ?3, ?4, ?5, ?6,
                      (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM workspaces WHERE project_id = ?2), ?7)",
-            params![id, project_id, name, path, branch, base_branch, now_ms()],
+            params![id, project_id, name, path, branch, base_branch, at],
         )?;
+        sync::queue_workspace(&tx, &id, at)?;
+        tx.commit()?;
         Ok(WorkspaceRow {
             id,
             project_id: project_id.to_owned(),
@@ -1788,26 +1825,46 @@ impl Store {
 
     /// Forget a worktree workspace. `local` rows cannot be removed this way.
     pub fn remove_worktree(&self, id: &str) -> StoreResult<bool> {
-        Ok(self.conn().execute(
-            "DELETE FROM workspaces WHERE id = ? AND kind = 'worktree'",
-            [id],
-        )? > 0)
+        self.change_workspace(
+            id,
+            "DELETE FROM workspaces WHERE id = ?1 AND kind = 'worktree'",
+            params![id],
+        )
+    }
+
+    /// Run one statement that changes a workspace, and queue what it means for sync, in one step.
+    fn change_workspace(
+        &self,
+        id: &str,
+        sql: &str,
+        params: impl rusqlite::Params,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let changed = tx.execute(sql, params)? > 0;
+        if changed {
+            sync::queue_workspace(&tx, id, now_ms())?;
+        }
+        tx.commit()?;
+        Ok(changed)
     }
 
     /// Give a workspace a new display name. Its folder and branch keep theirs.
     pub fn rename_workspace(&self, id: &str, name: &str) -> StoreResult<bool> {
-        Ok(self.conn().execute(
-            "UPDATE workspaces SET name = ? WHERE id = ? AND kind = 'worktree'",
-            [name, id],
-        )? > 0)
+        self.change_workspace(
+            id,
+            "UPDATE workspaces SET name = ?1 WHERE id = ?2 AND kind = 'worktree'",
+            params![name, id],
+        )
     }
 
     pub fn set_workspace_archived(&self, id: &str, archived: bool) -> StoreResult<bool> {
         let status = if archived { "archived" } else { "active" };
-        Ok(self.conn().execute(
-            "UPDATE workspaces SET status = ? WHERE id = ? AND kind = 'worktree'",
-            [status, id],
-        )? > 0)
+        self.change_workspace(
+            id,
+            "UPDATE workspaces SET status = ?1 WHERE id = ?2 AND kind = 'worktree'",
+            params![status, id],
+        )
     }
 
     /// Stop showing a worktree workspace. With `keep_history` the row stays, hidden, so its
@@ -1817,19 +1874,21 @@ impl Store {
         if !keep_history {
             return self.remove_worktree(id);
         }
-        Ok(self.conn().execute(
-            "UPDATE workspaces SET forgotten = 1 WHERE id = ? AND kind = 'worktree'",
-            [id],
-        )? > 0)
+        self.change_workspace(
+            id,
+            "UPDATE workspaces SET forgotten = 1 WHERE id = ?1 AND kind = 'worktree'",
+            params![id],
+        )
     }
 
     /// Show a forgotten workspace again, active and on whatever branch its worktree has now.
     pub fn revive_workspace(&self, id: &str, branch: Option<&str>) -> StoreResult<bool> {
-        Ok(self.conn().execute(
-            "UPDATE workspaces SET forgotten = 0, status = 'active', branch = ?
-             WHERE id = ? AND kind = 'worktree' AND forgotten = 1",
+        self.change_workspace(
+            id,
+            "UPDATE workspaces SET forgotten = 0, status = 'active', branch = ?1
+             WHERE id = ?2 AND kind = 'worktree' AND forgotten = 1",
             params![branch, id],
-        )? > 0)
+        )
     }
 
     // --- sessions -----------------------------------------------------------------------------
@@ -2221,6 +2280,7 @@ impl Store {
              VALUES (?, ?, ?, ?, NULL)",
             params![id, at, action, new.author],
         )?;
+        sync::queue_note(&tx, &id, None, at)?;
         tx.commit()?;
         Ok(id)
     }
@@ -2302,7 +2362,8 @@ impl Store {
     }
 
     /// Change an entry's state and, optionally, its text, and write the history line for it.
-    /// An edit keeps the text it replaced.
+    /// An edit keeps the text it replaced. A new text, or revoking, settles any conflict the
+    /// entry has; the person saw both texts to do either.
     pub fn change_memory(
         &self,
         id: &str,
@@ -2313,25 +2374,37 @@ impl Store {
         let at = now_ms();
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let previous: Option<String> = tx
-            .query_row("SELECT text FROM memory_entries WHERE id = ?", [id], |r| {
-                r.get(0)
-            })
+        let previous: Option<(String, Option<String>)> = tx
+            .query_row(
+                "SELECT text, conflict_id FROM memory_entries WHERE id = ?",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .optional()?;
-        let Some(previous) = previous else {
+        let Some((previous, conflict)) = previous else {
             return Ok(false);
         };
+        let settles = conflict.filter(|_| text.is_some() || state == "revoked");
         tx.execute(
             "UPDATE memory_entries SET state = ?, text = COALESCE(?, text), updated_at = ?
              WHERE id = ?",
             params![state, text, at, id],
         )?;
+        if settles.is_some() {
+            tx.execute(
+                "UPDATE memory_entries SET conflict_id = NULL, conflict_text = NULL,
+                     conflict_from = NULL, conflict_at = NULL
+                 WHERE id = ?",
+                [id],
+            )?;
+        }
         let replaced = text.filter(|t| *t != previous).map(|_| previous);
         tx.execute(
             "INSERT INTO memory_history (entry_id, at, action, by, previous_text)
              VALUES (?, ?, ?, 'user', ?)",
             params![id, at, action, replaced],
         )?;
+        sync::queue_note(&tx, id, settles, at)?;
         tx.commit()?;
         Ok(true)
     }
@@ -5499,6 +5572,8 @@ impl Store {
             .unwrap_or(false);
         if !same_server {
             tx.execute("DELETE FROM remote_grants", [])?;
+            // The new host is linked to nothing; what synced as the old one stops here.
+            sync::forget_sync(&tx)?;
         }
         tx.execute(
             "INSERT INTO remote_host
@@ -5521,12 +5596,13 @@ impl Store {
         Ok(())
     }
 
-    /// Turn Remote off: the host and every grant go, in one step.
+    /// Turn Remote off: the host, every grant and everything kept for sync go, in one step.
     pub fn forget_remote_host(&self) -> StoreResult<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM remote_grants", [])?;
         tx.execute("DELETE FROM remote_host", [])?;
+        sync::forget_sync(&tx)?;
         tx.commit()?;
         Ok(())
     }
@@ -5755,7 +5831,8 @@ fn outcome_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OutcomeRow> {
 }
 
 const MEMORY_COLUMNS: &str = "id, project_id, text, state, author, harness_id, workspace_id, \
-     workspace_name, run_id, created_at, updated_at";
+     workspace_name, run_id, created_at, updated_at, from_host, conflict_id, conflict_text, \
+     conflict_from, conflict_at";
 
 fn memory_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRow> {
     Ok(MemoryRow {
@@ -5770,6 +5847,16 @@ fn memory_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRow> {
         run_id: row.get(8)?,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
+        from_host: row.get(11)?,
+        conflict: match (row.get(12)?, row.get(13)?) {
+            (Some(id), Some(text)) => Some(MemoryConflict {
+                id,
+                text,
+                from: row.get::<_, Option<String>>(14)?.unwrap_or_default(),
+                at: row.get::<_, Option<i64>>(15)?.unwrap_or_default(),
+            }),
+            _ => None,
+        },
     })
 }
 
@@ -6626,10 +6713,11 @@ steps:
             assert!(MIGRATIONS[30].contains("CREATE TABLE workflow_approval_decisions"));
             // 0037 adds nullable device columns and an empty actions table, 0039 two
             // nullable columns to the notice outbox, 0040 an empty table of the pull
-            // requests runs made, and 0041 three columns with defaults to schedules and an
-            // empty table of the workspaces schedules made, and 0042 a column with a default
-            // to sessions.
-            assert_eq!(MIGRATIONS.len(), 42);
+            // requests runs made, 0041 three columns with defaults to schedules and an empty
+            // table of the workspaces schedules made, 0042 a column with a default to sessions,
+            // 0043 sync's three empty tables, 0044 six nullable columns to memory entries, and
+            // 0045 an empty table of other hosts' workspaces.
+            assert_eq!(MIGRATIONS.len(), 45);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -6698,10 +6786,11 @@ steps:
             assert!(MIGRATIONS[31].contains("code_rounds"));
             // 0037 adds nullable device columns and an empty actions table, 0039 two
             // nullable columns to the notice outbox, 0040 an empty table of the pull
-            // requests runs made, and 0041 three columns with defaults to schedules and an
-            // empty table of the workspaces schedules made, and 0042 a column with a default
-            // to sessions.
-            assert_eq!(MIGRATIONS.len(), 42);
+            // requests runs made, 0041 three columns with defaults to schedules and an empty
+            // table of the workspaces schedules made, 0042 a column with a default to sessions,
+            // 0043 sync's three empty tables, 0044 six nullable columns to memory entries, and
+            // 0045 an empty table of other hosts' workspaces.
+            assert_eq!(MIGRATIONS.len(), 45);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs

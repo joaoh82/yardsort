@@ -12,7 +12,8 @@ type can also start a new workspace or another agent, resume a conversation that
 agent a picture. The agents keep
 running on this computer whatever happens to the connection. This computer can also reach another one
 the same way, watch its terminals, type into them and start work there: see
-[Reaching another computer](#reaching-another-computer).
+[Reaching another computer](#reaching-another-computer). Your computers can sync a project with each
+other too: see [Syncing projects](#syncing-projects).
 
 Neither end listens for connections: this computer and your phone each reach out to the server.
 
@@ -20,7 +21,8 @@ Neither end listens for connections: this computer and your phone each reach out
 
 **Whoever runs the server can see what passes through it**, your terminals, your agents'
 conversations as Chat shows them, and what you type into them included. The connection is encrypted on the way, but not end to end. Use a server you run yourself, or
-one run by someone you trust with that.
+one run by someone you trust with that. A project you [sync](#syncing-projects) is kept on the
+server too, in plain text.
 
 Neither the server nor this computer writes any of it in a log: not what a terminal shows or is sent,
 not what a conversation says or its title, and not a memory note. Their logs say which device and which computer, and
@@ -66,6 +68,45 @@ go straight to the terminal instead, wherever the field is:
 **The arrows, Tab and Backspace on their own** go to the terminal while the field is empty, so they
 move through an agent's menu or a shell's history. While something is in the field, they edit it.
 Shortcuts with **Cmd** are left to the phone, and so are Ctrl-Tab and Alt-Tab.
+
+## A computer's workspaces
+
+On the phone, a computer's screen lists its workspaces under their projects, each with its branch
+and how many of its conversations are running. Press a project's name to fold it: its workspaces
+are put away, and the line keeps the count and, when agents are at work inside, how many are
+running — _api-gateway 3 · 2 running_. Press it again to open it. The phone remembers which
+projects you folded, for each computer, as this window remembers its own sidebar; nothing about
+it is sent anywhere.
+
+## Pull requests on the phone
+
+When this computer has `gh` installed and signed in, the phone shows what became of a workspace's
+branch, as the sidebar here does. It is read-only: nothing on the phone changes a pull request.
+
+- **On a workspace's row**, a badge with its pull request's number, coloured as here: green for
+  one open with nothing pending or wrong, yellow for a draft or one still waiting on checks or a
+  review, red for a failed check, changes asked for or conflicts, purple for merged, and red
+  struck through for one closed without merging. _#88 +2_ is a workspace with two more, and
+  _lib#7_ is one it follows in another repository. Press the badge to see that pull request.
+- **In a workspace**, a card above its conversations: the number and state, the title, the branch
+  and what it would merge into, lines added and removed, the checks, the review, and whether it
+  conflicts. **Show** opens the checks to each by name, the failed ones first; they are open
+  already when one failed. **Open on GitHub** opens its page in the phone's browser. Others the
+  workspace opened or follows are listed under the card.
+- **Pull requests**, on a computer's screen with the count of open ones, lists them over every
+  project the phone may see: **Open**, **Merged** and **Closed**. Merged and closed are those
+  among the newest fifty of each project.
+
+The phone asks this computer, never GitHub: it shows what this computer last read, and holds no
+GitHub sign-in of its own. A screen showing pull requests asks again each minute while it is in
+front, and this computer reads them again for it, so they stay current with this window in the
+background. Nothing of them is kept on the phone, so they show only while this computer can be
+reached.
+
+Without `gh`, or signed out of it, the phone shows no badges and no card, and says nothing about
+it, as here. The same goes for a computer on a version before this one, and for
+[a computer with no screen](headless-host.md), which reads no pull requests yet. A notification
+when a check fails or a review arrives is not built yet.
 
 ## Starting work from the phone
 
@@ -120,6 +161,9 @@ when it was read. Nothing typed or chosen while it cannot be reached is kept to 
 
 ## Diagnostics on the phone
 
+The phone's **Settings** is the gear at the top right of its first screen, Connect or your account.
+Once the phone is signed in to a server, **Settings → Servers on this phone** lists every server it
+is signed in to: switch to another, add one, or remove one.
 **Settings → Diagnostics** shows what happened to the phone's connections since the app started:
 
 - the app's version, the phone's system and the protocol it speaks;
@@ -169,6 +213,27 @@ terminal**. The phone needs to be allowed to type for this.
 
 The command is kept on this computer only while the question is open, and never in its records.
 For other agents, Chat says the agent is waiting and opens its terminal.
+
+## When a smoke test waits for you
+
+A [smoke test](smoke-tests.md) from the repository runs only once you have seen what it does. When
+one waits in a workspace — an agent ran `ys test run` on a file that is new or has changed, or the
+project asks to see every run — Chat in any of that workspace's conversations shows
+[the approval card](smoke-tests.md#the-approval-card) this window shows: who asked and with what
+inputs, every step in words, the names of the project's test environment it can read, and, for a
+file you approved before, the lines that changed. Values of the test environment are never sent.
+
+**Run** approves that version of the file for the project and starts the run here; **Don't run**
+ends it as refused and records nothing against the file. The card here goes once the phone has
+answered, and one answered here goes from the phone within a few seconds. Several waiting in one workspace
+show one at a time, oldest first. When the run was asked for by the conversation you are reading,
+its header says **Needs you** until you answer.
+
+The phone needs to be allowed to type for this: letting a test run is running programs on this
+computer, which is what typing into a terminal does. A phone that may only watch sees the card
+and is told so when it answers. A file too long to show whole on the phone says so and offers
+only **Don't run**; let that one run from here. A computer with no screen runs no smoke tests, so
+there is nothing to answer there.
 
 ## Scrolling on the phone
 
@@ -240,6 +305,56 @@ other computer lists it among its devices let in, where it can be revoked. A pai
 refused stays under **Pairings**, saying so, until you press **Forget**. **Forget** on one still in
 force takes it back from this side. Either way it is no longer listed here; pairing with that computer
 again makes a new pairing, which shows.
+
+## Syncing projects
+
+Your computers can share a project through the server: two computers with Remote on, signed in to
+the same account on the same server. That is the project itself, its name and its remote; its
+[approved notes](memory.md#on-your-other-computers), which reach every computer's agents; and its
+workspaces, which every other computer shows and never makes. Nothing syncs until you turn it on for
+a project, and **never its files, its path or its terminals**.
+
+Open **Project settings…** from the project's menu. Its **Sync** section shows what turning sync on
+sends: the project's name, the address of its Git remote (`origin`) without any user or password in
+it, or none for a remote that is a folder, and how many approved notes and workspaces go with it. **The server
+keeps synced records in plain text, readable by whoever runs it.** Press **Turn on sync**. The section says _Waiting to reach the
+server…_ until the server has it, then _Syncing with your other computers_, and when it last
+synced. With Remote off, the section says sync needs it and links to **Settings → Remote**.
+
+**On your other computer**, add the same repository as a project, a clone of it say, open its
+**Project settings…** and press **Link to a synced project…**. It lists the projects your other
+computers sync that this one does not, each with its remote; one whose remote is this project's
+is marked **Same remote** and listed first. Nothing is chosen for you: pick the one this project
+is and press **Link**. Link only to the same repository, since what syncs of it will be shared
+with this one: the notes synced from there arrive here, and this project's own approved notes go
+there.
+
+Yardsort syncs while it runs with Remote on: right after a change here, when the server says
+another computer changed something, and every five minutes otherwise. When the server cannot be
+reached, it tries again by itself, waiting longer each time, up to five minutes, and the section
+says why the last attempt failed. When the server refuses something, the section says why, and it
+is not sent again.
+
+**Your other computers' workspaces** of the project are listed under it in the sidebar, folded into
+**on other computers (n)**: each with its name, the computer it is on, its branch and the task it was
+started from, and _archived_ when it is. They are only a list. Nothing of them is on this computer:
+no worktree, no branch, no folder and no terminal is made for one, and there is nothing here to open
+or delete. Each changes when it changes on its computer, which alone writes it: made, renamed,
+archived, restored or deleted there. A workspace you make here, in the app or with `ys`, shows on
+your other computers within seconds. The project's own checkout is not listed, since each computer
+has its own.
+
+- **Stop syncing** unlinks this computer. The project stays here as it is, its notes included, and
+  your other computers keep syncing it.
+- **Remove from the server…** asks first, then removes the project's records from the server for
+  every computer. Each keeps its own copy of the project, and stops syncing it.
+- **Turning Remote off**, or moving this computer to another server, stops every project syncing
+  here. What is on the server stays for your other computers; turn sync on or link again
+  afterwards.
+
+On a computer with no screen, `yardsort-host sync` does the same: see
+[Syncing projects there](headless-host.md#syncing-projects). [`ys sync status`](cli.md#ys-sync-status)
+says what syncs, and nothing more: no agent can turn sync on, link, stop or remove a project.
 
 ## If a phone cannot open any terminal
 

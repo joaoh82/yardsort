@@ -151,11 +151,14 @@ Yardsort's window gets focus.
 Hover a project and press **⋯**, or right-click it:
 
 - **Project settings…** — files to copy into new worktrees, a setup command, a run/dev-server
-  command, and the smoke tests' environment and rules. See [Project automation](#project-automation)
-  and [Smoke tests](smoke-tests.md#project-settings).
+  command, the smoke tests' environment and rules, and whether the project syncs with your other
+  computers, its workspaces there listed under it. See [Project automation](#project-automation),
+  [Smoke tests](smoke-tests.md#project-settings) and
+  [Syncing projects](remote.md#syncing-projects).
 - **Memory…** — lessons about the project for its agents: what you write, what agents propose
   for you to approve, and whether they are given it. A count on the project's row says when
-  proposals wait. See [Memory](memory.md).
+  proposals wait. In a synced project, the notes your other computers approved are here too. See
+  [Memory](memory.md).
 - **Outcomes…** — every attempt in the project with what became of it, and each agent's
   history. See [Outcomes](outcomes.md).
 - **New workspace** — same as the **+** on the row. See [Workspaces](workspaces.md).

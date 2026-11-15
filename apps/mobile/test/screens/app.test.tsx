@@ -8,8 +8,16 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { Secret } from "@yardsort/remote-client";
 import { router, Stack } from "expo-router";
-import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
-import { Alert, type AlertButton, AppState, Linking, Share } from "react-native";
+import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
+import {
+  Alert,
+  type AlertButton,
+  AppState,
+  DeviceEventEmitter,
+  Linking,
+  Share,
+  StyleSheet,
+} from "react-native";
 
 import Account from "../../src/app/account";
 import ComputerScreen from "../../src/app/computer";
@@ -23,11 +31,14 @@ import Pair from "../../src/app/pair";
 import Servers from "../../src/app/servers";
 import Settings from "../../src/app/settings";
 import StartWork from "../../src/app/start";
+import PullScreen from "../../src/app/pull";
+import PullsScreen from "../../src/app/pulls";
 import WorkspaceScreen from "../../src/app/workspace";
 import { Accounts, type Browser, type Env } from "../../src/lib/accounts";
 import type { PickImage } from "../../src/lib/attach";
 import { AppProvider } from "../../src/lib/context";
 import { Diagnostics } from "../../src/lib/diagnostics";
+import { folds } from "../../src/lib/folds";
 import { Incoming } from "../../src/lib/pairing";
 import { viewChoices } from "../../src/lib/views";
 import { MemoryVault } from "../lib/memory-vault";
@@ -81,6 +92,8 @@ async function start({
       settings: Settings,
       pair: Pair,
       computer: ComputerScreen,
+      pull: PullScreen,
+      pulls: PullsScreen,
       workspace: WorkspaceScreen,
       memory: MemoryScreen,
       terminal: TerminalScreen,
@@ -105,6 +118,15 @@ async function signIn(name = "Ana’s phone") {
   await screen.findByText(`Signed in to Example Remote as ${name}.`);
 }
 
+/** The servers on this phone are reached through Settings, not from the screen beneath it. */
+async function openServers() {
+  expect(
+    within(screen.getByTestId("screen")).queryByRole("button", { name: "Servers on this phone" }),
+  ).toBeNull();
+  await fireEvent.press(await screen.findByRole("button", { name: "Settings" }));
+  await fireEvent.press(await screen.findByRole("button", { name: "Servers on this phone" }));
+}
+
 /** Press one of the buttons an alert offers. */
 async function answerAlert(text: string) {
   const buttons = (jest.mocked(Alert.alert).mock.lastCall?.[2] ?? []) as AlertButton[];
@@ -119,11 +141,26 @@ const ANSWER = { timeout: 5_000 };
 
 beforeEach(() => {
   jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  // Which projects are folded is the app's, and each test's alone.
+  folds.start({ read: () => null, write: () => {} });
 });
 
 afterEach(() => {
   jest.restoreAllMocks();
 });
+
+/** What a view has been asked about where it is, for a test to answer as the system would. */
+const measured = (view: ReturnType<typeof screen.getByTestId>) => {
+  type Answer = (x: number, y: number, width: number, height: number) => void;
+  type Fiber = {
+    return: Fiber;
+    stateNode?: { measureInWindow?: jest.Mock<(answer: Answer) => void> };
+  };
+  let fiber = (view as unknown as { unstable_fiber: Fiber }).unstable_fiber;
+  while (!fiber.stateNode?.measureInWindow) fiber = fiber.return;
+  const measure = fiber.stateNode.measureInWindow;
+  return () => measure.mock.calls.map(([answer]) => answer);
+};
 
 describe("Screens", () => {
   test("start below the header, which from iOS 26 is laid over them", async () => {
@@ -191,7 +228,7 @@ describe("Connect", () => {
     const vault = new MemoryVault();
     await start({ server, vault });
     await signIn();
-    await fireEvent.press(screen.getByRole("button", { name: "Servers on this phone" }));
+    await openServers();
     await fireEvent.press(await screen.findByRole("button", { name: "Add a server" }));
     await fireEvent.changeText(
       await screen.findByLabelText("Server address"),
@@ -340,7 +377,7 @@ describe("Servers", () => {
       );
     });
     await screen.findByText("Signed in to Other Remote as Ana’s phone.");
-    await fireEvent.press(await screen.findByRole("button", { name: "Servers on this phone" }));
+    await openServers();
     await screen.findByRole("button", { name: "Remove Example Remote" });
     return { ...app, server, other };
   }
@@ -404,7 +441,7 @@ describe("Servers", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Example Remote" }));
     await screen.findByText("Only on the first");
     expect(screen.queryByText("Only on the other")).toBeNull();
-    await fireEvent.press(screen.getByRole("button", { name: "Servers on this phone" }));
+    await openServers();
     await fireEvent.press(await screen.findByRole("button", { name: "Other Remote" }));
     await screen.findByText("Only on the other");
     expect(screen.queryByText("Only on the first")).toBeNull();
@@ -433,16 +470,27 @@ describe("Computers", () => {
     return app;
   }
 
+  /** Settings is a gear in the header's corner, not a button at the foot of the screen. */
+  async function openSettingsFromTheCorner() {
+    const corner = await screen.findByRole("button", { name: "Settings" });
+    expect(
+      within(screen.getByTestId("screen")).queryByRole("button", { name: "Settings" }),
+    ).toBeNull();
+    await fireEvent.press(corner);
+  }
+
   test("settings can be reached before there is any server", async () => {
     await start();
-    await fireEvent.press(await screen.findByRole("button", { name: "Settings" }));
+    await openSettingsFromTheCorner();
     expect(await screen.findByRole("radio", { name: "Dark" })).toBeTruthy();
+    // With no server yet, there are none to list.
+    expect(screen.queryByRole("button", { name: "Servers on this phone" })).toBeNull();
   });
 
   test("settings can be reached signed in", async () => {
     await start();
     await signIn();
-    await fireEvent.press(await screen.findByRole("button", { name: "Settings" }));
+    await openSettingsFromTheCorner();
     expect(await screen.findByRole("radio", { name: "Dark" })).toBeTruthy();
   });
 
@@ -908,6 +956,301 @@ describe("A computer", () => {
     expect(screen.getByText("Nothing printed for 3 min")).toBeTruthy();
   });
 
+  test("a project's heading folds its workspaces away, and says that agents run inside", async () => {
+    await paired();
+    await open();
+    const heading = screen.getByRole("button", { name: "demo, 1" });
+    expect(heading.props.accessibilityState.expanded).toBe(true);
+
+    await fireEvent.press(heading);
+    expect(screen.queryByRole("button", { name: /^fix-login/ })).toBeNull();
+    const folded = screen.getByRole("button", { name: "demo, 1, 1 running" });
+    expect(folded.props.accessibilityState.expanded).toBe(false);
+
+    await fireEvent.press(folded);
+    expect(screen.getByRole("button", { name: /^fix-login/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "demo, 1" })).toBeTruthy();
+  });
+
+  test("a folded project is still folded when the computer is opened again", async () => {
+    await paired();
+    await open();
+    await fireEvent.press(screen.getByRole("button", { name: "demo, 1" }));
+    await act(async () => router.back());
+
+    await fireEvent.press(await screen.findByRole("button", { name: /^Workstation, / }));
+    expect(await screen.findByRole("button", { name: "demo, 1, 1 running" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^fix-login/ })).toBeNull();
+  });
+
+  describe("pull requests", () => {
+    const button = (name: string | RegExp) => screen.findByRole("button", { name });
+    /** One with a failed check, changes asked for and conflicts, from the workspace. */
+    const failing = () => ({
+      project: "project-1",
+      number: 61,
+      title: "Retry uploads with backoff",
+      url: "https://github.com/orchard/orchard/pull/61",
+      branch: "ys/fix-login",
+      base: "main",
+      state: "open",
+      draft: false,
+      checks: { passed: 4, failed: 2, running: 0 },
+      review: "changesRequested",
+      conflicts: true,
+      additions: 184,
+      deletions: 22,
+      author: "juno-p",
+      updatedAt: Date.now() - 5 * 60_000,
+      workspaces: ["workspace-1"],
+    });
+    /** A draft in another repository, which the workspace follows. */
+    const followed = () => ({
+      ...failing(),
+      number: 7,
+      followed: "follow-1",
+      repo: "orchard/lib",
+      title: "Accept knots in parse()",
+      url: "https://github.com/orchard/lib/pull/7",
+      branch: "knots",
+      draft: true,
+      checks: { passed: 2, failed: 0, running: 3 },
+      review: "none",
+      conflicts: false,
+    });
+    /** A computer that reads pull requests, with these. */
+    function reading(...pulls: Record<string, unknown>[]) {
+      const server = new FakeServer();
+      server.computer.capabilities = ["pull.list", "pull.describe"];
+      server.computer.pulls = pulls;
+      return server;
+    }
+    const asked = (server: FakeServer, op: string) =>
+      server.operations.filter((o) => o.op === op).map((o) => o.params);
+
+    test("a workspace's row carries its pull request, in words as well as colour, and how many more it has", async () => {
+      const server = reading(failing(), followed());
+      await paired(new MemoryVault(), server);
+      await open();
+      expect(await screen.findByText("#61 +1")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^fix-login/ }).props.accessibilityLabel).toBe(
+        "fix-login, ys/fix-login · 1 running · pull request #61, needs attention",
+      );
+      expect(
+        screen.getByRole("button", {
+          name: "Show pull request #61, needs attention, and 1 more",
+        }),
+      ).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Pull requests · 2 open" })).toBeTruthy();
+      // What a workspace list shows, and nothing a list of them all would add.
+      expect(asked(server, "pull.list")[0]).toMatchObject({ of: "workspaces" });
+    });
+
+    test("a merged one says so in place of its number", async () => {
+      await paired(new MemoryVault(), reading({ ...failing(), state: "merged", conflicts: false }));
+      await open();
+      expect(await screen.findByText("merged")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^fix-login/ }).props.accessibilityLabel).toMatch(
+        /pull request #61, merged$/,
+      );
+      // None is open: the way to the list is there, without a count.
+      expect(screen.getByRole("button", { name: "Pull requests" })).toBeTruthy();
+    });
+
+    test("a computer that does not tell of pull requests is not asked, and shows nothing of them", async () => {
+      const server = new FakeServer();
+      server.computer.pulls = [failing()];
+      await paired(new MemoryVault(), server);
+      const row = await open();
+      expect(row.props.accessibilityLabel).toBe("fix-login, ys/fix-login · 1 running");
+      expect(screen.queryByRole("button", { name: /^Pull requests/ })).toBeNull();
+      await fireEvent.press(row);
+      await screen.findByText("The login page times out");
+      expect(screen.queryByText("Pull request")).toBeNull();
+      expect(asked(server, "pull.list")).toEqual([]);
+      expect(asked(server, "pull.describe")).toEqual([]);
+    });
+
+    test("a computer still reading them is asked again in a few seconds, and then each minute", async () => {
+      const server = reading();
+      server.computer.pullsReading = 1;
+      await paired(new MemoryVault(), server);
+      await open();
+      await waitFor(() => expect(asked(server, "pull.list")).toHaveLength(1));
+      expect(screen.queryByRole("button", { name: /^Pull requests/ })).toBeNull();
+
+      // What it read arrives at the computer while the phone waits.
+      server.computer.pulls = [failing()];
+      await act(async () => jest.advanceTimersByTimeAsync(4_100));
+      expect(await screen.findByText("#61")).toBeTruthy();
+      expect(asked(server, "pull.list")).toHaveLength(2);
+
+      // A check finishes without anyone pressing anything.
+      server.computer.pulls = [
+        {
+          ...failing(),
+          checks: { passed: 6, failed: 0, running: 0 },
+          review: "approved",
+          conflicts: false,
+        },
+      ];
+      await act(async () => jest.advanceTimersByTimeAsync(30_000));
+      expect(asked(server, "pull.list")).toHaveLength(2);
+      await act(async () => jest.advanceTimersByTimeAsync(31_000));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /^fix-login/ }).props.accessibilityLabel).toMatch(
+          /pull request #61, open$/,
+        ),
+      );
+    });
+
+    test("a workspace shows its pull request's card, each check by name, and opens its page on the forge", async () => {
+      const server = reading(failing(), followed());
+      server.computer.pullDetails["#61"] = {
+        checks: [
+          { name: "CI / test (ubuntu)", state: "failed" },
+          { name: "CI / test (windows)", state: "failed" },
+          { name: "CI / build", state: "passed" },
+        ],
+        moreChecks: 3,
+        reviews: [{ login: "mira-k", state: "changesRequested" }],
+        waitingOn: [],
+      };
+      await paired(new MemoryVault(), server);
+      await fireEvent.press(await open());
+
+      const card = await screen.findByLabelText("Pull request #61");
+      expect(within(card).getByText("Retry uploads with backoff")).toBeTruthy();
+      expect(within(card).getByText("Open")).toBeTruthy();
+      expect(within(card).getByText("updated 5 min ago")).toBeTruthy();
+      expect(within(card).getByText("ys/fix-login → main")).toBeTruthy();
+      expect(within(card).getByLabelText("184 lines added, 22 removed")).toBeTruthy();
+      expect(within(card).getByText("4 of 6 checks passed, 2 failed")).toBeTruthy();
+      // Something failed, so its checks are open without a press: the failed ones lead.
+      expect(await within(card).findByText("CI / test (ubuntu)")).toBeTruthy();
+      expect(within(card).getAllByText("failed")).toHaveLength(2);
+      expect(within(card).getByText("and 3 more")).toBeTruthy();
+      expect(within(card).getByText("Changes requested by mira-k")).toBeTruthy();
+      expect(within(card).getByText("Conflicts with main")).toBeTruthy();
+      expect(asked(server, "pull.describe").at(-1)).toEqual({ project: "project-1", number: 61 });
+
+      await fireEvent.press(within(card).getByRole("button", { name: "Hide the checks" }));
+      expect(within(card).queryByText("CI / build")).toBeNull();
+      await fireEvent.press(within(card).getByRole("button", { name: "Show the checks" }));
+      expect(within(card).getByText("CI / build")).toBeTruthy();
+
+      const openURL = jest.spyOn(Linking, "openURL").mockResolvedValue(undefined);
+      await fireEvent.press(within(card).getByRole("button", { name: "Open on GitHub" }));
+      expect(openURL).toHaveBeenCalledWith("https://github.com/orchard/orchard/pull/61");
+      // Left as it was found: a later test counts what is opened.
+      openURL.mockClear();
+      openURL.mockRestore();
+
+      // The one it follows in another repository is listed under it, and opens as its own card.
+      expect(screen.getByText("Also opened from this workspace")).toBeTruthy();
+      const other = screen.getByRole("button", {
+        name: "Accept knots in parse(), pull request lib#7, a draft",
+      });
+      expect(within(other).getByText("orchard/lib · checks running")).toBeTruthy();
+      expect(within(other).getByText("lib#7")).toBeTruthy();
+      await fireEvent.press(other);
+      const second = await screen.findByLabelText("Pull request lib#7");
+      expect(within(second).getByText("Draft")).toBeTruthy();
+      expect(within(second).getByText("2 of 5 checks passed, 3 still running")).toBeTruthy();
+      expect(asked(server, "pull.describe").at(-1)).toEqual({
+        project: "project-1",
+        number: 7,
+        followed: "follow-1",
+      });
+      expect(await screen.findByText("Followed from")).toBeTruthy();
+    });
+
+    test("a link that is not to a web page is no link, and a card has no way out by it", async () => {
+      const server = reading({ ...failing(), url: "intent://evil#Intent;end" });
+      await paired(new MemoryVault(), server);
+      await fireEvent.press(await open());
+      const card = await screen.findByLabelText("Pull request #61");
+      expect(within(card).getByText("Conflicts with main")).toBeTruthy();
+      expect(within(card).queryByRole("button", { name: /^Open / })).toBeNull();
+    });
+
+    test("pressing a row's badge opens that pull request, with the workspace it came from", async () => {
+      const server = reading(failing());
+      await paired(new MemoryVault(), server);
+      await open();
+      await fireEvent.press(await button("Show pull request #61, needs attention"));
+      const card = await screen.findByLabelText("Pull request #61");
+      expect(within(card).getByText("Retry uploads with backoff")).toBeTruthy();
+      expect(await screen.findByText("Opened from")).toBeTruthy();
+      await fireEvent.press(await button("fix-login"));
+      expect(await screen.findByText("The login page times out")).toBeTruthy();
+    });
+
+    test("the list of them all, by state, and one opens as its card", async () => {
+      const merged = {
+        ...failing(),
+        number: 39,
+        title: "Send rate-limit headers",
+        state: "merged",
+      };
+      const server = reading(failing(), followed(), {
+        ...merged,
+        conflicts: false,
+        workspaces: [],
+      });
+      await paired(new MemoryVault(), server);
+      await open();
+      await fireEvent.press(await button("Pull requests · 2 open"));
+
+      expect(
+        (await screen.findByRole("tab", { name: "Open · 2" })).props.accessibilityState,
+      ).toEqual({ selected: true });
+      const row = await button(/^Retry uploads with backoff, pull request #61, needs attention/);
+      expect(row.props.accessibilityLabel).toBe(
+        "Retry uploads with backoff, pull request #61, needs attention, 4 of 6 checks passed, 2 failed, conflicts, in fix-login",
+      );
+      expect(within(row).getByText("4/6")).toBeTruthy();
+      expect(within(row).getByText("In fix-login")).toBeTruthy();
+      expect(within(row).getByText("5 min")).toBeTruthy();
+      // One in another repository says which, and whose project follows it.
+      const elsewhere = await button(/^Accept knots in parse\(\)/);
+      expect(within(elsewhere).getByText("demo · orchard/lib")).toBeTruthy();
+      expect(screen.queryByText("Send rate-limit headers")).toBeNull();
+      expect(asked(server, "pull.list").at(-1)).toMatchObject({ of: "open" });
+
+      await fireEvent.press(screen.getByRole("tab", { name: "Merged" }));
+      expect(await screen.findByText("Send rate-limit headers")).toBeTruthy();
+      expect(screen.queryByText("Retry uploads with backoff")).toBeNull();
+      expect(asked(server, "pull.list").at(-1)).toMatchObject({ of: "merged" });
+
+      await fireEvent.press(screen.getByRole("tab", { name: "Closed" }));
+      expect(
+        await screen.findByText("No closed pull requests among the newest the computer read."),
+      ).toBeTruthy();
+      expect(screen.queryByText("Send rate-limit headers")).toBeNull();
+
+      await fireEvent.press(screen.getByRole("tab", { name: "Open · 2" }));
+      await fireEvent.press(await button(/^Retry uploads with backoff/));
+      const card = await screen.findByLabelText("Pull request #61");
+      expect(within(card).getByText("4 of 6 checks passed, 2 failed")).toBeTruthy();
+    });
+
+    test("one the computer no longer has among those it read says so", async () => {
+      const server = reading(failing());
+      await paired(new MemoryVault(), server);
+      await open();
+      const badge = await button("Show pull request #61, needs attention");
+      server.computer.pulls = [];
+      await fireEvent.press(badge);
+      expect(
+        await screen.findByText(
+          /^The computer no longer has this pull request among those it read/,
+        ),
+      ).toBeTruthy();
+      expect(screen.queryByLabelText("Pull request #61")).toBeNull();
+    });
+  });
+
   test("more than a page is asked for when wanted", async () => {
     const server = new FakeServer();
     server.computer.moreWorkspaces = [
@@ -1136,18 +1479,6 @@ describe("A computer", () => {
         await fireEvent.changeText(screen.getByTestId("composer"), text);
       };
       const sent = () => act(async () => jest.advanceTimersByTimeAsync(500));
-      /** What a view has been asked about where it is, for a test to answer as the system would. */
-      const measured = (view: ReturnType<typeof screen.getByTestId>) => {
-        type Answer = (x: number, y: number, width: number, height: number) => void;
-        type Fiber = {
-          return: Fiber;
-          stateNode?: { measureInWindow?: jest.Mock<(answer: Answer) => void> };
-        };
-        let fiber = (view as unknown as { unstable_fiber: Fiber }).unstable_fiber;
-        while (!fiber.stateNode?.measureInWindow) fiber = fiber.return;
-        const measure = fiber.stateNode.measureInWindow;
-        return () => measure.mock.calls.map(([answer]) => answer);
-      };
 
       test("a development build times a keystroke to what comes back", async () => {
         const { server } = await inControl();
@@ -1868,8 +2199,8 @@ describe("A computer", () => {
     /** Long enough for every answer to come, and for an Enter after its text. */
     const settle = () => act(async () => jest.advanceTimersByTimeAsync(500));
 
-    async function chatting(server = new FakeServer()) {
-      server.computer.capabilities = [...READS];
+    async function chatting(server = new FakeServer(), capabilities = READS) {
+      server.computer.capabilities = [...capabilities];
       const app = await paired(new MemoryVault(), server);
       await fireEvent.press(await open());
       await fireEvent.press(
@@ -1878,6 +2209,51 @@ describe("A computer", () => {
       await screen.findByTestId("chat");
       return app;
     }
+
+    describe("where the screen starts", () => {
+      const WINDOW = 800;
+      const KEYBOARD = 300;
+      /** The screen starts this far down the window, and then a keyboard comes up. */
+      async function typingFrom(top: number) {
+        await chatting();
+        await act(async () =>
+          measured(screen.getByTestId("above-keyboard"))().at(-1)?.(0, top, 400, WINDOW - top),
+        );
+        const clear = StyleSheet.flatten(screen.getByTestId("above-keyboard").props.style)
+          .paddingTop as number;
+        await act(async () =>
+          fireEvent(screen.getByTestId("lifted"), "layout", {
+            persist: () => {},
+            nativeEvent: {
+              layout: { x: 0, y: clear, width: 400, height: WINDOW - top - clear },
+            },
+          }),
+        );
+        await act(async () => {
+          DeviceEventEmitter.emit("keyboardWillShow", {
+            duration: 0,
+            easing: "keyboard",
+            endCoordinates: {
+              screenX: 0,
+              screenY: WINDOW - KEYBOARD,
+              width: 400,
+              height: KEYBOARD,
+            },
+          });
+        });
+        const lift = StyleSheet.flatten(screen.getByTestId("lifted").props.style).paddingBottom;
+        return { clear, lift };
+      }
+
+      test("under a header laid over it, as from iOS 26: the bar goes below the header, and a keyboard lifts the field by its own height", async () => {
+        // The header in these tests is 44 points.
+        expect(await typingFrom(0)).toEqual({ clear: 44, lift: KEYBOARD });
+      });
+
+      test("below the header, as on Android and older iOS: nothing is added, and the lift is the same", async () => {
+        expect(await typingFrom(44)).toEqual({ clear: 0, lift: KEYBOARD });
+      });
+    });
 
     test("a conversation opens as Chat, what was said and written back, with no terminal", async () => {
       const { server } = await chatting();
@@ -1943,6 +2319,113 @@ describe("A computer", () => {
       await settle();
       expect(screen.getByText("Not now.")).toBeTruthy();
       expect(screen.getByText("npm test -- --run render")).toBeTruthy();
+    });
+
+    describe("a smoke test run waiting to be let go", () => {
+      /** A run the conversation's own agent asked for, of a file changed since it was approved. */
+      const WAITING = {
+        run: "run-1",
+        name: "Sign-in works",
+        askedBy: "agent",
+        session: "session-1",
+        askedAt: 1_700_000_100_000,
+        inputs: [{ name: "user", value: "ana" }],
+        steps: [
+          { id: "server", phase: "setup", words: "start `npm run dev`, and keep it running" },
+          {
+            id: "sign-in",
+            phase: "steps",
+            words: "run `node scripts/sign-in.mjs`, expecting exit 0",
+          },
+        ],
+        env: [{ name: "TEST_PASSWORD", set: true }],
+        runsAProgram: true,
+        environment: ["BASE_URL", "TEST_PASSWORD"],
+        approvedBefore: false,
+        previous: "name: Sign-in works\nsteps:\n  - run: node sign-in.mjs\n",
+        definition: "name: Sign-in works\nsteps:\n  - run: node scripts/sign-in.mjs\n",
+        contentHash: "abc123",
+        whole: true,
+      };
+
+      async function waiting(tests: Record<string, unknown>[], capable = true) {
+        const server = new FakeServer();
+        server.computer.tests = tests;
+        await chatting(server, capable ? [...READS, "test.waiting", "test.decide"] : READS);
+        return server;
+      }
+
+      test("shows what the file does, what it can read and what changed, and Run lets it go", async () => {
+        const server = await waiting([WAITING, { ...WAITING, run: "run-2" }]);
+        expect(await screen.findByText("Run “Sign-in works”?")).toBeTruthy();
+        expect(screen.getByText(/Asked by claude, with user = ana\./)).toBeTruthy();
+        expect(screen.getByText("start `npm run dev`, and keep it running")).toBeTruthy();
+        expect(screen.getByText("run `node scripts/sign-in.mjs`, expecting exit 0")).toBeTruthy();
+        expect(screen.getByText("BASE_URL, TEST_PASSWORD")).toBeTruthy();
+        expect(screen.getByText("-   - run: node sign-in.mjs")).toBeTruthy();
+        expect(screen.getByText("+   - run: node scripts/sign-in.mjs")).toBeTruthy();
+        expect(screen.getByText(/1 more run waits behind it\./)).toBeTruthy();
+        // Its own agent waits on it: the conversation needs you.
+        expect(screen.getByText("Needs you")).toBeTruthy();
+
+        await fireEvent.press(screen.getByRole("button", { name: "Run" }));
+        await settle();
+        expect(server.decisions).toEqual([
+          { run: "run-1", contentHash: "abc123", decision: "run" },
+        ]);
+        // The one behind it is next.
+        expect(screen.queryByText(/more run waits behind it/)).toBeNull();
+        expect(screen.getByText("Run “Sign-in works”?")).toBeTruthy();
+      });
+
+      test("Don’t run refuses it, and the card goes", async () => {
+        const server = await waiting([WAITING]);
+        await screen.findByText("Run “Sign-in works”?");
+        await fireEvent.press(screen.getByRole("button", { name: "Don’t run" }));
+        await settle();
+        expect(server.decisions).toEqual([
+          { run: "run-1", contentHash: "abc123", decision: "refuse" },
+        ]);
+        expect(screen.queryByText("Run “Sign-in works”?")).toBeNull();
+      });
+
+      test("one the computer could not send whole says why, and can only be refused", async () => {
+        await waiting([
+          {
+            ...WAITING,
+            previous: undefined,
+            definition: undefined,
+            whole: false,
+            whyNot: "This test is too long to show whole here. Run it at the computer.",
+          },
+        ]);
+        expect(await screen.findByText(/too long to show whole here/)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Don’t run" })).toBeTruthy();
+      });
+
+      test("an answer the computer refused leaves the card, with why", async () => {
+        const server = await waiting([WAITING]);
+        server.computer.refuses.set("test.decide", "This phone may only watch here.");
+        await screen.findByText("Run “Sign-in works”?");
+        await fireEvent.press(screen.getByRole("button", { name: "Run" }));
+        await settle();
+        expect(screen.getByText("This phone may only watch here.")).toBeTruthy();
+        expect(screen.getByText("Run “Sign-in works”?")).toBeTruthy();
+      });
+
+      test("another agent's run says so, and does not make this conversation need you", async () => {
+        await waiting([{ ...WAITING, session: "other" }]);
+        expect(await screen.findByText(/Asked by another agent/)).toBeTruthy();
+        expect(screen.queryByText("Needs you")).toBeNull();
+      });
+
+      test("a computer from before this is not asked", async () => {
+        const server = await waiting([WAITING], false);
+        await settle();
+        expect(screen.queryByText("Run “Sign-in works”?")).toBeNull();
+        expect(server.operations.map((o) => o.op)).not.toContain("test.waiting");
+      });
     });
 
     test("a message is typed into its terminal with Enter, and control given back at once", async () => {

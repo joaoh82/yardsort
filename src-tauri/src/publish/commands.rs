@@ -108,50 +108,61 @@ pub async fn project_pull_requests(
     asked: bool,
 ) -> IpcResult<ProjectPullRequests> {
     blocking(app, move |state| {
-        let mut found = look(state, &project_id, refresh, full);
-        // The whole list is in hand: the moment to let go of what was fetched for pull requests
-        // that are no longer on it.
-        if full {
-            if let (Ok(git), Ok(root)) = (Git::new(&state.env()), project_root(state, &project_id))
-            {
-                super::pull_requests::prune_refs(&git, &root, &found);
-            }
-        }
-        let mut owned = state
-            .forge
-            .owned(&project_id, &found.pull_requests, refresh, || {
-                by_workspace(state, &project_id, &found.pull_requests)
-            });
-        // A full look has just read every open one. Otherwise the ones workspaces show that
-        // only the open tier has are asked about, or they would stay as they were at startup.
-        if refresh && !full {
-            let shown: Vec<u32> = owned.values().flatten().copied().collect();
-            let followed = match (project_root(state, &project_id), Gh::find(&state.env())) {
-                (Ok(root), Some(gh)) => state.forge.follow_open(&project_id, &shown, |number| {
-                    gh.pull_request_within(&root, number, super::PAGE_LIMIT)
-                }),
-                _ => false,
-            };
-            if followed {
-                // The recent tier is fresh in the cache, so this asks nobody.
-                found = look(state, &project_id, false, false);
-                owned = state
-                    .forge
-                    .owned(&project_id, &found.pull_requests, false, || {
-                        by_workspace(state, &project_id, &found.pull_requests)
-                    });
-            }
-        }
-        found.workspaces = owned;
-        found.tracked = super::tracked::of_project(state, &project_id, refresh, asked);
-        let _ = yardsort_core::notify::observe_reviews(
-            &state.store,
-            &found.pull_requests,
-            yardsort_core::store::now_ms(),
-        );
-        Ok(found)
+        Ok(read(state, &project_id, refresh, full, asked))
     })
     .await
+}
+
+/// What [`project_pull_requests`] answers. Also read for a device that asked about a project's
+/// pull requests, off its channel ([`super::lent`]).
+pub(super) fn read(
+    state: &AppState,
+    project_id: &str,
+    refresh: bool,
+    full: bool,
+    asked: bool,
+) -> ProjectPullRequests {
+    let mut found = look(state, project_id, refresh, full);
+    // The whole list is in hand: the moment to let go of what was fetched for pull requests
+    // that are no longer on it.
+    if full {
+        if let (Ok(git), Ok(root)) = (Git::new(&state.env()), project_root(state, project_id)) {
+            super::pull_requests::prune_refs(&git, &root, &found);
+        }
+    }
+    let mut owned = state
+        .forge
+        .owned(project_id, &found.pull_requests, refresh, || {
+            by_workspace(state, project_id, &found.pull_requests)
+        });
+    // A full look has just read every open one. Otherwise the ones workspaces show that
+    // only the open tier has are asked about, or they would stay as they were at startup.
+    if refresh && !full {
+        let shown: Vec<u32> = owned.values().flatten().copied().collect();
+        let followed = match (project_root(state, project_id), Gh::find(&state.env())) {
+            (Ok(root), Some(gh)) => state.forge.follow_open(project_id, &shown, |number| {
+                gh.pull_request_within(&root, number, super::PAGE_LIMIT)
+            }),
+            _ => false,
+        };
+        if followed {
+            // The recent tier is fresh in the cache, so this asks nobody.
+            found = look(state, project_id, false, false);
+            owned = state
+                .forge
+                .owned(project_id, &found.pull_requests, false, || {
+                    by_workspace(state, project_id, &found.pull_requests)
+                });
+        }
+    }
+    found.workspaces = owned;
+    found.tracked = super::tracked::of_project(state, project_id, refresh, asked);
+    let _ = yardsort_core::notify::observe_reviews(
+        &state.store,
+        &found.pull_requests,
+        yardsort_core::store::now_ms(),
+    );
+    found
 }
 
 /// Each workspace's own pull requests out of the project's. One `git reflog` per workspace, and

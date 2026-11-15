@@ -1088,7 +1088,19 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       their conflicts; workspaces seen elsewhere; checking a branch out here). The owner took the
       defaults for its four questions the same day. Slice 1, the server's records, was built on
       2026-11-14: the sync routes, tables and pruner, and the relay's hint as protocol minor 9; its
-      local smoke test passed, and its staging run waits on a deploy.
+      local smoke test passed, and its staging run passed on 2026-11-15. Slice 2, turning a
+      project on and linking it, was built the same day (42 §10): the local tables and the sync
+      loop, **Sync** in Project settings, `yardsort-host sync` behind the operator's guard and a
+      read-only `ys sync status`; its local smoke test, `sync-link.yaml`, passed, and so did its
+      owner run through staging, this computer and the box, on 2026-11-15. Slice 3, approved
+      notes, was built on 2026-11-15 (42 §11): the outbox in the memory methods' transactions,
+      conflicts kept on the server and shown on every host until settled once, the Memory view's
+      **Conflicts** section and `yardsort-host memory` behind the guard; its local smoke test,
+      `sync-memory.yaml`, passed, and its owner run, the gate's, is the owner's to make. Slice 4,
+      workspaces seen elsewhere, was built the same day (42 §12): the outbox in the workspace
+      methods, written only by the host a workspace lives on, and **on other computers** under
+      each project, with nothing made for them; its local smoke test, `sync-workspaces.yaml`,
+      passed.
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is
@@ -1327,6 +1339,28 @@ history a line at a time.
 - [ ] Run on an iPhone and on Android: Chat against a real conversation, a question answered from
       the phone, and the pinch in each WebView.
 - [ ] OpenCode's and Pi's questions, through their plugin and extension.
+- [x] Remote protocol minor 10: `test.waiting` (`terminal:read`) and `test.decide`
+      (`terminal:control`). A smoke test run waiting for its person shows in Chat as the
+      computer's approval card, and is let go or refused there (2026-11-15).
+- [x] A project folds on the phone's computer screen, remembered per computer (2026-11-15).
+- [x] Found on the iPhone on 2026-11-15, in the owner's first use of Chat there: from iOS 26 the
+      screen starts under the header, so the field stood a header's height above the keyboard and
+      the conversation's bar was under the status bar. The screen now asks where it starts
+      (43, _Found on the iPhone_). Checked on the Android emulator and by tests; not yet seen on
+      the iPhone.
+- [x] The smoke test `remote-phone-lets-a-test-run` passed on Linux (2026-11-15): the real
+      window, a pretend phone, a real run let go and carried out.
+- [ ] A smoke test let go from a real phone, and a notice when one starts waiting.
+- [x] Pull request status on the phone, read-only (45, 2026-11-15). Remote protocol minor 11:
+      `pull.list` and `pull.describe`, both `workspace:read`. The phone is told what the computer
+      last read with `gh`, and never asks the forge. Badges on workspace rows, a card with checks
+      and reviews on the workspace's screen, and a list over every project. Proposed in Figma
+      first (page **Pull requests · proposal**) and answered by the owner the same day.
+- [x] Its smoke test, `remote-phone-sees-pull-requests`, passed on Linux (2026-11-15): the real
+      window, a stand-in `gh`, a pretend phone.
+- [ ] See it on a phone.
+- [ ] A notification when a check fails or a review arrives (issue #263); merging from the phone;
+      pull requests of a computer with no window.
 
 _Exit:_ on a phone, a person reads an agent's whole conversation without scrolling sideways,
 answers its permission question, and sends it the next message, while the computer's terminal

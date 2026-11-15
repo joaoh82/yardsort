@@ -37,9 +37,11 @@ use yardsort_core::remote::host::{self, CredentialStore, FileCredentials, LocalG
 use yardsort_core::remote::serve::Context;
 use yardsort_core::remote::start::{Starter, Starting};
 use yardsort_core::remote::workflow::WorkflowGate;
-use yardsort_core::remote::HostIdentity;
+use yardsort_core::remote::{HostIdentity, PullRequests, TestGate};
 use yardsort_core::settings::SettingsFile;
 use yardsort_core::store::Store;
+
+pub mod sync;
 
 use crate::error::{IpcError, IpcResult};
 use crate::state::{blocking, AppState};
@@ -61,6 +63,7 @@ struct AppHome {
     app: AppHandle,
     git: OnceLock<Option<yardsort_core::git::Git>>,
     starting: Arc<AppStarting>,
+    pulls: Arc<crate::publish::lent::AppPulls>,
 }
 
 impl AppHome {
@@ -69,12 +72,18 @@ impl AppHome {
             app: app.clone(),
             git: OnceLock::new(),
             starting: Arc::new(AppStarting(app.clone())),
+            pulls: Arc::new(crate::publish::lent::AppPulls::new(app)),
         }
     }
 
     fn state(&self) -> &AppState {
         self.app.state::<AppState>().inner()
     }
+}
+
+/// Something sync carries changed here, as a note did: run a pass, when Remote is on.
+pub(crate) fn wake_sync(app: &AppHandle) {
+    remote_host::sync::wake(&AppHome::new(app));
 }
 
 impl Home for AppHome {
@@ -121,6 +130,8 @@ impl Home for AppHome {
             starting: Some(Arc::clone(&self.starting) as Arc<dyn Starting>),
             workflow: Some(Arc::new(AppWorkflows(self.app.clone())) as Arc<dyn WorkflowGate>),
             conversations: Some(&conversations),
+            tests: Some(Arc::new(AppTests(self.app.clone())) as Arc<dyn TestGate>),
+            pulls: Some(Arc::clone(&self.pulls) as Arc<dyn PullRequests>),
         });
     }
 
@@ -129,6 +140,10 @@ impl Home for AppHome {
             request: request.into(),
         }
         .emit(&self.app);
+    }
+
+    fn synced(&self) {
+        let _ = sync::SyncChanged {}.emit(&self.app);
     }
 }
 
@@ -153,6 +168,16 @@ impl WorkflowGate for AppWorkflows {
         if let Some(driver) = self.0.try_state::<crate::workflows::Driver>() {
             driver.wake();
         }
+    }
+}
+
+/// The app's smoke test runner, as a device's answer reaches it: the window reloads its runs,
+/// and the driver looks at them now, so a run let go starts at once.
+struct AppTests(AppHandle);
+
+impl TestGate for AppTests {
+    fn decided(&self) {
+        crate::smoke::changed(&self.0);
     }
 }
 

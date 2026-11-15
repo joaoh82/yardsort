@@ -64,6 +64,12 @@ import {
   type SessionPage,
   type SessionResumeParams,
   type SessionStartParams,
+  type PullDetail,
+  type PullListParams,
+  type PullPage,
+  type PullRef,
+  type TestDecideParams,
+  type TestWaitingPage,
   type Started,
   type StreamId,
   type StreamPosition,
@@ -412,6 +418,44 @@ export class Channel {
   /** Answer a question the agent asked. Refused as `not_found` once it is not open any more. */
   async answerAsk(params: ApprovalAnswerParams): Promise<void> {
     expect(await this.ask({ op: "approval.answer", params }), "done");
+  }
+
+  /**
+   * The oldest smoke test run waiting for a person in `workspace`, as the computer's approval
+   * card shows it, and how many wait behind it. Minor 10.
+   */
+  async testsWaiting(workspace: WorkspaceId): Promise<TestWaitingPage> {
+    const { kind: _, ...page } = expect(
+      await this.ask({ op: "test.waiting", params: { workspace } }),
+      "testsWaiting",
+    );
+    return page;
+  }
+
+  /**
+   * Let a waiting smoke test run, or refuse it, by the hash of the file its card showed. Refused
+   * as `not_found` once it waits no more, and as `stale` for another file than the one named.
+   */
+  async decideTest(params: TestDecideParams): Promise<void> {
+    expect(await this.ask({ op: "test.decide", params }), "done");
+  }
+
+  /**
+   * A page of the pull requests the computer last read from its forge, of the projects this
+   * device may see: by default those its workspaces opened or follow. The computer never waits
+   * for the forge: a page that says `reading` is of an older reading, with a newer one on its
+   * way. Minor 11.
+   */
+  async pulls(params: Partial<PullListParams> = {}): Promise<PullPage> {
+    const full: PullListParams = { of: "workspaces", cursor: null, limit: null, ...params };
+    const { kind: _, ...page } = expect(await this.ask({ op: "pull.list", params: full }), "pulls");
+    return page;
+  }
+
+  /** One pull request, with each check and reviewer by name. `not_found` once it is not read. */
+  async pull(params: PullRef): Promise<PullDetail> {
+    const { kind: _, ...detail } = expect(await this.ask({ op: "pull.describe", params }), "pull");
+    return detail;
   }
 
   /** An ended conversation again, under its own record: one whose summary says `resumable`. */

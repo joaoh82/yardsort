@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use yardsort_core::coordinator::{self, Action, Decision, FloorManagerLevel};
 
 use crate::commands::{
-    activity, event, memory, pr, project, schedule, session, task, test, trigger, workflow,
+    activity, event, memory, pr, project, schedule, session, sync, task, test, trigger, workflow,
     workspace,
 };
 use crate::{Command, Failure, Yardsort};
@@ -286,6 +286,9 @@ fn effect(command: &Command) -> Action {
         },
         Command::Event(command) => match command {
             event::Command::Emit { .. } => Action::Act,
+        },
+        Command::Sync(command) => match command {
+            sync::Command::Status => Action::Read,
         },
     }
 }

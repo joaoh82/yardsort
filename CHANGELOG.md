@@ -3,8 +3,51 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## 0.35.0
+## Unreleased
 
+- **Pull requests on the phone.** A workspace's row on the phone carries its pull request's
+  badge, coloured as in the sidebar here: green, yellow while it waits on checks or a review, red
+  for a failed check, changes asked for or conflicts, purple for merged. The workspace's screen
+  has a card with the checks by name, the review and **Open on GitHub**, and **Pull requests** on
+  a computer's screen lists the open, merged and closed ones over every project. It is read-only,
+  and the phone asks this computer, never GitHub, so it needs `gh` signed in here and this
+  version on the computer. See [Pull requests on the phone](docs/guide/remote.md#pull-requests-on-the-phone).
+- **Sync a project with your other computers** (Remote, under development). **Sync** in Project
+  settings shows what turning it on sends, the project's name and its Git remote without any
+  password, and turns it on; on your other computer, **Link to a synced project…** offers it, the
+  one with the same remote first, and links nothing until you choose. **Stop syncing** unlinks
+  one computer; **Remove from the server** removes it for all, each keeping its own copy. On a
+  computer with no screen, `yardsort-host sync`; `ys sync status` says what syncs and changes
+  nothing. See [Syncing projects](docs/guide/remote.md#syncing-projects).
+- **A synced project's approved notes reach your other computers' agents** (Remote, under
+  development), approved, saying which computer they are from; proposals stay where they were made
+  until you approve them. Revoking a note revokes it everywhere, over any edit made meanwhile. Two
+  computers that edit one note apart both keep their text: one stands, the other waits under the
+  Memory view's new **Conflicts** section on both, until you keep one or write another, once for
+  all. On a computer with no screen, `yardsort-host memory` lists, writes, approves, revokes and
+  settles notes, at a terminal of your own. See
+  [On your other computers](docs/guide/memory.md#on-your-other-computers).
+- **A synced project's workspaces on your other computers are listed under it** (Remote, under
+  development), folded into **on other computers**: name, computer, branch and task, as they change
+  there. Nothing is made for them here, no worktree, branch or folder. `ys sync status` lists them
+  too. See [Workspaces on your other computers](docs/guide/workspaces.md#workspaces-on-your-other-computers).
+- **On the phone, Settings is a gear at the top right** of Connect and the account screen, in place
+  of the button at the foot of the screen. **Servers on this phone** moved into Settings too, at
+  the top, once the phone is signed in to a server.
+- **Let a smoke test run from the phone.** When a smoke test waits for you — an agent ran
+  `ys test run` on a file you have not seen, or one that changed — Chat shows the same card this
+  computer does: every step in words, the names of the test environment it can read, and what
+  changed since the version you approved, with **Run** and **Don't run**. The phone needs to be
+  allowed to type, and this version on the computer. See
+  [When a smoke test waits for you](docs/guide/remote.md#when-a-smoke-test-waits-for-you).
+- **Fold a project on the phone.** On a computer's screen, press a project's name to put its
+  workspaces away, and again to bring them back. A folded project still says how many it has and
+  how many agents are running in it, and the phone remembers which you folded. See
+  [A computer's workspaces](docs/guide/remote.md#a-computers-workspaces).
+- **Fixed: on an iPhone, the message field stood well above the keyboard.** In Chat, typing left
+  empty room between the field and the keyboard, and the bar with the agent's name and
+  **Chat | Terminal** was drawn under the status bar. Both are in their place now, in Chat and in
+  a conversation's terminal.
 - **One line installs the headless host on a Linux server.** `install.sh` takes the newest
   release's tarball, puts `yardsort-host` and `ys` in place for one user with the systemd service,
   and prints the sign-ins that are left. Run as root with `--user`, as a new cloud server's first

@@ -1,0 +1,9 @@
+{
+  "requestId": "r-42",
+  "protocol": { "major": 1, "minor": 11 },
+  "op": "pull.describe",
+  "params": {
+    "project": "1f0e9d8c-7b6a-4c5d-8e3f-2a1b0c9d8e7f",
+    "number": 61
+  }
+}

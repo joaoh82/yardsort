@@ -43,6 +43,7 @@ import {
   MAX_ASKS,
   MAX_CLIENT_NAME,
   MAX_COMMAND,
+  MAX_CHECK_NAME,
   MAX_CODE_LEN,
   MAX_CURSOR_LEN,
   MAX_ID_LEN,
@@ -52,9 +53,18 @@ import {
   MAX_NOTE,
   MAX_PAGE,
   MAX_PROMPT,
+  MAX_PULL_CHECKS,
+  MAX_PULL_WORKSPACES,
+  MAX_REVIEWERS,
   MAX_SAID,
+  MAX_STEP_WORDS,
   MAX_TASKS,
   MAX_TERMINALS,
+  MAX_TEST_DEFINITION,
+  MAX_TEST_HASH,
+  MAX_TEST_INPUT,
+  MAX_TEST_NAMES,
+  MAX_TEST_STEPS,
   MAX_TEXT,
   MAX_TURN_TEXT,
   MAX_UPLOAD,
@@ -1041,6 +1051,233 @@ const conversationPageFields = {
   answersAsks: orElse(bool, () => false),
 };
 
+// --- smoke tests waiting for a person (minor 10) ------------------------------------------------
+
+/** Who asked for a run. One from a newer host is `other`. */
+export type TestAskedBy = "agent" | "app" | "workflow" | "other";
+
+/** One step of a smoke test, in a sentence. */
+export interface TestStep {
+  id: string;
+  /** `setup`, `steps` or `teardown`. */
+  phase: string;
+  words: string;
+}
+
+/**
+ * A smoke test run waiting for a person, as the computer's approval card shows it: every step in
+ * words, the names of the project's test environment it can read (never a value), and the file
+ * before and now when it changed since it was approved.
+ */
+export interface WaitingTest {
+  run: string;
+  name: string;
+  askedBy: TestAskedBy;
+  /** The conversation whose agent asked, when one did. */
+  session?: SessionRecordId;
+  askedAt: number;
+  inputs: { name: string; value: string }[];
+  steps: TestStep[];
+  env: { name: string; set: boolean }[];
+  /** A step runs a program, which is handed the project's whole test environment. */
+  runsAProgram: boolean;
+  environment: string[];
+  /** This exact file was approved before, and the project asks to see every run. */
+  approvedBefore: boolean;
+  previous?: string;
+  definition?: string;
+  contentHash: string;
+  /** Everything the card says is here, uncut. When false, it can only be refused from here. */
+  whole: boolean;
+  whyNot?: string;
+}
+
+/** The oldest run waiting in a workspace, and how many wait behind it. */
+export interface TestWaitingPage {
+  first?: WaitingTest;
+  behind: number;
+}
+
+export type TestDecision = "run" | "refuse";
+
+/** `test.decide`: an answer to the card that showed the file at `contentHash`. */
+export interface TestDecideParams {
+  workspace: WorkspaceId;
+  run: string;
+  contentHash: string;
+  decision: TestDecision;
+}
+
+const TEST_HASH = /^[0-9A-Fa-f]+$/;
+const TEST_RUN_ID = /^[A-Za-z0-9_.:-]+$/;
+
+const testWaitingPageFields = {
+  first: optional(
+    object({
+      run: text(MAX_ID_LEN),
+      name: text(MAX_TEXT),
+      askedBy: oneOf(["agent", "app", "workflow", "other"] as const, "other"),
+      session: optional(id<SessionRecordId>()),
+      askedAt: i64,
+      inputs: array(object({ name: text(MAX_LABEL), value: text(MAX_TEST_INPUT) }), MAX_TEST_NAMES),
+      steps: array(
+        object({ id: text(MAX_LABEL), phase: text(MAX_LABEL), words: text(MAX_STEP_WORDS) }),
+        MAX_TEST_STEPS,
+      ),
+      env: array(object({ name: text(MAX_LABEL), set: bool }), MAX_TEST_NAMES),
+      runsAProgram: bool,
+      environment: array(text(MAX_LABEL), MAX_TEST_NAMES),
+      approvedBefore: bool,
+      previous: optional(text(MAX_TEST_DEFINITION)),
+      definition: optional(text(MAX_TEST_DEFINITION)),
+      contentHash: text(MAX_TEST_HASH),
+      whole: bool,
+      whyNot: optional(text(MAX_TEXT)),
+    }),
+  ),
+  behind: u32,
+};
+
+// --- pull requests, as a host last read them (minor 11) -----------------------------------------
+
+/**
+ * Which pull requests `pull.list` gives. `workspaces`: those a workspace opened or follows,
+ * whatever their state, each workspace's own in the host's order for it and before what it
+ * follows. The others: every one of that state the host has read, most recently changed first.
+ */
+export type PullsOf = "workspaces" | "open" | "merged" | "closed";
+
+export interface PullListParams {
+  of: PullsOf;
+  cursor: Cursor | null;
+  limit: number | null;
+}
+
+/**
+ * Which pull request: a project's own by its number, or one a workspace follows in another
+ * repository, by the host's id for that.
+ */
+export interface PullRef {
+  project: ProjectId;
+  number: number;
+  followed?: string;
+}
+
+/** One from a newer host is `other`. */
+export type PullState = "open" | "merged" | "closed" | "other";
+export type PullReview = "approved" | "changesRequested" | "required" | "none" | "other";
+
+/** A pull request, as much of it as a row and a badge need. */
+export interface PullSummary {
+  project: ProjectId;
+  number: number;
+  /** The host's id for it, when a workspace follows it in another repository. */
+  followed?: string;
+  /** The repository it is in, as `owner/name`, when that is not the project's own. */
+  repo?: string;
+  title: string;
+  /** Its page on the forge: an `https` link, or absent. */
+  url?: string;
+  branch: string;
+  base?: string;
+  state: PullState;
+  draft: boolean;
+  checks: { passed: number; failed: number; running: number };
+  review: PullReview;
+  /** The forge says it does not merge cleanly into its base. */
+  conflicts: boolean;
+  additions?: number;
+  deletions?: number;
+  author?: string;
+  /** When it last changed, in epoch milliseconds. */
+  updatedAt?: number;
+  workspaces: WorkspaceId[];
+}
+
+/** `pull.list`. A page without `next` is the last. */
+export interface PullPage {
+  pulls: PullSummary[];
+  next: Cursor | null;
+  /** How many open ones the host has read, over every project this device may see. */
+  open: number;
+  /** The host is reading some of these from the forge now. Asking again shortly gives them. */
+  reading: boolean;
+}
+
+export type CheckState = "passed" | "failed" | "running" | "other";
+export type ReviewerState = "approved" | "changesRequested" | "commented" | "dismissed" | "other";
+
+/** `pull.describe`: one pull request, with its checks and reviewers by name. */
+export interface PullDetail {
+  pull: PullSummary;
+  /** The failed first, then those running. Empty when the host has only their counts. */
+  checks: { name: string; state: CheckState }[];
+  /** How many checks are not in `checks`. */
+  moreChecks: number;
+  reviews: { login: string; state: ReviewerState }[];
+  /** Who a review was asked of and has not answered. */
+  waitingOn: string[];
+}
+
+const HTTPS = /^https:\/\//;
+
+const pullSummaryFields = object({
+  project: id<ProjectId>(),
+  number: u32,
+  followed: optional(text(MAX_ID_LEN)),
+  repo: optional(text(MAX_TEXT)),
+  title: text(MAX_TEXT),
+  url: optional(text(MAX_LINK)),
+  branch: text(MAX_TEXT),
+  base: optional(text(MAX_TEXT)),
+  state: oneOf(["open", "merged", "closed", "other"] as const, "other"),
+  draft: bool,
+  checks: object({ passed: u32, failed: u32, running: u32 }),
+  review: oneOf(["approved", "changesRequested", "required", "none", "other"] as const, "other"),
+  conflicts: bool,
+  additions: optional(u32),
+  deletions: optional(u32),
+  author: optional(text(MAX_LABEL)),
+  updatedAt: optional(i64),
+  workspaces: array(id<WorkspaceId>(), MAX_PULL_WORKSPACES),
+});
+
+/** A link is kept only when it is to a web page: what a host says is opened in a browser. */
+const pullSummary: Decoder<PullSummary> = (value, path) => {
+  const { url, ...pull } = pullSummaryFields(value, path);
+  return url !== undefined && HTTPS.test(url) ? { ...pull, url } : pull;
+};
+
+const pullPageFields = {
+  pulls: array(pullSummary, MAX_PAGE),
+  next: nullable(cursor),
+  open: u32,
+  reading: bool,
+};
+
+const pullDetailFields = {
+  pull: pullSummary,
+  checks: array(
+    object({
+      name: text(MAX_CHECK_NAME),
+      state: oneOf(["passed", "failed", "running", "other"] as const, "other"),
+    }),
+    MAX_PULL_CHECKS,
+  ),
+  moreChecks: u32,
+  reviews: array(
+    object({
+      login: text(MAX_LABEL),
+      state: oneOf(
+        ["approved", "changesRequested", "commented", "dismissed", "other"] as const,
+        "other",
+      ),
+    }),
+    MAX_REVIEWERS,
+  ),
+  waitingOn: array(text(MAX_LABEL), MAX_REVIEWERS),
+};
+
 /** Everything a client can ask a host: `op` names it, `params` carries its parameters. */
 export type Operation =
   | { op: "host.describe" }
@@ -1078,7 +1315,11 @@ export type Operation =
     }
   | { op: "workflow.decide"; params: WorkflowDecideParams }
   | { op: "conversation.read"; params: ConversationReadParams }
-  | { op: "approval.answer"; params: ApprovalAnswerParams };
+  | { op: "approval.answer"; params: ApprovalAnswerParams }
+  | { op: "test.waiting"; params: { workspace: WorkspaceId } }
+  | { op: "test.decide"; params: TestDecideParams }
+  | { op: "pull.list"; params: PullListParams }
+  | { op: "pull.describe"; params: PullRef };
 
 export type OperationName = Operation["op"];
 
@@ -1111,6 +1352,10 @@ export const OPERATIONS: readonly OperationName[] = [
   "workflow.decide",
   "conversation.read",
   "approval.answer",
+  "test.waiting",
+  "test.decide",
+  "pull.list",
+  "pull.describe",
 ];
 
 const leaseRefFields = { terminal: id<TerminalId>(), lease: id<LeaseId>(), generation: u64 };
@@ -1199,6 +1444,23 @@ const params: Record<string, Decoder<unknown>> = {
     ask: text(MAX_ASK_ID),
     decision: oneOf(["allow", "deny"] as const),
   }),
+  "test.waiting": object({ workspace: id<WorkspaceId>() }),
+  "test.decide": object({
+    workspace: id<WorkspaceId>(),
+    run: text(MAX_ID_LEN),
+    contentHash: text(MAX_TEST_HASH),
+    decision: oneOf(["run", "refuse"] as const),
+  }),
+  "pull.list": object({
+    of: orElse(oneOf(["workspaces", "open", "merged", "closed"] as const), () => "workspaces"),
+    cursor: nullable(cursor),
+    limit,
+  }),
+  "pull.describe": object({
+    project: id<ProjectId>(),
+    number: u32,
+    followed: optional(text(MAX_ID_LEN)),
+  }),
 };
 
 /** The scope a caller needs for an operation. `null` for `host.describe`, which any grant may ask. */
@@ -1208,13 +1470,20 @@ export function scopeOf(op: OperationName): Scope | null {
     op === "workspace.list" ||
     op === "workspace.describe" ||
     op === "session.list" ||
-    op === "harness.list"
+    op === "harness.list" ||
+    op === "pull.list" ||
+    op === "pull.describe"
   ) {
     return "workspace:read";
   }
   if (op.startsWith("activity.")) return "activity:read";
   if (op === "memory.list") return "memory:read";
-  if (op === "terminal.attach" || op === "terminal.detach" || op === "conversation.read") {
+  if (
+    op === "terminal.attach" ||
+    op === "terminal.detach" ||
+    op === "conversation.read" ||
+    op === "test.waiting"
+  ) {
     return "terminal:read";
   }
   if (op === "workflow.run.list" || op === "workflow.run.get") return "workflow:read";
@@ -1297,6 +1566,14 @@ export function validate(operation: Operation): string | null {
       return ASK_ID.test(operation.params.ask) && operation.params.ask.length <= MAX_ASK_ID
         ? null
         : "names a question Yardsort did not ask";
+    case "test.decide":
+      if (!TEST_RUN_ID.test(operation.params.run)) return "names a run Yardsort did not queue";
+      return TEST_HASH.test(operation.params.contentHash) ? null : "names no test file's hash";
+    case "pull.describe":
+      if (operation.params.number === 0) return "numbers pull requests from 0, not 1";
+      return operation.params.followed === undefined || isId(operation.params.followed)
+        ? null
+        : "names a followed pull request by no id of Yardsort's";
     default:
       return null;
   }
@@ -1390,6 +1667,9 @@ export type Reply =
   | ({ kind: "workflowChallenge" } & WorkflowChallenge)
   | ({ kind: "workflowDecision" } & WorkflowDecision)
   | ({ kind: "conversation" } & ConversationPage)
+  | ({ kind: "testsWaiting" } & TestWaitingPage)
+  | ({ kind: "pulls" } & PullPage)
+  | ({ kind: "pull" } & PullDetail)
   | { kind: "done" };
 
 export const reply: Decoder<Reply> = tagged<Reply>("kind", {
@@ -1418,6 +1698,9 @@ export const reply: Decoder<Reply> = tagged<Reply>("kind", {
     message: text(MAX_TEXT),
   }),
   conversation: variant("kind", "conversation", conversationPageFields),
+  testsWaiting: variant("kind", "testsWaiting", testWaitingPageFields),
+  pulls: variant("kind", "pulls", pullPageFields),
+  pull: variant("kind", "pull", pullDetailFields),
   done: variant("kind", "done", {}),
 });
 

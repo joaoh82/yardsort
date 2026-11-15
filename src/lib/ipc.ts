@@ -25,6 +25,8 @@ import {
   type MemoryCheck,
   type MemoryDecision,
   type MemoryEntry,
+  type MemoryEntryConflict,
+  type MemorySettle,
   type MemoryWaiting,
   type ProjectMemory,
   type ProjectOutcomes,
@@ -63,6 +65,10 @@ import {
   type NewWorkspace,
   type Preflight,
   type Project,
+  type ProjectSyncStatus,
+  type SyncOffer,
+  type SyncedWorkspace,
+  type WorkspaceTask,
   type ProjectAutomation,
   type ProjectPullRequests,
   type ProjectTasks,
@@ -271,6 +277,8 @@ export type {
   MemoryCheck,
   MemoryDecision,
   MemoryEntry,
+  MemoryEntryConflict,
+  MemorySettle,
   MemoryWaiting,
   ProjectMemory,
   ProjectOutcomes,
@@ -310,6 +318,10 @@ export type {
   NewWorkspace,
   Preflight,
   Project,
+  ProjectSyncStatus,
+  SyncOffer,
+  SyncedWorkspace,
+  WorkspaceTask,
   ProjectPullRequests,
   ProjectTasks,
   OtherComputers,
@@ -867,6 +879,27 @@ export const ipc = {
     events.remotePairingRequested.listen((event) => handler(event.payload.request)),
 
   /**
+   * Sync between this computer and the account's others, a project at a time, while Remote is
+   * on. Only the person turns it on, links, stops or removes, here. See
+   * `src-tauri/src/remote/sync.rs`.
+   */
+  projectSyncGet: (projectId: string) => unwrap(commands.projectSyncGet(projectId)),
+  /** Its name and remote hint go to the server: what `projectSyncGet`'s preview showed. */
+  projectSyncOn: (projectId: string) => unwrap(commands.projectSyncOn(projectId)),
+  /** The account's synced projects this one could be linked to; matching remotes first. */
+  projectSyncOffers: (projectId: string) => unwrap(commands.projectSyncOffers(projectId)),
+  projectSyncLink: (projectId: string, synced: string) =>
+    unwrap(commands.projectSyncLink(projectId, synced)),
+  projectSyncStop: (projectId: string) => unwrap(commands.projectSyncStop(projectId)),
+  /** Remove its records from the server, for every computer. Each keeps its own copy. */
+  projectSyncRemove: (projectId: string) => unwrap(commands.projectSyncRemove(projectId)),
+  /** The other computers' workspaces of a project that syncs here: shown, never made here. */
+  projectSyncWorkspaces: (projectId: string): Promise<SyncedWorkspace[]> =>
+    unwrap(commands.projectSyncWorkspaces(projectId)),
+  /** Sync changed something it shows: a project stopped syncing, or a pass failed or recovered. */
+  onSyncChanged: (handler: () => void) => events.syncChanged.listen(() => handler()),
+
+  /**
    * Remote the other way round: this computer as a client of other hosts, a device of its own at
    * the server, apart from this computer as a host. What a host shows is read-only and carries no
    * paths. See `src-tauri/src/computers.rs`.
@@ -964,6 +997,8 @@ export const ipc = {
   memoryEdit: (id: string, text: string) => unwrap(commands.memoryEdit(id, text)),
   memoryDecide: (id: string, decision: MemoryDecision) =>
     unwrap(commands.memoryDecide(id, decision)),
+  /** Settle a synced note two hosts changed at once: keep one of the texts, or write a third. */
+  memorySettle: (id: string, how: MemorySettle) => unwrap(commands.memorySettle(id, how)),
   /** Whether a project's approved entries go into its agents' first messages. */
   memoryShare: (projectId: string, shared: boolean) =>
     unwrap(commands.memoryShare(projectId, shared)),
