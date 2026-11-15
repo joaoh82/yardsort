@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.35.0
 
 - **Pull requests on the phone.** A workspace's row on the phone carries its pull request's
   badge, coloured as in the sidebar here: green, yellow while it waits on checks or a review, red
