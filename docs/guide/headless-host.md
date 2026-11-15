@@ -47,12 +47,26 @@ curl -fsSL https://raw.githubusercontent.com/joaoh82/yardsort/main/crates/host/p
 ```
 
 As root it makes that user if there is none, installs `git` where `apt` can, and installs the same
-things for that user; the host itself never runs as root. A user it made gets root's
-`~/.ssh/authorized_keys`, so the key you chose for the server logs in as `yardsort` too. The same line
-works as the server's first-boot script, where your provider takes one (cloud-init's user data):
+things for that user; the host itself never runs as root. Nothing is made until the release is
+downloaded, so a run that fails there can simply be run again.
+
+A user it made is given SSH keys, so that you can log in as it: yours, when you ran the line with
+`sudo`, and otherwise root's. Only keys with no options before them are given. Many cloud images
+turn root's login off by putting a command before root's key that says to log in as another user;
+that line is never handed on, and when there is no other key the script says the user has none yet
+and where to put yours.
+
+As a server's first boot, where your provider takes cloud-init's user data, make the user there with
+your key, and the script installs for it:
 
 ```yaml
 #cloud-config
+users:
+  - default
+  - name: yardsort
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAA… you@laptop
 runcmd:
   - curl -fsSL https://raw.githubusercontent.com/joaoh82/yardsort/main/crates/host/packaging/install.sh | sh -s -- --user yardsort
 ```

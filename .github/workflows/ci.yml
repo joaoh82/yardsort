@@ -193,6 +193,11 @@ jobs:
           done
           test -f "$home/.config/systemd/user/yardsort-host.service"
 
+      # As root, as a server's first boot runs it: which SSH keys a new user is given.
+      - name: The install script as root gives a new user a way in
+        if: matrix.arch == 'x86_64'
+        run: scripts/host-install-check.sh
+
       - uses: oven-sh/setup-bun@v2
         if: matrix.arch == 'x86_64'
         with:

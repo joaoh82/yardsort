@@ -10,8 +10,10 @@
 #
 #   curl -fsSL …/install.sh | sh -s -- --user yardsort
 #
-# makes that user if there is none, gives a user it made root's SSH keys, installs git if apt can,
-# and installs the same things for that user. The host itself never runs as root.
+# makes that user if there is none, installs git if apt can, and installs the same things for that
+# user. A user it made gets the SSH keys of whoever ran it: yours under sudo, else root's, and only
+# keys with no options before them, so never cloud-init's "log in as another user" line. The host
+# itself never runs as root.
 #
 #   --version X.Y.Z   that release rather than the newest
 #   --user NAME       as root only: the user to install for
@@ -101,23 +103,12 @@ main() {
     [ -n "$user" ] || die "The host never runs as root. Run this as the user that will run it, or as root with --user NAME."
     [ "$user" != root ] || die "The host never runs as root: name an ordinary user."
     command -v runuser >/dev/null 2>&1 || die "Needs runuser."
-    if ! id "$user" >/dev/null 2>&1; then
-      useradd --create-home --shell /bin/bash "$user"
-      made_user=1
-      say "Made the user $user."
-    fi
+    id "$user" >/dev/null 2>&1 || command -v useradd >/dev/null 2>&1 || die "Needs useradd, to make $user."
   else
     as_root=0
     [ -z "$user" ] || [ "$user" = "$(id -un)" ] || die "--user is for root. Run this as $user instead."
     user="$(id -un)"
   fi
-  if [ "$as_root" = 1 ]; then
-    home="$(getent passwd "$user" | cut -d: -f6)"
-  else
-    home="$HOME"
-  fi
-  [ -n "$home" ] && [ -d "$home" ] || die "$user has no home folder."
-
   if [ -z "$version" ]; then
     # The newest release's page redirects to its tag: no API, so no rate limit.
     latest="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$releases/latest")" ||
@@ -142,12 +133,40 @@ main() {
   # The user reads it from here; nothing in it is secret.
   chmod -R a+rX "$tmp"
 
+  # Only now, with a release in hand, is anything made: a download that fails leaves no user
+  # behind, for the next run to find already there and give no keys to.
+  no_keys=0
   if [ "$as_root" = 1 ]; then
-    # On a new cloud server the key chosen in its console lands on root alone.
-    if [ "$made_user" = 1 ] && [ -s /root/.ssh/authorized_keys ]; then
-      install -d -m 700 -o "$user" -g "$(id -gn "$user")" "$home/.ssh"
-      install -m 600 -o "$user" -g "$(id -gn "$user")" /root/.ssh/authorized_keys "$home/.ssh/authorized_keys"
-      say "Gave $user root's SSH keys, so whoever logs in as root can log in as $user."
+    if ! id "$user" >/dev/null 2>&1; then
+      useradd --create-home --shell /bin/bash "$user"
+      made_user=1
+      say "Made the user $user."
+    fi
+    home="$(getent passwd "$user" | cut -d: -f6)"
+  else
+    home="$HOME"
+  fi
+  [ -n "$home" ] && [ -d "$home" ] || die "$user has no home folder."
+
+  if [ "$as_root" = 1 ]; then
+    if [ "$made_user" = 1 ]; then
+      # A new user has no way in. Give it the keys of whoever is running this: the user who
+      # called sudo, else root. Only keys with nothing before them are taken. A key with options
+      # is restricted, and on cloud-init images root's is a forced command that says to log in
+      # as another user and hangs up: copied, it would lock the new user out the same way.
+      giver="${SUDO_USER:-root}"
+      giver_home="$(getent passwd "$giver" | cut -d: -f6)"
+      if [ -n "$giver_home" ] && [ -r "$giver_home/.ssh/authorized_keys" ]; then
+        grep -E '^[[:space:]]*(ssh-|ecdsa-|sk-)[^[:space:]]+[[:space:]]+[A-Za-z0-9+/]' \
+          "$giver_home/.ssh/authorized_keys" >"$tmp/keys" 2>/dev/null || true
+      fi
+      if [ -s "$tmp/keys" ]; then
+        install -d -m 700 -o "$user" -g "$(id -gn "$user")" "$home/.ssh"
+        install -m 600 -o "$user" -g "$(id -gn "$user")" "$tmp/keys" "$home/.ssh/authorized_keys"
+        say "Gave $user $giver's SSH keys, so whoever logs in as $giver can log in as $user."
+      else
+        no_keys=1
+      fi
     fi
     if ! command -v git >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
       say "Installing git"
@@ -210,6 +229,11 @@ main() {
     fi
     say "The agents keep running."
     return
+  fi
+  if [ "$no_keys" = 1 ]; then
+    say "$user has no SSH key yet: $giver has none it could be given. Before logging in as $user,"
+    say "put your public key in $home/.ssh/authorized_keys (folder 700, file 600, both $user's)."
+    say ""
   fi
   if [ "$as_root" = 1 ]; then
     say "What is left, logged in as $user (over SSH, not su or sudo), each a sign-in of yours:"
