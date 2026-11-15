@@ -10,7 +10,8 @@ use remote_host::sync::{self, Loop};
 use remote_proto::sync::SyncId;
 use yardsort_core::store::ProjectRow;
 use yardsort_core::sync::{
-    approved_notes, project_hint, project_sync, same_remote, ProjectSync, SyncPreview,
+    approved_notes, project_hint, project_sync, same_remote, synced_workspace_count, ProjectSync,
+    SyncPreview,
 };
 
 use crate::control::{Offered, Reply, SyncStatus, SyncedProject};
@@ -63,10 +64,12 @@ pub fn preview(home: &Arc<HostHome>, named: &str) -> account::Result<Reply> {
     }
     let remote = hint(home, &project);
     let notes = approved_notes(&home.store, &project.id).map_err(store_failed)?;
+    let workspaces = synced_workspace_count(&home.store, &project.id).map_err(store_failed)?;
     Ok(Reply::Preview(SyncPreview {
         name: project.name,
         remote,
         notes,
+        workspaces,
     }))
 }
 

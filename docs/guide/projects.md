@@ -152,7 +152,7 @@ Hover a project and press **⋯**, or right-click it:
 
 - **Project settings…** — files to copy into new worktrees, a setup command, a run/dev-server
   command, the smoke tests' environment and rules, and whether the project syncs with your other
-  computers. See [Project automation](#project-automation),
+  computers, its workspaces there listed under it. See [Project automation](#project-automation),
   [Smoke tests](smoke-tests.md#project-settings) and
   [Syncing projects](remote.md#syncing-projects).
 - **Memory…** — lessons about the project for its agents: what you write, what agents propose

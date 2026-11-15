@@ -67,6 +67,8 @@ import {
   type Project,
   type ProjectSyncStatus,
   type SyncOffer,
+  type SyncedWorkspace,
+  type WorkspaceTask,
   type ProjectAutomation,
   type ProjectPullRequests,
   type ProjectTasks,
@@ -330,6 +332,8 @@ export type {
   Project,
   ProjectSyncStatus,
   SyncOffer,
+  SyncedWorkspace,
+  WorkspaceTask,
   ProjectPullRequests,
   ProjectTasks,
   OtherComputers,
@@ -913,6 +917,9 @@ export const ipc = {
   projectSyncStop: (projectId: string) => unwrap(commands.projectSyncStop(projectId)),
   /** Remove its records from the server, for every computer. Each keeps its own copy. */
   projectSyncRemove: (projectId: string) => unwrap(commands.projectSyncRemove(projectId)),
+  /** The other computers' workspaces of a project that syncs here: shown, never made here. */
+  projectSyncWorkspaces: (projectId: string): Promise<SyncedWorkspace[]> =>
+    unwrap(commands.projectSyncWorkspaces(projectId)),
   /** Sync changed something it shows: a project stopped syncing, or a pass failed or recovered. */
   onSyncChanged: (handler: () => void) => events.syncChanged.listen(() => handler()),
 

@@ -452,14 +452,14 @@ again makes a new pairing, which shows.
 ## Syncing projects
 
 Your computers can share a project through the server: two computers with Remote on, signed in to
-the same account on the same server. That is the project itself, its name and its remote, and its
-[approved notes](memory.md#on-your-other-computers), which reach every computer's agents; its
-workspaces will follow in a later update. Nothing syncs until you turn it on for a project, and
-**never its files, its path or its terminals**.
+the same account on the same server. That is the project itself, its name and its remote; its
+[approved notes](memory.md#on-your-other-computers), which reach every computer's agents; and its
+workspaces, which every other computer shows and never makes. Nothing syncs until you turn it on for
+a project, and **never its files, its path or its terminals**.
 
 Open **Project settings…** from the project's menu. Its **Sync** section shows what turning sync on
 sends: the project's name, the address of its Git remote (`origin`) without any user or password in
-it, or none for a remote that is a folder, and how many approved notes go with it. **The server
+it, or none for a remote that is a folder, and how many approved notes and workspaces go with it. **The server
 keeps synced records in plain text, readable by whoever runs it.** Press **Turn on sync**. The section says _Waiting to reach the
 server…_ until the server has it, then _Syncing with your other computers_, and when it last
 synced. With Remote off, the section says sync needs it and links to **Settings → Remote**.
@@ -477,6 +477,15 @@ another computer changed something, and every five minutes otherwise. When the s
 reached, it tries again by itself, waiting longer each time, up to five minutes, and the section
 says why the last attempt failed. When the server refuses something, the section says why, and it
 is not sent again.
+
+**Your other computers' workspaces** of the project are listed under it in the sidebar, folded into
+**on other computers (n)**: each with its name, the computer it is on, its branch and the task it was
+started from, and _archived_ when it is. They are only a list. Nothing of them is on this computer:
+no worktree, no branch, no folder and no terminal is made for one, and there is nothing here to open
+or delete. Each changes when it changes on its computer, which alone writes it: made, renamed,
+archived, restored or deleted there. A workspace you make here, in the app or with `ys`, shows on
+your other computers within seconds. The project's own checkout is not listed, since each computer
+has its own.
 
 - **Stop syncing** unlinks this computer. The project stays here as it is, its notes included, and
   your other computers keep syncing it.

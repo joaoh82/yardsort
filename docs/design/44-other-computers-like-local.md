@@ -1,8 +1,8 @@
 # Other computers, like local projects
 
 _Proposed in Figma on 2026-11-14 and approved by the owner the same day, with the decisions in
-section 6. Slice 1 was built the same day (section 8); slices 2 to 5 are not built. The frames are on the page "Other computers like local" of the
-desktop file (<https://www.figma.com/design/HXSYFYmKvlzr1IXp0hBEh3?node-id=15-841>): A1 a workspace
+section 6. All five slices are built: the first that day, the rest on 2026-11-15 (sections 8 to
+12). The frames are on the page "Other computers like local" of the desktop file (<https://www.figma.com/design/HXSYFYmKvlzr1IXp0hBEh3?node-id=15-841>): A1 a workspace
 on another computer, A2 and A3 the composer, A4 the states, and a Notes frame, which was written
 before the decisions and is superseded by this document where they differ._
 

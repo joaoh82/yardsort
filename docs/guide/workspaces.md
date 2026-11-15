@@ -158,6 +158,15 @@ learns about it. An imported workspace is named after its folder; rename it if y
 To go the other way, **Forget…** in the workspace menu takes a workspace out of Yardsort without
 touching its folder or its branch.
 
+## Workspaces on your other computers
+
+In a project that [syncs](remote.md#syncing-projects) with your other computers, their workspaces
+of it are listed under the project, folded into **on other computers (n)** below the archived ones:
+name, computer, branch and task. They are there to read. None of them is a workspace here, and
+nothing is made for one: no worktree, no branch, no folder. Your own workspaces are listed on those
+computers the same way, renamed, archived or gone as you rename, archive or delete them here, and
+forgetting one takes it off their lists.
+
 ## The workspace menu
 
 Hover a workspace and press **⋯**, or right-click it.

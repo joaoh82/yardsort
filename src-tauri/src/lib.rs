@@ -168,6 +168,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             remote::sync::project_sync_link,
             remote::sync::project_sync_stop,
             remote::sync::project_sync_remove,
+            remote::sync::project_sync_workspaces,
             remote::remote_enable,
             remote::remote_cancel,
             remote::remote_disable,

@@ -5,7 +5,8 @@ day. Slice 1, the server's records, was built on 2026-11-14 (§9); its tests and
 passed, and so did its staging run on 2026-11-15. Slice 2, turning a project on and linking it, was
 built the same day (§10); its local smoke test passed, and so did its owner run through staging,
 this computer and the box, on 2026-11-15. Slice 3, approved notes, was built on 2026-11-15 (§11);
-its local smoke test passed, and its owner run through staging is the owner's to make.
+its local smoke test passed, and its owner run through staging is the owner's to make. Slice 4,
+workspaces seen elsewhere, was built the same day (§12); its local smoke test passed.
 
 This is the plan for the phase after R4 and R5 ([35](35-remote-r4-r5.md)): what it has to show, what
 it starts from, the decisions taken before any code, the slices in the order they are built, and
@@ -214,7 +215,7 @@ phone's chat ([43](43-phone-chat.md)).
 | 1   | The server's records (built, §9)                  | `remote_proto::sync`: logical ids, op ids, revisions, cursors, ops and their answers, with fixtures. The server's tables, `Records` methods on both stores, the three routes, the pruner, the relay hint (minor 9). No client                                                                                                                                         | The server's own: two accounts, duplicate push, stale base, revoke over a stale edit, a tombstone refusing a create, cursor past the floor answered with "take a snapshot", a body over the limit, a phone's token refused. Run on PostgreSQL in CI and on the stand-in |
 | 2   | Turning a project on, and linking it (built, §10) | The local tables: the logical-id map, the outbox, the cursor. The core's sync loop in the host runtime. Projects only: **Sync** in Project settings with its preview, **Link a synced project** on another machine, **Stop syncing**, **Remove from the server**; `yardsort-host sync on`, `link`, `status`, behind the operator's guard. `ys sync status`, read-only | `sync-link.yaml`: two throwaway profiles on the stand-in, one turning a project on, the other linking it to a clone of the same repository; the hint offered first, nothing linked until chosen; stop and remove                                                        |
 | 3   | Approved notes (built, §11)                       | The outbox written in `add_memory` and `change_memory`'s transactions for a synced project's approved and revoked notes; import without echo; revisions; conflicts kept locally with both texts; the Memory view's **Conflicts** section; "from Build box", "source unavailable on this device". Agents' launches get the synced notes as their own                   | `sync-memory.yaml`: two profiles; approve on one, launch an agent on the other and find the note in its first message; both offline, edit the same note on each, reconnect, settle the conflict; revoke on one while the other edits, reconnect: revoked on both        |
-| 4   | Workspaces, seen elsewhere                        | The outbox in the workspace methods, each in a transaction. On a linked machine, the other host's workspaces under the project, named with their host, branch and task, and never made here. A conflict shown, nothing renamed                                                                                                                                        | `sync-workspaces.yaml`: make, rename and archive on one profile, see each on the other; no worktree, branch or directory appears on the second                                                                                                                          |
+| 4   | Workspaces, seen elsewhere (built, §12)           | The outbox in the workspace methods, each in a transaction. On a linked machine, the other host's workspaces under the project, named with their host, branch and task, and never made here. A conflict shown, nothing renamed                                                                                                                                        | `sync-workspaces.yaml`: make, rename and archive on one profile, see each on the other; no worktree, branch or directory appears on the second                                                                                                                          |
 | 5   | Checking a branch out here                        | **Check out here** on another host's workspace: fetches its branch with Git and makes a workspace for it through `Workspaces::open_branch`, refusing when a local branch of that name has work the remote does not. The record of the other one is untouched                                                                                                          | `sync-checkout.yaml`: push a branch from one profile's workspace, check it out on the other; a second attempt with a diverged local branch refused                                                                                                                      |
 
 Slice 1 comes first because every other slice pushes to it. Slices 3 and 4 depend on 2 and not on
@@ -584,3 +585,85 @@ before `ys test run` runs it.
 reads nothing in a record, but a build of this branch on both, and a way to take each offline from
 staging while its host runs: on the box, a firewall rule, as root; here, the app with the network
 off. That is the gate's run (§5), and the owner's to make.
+
+## 12 · Slice 4: workspaces, seen elsewhere
+
+**Built on 2026-11-15.** A synced project's worktree workspaces sync, as records only: each other
+host lists them and makes nothing for them.
+
+**What it adds.**
+
+- **Core migration 45**: `synced_workspaces`, the other hosts' workspaces as their records say them,
+  cleared with the rest of sync's tables and with a project that stops syncing. This host's own
+  stay in `workspaces`, mapped in `sync_ids`.
+- **The outbox in the workspace methods**, each now one transaction: `add_worktree` (and
+  `add_worktree_if_new` through it), `link_task`, and `rename_workspace`, `set_workspace_archived`,
+  `forget_workspace`, `revive_workspace` and `remove_worktree` through one `change_workspace`.
+  Turning a project on and linking one queue its workspaces as they do its notes. A test reads
+  `store.rs` and fails when a method that writes `workspaces` or `workspace_tasks` is not on its
+  list.
+- **A workspace's body**, `{name, branch, baseBranch, archived, tasks, origin, host}` at schema 1,
+  each task its source, repo, key, link and title. Never its path, preparation, sessions or outcomes.
+- **On the desktop**, **on other computers (n)** under each project in the sidebar, folded, from a new
+  `project_sync_workspaces` command, read again on `SyncChanged`: each one's name, computer, branch
+  and tasks, and _archived_, with no menu and nothing to open. **`ys sync status`** lists them under
+  the projects. The turn-on preview counts the workspaces that go up.
+- **The loop looks at the outbox here every five seconds** while it waits after a good pass: one
+  read of the database, nothing on the network. So a workspace `ys workspace new` makes, in a process
+  of its own that tells the host nothing, goes up within seconds rather than at the next five
+  minutes.
+
+**What building it settled, beyond §3.**
+
+- **Only the host a workspace lives on writes its record.** So two hosts never edit one, and the
+  conflict §3 allowed for cannot arise between hosts: a conflict on this host's own record is one
+  that went on without it hearing, and what it has here is put again against the revision there.
+  Nothing is renamed, moved or ended for a record, on any host.
+- **Only worktrees.** The project's own checkout is not a workspace elsewhere: every host has its
+  own.
+- **Gone is deleted.** A workspace removed or forgotten here is deleted there, leaving a tombstone.
+  One brought back while its delete waits to go up is a new record; one that never reached the
+  server is only forgotten here.
+- **A record of this host's that no workspace here maps to**, after sync was stopped and the project
+  linked again, is deleted rather than shown as another host's: this host's workspaces go up anew.
+- **Renaming and archiving have no command line.** `ys` makes and deletes workspaces; renaming and
+  archiving are the window's. So the smoke test makes and deletes on a computer with no screen, and
+  the core's tests cover renaming, archiving and task links.
+
+**What its review settled** (#265):
+
+- **What an earlier version left unsent goes up.** A project already syncing before this slice has
+  workspaces with no record, and one syncing before slice 3 has approved notes with none. Each pass
+  first queues them (`Store::backfill_sync`); one queued or sent is not queued again, so after the
+  first pass it queues nothing. A project just linked waits for its snapshot, which does the same.
+- **A full snapshot drops the other hosts' workspaces it no longer has.** A host away past retention
+  never sees a deleted workspace's tombstone, which is pruned from snapshots; without this, the
+  workspace stayed listed for good.
+- **`sync-memory.yaml`'s proposal step** now checks that the proposal is not on the first host once
+  the second's outbox is empty, rather than that nothing is waiting to go up: the agent's workspace
+  syncs now, and waits a moment like any other record.
+
+**Its tests.** `crates/core/src/sync/workspace_tests.rs`, 7 with two from the review (a profile as
+slice 3 left it sending its old workspace and note once, and a full snapshot dropping a workspace
+whose tombstone was pruned, which fails without the fix), two stores through the notes' stand-in,
+which now applies deletes too: made with a task, renamed, archived and deleted on one, seen each
+time on the other with nothing made there and nothing echoed; the project's own checkout and a
+forgotten workspace not sent, and one revived before its delete went up becoming a new record;
+turning on and linking sending each host's own, and stopping hiding the others'; a record of this
+host's it no longer maps deleted, not shown; and the list of methods that write workspaces. The
+revive and stray-record rules were each checked to fail their tests without them.
+`crates/remote-host/tests/sync.rs` gains a workspace written by another process going up while the
+loop waits, which fails without the look at the outbox. `ys`'s sync test lists another computer's
+workspace and checks no workspace row was made. The sidebar's test: the group folded, only under
+the project that has some, its rows with nothing to press, and gone when a pass says so.
+
+**Its smoke test.** `.yardsort/tests/sync-workspaces.yaml`, two throwaway `yardsort-host` profiles
+on the stand-in: a workspace made on the first with `ys workspace new` is listed on the second by
+`ys sync status` with its computer and branch; the second's workspaces, branches, worktrees and
+worktree folder are byte for byte what they were before; deleted on the first, it is gone from the
+second, and the second is still unchanged. Passed on 2026-11-15 with its steps run by hand, all
+15, and no workspace's name was in the stand-in's log or either host's. Like the others, it waits
+for the owner's approval in the app.
+
+**The owner run**, this computer and the box through staging: needs no deploy, only a build of this
+branch on both, and the owner's look at the box afterwards (§5).

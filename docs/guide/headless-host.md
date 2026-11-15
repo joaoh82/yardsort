@@ -335,7 +335,8 @@ yardsort-host sync remove my-service          # from the server, for every compu
 ```
 
 A project is named as `ys project list` shows it, or by its id. `sync on` prints the project's
-name, its remote's address, without any user or password, and how many approved notes go with it,
+name, its remote's address, without any user or password, and how many approved notes and
+workspaces go with it,
 says the server keeps them in plain text, and asks before sending. `status` lists the projects your other computers sync that this one
 does not, each by the start of its id, its name and its remote, and says which project here has
 the same remote; `link` takes that id or the name. Nothing is linked by itself. `--yes` skips the
@@ -343,7 +344,8 @@ question `on` and `remove` ask.
 
 Like `pair`, `on`, `link`, `stop` and `remove` are refused from a terminal Yardsort started, from
 anything an agent runs, and from input that is not a terminal ([the guard](#only-a-person-can-pair-a-device)).
-`status` is not; nor is [`ys sync status`](cli.md#ys-sync-status), which is all `ys` offers of sync.
+`status` is not; nor is [`ys sync status`](cli.md#ys-sync-status), which is all `ys` offers of sync,
+and which lists your other computers' workspaces of each synced project. None of them is made here.
 
 ## Memory there
 

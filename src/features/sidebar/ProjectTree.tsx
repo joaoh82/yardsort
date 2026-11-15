@@ -1,6 +1,6 @@
 import { treeNavigation } from "@/lib/treeNavigation";
 import { useEffect, useState } from "react";
-import { hasCore, ipc, type Project, type Workspace } from "@/lib/ipc";
+import { hasCore, ipc, type Project, type SyncedWorkspace, type Workspace } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { shownFor, usePublishStore } from "@/stores/publish";
@@ -196,6 +196,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
             </li>
           )}
           <ArchivedGroup project={project} />
+          <ElsewhereGroup project={project} />
         </ul>
       )}
       {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
@@ -239,6 +240,75 @@ function ArchivedGroup({ project }: { project: Project }) {
               projectId={project.id}
               disabled={project.missing}
             />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+/**
+ * The project's workspaces on the person's other computers, when it syncs: named with the
+ * computer, the branch and the task, and nothing more. They are records only: nothing of them is
+ * on this disk, so there is nothing here to open, run or delete.
+ */
+function ElsewhereGroup({ project }: { project: Project }) {
+  const [elsewhere, setElsewhere] = useState<SyncedWorkspace[]>([]);
+  const key = `sidebar.showElsewhere.${project.id}`;
+  const open = useProjectsStore((s) => recall(s.ui, key, false));
+  useEffect(() => {
+    if (!hasCore()) return;
+    let gone = false;
+    const load = () =>
+      ipc.projectSyncWorkspaces(project.id).then(
+        (list) => !gone && setElsewhere(list),
+        () => {},
+      );
+    void load();
+    const unlisten = ipc.onSyncChanged(() => void load());
+    return () => {
+      gone = true;
+      void unlisten.then((stop) => stop());
+    };
+  }, [project.id]);
+  if (elsewhere.length === 0) return null;
+
+  return (
+    <li role="treeitem" aria-expanded={open} aria-label="On other computers">
+      <button
+        type="button"
+        onClick={() => useProjectsStore.getState().remember(key, !open)}
+        className="flex h-7 w-full items-center gap-1 pl-8 text-left text-small text-ink-faint hover:text-ink-muted"
+      >
+        <span aria-hidden className={`w-3 text-micro ${open ? "rotate-90" : ""}`}>
+          ▶
+        </span>
+        on other computers ({elsewhere.length})
+      </button>
+      {open && (
+        <ul role="group">
+          {elsewhere.map((workspace) => (
+            <li
+              key={workspace.id}
+              role="treeitem"
+              aria-label={`${workspace.name} on ${workspace.host}`}
+              title={`On ${workspace.host}. Nothing of it is on this computer.`}
+              className="flex min-h-7 flex-col justify-center py-0.5 pr-2 pl-12"
+            >
+              <span className="truncate text-ink-muted">
+                {workspace.name}
+                {workspace.archived && <span className="text-ink-faint"> · archived</span>}
+              </span>
+              <span className="truncate text-micro text-ink-faint">
+                {[
+                  workspace.host,
+                  workspace.branch,
+                  ...workspace.tasks.map((task) => `${task.key} ${task.title}`),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            </li>
           ))}
         </ul>
       )}
