@@ -306,3 +306,69 @@ What the runs found before they passed:
 
 Not run: macOS and Windows, since these three tests are Linux only (the window stands in for the
 browser with `xdg-open`), and none of it on a second real computer.
+
+## 9 · Slice 2: Run on, in the composer
+
+**Built on 2026-11-15**, on Linux. No change to the protocol, the server, the host or the phone.
+
+**What it adds.**
+
+- **Run on** (`src/features/remote/RunOn.tsx`): the last part of the composer's title, a menu of
+  this computer and every paired one with how it stands. Online and able to start is offered;
+  offline, connecting, not read yet, watch only and too old to start are listed with the reason and
+  disabled (`whyNotThere`). **Pair another computer…** opens Settings → Remote.
+- **In the local composer** (`src/features/composer/Composer.tsx`): shown once this computer is
+  signed in to reach others, and only for a plain new workspace. Choosing a computer goes to the
+  composer for it with the message typed so far.
+- **In the composer for another computer** (`RemoteComposer`): the same menu, with that computer
+  chosen. **This computer** goes back to the project it was opened in, or to one here of the same
+  name when it was opened from the tree; with neither, it is listed and disabled. Another computer
+  is chosen the same way. The message goes along each time.
+- **Project on _computer_**: that computer's projects, with the one offered for the project here
+  chosen (`offeredThere` in `there.ts`): the one chosen last time for it, if that computer still
+  has it, or else the one of the same name, exactly and then without regard to case. The line beside
+  it says which: "same name as here", "as you chose last time", or only that it will be remembered.
+  The choice is kept on this computer under `composer.projectThere`, by that computer's id and
+  this project's, and only once a start succeeded.
+- **A project that computer lacks** is said to be missing, with how to add it there; Start waits
+  until one is chosen. Slice 3 puts **Clone it there** in that place.
+- `useProjectsStore.composingThere` gained `from` (this computer's project) and `message`, and
+  its `projectId` can be `null`.
+
+**What building it settled.**
+
+- **The menu is not there without Remote.** A computer that is not signed in to reach others shows
+  the composer's title as before, so nothing changes for someone who does not use Remote.
+- **Only a plain new workspace can move.** A fork, a task, a pull request's branch and a run in a
+  workspace start from records and files of this computer, which a start there cannot carry. Their
+  composers have no menu.
+- **What does not go along.** The model, effort, branch, name and ticked presets picked here are
+  left behind when another computer is chosen, since a start there cannot say them until slice 3.
+  They come back from the last picks when this computer is chosen again.
+
+**Its tests.** The menu, the disabled rows and the hand-over in `Composer.test.tsx`; the project
+offered, changed, remembered and missing, and the way back, in `OtherComputers.test.tsx`.
+
+**Its smoke test.** `run-on.yaml`, new, with the window steps `runs-on`, `missing-there` and
+`not-offered-away` (`.yardsort/tests/support/window.ts`).
+
+**Run on 2026-11-15**, on Linux, against a `yardsort-host` on the stand-in server with the real
+window on a profile of its own: passed, 24 of 24 steps (run 52804dbb).
+
+- From the composer of this computer's own `repo`, the host was chosen in the title's menu; what
+  was typed came along; the host's `repo` was offered as the same name; Start made the workspace
+  there, selected under the host in the sidebar, with this computer in control. A pretend phone saw
+  the host's agent begin with the message. This computer's repository still had its one checkout,
+  and the host's had the new worktree.
+- From `notes`, which the host has no project for, the composer said so and Start waited.
+- With the host stopped, its row in the menu said offline and was disabled.
+
+`remote-start-and-resume.yaml` was run again on this build, since the composer for another computer
+now has two lists and its step picked the agent by the first: passed, 25 of 25 (run 1e4abbc2).
+
+What the runs found: nothing in the app. The first run of `run-on` (9427a522) failed in the test's
+own setup: a step loaded the window again and then opened a second inspector connection beside
+the first, which never answers. Loading again and looking are now two steps.
+
+Not run: macOS and Windows, since the test is Linux only like the three before it, and none of it
+on a second real computer.

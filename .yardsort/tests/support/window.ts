@@ -47,8 +47,8 @@ function connect(): Promise<(expression: string) => Promise<unknown>> {
   });
 }
 
-async function until<T>(what: string, look: () => Promise<T>): Promise<T> {
-  const deadline = Date.now() + WAIT_MS;
+async function until<T>(what: string, look: () => Promise<T>, waitMs = WAIT_MS): Promise<T> {
+  const deadline = Date.now() + waitMs;
   for (;;) {
     const found = await look();
     if (found) return found;
@@ -167,6 +167,35 @@ const openThere = async (name: string, workspace: string) => {
     throw error;
   }
 };
+/** The composer for a new workspace on this computer. */
+const HERE = `form[aria-label="New workspace"]`;
+/** Open the composer for this computer's own project called `project`, as its + does. */
+const composeHere = async (project: string) => {
+  const plus = `aside[aria-label="Projects"] button[aria-label="New workspace in ${project}"]`;
+  await until(`the + on ${project}`, () =>
+    page(`(() => {
+      const button = document.querySelector(${JSON.stringify(plus)});
+      button?.click();
+      return Boolean(button);
+    })()`),
+  );
+  await until("this computer's composer", async () =>
+    (await textOf(HERE)).includes(`New workspace in ${project} on`),
+  );
+};
+/** In the composer's title, choose the other computer called `name`, which must be offered. */
+const chooseThere = async (name: string) => {
+  await until("the menu", () => page(clickedNamed("Run on: This computer")));
+  const row = `[role="menu"][aria-label="Run on"] [role="menuitemradio"][aria-label="${name}, online"]`;
+  await until(`${name}, offered in the menu`, () =>
+    page(`(() => {
+      const row = document.querySelector(${JSON.stringify(row)});
+      if (!row || row.disabled) return false;
+      row.click();
+      return true;
+    })()`),
+  );
+};
 /** A workspace on another computer, in the center panel. */
 const viewThere = (name: string, workspace: string) =>
   `section[aria-label="${workspace} on ${name}"]`;
@@ -178,11 +207,28 @@ switch (doing) {
     // As adding a folder in the window does, without the system's folder picker. The inspector
     // does not wait for a promise, so its outcome is left on the window and looked for.
     await page(
-      `void window.__TAURI_INTERNALS__.invoke("project_open", { path: ${JSON.stringify(`${runDir}/repo`)}, initGit: false }).then(() => { window.__added = "added"; }, (e) => { window.__added = JSON.stringify(e); })`,
+      `void (window.__added = "", window.__TAURI_INTERNALS__.invoke("project_open", { path: ${JSON.stringify(`${runDir}/${process.argv[5] ?? "repo"}`)}, initGit: false }).then(() => { window.__added = "added"; }, (e) => { window.__added = JSON.stringify(e); }))`,
     );
     const added = await until("the project added", () => page(`window.__added ?? ""`));
     if (added !== "added") throw new Error(`The project was not added: ${String(added)}`);
     console.log("added the project");
+    break;
+  }
+  case "load-again":
+    // The window reads its projects when it loads, so one added past it, through the core, shows
+    // once it is loaded again. Whatever looks next connects anew, to the page as it then is.
+    void page(`location.reload()`);
+    await Bun.sleep(1_000);
+    console.log("asked the window to load again");
+    break;
+  case "shows-projects": {
+    // Here the last arguments are the names of projects that must be in the sidebar.
+    const names = process.argv.slice(4);
+    await until(`${names.join(" and ")} in the sidebar`, async () => {
+      const said = await textOf(`aside[aria-label="Projects"]`);
+      return names.every((name) => said.includes(name));
+    });
+    console.log(`saw: ${names.join(" and ")} among this computer's projects`);
     break;
   }
   case "sees":
@@ -397,7 +443,7 @@ switch (doing) {
     await until("its agents", () =>
       page(`Boolean(document.querySelector('${form} option[value="stand-in"]'))`),
     );
-    await setField(`${form} select`, "stand-in");
+    await setField(`${form} select[aria-label="Harness"]`, "stand-in");
     await setField(`${form} textarea`, message);
     await click("Start");
     try {
@@ -432,6 +478,93 @@ switch (doing) {
       page(`Boolean(document.querySelector(".xterm"))`),
     );
     console.log(`saw: a conversation resumed on ${name}, watched`);
+    break;
+  }
+  case "runs-on": {
+    // Here the last arguments are the host's name and what its agent is to do. From the composer
+    // of this computer's own project repo: the host is chosen in its title, its project of the
+    // same name is the one offered, what was typed comes along, and Start makes the workspace
+    // there, under the host in the sidebar and this computer's to type into.
+    const name = runDir as string;
+    const message = process.argv[5] as string;
+    await onlineThere(name);
+    await composeHere("repo");
+    await setField(`${HERE} textarea`, message);
+    await chooseThere(name);
+    const form = `form[aria-label="New workspace on ${name}"]`;
+    await until("the composer for it", async () => (await textOf(form)) !== "");
+    const typed = await page(`document.querySelector(${JSON.stringify(`${form} textarea`)}).value`);
+    if (typed !== message) throw new Error(`What was typed did not come along: ${String(typed)}`);
+    console.log("saw: what was typed, in the composer for it");
+    const offered = await page(
+      `(() => { const field = document.querySelector(${JSON.stringify(`${form} select:not([aria-label])`)}); return field?.selectedOptions[0]?.textContent ?? ""; })()`,
+    );
+    if (offered !== "repo") throw new Error(`The project offered there is: ${String(offered)}`);
+    if (!(await textOf(form)).includes("same name as here"))
+      throw new Error(`It does not say why repo is offered: ${await textOf(form)}`);
+    console.log(`saw: Project on ${name} is repo, same name as here`);
+    await until("its agents", () =>
+      page(`Boolean(document.querySelector('${form} option[value="stand-in"]'))`),
+    );
+    await setField(`${form} select[aria-label="Harness"]`, "stand-in");
+    await click("Start");
+    try {
+      await until("the started agent's terminal", () =>
+        page(`Boolean(document.querySelector(".xterm"))`),
+      );
+      await until("control of what it started", async () =>
+        (await textOf(`[aria-label="Control"]`)).includes("This computer has control."),
+      );
+      await until("the new workspace under it in the sidebar", () =>
+        page(
+          `Boolean(document.querySelector(${JSON.stringify(`${TREE} [role="treeitem"][aria-label="${name}"] [role="treeitem"][aria-label="repo"] [role="treeitem"][aria-selected="true"]`)}))`,
+        ),
+      );
+    } catch (error) {
+      console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
+      throw error;
+    }
+    console.log(`saw: a workspace started on ${name} from this computer's composer`);
+    break;
+  }
+  case "missing-there": {
+    // Here the last argument is the host's name. This computer's project notes has no namesake
+    // there: the composer says so, and Start waits.
+    const name = runDir as string;
+    await composeHere("notes");
+    await chooseThere(name);
+    const form = `form[aria-label="New workspace on ${name}"]`;
+    await until("its project said to be missing", async () =>
+      (await textOf(`${form} [role="alert"]`)).includes(`${name} has no project called notes`),
+    );
+    await setField(`${form} textarea`, "nothing to start");
+    const waits = await page(
+      `[...document.querySelectorAll(${JSON.stringify(`${form} button[type="submit"]`)})].every((b) => b.disabled)`,
+    );
+    if (!waits) throw new Error("Start is offered with no project there.");
+    console.log(`saw: ${name} has no project called notes, and Start waits`);
+    break;
+  }
+  case "not-offered-away": {
+    // Here the last argument is the host's name, which has just stopped. It is listed in the
+    // composer's menu as offline, and cannot be chosen.
+    const name = runDir as string;
+    await until(
+      `${name} offline in the sidebar`,
+      async () =>
+        (await textOf(`${TREE} [role="treeitem"][aria-label="${name}"] > div`)).includes("offline"),
+      90_000,
+    );
+    await composeHere("repo");
+    await until("the menu", () => page(clickedNamed("Run on: This computer")));
+    const row = `[role="menu"][aria-label="Run on"] [role="menuitemradio"][aria-label^="${name}, offline"]`;
+    const away = await until("its row in the menu", () =>
+      page(
+        `(() => { const row = document.querySelector(${JSON.stringify(row)}); return row ? (row.disabled ? "disabled" : "offered") : ""; })()`,
+      ),
+    );
+    if (away !== "disabled") throw new Error(`${name} is away and still offered.`);
+    console.log(`saw: ${name} listed as offline, and not offered`);
     break;
   }
   default:

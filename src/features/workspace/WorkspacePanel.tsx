@@ -85,9 +85,10 @@ export function WorkspacePanel() {
         />
       ) : composingThere ? (
         <RemoteComposer
-          key={`${composingThere.hostId}/${composingThere.projectId}`}
+          key={`${composingThere.hostId}/${composingThere.from ?? ""}`}
           hostId={composingThere.hostId}
           projectId={composingThere.projectId}
+          from={composingThere.from ?? null}
         />
       ) : usageOpen ? (
         <UsageView />

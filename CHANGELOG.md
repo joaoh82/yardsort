@@ -14,6 +14,12 @@ has the downloads and the full commit lists.
   one that was already running still takes **Take control**. The workspace and tab shortcuts reach
   workspaces there too. See
   [Reaching another computer](docs/guide/remote.md#reaching-another-computer).
+- **Choose the computer in the composer.** With this computer signed in to reach others, the
+  composer's title ends in **This computer**, and pressing it lists the computers you are paired
+  with. Pick one and the workspace is made there, with what you had typed: the composer shows that
+  computer's agents and which of its projects it will use, offered by the same name and remembered
+  once you start. A computer that is offline or lets you only watch is listed and cannot be
+  chosen. See [Run on](docs/guide/remote.md#run-on).
 
 ## 0.34.1
 

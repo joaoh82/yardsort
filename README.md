@@ -206,7 +206,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   conversations back. The desktop app can
   reach another computer the same way: its projects and workspaces in the sidebar under that
   computer, opened like your own, with its terminals to watch and, once you have control, to type
-  into, and new work or a resumed conversation to start there.
+  into. New work starts there from the same composer, by choosing the computer in its title, and
+  an ended conversation can be resumed there.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
 
 <table>

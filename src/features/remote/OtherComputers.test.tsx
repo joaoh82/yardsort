@@ -65,8 +65,10 @@ import { OtherComputersSettings } from "@/features/settings/OtherComputersSettin
 import { OtherComputersTree } from "@/features/sidebar/OtherComputersTree";
 import { thereKey, useOtherComputersStore } from "@/stores/otherComputers";
 import { recall, useProjectsStore } from "@/stores/projects";
+import { project } from "@/test/fixtures";
 import { RemoteComposer } from "./RemoteComposer";
 import { RemoteWorkspaceView } from "./RemoteWorkspaceView";
+import { offeredThere } from "./there";
 
 const signedOut: OtherComputers = {
   client: null,
@@ -203,7 +205,7 @@ beforeEach(() => {
     error: null,
     startProblem: null,
   });
-  useProjectsStore.setState({ remote: null, composingThere: null, ui: {} });
+  useProjectsStore.setState({ projects: [], remote: null, composingThere: null, ui: {} });
 });
 
 describe("the sidebar's other computers", () => {
@@ -693,6 +695,131 @@ describe("a new workspace on another computer", () => {
     expect(within(form).getByRole("button", { name: "Start" })).toBeDisabled();
     expect(within(form).getByRole("alert")).toHaveTextContent(/nothing is queued for it/);
     expect(core.otherHostStartWorkspace).not.toHaveBeenCalled();
+  });
+
+  /** The composer as the center panel shows it: for wherever the store says composing is. */
+  function Composing() {
+    const there = useProjectsStore((s) => s.composingThere);
+    return there ? (
+      <RemoteComposer hostId={there.hostId} projectId={there.projectId} from={there.from ?? null} />
+    ) : null;
+  }
+  /** Build box with a second project, and this computer with `service` and `notes` of its own. */
+  const twoThere: View = {
+    ...able,
+    projects: [...able.projects, { id: "p-2", name: "service-fork", workspaces: [] }],
+  };
+  const fromHere = (from: string, projectId: string | null, message = "") => {
+    showing(twoThere);
+    useProjectsStore.setState({
+      projects: [project("service"), project("notes")],
+      composingThere: { hostId: "h-1", projectId, from, message },
+    });
+    render(<Composing />);
+    return screen.getByRole("form", { name: "New workspace on Build box" });
+  };
+  const field = (form: HTMLElement) =>
+    within(form).getByRole("combobox", { name: "Project on Build box" });
+  const kept = () =>
+    recall<Record<string, string>>(useProjectsStore.getState().ui, "composer.projectThere", {});
+
+  it("shows which of that computer's projects it will be in, for the project here it was opened in, and brings what was typed", async () => {
+    const form = fromHere("p-service", "p-1", "Fix the spacing");
+    expect(form).toHaveTextContent("New workspace in service on Build box");
+    expect(field(form)).toHaveValue("p-1");
+    expect(form).toHaveTextContent("same name as here · remembered after you start");
+    expect(
+      within(form).getByRole("textbox", { name: "What should the agent work on?" }),
+    ).toHaveValue("Fix the spacing");
+  });
+
+  it("starts in another of that computer's projects when one is chosen, and offers that one next time", async () => {
+    core.otherHostStartWorkspace.mockResolvedValue({
+      workspaceId: "w-9",
+      terminal: "t-9",
+      harness: "claude",
+    });
+    const form = fromHere("p-service", "p-1", "Fix the spacing");
+    await userEvent.selectOptions(field(form), "service-fork");
+    expect(useProjectsStore.getState().composingThere).toMatchObject({
+      projectId: "p-2",
+      from: "p-service",
+    });
+    expect(form).toHaveTextContent("remembered after you start");
+    expect(form).not.toHaveTextContent("same name as here");
+    // Nothing is remembered for a choice that started nothing.
+    expect(kept()).toEqual({});
+    await vi.waitFor(() =>
+      expect(within(form).getByRole("button", { name: "Start" })).toBeEnabled(),
+    );
+    await userEvent.click(within(form).getByRole("button", { name: "Start" }));
+    expect(core.otherHostStartWorkspace).toHaveBeenCalledWith(
+      "h-1",
+      "p-2",
+      "Fix the spacing",
+      "claude",
+    );
+    await vi.waitFor(() => expect(kept()).toEqual({ [thereKey("h-1", "p-service")]: "p-2" }));
+    // Next time, from the same project here, it is the one offered, and said to be.
+    const again = offeredThere(twoThere, useProjectsStore.getState().ui, "h-1", {
+      id: "p-service",
+      name: "service",
+    });
+    expect(again).toEqual({ projectId: "p-2", how: "remembered" });
+    useProjectsStore.setState({
+      remote: null,
+      composingThere: { hostId: "h-1", projectId: again.projectId, from: "p-service" },
+    });
+    expect(await screen.findByText("as you chose last time")).toBeInTheDocument();
+  });
+
+  it("says so when that computer has no project of that name, and starts nothing until one is chosen", async () => {
+    const form = fromHere("p-notes", null, "Tidy the notes");
+    expect(form).toHaveTextContent("New workspace in notes on Build box");
+    expect(within(form).getByRole("alert")).toHaveTextContent(
+      "Build box has no project called notes. Add it there",
+    );
+    expect(within(form).getByRole("alert")).toHaveTextContent(
+      "Or choose another of its projects above.",
+    );
+    expect(field(form)).toHaveValue("");
+    expect(within(form).getByRole("button", { name: "Start" })).toBeDisabled();
+    await userEvent.type(
+      within(form).getByRole("textbox", { name: "What should the agent work on?" }),
+      "{Enter}",
+    );
+    expect(core.otherHostStartWorkspace).not.toHaveBeenCalled();
+    await userEvent.selectOptions(field(form), "service");
+    await vi.waitFor(() =>
+      expect(within(form).getByRole("button", { name: "Start" })).toBeEnabled(),
+    );
+    expect(within(form).queryByRole("alert")).toBeNull();
+  });
+
+  it("goes back to this computer's composer with what was typed", async () => {
+    const form = fromHere("p-service", "p-1");
+    await userEvent.type(
+      within(form).getByRole("textbox", { name: "What should the agent work on?" }),
+      "Fix the spacing",
+    );
+    await userEvent.click(within(form).getByRole("button", { name: "Run on: Build box" }));
+    const menu = screen.getByRole("menu", { name: "Run on" });
+    expect(within(menu).getByRole("menuitemradio", { name: "Build box, online" })).toBeChecked();
+    await userEvent.click(within(menu).getByRole("menuitemradio", { name: "This computer" }));
+    const projects = useProjectsStore.getState();
+    expect(projects.composingThere).toBeNull();
+    expect(projects.composingProjectId).toBe("p-service");
+    expect(projects.composingPrompt).toBe("Fix the spacing");
+  });
+
+  it("does not offer this computer for a project it has none of that name for", async () => {
+    const form = composing();
+    await userEvent.click(within(form).getByRole("button", { name: "Run on: Build box" }));
+    expect(
+      screen.getByRole("menuitemradio", {
+        name: "This computer, no project called service here",
+      }),
+    ).toBeDisabled();
   });
 
   it("gives up on Escape", async () => {

@@ -231,10 +231,12 @@ nothing is sent twice.
 **Starting work there.** When that computer lets this one type, you start work there as you do here,
 each by that computer's own projects, workspaces and agents:
 
-- **A new workspace:** the **+** on one of its projects, or **New workspace** in the project's menu,
-  opens the composer for that computer. Say what the agent should work on, pick one of that
+- **A new workspace:** choose the computer in the composer. Its title ends in where the workspace
+  will run, **This computer** until you change it; press that and pick a computer. The **+** on one
+  of a computer's projects in the sidebar, or **New workspace** in that project's menu, opens the
+  composer with that computer already chosen. Say what the agent should work on, pick one of that
   computer's agents, and press Enter. That computer makes the workspace, names its branch after your
-  message and starts from its default branch.
+  message and starts from its default branch. See [Run on](#run-on) below.
 - **Another agent:** the buttons at the end of the tab bar start one of that computer's agents in the
   workspace, waiting to be told what to do. A workspace's menu in the sidebar offers the same.
 - **Resume:** an agent that ended there offers **Resume** over its terminal, and under **Previous
@@ -247,6 +249,34 @@ and is listed under it, never among your own projects. If the connection drops b
 answers, the window says it may have started anyway, and nothing is tried again by itself. A computer
 that lets this one only watch offers none of these, and nor does one whose Yardsort is too old for
 them. Nothing can be started on a computer that is away, and nothing is queued for it.
+
+### Run on
+
+Once this computer is signed in to reach other computers, the title of the composer for a new
+workspace reads _New workspace in project on **This computer**_. The last part is a menu:
+
+- **This computer**, then every computer you are paired with and how it stands.
+- A computer that is **online** can be chosen. One that is offline, still connecting, or that lets
+  this computer only watch is listed with the reason and cannot be chosen. Nothing is queued for a
+  computer that is away.
+- **Pair another computer…** opens Settings → Remote.
+
+Choosing a computer keeps what you have typed and changes the rest of the composer to that
+computer's: its agents, and a line saying that it names the branch, picks the branch to start from,
+adds its project memory and runs its setup by its own settings. The model, effort, name and branch
+fields are not there yet for another computer. Choosing **This computer** brings the full composer
+back, again with what you typed.
+
+**Project on _computer_** says which of that computer's projects the workspace will be made in. A
+project here and one there are separate, so Yardsort offers the one with the same name and says so,
+and you can pick another. The choice is remembered on this computer once something starts, and
+offered next time for the same project here. When that computer has no project of that name, the
+composer says so and nothing starts until you choose one of its projects or add the project there
+(**Add project** in its window, or `ys project add` in its terminal).
+
+The menu is offered for a plain new workspace only. A fork, a task from the Tasks view, a pull
+request's branch and a run in an existing workspace all start from something on this computer, so
+they stay here.
 
 **The keyboard.** The next and previous workspace shortcuts go on from your own workspaces to the
 other computers', in the sidebar's order, and the next and previous tab shortcuts switch a workspace's

@@ -47,7 +47,16 @@ const KEYS = {
 export type RemoteSelection = { hostId: string; workspaceId: string };
 
 /** Where a new workspace on another computer is being composed. */
-export type ComposingThere = { hostId: string; projectId: string };
+export type ComposingThere = {
+  hostId: string;
+  /** The project there, by that computer's id; `null` while it has none to offer for `from`. */
+  projectId: string | null;
+  /** This computer's project the composer was opened in, when it was: what **This computer**
+   *  goes back to, and what the choice of project there is remembered for. */
+  from?: string | null;
+  /** What was typed before the computer was chosen: it comes along. */
+  message?: string;
+};
 
 /** Nothing of another computer has the center panel. */
 const NOT_THERE = { remote: null, composingThere: null } as const;
