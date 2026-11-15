@@ -66,6 +66,7 @@ use crate::store::{EventBound, EventFilter, ProjectRow, SessionRow, Store, Works
 use crate::tasks::delegate::TaskRef;
 
 pub use conversation::Conversations;
+pub use pull::PullRequests;
 pub use smoke::TestGate;
 
 /// The operations this host answers. Advertised in [`HostDescription::capabilities`]; anything
@@ -122,6 +123,10 @@ pub const CONVERSATION_OPERATIONS: &[&str] = &["conversation.read", "approval.an
 /// ([`TestGate`]).
 pub const TEST_OPERATIONS: &[&str] = &["test.waiting", "test.decide"];
 
+/// Pull requests as the host last read them, answered when the host reads them
+/// ([`PullRequests`]).
+pub const PULL_OPERATIONS: &[&str] = &["pull.list", "pull.describe"];
+
 /// Who this host is, to remote clients. Supplied by whoever builds the facade: no host identity
 /// is stored before Remote is enabled, so nothing is created for people who never use it.
 #[derive(Debug, Clone)]
@@ -158,6 +163,9 @@ pub struct HostFacade<'a> {
     /// What is told once a device decided a waiting smoke test run. Without it — a headless
     /// host, which queues no runs — `test.waiting` and `test.decide` are unsupported.
     pub tests: Option<&'a dyn TestGate>,
+    /// What the host last read of its projects' pull requests. Without it — a host with no
+    /// window, which reads none — `pull.list` and `pull.describe` are unsupported.
+    pub pulls: Option<&'a dyn PullRequests>,
 }
 
 /// What a device is told of terminals in a daemon from before leases, which the app keeps for the
@@ -255,6 +263,10 @@ impl HostFacade<'_> {
                 self.tests_waiting(grant, params).map(Reply::TestsWaiting)
             }
             Operation::TestDecide(params) => self.decide_test(grant, params).map(|()| Reply::Done),
+            Operation::PullList(params) => self.pulls(grant, params).map(Reply::Pulls),
+            Operation::PullDescribe(params) => self
+                .pull(grant, params)
+                .map(|detail| Reply::Pull(Box::new(detail))),
             Operation::ApprovalAnswer(params) => {
                 self.answer_ask(grant, params).map(|()| Reply::Done)
             }
@@ -335,6 +347,11 @@ impl HostFacade<'_> {
                 })
                 .chain(if self.tests.is_some() {
                     TEST_OPERATIONS
+                } else {
+                    &[]
+                })
+                .chain(if self.pulls.is_some() {
+                    PULL_OPERATIONS
                 } else {
                     &[]
                 })
@@ -1162,6 +1179,7 @@ fn encoded_len(value: &impl Serialize) -> usize {
 mod activity;
 mod conversation;
 pub mod host;
+pub mod pull;
 pub mod serve;
 pub mod smoke;
 pub mod start;

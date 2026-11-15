@@ -37,7 +37,7 @@ use yardsort_core::remote::host::{self, CredentialStore, FileCredentials, LocalG
 use yardsort_core::remote::serve::Context;
 use yardsort_core::remote::start::{Starter, Starting};
 use yardsort_core::remote::workflow::WorkflowGate;
-use yardsort_core::remote::{HostIdentity, TestGate};
+use yardsort_core::remote::{HostIdentity, PullRequests, TestGate};
 use yardsort_core::settings::SettingsFile;
 use yardsort_core::store::Store;
 
@@ -63,6 +63,7 @@ struct AppHome {
     app: AppHandle,
     git: OnceLock<Option<yardsort_core::git::Git>>,
     starting: Arc<AppStarting>,
+    pulls: Arc<crate::publish::lent::AppPulls>,
 }
 
 impl AppHome {
@@ -71,6 +72,7 @@ impl AppHome {
             app: app.clone(),
             git: OnceLock::new(),
             starting: Arc::new(AppStarting(app.clone())),
+            pulls: Arc::new(crate::publish::lent::AppPulls::new(app)),
         }
     }
 
@@ -124,6 +126,7 @@ impl Home for AppHome {
             workflow: Some(Arc::new(AppWorkflows(self.app.clone())) as Arc<dyn WorkflowGate>),
             conversations: Some(&conversations),
             tests: Some(Arc::new(AppTests(self.app.clone())) as Arc<dyn TestGate>),
+            pulls: Some(Arc::clone(&self.pulls) as Arc<dyn PullRequests>),
         });
     }
 

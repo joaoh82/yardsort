@@ -1343,8 +1343,16 @@ history a line at a time.
 - [x] The smoke test `remote-phone-lets-a-test-run` passed on Linux (2026-11-15): the real
       window, a pretend phone, a real run let go and carried out.
 - [ ] A smoke test let go from a real phone, and a notice when one starts waiting.
-- [ ] Pull request status on the phone: proposed in Figma on 2026-11-15 (page **Pull requests ·
-      proposal** of the phone's file), waiting for the owner's answers before it is built.
+- [x] Pull request status on the phone, read-only (45, 2026-11-15). Remote protocol minor 11:
+      `pull.list` and `pull.describe`, both `workspace:read`. The phone is told what the computer
+      last read with `gh`, and never asks the forge. Badges on workspace rows, a card with checks
+      and reviews on the workspace's screen, and a list over every project. Proposed in Figma
+      first (page **Pull requests · proposal**) and answered by the owner the same day.
+- [x] Its smoke test, `remote-phone-sees-pull-requests`, passed on Linux (2026-11-15): the real
+      window, a stand-in `gh`, a pretend phone.
+- [ ] See it on a phone.
+- [ ] A notification when a check fails or a review arrives (issue #263); merging from the phone;
+      pull requests of a computer with no window.
 
 _Exit:_ on a phone, a person reads an agent's whole conversation without scrolling sideways,
 answers its permission question, and sends it the next message, while the computer's terminal

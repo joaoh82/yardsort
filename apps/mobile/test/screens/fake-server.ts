@@ -40,6 +40,9 @@ interface Grant {
   expiresInMs: number | null;
 }
 
+/** What a computer has none of. */
+class NotThere extends Error {}
+
 export class FakeServer {
   name = "Example Remote";
   server = "srv-example";
@@ -173,6 +176,12 @@ export class FakeServer {
     asks: [] as Record<string, unknown>[],
     /** Smoke test runs waiting for a person, oldest first, as `test.waiting` shows the first. */
     tests: [] as Record<string, unknown>[],
+    /** The pull requests it last read, in its order, as `pull.list` gives them. */
+    pulls: [] as Record<string, unknown>[],
+    /** What `pull.describe` adds to one: its checks and reviewers, by `followed#number`. */
+    pullDetails: {} as Record<string, Record<string, unknown>>,
+    /** How many more answers say it is still reading them from the forge. */
+    pullsReading: 0,
   };
   /** The questions answered, each as it came. */
   answers: { ask: string; decision: string }[] = [];
@@ -394,7 +403,7 @@ export class FakeServer {
                   }
                 : refusal
                   ? { requestId, error: { code: "forbidden", message: refusal, retryable: false } }
-                  : { requestId, result: this.#answer(op, params, socket) },
+                  : this.#answered(requestId, op, params, socket),
             );
           }
         }, 0);
@@ -418,6 +427,16 @@ export class FakeServer {
   /** The relay closing every channel to `host`, as it does with 4003 for anything revoked. */
   closeChannelsTo(host: string, code: number): void {
     for (const [socket, to] of [...this.#hostOf]) if (to === host) socket.close(code);
+  }
+
+  /** A computer's response to one request: its answer, or that it has no such thing. */
+  #answered(requestId: string, op: string, params: Record<string, never>, socket: Socket): unknown {
+    try {
+      return { requestId, result: this.#answer(op, params, socket) };
+    } catch (error) {
+      if (!(error instanceof NotThere)) throw error;
+      return { requestId, error: { code: "not_found", message: "Not found.", retryable: false } };
+    }
   }
 
   /** A computer's answer to one operation. */
@@ -556,6 +575,40 @@ export class FakeServer {
         });
         computer.tests = computer.tests.filter((t) => t.run !== (params.run as unknown as string));
         return { kind: "done" };
+      case "pull.list": {
+        const of = (params.of as unknown as string | undefined) ?? "workspaces";
+        const reading = computer.pullsReading > 0;
+        if (reading) computer.pullsReading -= 1;
+        const all = computer.pulls as { state: string; workspaces: string[] }[];
+        return {
+          kind: "pulls",
+          pulls: all.filter((pull) =>
+            of === "workspaces" ? pull.workspaces.length > 0 : pull.state === of,
+          ),
+          next: null,
+          open: all.filter((pull) => pull.state === "open").length,
+          reading,
+        };
+      }
+      case "pull.describe": {
+        const pull = computer.pulls.find(
+          (held) =>
+            held.project === (params.project as unknown as string) &&
+            held.number === (params.number as unknown as number) &&
+            (held.followed ?? null) ===
+              ((params.followed as unknown as string | undefined) ?? null),
+        );
+        if (!pull) throw new NotThere();
+        return {
+          kind: "pull",
+          pull,
+          checks: [],
+          moreChecks: 0,
+          reviews: [],
+          waitingOn: [],
+          ...computer.pullDetails[`${pull.followed ?? ""}#${pull.number}`],
+        };
+      }
       case "harness.list":
         return { kind: "harnesses", harnesses: computer.harnesses };
       case "workspace.start":

@@ -78,6 +78,36 @@ running — _api-gateway 3 · 2 running_. Press it again to open it. The phone r
 projects you folded, for each computer, as this window remembers its own sidebar; nothing about
 it is sent anywhere.
 
+## Pull requests on the phone
+
+When this computer has `gh` installed and signed in, the phone shows what became of a workspace's
+branch, as the sidebar here does. It is read-only: nothing on the phone changes a pull request.
+
+- **On a workspace's row**, a badge with its pull request's number, coloured as here: green for
+  one open with nothing pending or wrong, yellow for a draft or one still waiting on checks or a
+  review, red for a failed check, changes asked for or conflicts, purple for merged, and red
+  struck through for one closed without merging. _#88 +2_ is a workspace with two more, and
+  _lib#7_ is one it follows in another repository. Press the badge to see that pull request.
+- **In a workspace**, a card above its conversations: the number and state, the title, the branch
+  and what it would merge into, lines added and removed, the checks, the review, and whether it
+  conflicts. **Show** opens the checks to each by name, the failed ones first; they are open
+  already when one failed. **Open on GitHub** opens its page in the phone's browser. Others the
+  workspace opened or follows are listed under the card.
+- **Pull requests**, on a computer's screen with the count of open ones, lists them over every
+  project the phone may see: **Open**, **Merged** and **Closed**. Merged and closed are those
+  among the newest fifty of each project.
+
+The phone asks this computer, never GitHub: it shows what this computer last read, and holds no
+GitHub sign-in of its own. A screen showing pull requests asks again each minute while it is in
+front, and this computer reads them again for it, so they stay current with this window in the
+background. Nothing of them is kept on the phone, so they show only while this computer can be
+reached.
+
+Without `gh`, or signed out of it, the phone shows no badges and no card, and says nothing about
+it, as here. The same goes for a computer on a version before this one, and for
+[a computer with no screen](headless-host.md), which reads no pull requests yet. A notification
+when a check fails or a review arrives is not built yet.
+
 ## Starting work from the phone
 
 A device you let type can start work here too. It is no more than it could do by typing into a terminal,
