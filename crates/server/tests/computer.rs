@@ -704,6 +704,62 @@ impl Starting for Stand {
             _ => return Err(IpcError::new("bad_path", "/home/someone/w is outside")),
         })
     }
+    fn publish(
+        &self,
+        workspace: &str,
+        forge: bool,
+    ) -> IpcResult<remote_proto::publish::PublishState> {
+        self.note(format!("publish {workspace} {forge}"));
+        Ok(remote_proto::publish::PublishState {
+            branch: Some("ys/tidy".into()),
+            base: Some("main".into()),
+            remote: true,
+            ahead: 1,
+            unpushed: vec!["Tidy it".into()],
+            can_open: true,
+            gh: true,
+            ..Default::default()
+        })
+    }
+    fn commit(
+        &self,
+        workspace: &str,
+        message: &str,
+    ) -> IpcResult<remote_proto::publish::PublishState> {
+        self.note(format!("commit {workspace} {message}"));
+        self.publish(workspace, false)
+    }
+    fn push(&self, workspace: &str) -> IpcResult<remote_proto::publish::PublishState> {
+        self.note(format!("push {workspace}"));
+        // As the core says a refused push: in its own words, with nothing of Git's.
+        Err(IpcError::new(
+            "push_rejected",
+            "The remote has commits this branch does not have, so it refused the push.",
+        ))
+    }
+    fn open_pull_request(
+        &self,
+        workspace: &str,
+        title: &str,
+        body: &str,
+        draft: bool,
+    ) -> IpcResult<remote_proto::publish::PullRequestOpened> {
+        self.note(format!("open {workspace} {title} {body:?} {draft}"));
+        Ok(remote_proto::publish::PullRequestOpened {
+            url: "https://forge.example/acme/app/pull/7".into(),
+            created: true,
+        })
+    }
+    fn merge_pull_request(
+        &self,
+        workspace: &str,
+        number: u32,
+        head_oid: &str,
+        method: remote_proto::publish::MergeMethod,
+    ) -> IpcResult<()> {
+        self.note(format!("merge {workspace} {number} {head_oid} {method:?}"));
+        Ok(())
+    }
     fn session(
         &self,
         workspace: &str,
@@ -1003,6 +1059,66 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
     assert!(read("../up.txt", remote_proto::FileOf::Working)
         .await
         .is_err());
+    // Since minor 12: commit, push and the pull request, each done by the host as itself.
+    use remote_host::computer::publish;
+    let asked_before = stand.asked.lock().unwrap().len();
+    let stands = publish::state(&desk, host, &workspace.id, true)
+        .await
+        .unwrap();
+    assert_eq!(stands.branch.as_deref(), Some("ys/tidy"));
+    assert!(stands.can_open && stands.gh);
+    let committed = publish::commit(&desk, host, &workspace.id, "  Tidy it\n\nA body.  ")
+        .await
+        .unwrap();
+    assert_eq!(committed.unpushed, ["Tidy it"]);
+    // A push the remote refuses is said in the host's own words.
+    let refused = publish::push(&desk, host, &workspace.id).await.unwrap_err();
+    assert_eq!(refused.code, "remote_refused");
+    assert!(
+        refused.message.contains("refused the push"),
+        "{}",
+        refused.message
+    );
+    let opened = publish::open_pull_request(&desk, host, &workspace.id, " Tidy it ", "Why.", true)
+        .await
+        .unwrap();
+    assert!(opened.created);
+    assert_eq!(opened.url, "https://forge.example/acme/app/pull/7");
+    publish::merge_pull_request(
+        &desk,
+        host,
+        &workspace.id,
+        7,
+        "0123456789abcdef",
+        remote_proto::publish::MergeMethod::Rebase,
+    )
+    .await
+    .unwrap();
+    // What no host would take is refused by this computer's client, and never sent.
+    assert!(publish::commit(&desk, host, &workspace.id, "  ")
+        .await
+        .is_err());
+    assert!(publish::merge_pull_request(
+        &desk,
+        host,
+        &workspace.id,
+        7,
+        "HEAD",
+        remote_proto::publish::MergeMethod::Squash
+    )
+    .await
+    .is_err());
+    assert_eq!(
+        stand.asked.lock().unwrap()[asked_before..],
+        [
+            format!("publish {} true", workspace.id),
+            format!("commit {} Tidy it\n\nA body.", workspace.id),
+            format!("publish {} false", workspace.id),
+            format!("push {}", workspace.id),
+            format!("open {} Tidy it \"Why.\" true", workspace.id),
+            format!("merge {} 7 0123456789abcdef Rebase", workspace.id),
+        ]
+    );
     for terminal in here.terminals.list() {
         let _ = here.terminals.kill(&terminal.id);
     }

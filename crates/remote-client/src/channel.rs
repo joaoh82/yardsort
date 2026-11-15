@@ -344,6 +344,52 @@ impl Channel {
         }
     }
 
+    /// Where a workspace stands with its remote; with `forge`, its pull request too. Minor 12.
+    pub async fn publish_state(
+        &self,
+        params: remote_proto::publish::WorkspacePublishParams,
+    ) -> Result<remote_proto::publish::PublishState> {
+        publish(self.ask(Operation::WorkspacePublish(params)).await?)
+    }
+
+    /// Commit everything changed in a workspace. Minor 12.
+    pub async fn commit(
+        &self,
+        params: remote_proto::publish::WorkspaceCommitParams,
+    ) -> Result<remote_proto::publish::PublishState> {
+        publish(self.ask(Operation::WorkspaceCommit(params)).await?)
+    }
+
+    /// Push a workspace's branch to its project's remote. Minor 12.
+    pub async fn push(
+        &self,
+        workspace: WorkspaceId,
+    ) -> Result<remote_proto::publish::PublishState> {
+        publish(
+            self.ask(Operation::WorkspacePush(WorkspaceRef { workspace }))
+                .await?,
+        )
+    }
+
+    /// Open a pull request for a workspace's branch. Minor 12.
+    pub async fn open_pull_request(
+        &self,
+        params: remote_proto::publish::PullRequestOpenParams,
+    ) -> Result<remote_proto::publish::PullRequestOpened> {
+        match self.ask(Operation::PullRequestOpen(params)).await? {
+            Reply::PullRequestOpened(opened) => Ok(opened),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// Merge a workspace's pull request, if it is still at the commit named. Minor 12.
+    pub async fn merge_pull_request(
+        &self,
+        params: remote_proto::publish::PullRequestMergeParams,
+    ) -> Result<()> {
+        done(self.ask(Operation::PullRequestMerge(params)).await?)
+    }
+
     /// A whole file in a workspace, read piece by piece and put together. A file that changes
     /// while it is read is read again from the start, a few times at most. Minor 11.
     pub async fn whole_file(&self, first: FileReadParams) -> Result<WholeFile> {
@@ -495,6 +541,13 @@ pub struct WholeFile {
     pub size: u64,
     /// Empty unless `state` is text.
     pub bytes: Vec<u8>,
+}
+
+fn publish(reply: Reply) -> Result<remote_proto::publish::PublishState> {
+    match reply {
+        Reply::Publish(state) => Ok(state),
+        _ => Err(something_else()),
+    }
 }
 
 fn done(reply: Reply) -> Result<()> {

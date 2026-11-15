@@ -18,9 +18,11 @@ import {
   type ControlLoss,
   encodeFrame,
   type HostId,
+  MAX_COMMIT_MESSAGE,
   MAX_FILE,
   MAX_FILE_CHUNK,
   MAX_OUTPUT_CHUNK,
+  MAX_PULL_REQUEST_BODY,
   MAX_UPLOAD_CHUNK,
   openChannel,
   type ProjectId,
@@ -911,6 +913,174 @@ describe("reading a workspace's changes and files", () => {
       channel.readFile({ ...FILE, oldPath: "C:\\Users\\me" }),
       channel.readFile({ ...FILE, offset: MAX_FILE + 1 }),
       channel.wholeFile({ ...FILE, path: "src/../../secrets" }),
+    ]) {
+      expect(((await refused.catch((e: unknown) => e)) as ClientError).kind).toBe("invalid");
+    }
+    expect(asked).toEqual([]);
+    channel.close();
+  });
+});
+
+describe("sending a workspace's work on", () => {
+  const WORKSPACE = "w" as WorkspaceId;
+  const HEAD = "3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a";
+  const PULL_REQUEST = {
+    number: 91,
+    url: "https://example.com/app/pull/91",
+    title: "Fix it",
+    state: "open",
+    checks: "passing",
+    headOid: HEAD,
+  };
+
+  test("each is asked under its name, and its reply read", async () => {
+    const { client, asked } = relay((request, socket) => {
+      const standing = { branch: "ys/fix", base: "main", remote: true, behind: 0 };
+      const results: Record<string, unknown> = {
+        "workspace.publish": request.params?.forge
+          ? { kind: "publish", ...standing, pushed: true, ahead: 0, pullRequest: PULL_REQUEST }
+          : { kind: "publish", ...standing, ahead: 0, canOpen: false, gh: false, unpushed: [] },
+        "workspace.commit": { kind: "publish", ...standing, ahead: 1, unpushed: ["Fix it"] },
+        "workspace.push": { kind: "publish", ...standing, pushed: true, ahead: 0, canOpen: true },
+        "pull_request.open": {
+          kind: "pullRequestOpened",
+          url: PULL_REQUEST.url,
+          created: request.params?.draft !== true,
+        },
+        "pull_request.merge": { kind: "done" },
+      };
+      answer(socket, request, results[request.op]);
+    });
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    // What is false or empty comes as left out, as the computer writes it.
+    expect(await channel.publishState({ workspace: WORKSPACE })).toEqual({
+      branch: "ys/fix",
+      base: "main",
+      remote: true,
+      ahead: 0,
+      behind: 0,
+    });
+    expect(await channel.commit({ workspace: WORKSPACE, message: "Fix it" })).toEqual({
+      branch: "ys/fix",
+      base: "main",
+      remote: true,
+      ahead: 1,
+      behind: 0,
+      unpushed: ["Fix it"],
+    });
+    const pushed = await channel.push(WORKSPACE);
+    expect([pushed.pushed, pushed.ahead, pushed.canOpen]).toEqual([true, 0, true]);
+    expect(await channel.openPullRequest({ workspace: WORKSPACE, title: "Fix it" })).toEqual({
+      url: PULL_REQUEST.url,
+      created: true,
+    });
+    const form = await channel.openPullRequest({
+      workspace: WORKSPACE,
+      title: "Fix it",
+      body: "Why.",
+      draft: true,
+    });
+    expect(form.created).toBe(false);
+    const withForge = await channel.publishState({ workspace: WORKSPACE, forge: true });
+    expect(withForge.pullRequest).toEqual(PULL_REQUEST as never);
+    // The head merged is the one the reply showed.
+    expect(
+      await channel.mergePullRequest({
+        workspace: WORKSPACE,
+        number: withForge.pullRequest?.number ?? 0,
+        headOid: withForge.pullRequest?.headOid ?? "",
+        method: "squash",
+      }),
+    ).toBeUndefined();
+    // Not asking the forge, no description and not a draft each say nothing, as ones left out.
+    await channel.publishState({ workspace: WORKSPACE, forge: false });
+    await channel.openPullRequest({
+      workspace: WORKSPACE,
+      title: "Fix it",
+      body: "",
+      draft: false,
+    });
+    expect(asked.map(({ op, params }) => ({ op, params }))).toEqual([
+      { op: "workspace.publish", params: { workspace: "w" } },
+      { op: "workspace.commit", params: { workspace: "w", message: "Fix it" } },
+      { op: "workspace.push", params: { workspace: "w" } },
+      { op: "pull_request.open", params: { workspace: "w", title: "Fix it" } },
+      {
+        op: "pull_request.open",
+        params: { workspace: "w", title: "Fix it", body: "Why.", draft: true },
+      },
+      { op: "workspace.publish", params: { workspace: "w", forge: true } },
+      {
+        op: "pull_request.merge",
+        params: { workspace: "w", number: 91, headOid: HEAD, method: "squash" },
+      },
+      { op: "workspace.publish", params: { workspace: "w" } },
+      { op: "pull_request.open", params: { workspace: "w", title: "Fix it" } },
+    ]);
+    channel.close();
+  });
+
+  test("a refusal there is passed on with its words, and nothing is sent again", async () => {
+    const { client, asked } = relay((request, socket) =>
+      socket.send(
+        JSON.stringify({
+          requestId: request.requestId,
+          error: {
+            code: "invalid_request",
+            message: "The pull request changed or is no longer ready to merge.",
+            retryable: false,
+          },
+        }),
+      ),
+    );
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const refused = await channel
+      .mergePullRequest({ workspace: WORKSPACE, number: 91, headOid: HEAD, method: "merge" })
+      .catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(ClientError);
+    expect((refused as ClientError).code).toBe("invalid_request");
+    expect((refused as ClientError).message).toContain("no longer ready to merge");
+    expect(asked.map((r) => r.op)).toEqual(["pull_request.merge"]);
+    channel.close();
+  });
+
+  test("a reply of another kind is not taken for the one asked for", async () => {
+    const { client } = relay((request, socket) => answer(socket, request, { kind: "done" }));
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    for (const misfit of [
+      channel.publishState({ workspace: WORKSPACE }),
+      channel.commit({ workspace: WORKSPACE, message: "Fix it" }),
+      channel.push(WORKSPACE),
+      channel.openPullRequest({ workspace: WORKSPACE, title: "Fix it" }),
+    ]) {
+      expect(((await misfit.catch((e: unknown) => e)) as ClientError).kind).toBe("unexpected");
+    }
+    channel.close();
+  });
+
+  test("what no computer would take is refused here, and nothing is sent", async () => {
+    const { client, asked } = relay(() => {});
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const merge = (number: number, headOid: string) =>
+      channel.mergePullRequest({ workspace: WORKSPACE, number, headOid, method: "squash" });
+    for (const refused of [
+      channel.commit({ workspace: WORKSPACE, message: " \n" }),
+      channel.commit({ workspace: WORKSPACE, message: "a\u0000b" }),
+      channel.commit({ workspace: WORKSPACE, message: "m".repeat(MAX_COMMIT_MESSAGE + 1) }),
+      channel.openPullRequest({ workspace: WORKSPACE, title: "" }),
+      channel.openPullRequest({ workspace: WORKSPACE, title: "--web" }),
+      channel.openPullRequest({ workspace: WORKSPACE, title: "two\nlines" }),
+      channel.openPullRequest({
+        workspace: WORKSPACE,
+        title: "ok",
+        body: "b".repeat(MAX_PULL_REQUEST_BODY + 1),
+      }),
+      merge(0, HEAD),
+      merge(91, ""),
+      merge(91, "HEAD"),
+      merge(91, "--admin"),
+      channel.push("../w" as WorkspaceId),
+      channel.publishState({ workspace: "a b" as WorkspaceId }),
     ]) {
       expect(((await refused.catch((e: unknown) => e)) as ClientError).kind).toBe("invalid");
     }

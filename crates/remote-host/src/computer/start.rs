@@ -247,7 +247,7 @@ pub(super) fn open(
             if capability == RESUME {
                 "That computer's Yardsort is too old to resume a conversation from here. Update it, \
                  then try again."
-            } else if capability == MANAGE || capability == super::look::LOOK {
+            } else if [MANAGE, super::look::LOOK, super::publish::PUBLISH].contains(&capability) {
                 "That computer's Yardsort is too old for this from here. Update it, then try again."
             } else {
                 "That computer's Yardsort is too old to start work from here. Update it, then try \

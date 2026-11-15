@@ -708,8 +708,8 @@ switch (doing) {
   }
   case "reads-changes-there": {
     // Here the last arguments are the host's name, one of its workspaces, and a word its changed
-    // file must hold. The right panel lists what changed there, opens the change, and lists its
-    // files without what Git ignores; nothing in it writes.
+    // file must hold. The right panel lists what changed there and opens the change; nothing in
+    // it edits a file.
     const name = runDir as string;
     const workspace = process.argv[5] as string;
     const word = process.argv[6] as string;
@@ -734,11 +734,13 @@ switch (doing) {
       60_000,
     );
     console.log(`saw: the change to README.md, with ${word}`);
-    const writes = await page(
-      `[...document.querySelectorAll(${JSON.stringify(`${panel} button, ${panel} textarea, ${panel} input`)})].map((b) => (b.getAttribute("aria-label") ?? b.textContent ?? "").trim()).filter((t) => /commit|push|edit|save|pull request/i.test(t)).join(",")`,
+    // Committing and pushing are under the list, in a bar of their own, and are that computer's
+    // to do. Nothing here edits a file: there is no editor, and no way to one.
+    const edits = await page(
+      `[...document.querySelectorAll(${JSON.stringify(`${panel} button, ${panel} textarea, ${panel} input`)})].filter((b) => !b.closest('[role="group"][aria-label^="Send on from"]')).map((b) => (b.getAttribute("aria-label") ?? b.textContent ?? "").trim()).filter((t) => /edit|save|commit|push/i.test(t)).join(",")`,
     );
-    if (writes !== "") throw new Error(`The panel offers something that writes: ${String(writes)}`);
-    console.log("saw: nothing in the panel that writes");
+    if (edits !== "") throw new Error(`The panel offers something that edits: ${String(edits)}`);
+    console.log("saw: nothing in the panel that edits a file");
     break;
   }
   case "reads-files-there": {
@@ -793,6 +795,123 @@ switch (doing) {
     })().then((outcome) => { window.__read = outcome; }, (error) => { window.__read = "failed: " + String(error); }))`);
     const asked = await until("that computer's answer", () => page(`window.__read ?? ""`));
     console.log(`saw: ${path} ${String(asked)}`);
+    break;
+  }
+  case "commits-there": {
+    // Here the last arguments are the host's name, one of its workspaces and a commit message.
+    // With what changed there listed, the message is typed under it and Commit pressed: the host
+    // commits, and the bar then offers to push what it has that its remote lacks.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    const message = process.argv[6] as string;
+    await openThere(name, workspace);
+    const bar = `aside[aria-label="Changes"] [role="group"][aria-label="Send on from ${name}"]`;
+    await until("something to commit there", async () =>
+      /Commit \d+ files? on/.test(
+        String(
+          await page(
+            `document.querySelector(${JSON.stringify(`${bar} textarea`)})?.placeholder ?? ""`,
+          ),
+        ),
+      ),
+    );
+    await setField(`${bar} textarea`, message);
+    await until("Commit, pressed", () => page(clicked("Commit")));
+    await until(
+      "the commit, to push",
+      async () => /Push \d+ commits?/.test(await textOf(bar)),
+      60_000,
+    );
+    console.log(`saw: committed on ${name}, with a commit to push`);
+    break;
+  }
+  case "pushes-there": {
+    // Here the last arguments are the host's name and `refused` or nothing. Push is pressed: the
+    // host pushes and nothing is left to push, or its remote refuses and the bar says why in the
+    // host's own words.
+    const name = runDir as string;
+    const refusal = process.argv[5] === "refused";
+    const bar = `aside[aria-label="Changes"] [role="group"][aria-label="Send on from ${name}"]`;
+    await until("Push, pressed", () =>
+      page(`(() => {
+        const button = [...document.querySelectorAll(${JSON.stringify(`${bar} button`)})].find((b) => /^Push \\d+ commits?$/.test(b.textContent.trim()));
+        button?.click();
+        return Boolean(button);
+      })()`),
+    );
+    if (refusal) {
+      await until(
+        "why it was refused",
+        async () => (await textOf(`${bar} [role="alert"]`)).includes("refused the push"),
+        60_000,
+      );
+      const said = await textOf(`${bar} [role="alert"]`);
+      if (said.includes("/")) throw new Error(`It names a folder or an address: ${said}`);
+      console.log(`saw: the push refused, said in a sentence with no folder in it`);
+      break;
+    }
+    await until(
+      "nothing left to push",
+      async () => {
+        const said = await textOf(bar);
+        return said !== "" && !/Push \d+ commit/.test(said) && !/Pushing/.test(said);
+      },
+      60_000,
+    );
+    console.log(`saw: pushed from ${name}, nothing left to push`);
+    break;
+  }
+  case "opens-pull-request-there": {
+    // Here the last arguments are the host's name and a title. Open pull request is pressed, the
+    // title given and Open pressed: the host opens it, and its line shows under the changes.
+    const name = runDir as string;
+    const title = process.argv[5] as string;
+    const bar = `aside[aria-label="Changes"] [role="group"][aria-label="Send on from ${name}"]`;
+    await until("Open pull request, pressed", () => page(clicked("Open pull request")));
+    const form = `${bar} form[aria-label="Open pull request"]`;
+    await until("its form", async () => (await textOf(form)) !== "");
+    await setField(`${form} input`, title);
+    await until("Open, pressed", () => page(clicked("Open")));
+    await until(
+      "its pull request",
+      async () =>
+        (await textOf(`${bar} [role="group"][aria-label^="Pull request #"]`)).includes(title),
+      60_000,
+    );
+    console.log(`saw: ${await textOf(`${bar} [role="group"][aria-label^="Pull request #"]`)}`);
+    break;
+  }
+  case "merges-there": {
+    // Here the last arguments are the host's name, one of its workspaces, and `stale` or nothing.
+    // The window's question before a merge is the system's own dialog, which nothing here can
+    // press, so the core is asked as the window asks it once the person has said yes: with the
+    // commit the forge says is at the pull request's head, or with another for `stale`.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    const stale = process.argv[6] === "stale";
+    await page(`void (window.__merged = "", (async () => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const status = await invoke("other_computers");
+      const host = status.hosts.find((h) => h.name === ${JSON.stringify(name)});
+      const view = await invoke("other_host", { hostId: host.hostId });
+      const found = view.projects.flatMap((p) => p.workspaces).find((w) => w.name === ${JSON.stringify(workspace)});
+      if (!found) return "no such workspace";
+      const stands = await invoke("other_host_publish_state", { hostId: host.hostId, workspaceId: found.id, forge: true });
+      const pr = stands.pullRequest;
+      if (!pr || !pr.headOid) return "no pull request to merge";
+      try {
+        await invoke("other_host_merge_pull_request", { hostId: host.hostId, workspaceId: found.id, number: pr.number, headOid: ${stale} ? "0123456789abcdef0123456789abcdef01234567" : pr.headOid, method: "squash" });
+        return "merged #" + pr.number + " at " + pr.headOid;
+      } catch (error) {
+        return "refused: " + error.message;
+      }
+    })().then((outcome) => { window.__merged = outcome; }, (error) => { window.__merged = "failed: " + String(error); }))`);
+    const asked = await until(
+      "that computer's answer",
+      () => page(`window.__merged ?? ""`),
+      60_000,
+    );
+    console.log(`saw: ${String(asked)}`);
     break;
   }
   default:

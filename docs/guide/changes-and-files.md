@@ -128,6 +128,6 @@ Paths outside the workspace, including symlinks pointing outside it, are refused
 
 When the workspace in view is on [another computer](remote.md#reaching-another-computer), this
 panel shows that computer's changes and files, read from it when you look and not kept here.
-**Changes** and **Files** work as above, without the parts that write: no commit box, no editor,
-no **Edit ↗**, no publishing and no file explorer. See
-[Its changes and files](remote.md#reaching-another-computer).
+**Changes** and **Files** work as above without the editor, **Edit ↗** and the file explorer.
+Committing, pushing and the pull request are there in a simpler form, done by that computer as
+itself. See [Reaching another computer](remote.md#reaching-another-computer).

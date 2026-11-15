@@ -138,7 +138,10 @@ import {
   type OtherFiles,
   type OtherCloned,
   type OtherHarness,
+  type OtherMergeMethod,
   type OtherNewWorkspace,
+  type OtherPublishState,
+  type OtherPullRequest,
   type ProjectsDir,
   type OtherHostView,
   type OtherLink,
@@ -329,7 +332,10 @@ export type {
   OtherCloned,
   OtherFiles,
   OtherHarness,
+  OtherMergeMethod,
   OtherNewWorkspace,
+  OtherPublishState,
+  OtherPullRequest,
   ProjectsDir,
   OtherHostView,
   OtherLink,
@@ -946,6 +952,31 @@ export const ipc = {
   ) => unwrap(commands.otherHostDiff(hostId, workspaceId, path, oldPath, scope)),
   otherHostFile: (hostId: string, workspaceId: string, path: string) =>
     unwrap(commands.otherHostFile(hostId, workspaceId, path)),
+  /**
+   * Sending on from a workspace on another computer. That computer commits with its own Git
+   * identity, pushes with its own credentials and asks the forge with its own sign-in. Each is
+   * for one press by the person, and is never tried again by itself.
+   */
+  otherHostPublishState: (hostId: string, workspaceId: string, forge: boolean) =>
+    unwrap(commands.otherHostPublishState(hostId, workspaceId, forge)),
+  otherHostCommit: (hostId: string, workspaceId: string, message: string) =>
+    unwrap(commands.otherHostCommit(hostId, workspaceId, message)),
+  otherHostPush: (hostId: string, workspaceId: string) =>
+    unwrap(commands.otherHostPush(hostId, workspaceId)),
+  otherHostOpenPullRequest: (
+    hostId: string,
+    workspaceId: string,
+    title: string,
+    body: string,
+    draft: boolean,
+  ) => unwrap(commands.otherHostOpenPullRequest(hostId, workspaceId, title, body, draft)),
+  otherHostMergePullRequest: (
+    hostId: string,
+    workspaceId: string,
+    number: number,
+    headOid: string,
+    method: OtherMergeMethod,
+  ) => done(commands.otherHostMergePullRequest(hostId, workspaceId, number, headOid, method)),
   /** Which repository one of this computer's projects is, to offer the same one elsewhere. */
   projectRepository: (projectId: string) => unwrap(commands.projectRepository(projectId)),
   /** Where a repository another device has this computer clone goes. */

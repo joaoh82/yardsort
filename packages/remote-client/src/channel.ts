@@ -62,6 +62,10 @@ import {
   type ProjectCloneParams,
   type ProjectId,
   type ProtocolVersion,
+  type PublishState,
+  type PullRequestMergeParams,
+  type PullRequestOpened,
+  type PullRequestOpenParams,
   type RemoteError,
   type Reply,
   request as requestDecoder,
@@ -84,8 +88,10 @@ import {
   type WorkspaceId,
   type WorkspaceListParams,
   type WorkspaceChanges,
+  type WorkspaceCommitParams,
   type WorkspaceFilesParams,
   type WorkspacePage,
+  type WorkspacePublishParams,
   type WorkspaceRemoveParams,
   type WorkspaceRenameParams,
   type WorkflowChallenge,
@@ -521,6 +527,70 @@ export class Channel {
       }
       return { state: chunk.state, size: chunk.size, bytes };
     }
+  }
+
+  // --- sending a workspace's work on -----------------------------------------------------------
+
+  // The computer commits with its own Git identity, pushes with its own credentials and asks the
+  // forge with its own sign-in. All but `publishState` change a repository: each is for its
+  // person's press, and none is sent again by itself.
+
+  /**
+   * Where a workspace stands with its remote: its branch, what is not pushed, and whether a pull
+   * request can be opened. With `forge`, the computer asks the forge about its pull request too,
+   * which takes it a network round trip; without, `pullRequest` is absent. Minor 12.
+   */
+  async publishState(params: WorkspacePublishParams): Promise<PublishState> {
+    const { kind: _, ...state } = expect(
+      await this.ask({ op: "workspace.publish", params }),
+      "publish",
+    );
+    return state;
+  }
+
+  /**
+   * Commit everything changed in a workspace. The reply is where it stands afterwards, as Git
+   * knows it: the forge is not asked. Minor 12.
+   */
+  async commit(params: WorkspaceCommitParams): Promise<PublishState> {
+    const { kind: _, ...state } = expect(
+      await this.ask({ op: "workspace.commit", params }),
+      "publish",
+    );
+    return state;
+  }
+
+  /**
+   * Push a workspace's branch to its project's remote. The reply is where it stands afterwards,
+   * as Git knows it: the forge is not asked. Minor 12.
+   */
+  async push(workspace: WorkspaceId): Promise<PublishState> {
+    const { kind: _, ...state } = expect(
+      await this.ask({ op: "workspace.push", params: { workspace } }),
+      "publish",
+    );
+    return state;
+  }
+
+  /**
+   * Open a pull request for a workspace's branch, which the computer pushes first when the remote
+   * does not have it all. When `created` is false the computer could not open it, and `url` is the
+   * forge's own form to finish in a browser. Minor 12.
+   */
+  async openPullRequest(params: PullRequestOpenParams): Promise<PullRequestOpened> {
+    const { kind: _, ...opened } = expect(
+      await this.ask({ op: "pull_request.open", params }),
+      "pullRequestOpened",
+    );
+    return opened;
+  }
+
+  /**
+   * Merge the pull request of a workspace's branch, if it is still open, not a draft, and at the
+   * commit named: the `headOid` its person saw, from {@link Channel.publishState}. Minor 12.
+   */
+  async mergePullRequest(params: PullRequestMergeParams): Promise<void> {
+    expect(await this.ask({ op: "pull_request.merge", params }), "done");
   }
 
   /** Workflow runs this computer is driving, newest first. */

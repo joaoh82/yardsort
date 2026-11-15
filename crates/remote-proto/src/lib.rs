@@ -30,6 +30,7 @@
 //! for: see [`conversation`]. Since minor 10 a start may say a name, a model, an effort and a
 //! branch, and a client that may type may also look after projects and workspaces: see
 //! [`manage`]. Since minor 11 such a client may read a workspace's changes and files: see [`look`].
+//! Since minor 12 it may commit, push, and open and merge a pull request there: see [`publish`].
 //! A host lists what it answers in [`HostDescription::capabilities`].
 //!
 //! Sync between hosts ([`sync`]) is not part of this protocol: it is between a host and the
@@ -44,6 +45,7 @@ pub mod manage;
 pub mod model;
 pub mod notify;
 pub mod pairing;
+pub mod publish;
 pub mod relay;
 pub mod start;
 pub mod sync;
@@ -98,7 +100,9 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 ///   `project.branches`, `project.clone`, `shell.start`, `workspace.rename`, `workspace.archive`
 ///   and `workspace.delete`; and the `uncommitted_work` error.
 /// - 11: `workspace.changes`, `workspace.files` and `file.read`.
-pub const PROTOCOL_MINOR: u16 = 11;
+/// - 12: `workspace.publish`, `workspace.commit`, `workspace.push`, `pull_request.open` and
+///   `pull_request.merge`.
+pub const PROTOCOL_MINOR: u16 = 12;
 /// `workflow:read` and `workflow:decide` arrived in this minor. A host is shown
 /// those scope names when it stated this minor or a newer minor of this major.
 pub const WORKFLOW_SCOPES_MINOR: u16 = 7;
@@ -511,6 +515,21 @@ pub enum Operation {
     /// Since minor 11.
     #[serde(rename = "file.read")]
     FileRead(FileReadParams),
+    /// Since minor 12.
+    #[serde(rename = "workspace.publish")]
+    WorkspacePublish(publish::WorkspacePublishParams),
+    /// Since minor 12.
+    #[serde(rename = "workspace.commit")]
+    WorkspaceCommit(publish::WorkspaceCommitParams),
+    /// Since minor 12.
+    #[serde(rename = "workspace.push")]
+    WorkspacePush(WorkspaceRef),
+    /// Since minor 12.
+    #[serde(rename = "pull_request.open")]
+    PullRequestOpen(publish::PullRequestOpenParams),
+    /// Since minor 12.
+    #[serde(rename = "pull_request.merge")]
+    PullRequestMerge(publish::PullRequestMergeParams),
 }
 
 /// Every operation's wire name, in [`Operation`]'s order.
@@ -551,6 +570,11 @@ pub const OPERATIONS: &[&str] = &[
     "workspace.changes",
     "workspace.files",
     "file.read",
+    "workspace.publish",
+    "workspace.commit",
+    "workspace.push",
+    "pull_request.open",
+    "pull_request.merge",
 ];
 
 impl Operation {
@@ -592,6 +616,11 @@ impl Operation {
             Self::WorkspaceChanges(_) => 33,
             Self::WorkspaceFiles(_) => 34,
             Self::FileRead(_) => 35,
+            Self::WorkspacePublish(_) => 36,
+            Self::WorkspaceCommit(_) => 37,
+            Self::WorkspacePush(_) => 38,
+            Self::PullRequestOpen(_) => 39,
+            Self::PullRequestMerge(_) => 40,
         };
         OPERATIONS[index]
     }
@@ -631,7 +660,12 @@ impl Operation {
             | Self::WorkspaceDelete(_)
             | Self::WorkspaceChanges(_)
             | Self::WorkspaceFiles(_)
-            | Self::FileRead(_) => Scope::TerminalControl,
+            | Self::FileRead(_)
+            | Self::WorkspacePublish(_)
+            | Self::WorkspaceCommit(_)
+            | Self::WorkspacePush(_)
+            | Self::PullRequestOpen(_)
+            | Self::PullRequestMerge(_) => Scope::TerminalControl,
             Self::WorkflowRunList(_) | Self::WorkflowRunGet(_) => Scope::WorkflowRead,
             Self::WorkflowChallenge(_) | Self::WorkflowDecide(_) => Scope::WorkflowDecide,
         })
@@ -670,6 +704,9 @@ impl Operation {
             Self::WorkspaceRename(rename) => rename.validate(),
             Self::WorkspaceFiles(files) => files.validate(),
             Self::FileRead(read) => read.validate(),
+            Self::WorkspaceCommit(commit) => commit.validate(),
+            Self::PullRequestOpen(open) => open.validate(),
+            Self::PullRequestMerge(merge) => merge.validate(),
             Self::WorkflowRunList(params) if params.limit == Some(0) => {
                 invalid("A page holds at least one item.")
             }
@@ -753,6 +790,10 @@ pub enum Reply {
     Files(FileList),
     /// Since minor 11.
     File(FileChunk),
+    /// Since minor 12.
+    Publish(publish::PublishState),
+    /// Since minor 12.
+    PullRequestOpened(publish::PullRequestOpened),
     Done,
 }
 

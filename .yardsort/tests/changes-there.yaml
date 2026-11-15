@@ -4,8 +4,7 @@ description: >-
   A yardsort-host on the stand-in server, serving a shell in a workspace of its one project. A
   file is changed in that workspace, another is added, one is ignored, and a link in it points
   outside. The real window, on a profile of its own, signs in as a client and is let type. With
-  the workspace open, its right panel lists the changed files, opens the change and shows the new
-  line, and offers nothing that writes; when the file changes again on the host, the open change
+  the workspace open, its right panel lists the changed files, opens the change and shows the new line, and offers nothing that edits a file; when the file changes again on the host, the open change
   follows. The Files tab lists the tree, a folder when it is opened, without `.git` and the
   ignored file. A file is read by a path inside the workspace: one that climbs out is refused by this
   computer before it is sent, the link that leads out is refused by the host, and a file in it is
@@ -143,7 +142,7 @@ steps:
       ]
     timeout: 150s
     expect:
-      stdout_contains: "saw: nothing in the panel that writes"
+      stdout_contains: "saw: nothing in the panel that edits a file"
   - id: the_file_changes_again_on_the_host
     action: shell
     line: printf 'first\nsecond-line\nthird-line\n' > "$(cat "$YS_RUN_DIR/smoke.path")/README.md" && echo written

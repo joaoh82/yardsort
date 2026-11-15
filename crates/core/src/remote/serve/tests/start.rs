@@ -139,6 +139,44 @@ impl Starting for Lent {
     ) -> crate::error::IpcResult<crate::changes::Content> {
         self.with(|s| s.content(workspace, path, old_path, of))
     }
+    fn publish(
+        &self,
+        workspace: &str,
+        forge: bool,
+    ) -> crate::error::IpcResult<remote_proto::publish::PublishState> {
+        self.with(|s| s.publish(workspace, forge))
+    }
+    fn commit(
+        &self,
+        workspace: &str,
+        message: &str,
+    ) -> crate::error::IpcResult<remote_proto::publish::PublishState> {
+        self.with(|s| s.commit(workspace, message))
+    }
+    fn push(
+        &self,
+        workspace: &str,
+    ) -> crate::error::IpcResult<remote_proto::publish::PublishState> {
+        self.with(|s| s.push(workspace))
+    }
+    fn open_pull_request(
+        &self,
+        workspace: &str,
+        title: &str,
+        body: &str,
+        draft: bool,
+    ) -> crate::error::IpcResult<remote_proto::publish::PullRequestOpened> {
+        self.with(|s| s.open_pull_request(workspace, title, body, draft))
+    }
+    fn merge_pull_request(
+        &self,
+        workspace: &str,
+        number: u32,
+        head_oid: &str,
+        method: remote_proto::publish::MergeMethod,
+    ) -> crate::error::IpcResult<()> {
+        self.with(|s| s.merge_pull_request(workspace, number, head_oid, method))
+    }
     fn session(
         &self,
         workspace: &str,
@@ -175,6 +213,12 @@ impl Started {
 
     /// As [`Self::new`], with the host's git made by `make`: one whose configuration a test set.
     fn with_git(make: impl Fn() -> Git) -> Self {
+        Self::with(make, None)
+    }
+
+    /// As [`Self::with_git`], with `bin` first on the host's `PATH`: where a test put a stand-in
+    /// for a program the host looks for.
+    fn with(make: impl Fn() -> Git, bin: Option<&Path>) -> Self {
         let git = make();
         let repo = tempfile::tempdir().unwrap();
         git.init(repo.path()).unwrap();
@@ -221,7 +265,19 @@ impl Started {
                 store: Arc::new(store),
                 host: Arc::new(PtyHost::new(Arc::new(|_| {}))),
                 env: Arc::new(ShellEnv {
-                    vars: std::env::vars().collect(),
+                    vars: std::env::vars()
+                        .map(|(key, value)| match bin {
+                            Some(bin) if key == "PATH" => {
+                                let joined = std::env::join_paths(
+                                    std::iter::once(bin.to_owned())
+                                        .chain(std::env::split_paths(&value)),
+                                )
+                                .unwrap();
+                                (key, joined.to_string_lossy().into_owned())
+                            }
+                            _ => (key, value),
+                        })
+                        .collect(),
                     source: EnvSource::Process,
                     warning: None,
                 }),
@@ -1380,4 +1436,234 @@ fn a_device_with_control_reads_a_workspaces_changes_its_tree_and_its_files_and_n
         let reply = ask(id, op, params);
         assert_eq!(reply["error"]["code"], "forbidden", "{op}: {reply}");
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_device_with_control_commits_pushes_and_opens_and_merges_a_pull_request_as_the_host() {
+    use std::os::unix::fs::PermissionsExt;
+    // A remote on this disk behind an address under a name reserved for tests, which no program
+    // could reach if it tried, and a stand-in for the forge's program that notes what it was asked.
+    let outside = tempfile::tempdir().unwrap();
+    let bare = outside.path().join("alpha.git");
+    git()
+        .run(outside.path(), &["init", "--bare", "alpha.git"])
+        .unwrap();
+    let asked = outside.path().join("gh.log");
+    let listed = outside.path().join("list.json");
+    let bin = outside.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    std::fs::write(
+        bin.join("gh"),
+        format!(
+            "#!/bin/sh\necho \"$@\" >> '{log}'\ncase \"$1 $2\" in\n  'pr list') cat '{list}' 2>/dev/null || echo '[]' ;;\n  'pr create') echo 'Creating pull request'; echo 'https://git.example.test/acme/alpha/pull/7' ;;\n  'pr merge') exit 0 ;;\n  *) echo \"not answered: $*\" >&2; exit 1 ;;\nesac\n",
+            log = asked.display(),
+            list = listed.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(bin.join("gh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let key = format!("url.file://{}/.insteadOf", outside.path().display());
+    let rewritten = move || {
+        crate::git::testing::git_with(&[
+            ("GIT_CONFIG_COUNT", "1"),
+            ("GIT_CONFIG_KEY_0", &key),
+            ("GIT_CONFIG_VALUE_0", "https://git.example.test/acme/"),
+        ])
+    };
+    let fx = Started::with(rewritten, Some(&bin));
+    fx.git
+        .run(
+            &fx.repo(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://git.example.test/acme/alpha.git",
+            ],
+        )
+        .unwrap();
+    fx.approve(&CONTROL);
+    let out = Recorded::new(usize::MAX);
+    let visitor = fx.visitor(&out);
+    let reply = fx.ask(
+        &visitor,
+        &out,
+        "s1",
+        "workspace.start",
+        json!({"project": fx.project, "prompt": "echo publishing"}),
+    );
+    let workspace = reply["result"]["workspace"].as_str().unwrap().to_owned();
+    let row = fx.lent.store.workspace(&workspace).unwrap().unwrap();
+    let root = PathBuf::from(&row.path);
+    let branch = row.branch.clone().unwrap();
+    let ask = |id: &str, op: &str, mut params: Value| {
+        params["workspace"] = json!(workspace);
+        fx.ask(&visitor, &out, id, op, params)
+    };
+    let head = || fx.git.run(&root, &["rev-parse", "HEAD"]).unwrap();
+    let on_remote = || {
+        git()
+            .run(&bare, &["rev-parse", &format!("refs/heads/{branch}")])
+            .ok()
+    };
+    let refused = |reply: &Value, said: &str| {
+        assert_eq!(reply["error"]["code"], "invalid_request", "{reply}");
+        let message = reply["error"]["message"].as_str().unwrap();
+        assert!(message.contains(said), "{message}");
+        // Never Git's own words, which name this host's folders and its remote's address.
+        for leak in [outside.path().to_string_lossy(), root.to_string_lossy()] {
+            assert!(!message.contains(&*leak), "{message}");
+        }
+    };
+
+    // Where it stands before anything is done: a branch of its own, nothing pushed.
+    let before = ask("p1", "workspace.publish", json!({}));
+    assert_eq!(before["result"]["kind"], "publish", "{before}");
+    assert_eq!(before["result"]["branch"], branch);
+    assert_eq!(before["result"]["base"], "trunk");
+    assert_eq!(before["result"]["remote"], true);
+    assert!(before["result"].get("pushed").is_none());
+    assert!(before["result"]["identity"]
+        .as_str()
+        .unwrap()
+        .contains("Test"));
+    assert!(
+        before["result"].get("pullRequest").is_none(),
+        "the forge was not asked"
+    );
+    assert!(!asked.exists(), "nor was its program run");
+
+    // A commit is everything changed, by the host's own identity.
+    std::fs::write(root.join("notes.txt"), "to commit\n").unwrap();
+    let committed = ask(
+        "c1",
+        "workspace.commit",
+        json!({"message": "Add the notes\n\nWith a body."}),
+    );
+    assert_eq!(committed["result"]["ahead"], 1, "{committed}");
+    assert_eq!(committed["result"]["unpushed"], json!(["Add the notes"]));
+    assert_eq!(fx.git.run(&root, &["status", "--porcelain"]).unwrap(), "");
+    assert!(fx
+        .git
+        .run(&root, &["log", "-1", "--format=%an <%ae>"])
+        .unwrap()
+        .contains("Test <test@example.com>"));
+    refused(
+        &ask("c2", "workspace.commit", json!({"message": "Again"})),
+        "nothing to commit",
+    );
+    assert_eq!(
+        ask("c3", "workspace.commit", json!({"message": " "}))["error"]["code"],
+        "invalid_request"
+    );
+
+    // A push sends the workspace's own branch to the project's own remote.
+    assert_eq!(on_remote(), None);
+    let pushed = ask("u1", "workspace.push", json!({}));
+    assert_eq!(pushed["result"]["pushed"], true, "{pushed}");
+    assert_eq!(pushed["result"]["ahead"], 0);
+    assert_eq!(on_remote(), Some(head()));
+
+    // A push the remote refuses says why, in the host's words.
+    let hook = bare.join("hooks/pre-receive");
+    std::fs::write(&hook, "#!/bin/sh\necho 'no pushes here' >&2\nexit 1\n").unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(root.join("more.txt"), "another\n").unwrap();
+    ask("c4", "workspace.commit", json!({"message": "Add more"}));
+    let sent = on_remote();
+    refused(&ask("u2", "workspace.push", json!({})), "refused the push");
+    assert_eq!(on_remote(), sent, "nothing reached the remote");
+    std::fs::remove_file(&hook).unwrap();
+
+    // Opening a pull request pushes what the remote lacks first, then asks the forge.
+    let opened = ask(
+        "o1",
+        "pull_request.open",
+        json!({"title": "Add the notes", "body": "Two files.", "draft": true}),
+    );
+    assert_eq!(opened["result"]["kind"], "pullRequestOpened", "{opened}");
+    assert_eq!(
+        opened["result"]["url"],
+        "https://git.example.test/acme/alpha/pull/7"
+    );
+    assert_eq!(opened["result"]["created"], true);
+    assert_eq!(on_remote(), Some(head()));
+    let log = std::fs::read_to_string(&asked).unwrap();
+    assert!(
+        log.contains("pr create --base trunk --title Add the notes --body Two files. --draft"),
+        "{log}"
+    );
+
+    // With the forge asked, its pull request is told, and there is none to open any more.
+    std::fs::write(
+        &listed,
+        json!([{
+            "number": 7,
+            "url": "https://git.example.test/acme/alpha/pull/7",
+            "title": "Add the notes",
+            "headRefName": branch,
+            "state": "OPEN",
+            "isDraft": false,
+            "headRefOid": head(),
+            "mergeable": "MERGEABLE",
+        }])
+        .to_string(),
+    )
+    .unwrap();
+    let with_forge = ask("p2", "workspace.publish", json!({"forge": true}));
+    let pr = &with_forge["result"]["pullRequest"];
+    assert_eq!(pr["number"], 7, "{with_forge}");
+    assert_eq!(pr["state"], "open");
+    assert_eq!(pr["headOid"], head());
+    assert!(with_forge["result"].get("canOpen").is_none());
+
+    // A merge names the commit the person saw. Another one, or another number, merges nothing.
+    for (id, number, oid) in [
+        (
+            "m1",
+            7,
+            "0123456789abcdef0123456789abcdef01234567".to_owned(),
+        ),
+        ("m2", 8, head()),
+    ] {
+        let reply = ask(
+            id,
+            "pull_request.merge",
+            json!({"number": number, "headOid": oid, "method": "squash"}),
+        );
+        refused(&reply, "changed or is no longer ready");
+    }
+    assert!(!std::fs::read_to_string(&asked)
+        .unwrap()
+        .contains("pr merge"));
+    let merged = ask(
+        "m3",
+        "pull_request.merge",
+        json!({"number": 7, "headOid": head(), "method": "squash"}),
+    );
+    assert_eq!(merged["result"]["kind"], "done", "{merged}");
+    assert!(std::fs::read_to_string(&asked).unwrap().contains(&format!(
+        "pr merge 7 --squash --match-head-commit {}",
+        head()
+    )));
+
+    // Watching only: none of it, and nothing is run for it.
+    let ran = std::fs::read_to_string(&asked).unwrap();
+    fx.approve(&[Scope::WorkspaceRead, Scope::TerminalRead]);
+    for (id, op, params) in [
+        ("w1", "workspace.publish", json!({})),
+        ("w2", "workspace.commit", json!({"message": "No"})),
+        ("w3", "workspace.push", json!({})),
+        ("w4", "pull_request.open", json!({"title": "No"})),
+        (
+            "w5",
+            "pull_request.merge",
+            json!({"number": 7, "headOid": head(), "method": "merge"}),
+        ),
+    ] {
+        let reply = ask(id, op, params);
+        assert_eq!(reply["error"]["code"], "forbidden", "{op}: {reply}");
+    }
+    assert_eq!(std::fs::read_to_string(&asked).unwrap(), ran);
 }

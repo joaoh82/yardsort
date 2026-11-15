@@ -95,6 +95,36 @@ pub trait Starting: Send + Sync {
         old_path: Option<&str>,
         of: remote_proto::FileOf,
     ) -> IpcResult<crate::changes::Content>;
+    /// Where `workspace` stands with its remote; with `forge`, its pull request too.
+    fn publish(
+        &self,
+        workspace: &str,
+        forge: bool,
+    ) -> IpcResult<remote_proto::publish::PublishState>;
+    /// Commit everything changed in `workspace`.
+    fn commit(
+        &self,
+        workspace: &str,
+        message: &str,
+    ) -> IpcResult<remote_proto::publish::PublishState>;
+    /// Push `workspace`'s branch to the project's remote.
+    fn push(&self, workspace: &str) -> IpcResult<remote_proto::publish::PublishState>;
+    /// Open a pull request for `workspace`'s branch, pushing first when needed.
+    fn open_pull_request(
+        &self,
+        workspace: &str,
+        title: &str,
+        body: &str,
+        draft: bool,
+    ) -> IpcResult<remote_proto::publish::PullRequestOpened>;
+    /// Merge `workspace`'s pull request, if it is still at `head_oid`.
+    fn merge_pull_request(
+        &self,
+        workspace: &str,
+        number: u32,
+        head_oid: &str,
+        method: remote_proto::publish::MergeMethod,
+    ) -> IpcResult<()>;
     /// Another agent in `workspace`.
     fn session(
         &self,
@@ -259,7 +289,10 @@ impl Starter<'_> {
     }
 
     /// A workspace's folder, when it is there.
-    fn folder(&self, workspace: &str) -> IpcResult<(crate::store::WorkspaceRow, PathBuf)> {
+    pub(crate) fn folder(
+        &self,
+        workspace: &str,
+    ) -> IpcResult<(crate::store::WorkspaceRow, PathBuf)> {
         let row = self.store.workspace(workspace)?.ok_or_else(|| {
             IpcError::new("unknown_workspace", "That workspace no longer exists.")
         })?;
@@ -561,6 +594,10 @@ pub fn start_error(error: &IpcError) -> remote_proto::RemoteError {
             "That branch is not in the project on the computer.",
         ),
         "unknown_project" => RemoteError::not_found(),
+        // Written by this host for a device, with nothing of Git's or the forge's own words.
+        code if super::publish::REFUSALS.contains(&code) => {
+            RemoteError::new(ErrorCode::InvalidRequest, error.message.clone())
+        }
         "bad_path" => RemoteError::new(
             ErrorCode::InvalidRequest,
             "That is not a path inside the workspace.",

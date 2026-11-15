@@ -39,6 +39,11 @@ has the downloads and the full commit lists.
   A computer you let type into this one can read a workspace's changes and files here the same
   way, by paths inside the workspace and nothing outside it. See
   [Reaching another computer](docs/guide/remote.md#reaching-another-computer).
+- **Commit, push and pull requests on another computer.** Under a workspace's changes there:
+  commit them with a message, push the branch, open its pull request, and merge it after a
+  confirmation. That computer does each as itself, with its own Git identity, credentials and
+  `gh` sign-in, and only at your press. A refused push or commit is explained in a sentence
+  rather than with Git's own output, which stays on that computer.
 
 ## 0.34.1
 

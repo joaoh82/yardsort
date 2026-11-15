@@ -414,6 +414,11 @@ export const commands = {
 	 *  computer's Yardsort is new enough.
 	 */
 	mayLook: boolean,
+	/**
+	 *  Whether this computer may commit, push, and open and merge a pull request there: it may
+	 *  type, and that computer's Yardsort is new enough.
+	 */
+	mayPublish: boolean,
 	/**  When it was last read; `None` until it has been. */
 	readAt: number | null,
 	platform: string | null,
@@ -462,6 +467,31 @@ export const commands = {
 	otherHostDiff: (hostId: string, workspaceId: string, path: string, oldPath: string | null, scope: Scope) => typedError<FileDiff, IpcError>(__TAURI_INVOKE("other_host_diff", { hostId, workspaceId, path, oldPath, scope })),
 	/**  A file of a workspace on another computer, as it is on its disk now. */
 	otherHostFile: (hostId: string, workspaceId: string, path: string) => typedError<Content, IpcError>(__TAURI_INVOKE("other_host_file", { hostId, workspaceId, path })),
+	/**
+	 *  Where a workspace on another computer stands with its remote. With `forge`, that computer
+	 *  asks the forge about its pull request, which takes it a network round trip.
+	 */
+	otherHostPublishState: (hostId: string, workspaceId: string, forge: boolean) => typedError<OtherPublishState, IpcError>(__TAURI_INVOKE("other_host_publish_state", { hostId, workspaceId, forge })),
+	/**
+	 *  Commit everything changed in a workspace on another computer, with that computer's own Git
+	 *  identity. Only ever at the person's press.
+	 */
+	otherHostCommit: (hostId: string, workspaceId: string, message: string) => typedError<OtherPublishState, IpcError>(__TAURI_INVOKE("other_host_commit", { hostId, workspaceId, message })),
+	/**
+	 *  Push a workspace's branch on another computer to its project's remote, with that computer's
+	 *  own credentials. Only ever at the person's press.
+	 */
+	otherHostPush: (hostId: string, workspaceId: string) => typedError<OtherPublishState, IpcError>(__TAURI_INVOKE("other_host_push", { hostId, workspaceId })),
+	/**
+	 *  Open a pull request for a workspace's branch on another computer, with that computer's own
+	 *  forge sign-in, pushing first when it needs it.
+	 */
+	otherHostOpenPullRequest: (hostId: string, workspaceId: string, title: string, body: string, draft: boolean) => typedError<OtherPullRequestOpened, IpcError>(__TAURI_INVOKE("other_host_open_pull_request", { hostId, workspaceId, title, body, draft })),
+	/**
+	 *  Merge the pull request of a workspace on another computer, if it is still open and at the
+	 *  commit the person saw.
+	 */
+	otherHostMergePullRequest: (hostId: string, workspaceId: string, number: number, headOid: string, method: OtherMergeMethod) => typedError<null, IpcError>(__TAURI_INVOKE("other_host_merge_pull_request", { hostId, workspaceId, number, headOid, method })),
 	/**  Which repository one of this computer's projects is, read from its `origin`. */
 	projectRepository: (projectId: string) => typedError<LocalRepository, IpcError>(__TAURI_INVOKE("project_repository", { projectId })),
 	/**  Where a repository another device has this computer clone goes. */
@@ -2312,6 +2342,11 @@ export type OtherHostView = {
 	 *  computer's Yardsort is new enough.
 	 */
 	mayLook: boolean,
+	/**
+	 *  Whether this computer may commit, push, and open and merge a pull request there: it may
+	 *  type, and that computer's Yardsort is new enough.
+	 */
+	mayPublish: boolean,
 	/**  When it was last read; `None` until it has been. */
 	readAt: number | null,
 	platform: string | null,
@@ -2322,6 +2357,9 @@ export type OtherHostView = {
 };
 
 export type OtherLink = { kind: "connecting" } | { kind: "online" } | { kind: "offline"; since: number | null; why: string };
+
+/**  How to merge a pull request on another computer. */
+export type OtherMergeMethod = "squash" | "merge" | "rebase";
 
 /**  A new workspace on another computer, as its composer here says it. */
 export type OtherNewWorkspace = {
@@ -2356,6 +2394,49 @@ export type OtherProject = {
 	 */
 	repository: string | null,
 	workspaces: OtherWorkspace[],
+};
+
+/**  Where a workspace on another computer stands with its remote. */
+export type OtherPublishState = {
+	branch: string | null,
+	base: string | null,
+	/**  Who commits there would be by. */
+	identity: string | null,
+	remote: boolean,
+	pushed: boolean,
+	ahead: number,
+	behind: number,
+	/**  The subjects of the commits its remote does not have, newest first. */
+	unpushed: string[],
+	/**  Its pull request, when that computer was asked to ask the forge and there is one. */
+	pullRequest: OtherPullRequest | null,
+	canOpen: boolean,
+	/**  That computer can open and merge a pull request without a browser. */
+	gh: boolean,
+	problem: string | null,
+};
+
+/**  The pull request of a workspace's branch on another computer. */
+export type OtherPullRequest = {
+	number: number,
+	/**  Its page on the forge, when that is an `https` address. */
+	url: string | null,
+	title: string,
+	/**  `open`, `merged`, `closed` or `unknown`. */
+	state: string,
+	draft: boolean,
+	/**  `none`, `running`, `passing`, `failing` or `unknown`. */
+	checks: string,
+	/**  The commit at its head, to name when merging it. */
+	headOid: string | null,
+	conflicting: boolean,
+};
+
+/**  A pull request another computer opened, or the forge's form to finish in a browser. */
+export type OtherPullRequestOpened = {
+	url: string,
+	/**  That computer opened it. When false the address is the forge's own form. */
+	created: boolean,
 };
 
 export type OtherSession = {

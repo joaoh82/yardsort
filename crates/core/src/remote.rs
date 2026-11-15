@@ -118,6 +118,11 @@ pub const START_OPERATIONS: &[&str] = &[
     "workspace.changes",
     "workspace.files",
     "file.read",
+    "workspace.publish",
+    "workspace.commit",
+    "workspace.push",
+    "pull_request.open",
+    "pull_request.merge",
 ];
 
 /// Reading conversations and answering their agents' questions, answered when the facade knows
@@ -293,7 +298,12 @@ impl HostFacade<'_> {
             | Operation::WorkspaceDelete(_)
             | Operation::WorkspaceChanges(_)
             | Operation::WorkspaceFiles(_)
-            | Operation::FileRead(_) => Err(RemoteError::new(
+            | Operation::FileRead(_)
+            | Operation::WorkspacePublish(_)
+            | Operation::WorkspaceCommit(_)
+            | Operation::WorkspacePush(_)
+            | Operation::PullRequestOpen(_)
+            | Operation::PullRequestMerge(_) => Err(RemoteError::new(
                 ErrorCode::Unsupported,
                 self.terminals_later.as_ref().map_or(
                     "Starting agents from here is not available on this host yet.",
@@ -1172,6 +1182,7 @@ fn encoded_len(value: &impl Serialize) -> usize {
 mod activity;
 mod conversation;
 pub mod host;
+pub mod publish;
 pub mod serve;
 pub mod start;
 #[cfg(test)]

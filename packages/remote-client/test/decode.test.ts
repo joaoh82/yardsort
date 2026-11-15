@@ -19,16 +19,22 @@ import {
   MAX_BRANCH,
   MAX_BRANCHES,
   MAX_CHOICES,
+  MAX_COMMIT_MESSAGE,
   MAX_FILE,
   MAX_FILE_CHUNK,
   MAX_ID_LEN,
   MAX_INPUT_BYTES,
   MAX_LABEL,
   MAX_LISTED_BYTES,
+  MAX_OID,
   MAX_PATH,
   MAX_PROJECT_NAME,
+  MAX_PULL_REQUEST_BODY,
+  MAX_PULL_REQUEST_TITLE,
   MAX_REMOTE,
   MAX_TEXT,
+  MAX_UNPUSHED,
+  MAX_URL,
   MAX_WORKSPACE_NAME,
   normalizeCode,
   parsePairingLink,
@@ -338,6 +344,99 @@ describe("requests are checked as a host checks them", () => {
     expect(() => ask("workspace.changes", { workspace: "../w" })).toThrow(/not an id/);
   });
 
+  test("a commit says something, and a pull request has a title on one line", () => {
+    const commit = (message: unknown) => ask("workspace.commit", { workspace: "w", message });
+    expect(commit("Fix it\n\nWith a body.").op).toBe("workspace.commit");
+    for (const empty of ["", "  \n", "\u00a0\t"]) {
+      expect(() => commit(empty)).toThrow(/commits with no message/);
+    }
+    expect(() => commit("a\u0000b")).toThrow(/a commit message no request may/);
+    // Counted as UTF-8, as the host counts it.
+    expect(commit("m".repeat(MAX_COMMIT_MESSAGE)).op).toBe("workspace.commit");
+    expect(() => commit("m".repeat(MAX_COMMIT_MESSAGE + 1))).toThrow(
+      /a commit message no request may/,
+    );
+    expect(() => commit("é".repeat(MAX_COMMIT_MESSAGE / 2 + 1))).toThrow(
+      /a commit message no request may/,
+    );
+    expect(() => commit(undefined)).toThrow(/not a string/);
+
+    const open = (title: string, more: Record<string, unknown> = {}) =>
+      ask("pull_request.open", { workspace: "w", title, ...more });
+    expect(open("Fix the spacing").op).toBe("pull_request.open");
+    // What is around a title is the host's to trim, so it is measured without it.
+    expect(open(" Fix the spacing\n").op).toBe("pull_request.open");
+    expect(open(` ${"t".repeat(MAX_PULL_REQUEST_TITLE)} `).op).toBe("pull_request.open");
+    // In characters, as the host counts them.
+    expect(open("\u{1f600}".repeat(MAX_PULL_REQUEST_TITLE)).op).toBe("pull_request.open");
+    for (const bad of [
+      "",
+      " ",
+      "--web",
+      "  -x",
+      "two\nlines",
+      "a\u001b[2J",
+      "t".repeat(MAX_PULL_REQUEST_TITLE + 1),
+    ]) {
+      expect(() => open(bad)).toThrow(/not 1 to 256 characters on one line/);
+    }
+    expect(open("ok", { body: "b".repeat(MAX_PULL_REQUEST_BODY) }).op).toBe("pull_request.open");
+    expect(() => open("ok", { body: "b".repeat(MAX_PULL_REQUEST_BODY + 1) })).toThrow(
+      /a longer description/,
+    );
+    expect(() => open("ok", { body: "é".repeat(MAX_PULL_REQUEST_BODY / 2 + 1) })).toThrow(
+      /a longer description/,
+    );
+    expect(() => open("ok", { body: "a\u0000b" })).toThrow(/a longer description/);
+    // No description, and not a draft, are each left out, as Rust writes them.
+    expect(open("ok", { body: "", draft: false })).toEqual(open("ok"));
+    expect((open("ok") as { params: object }).params).toEqual({ workspace: "w", title: "ok" });
+    expect(open("ok", { body: "Why.", draft: true })).toHaveProperty("params.draft", true);
+    expect(() => open("ok", { draft: "yes" })).toThrow(/true or false/);
+    expect(() => open("ok", { body: null })).toThrow(/not a string/);
+  });
+
+  test("a merge names its pull request and the commit seen at its head", () => {
+    const HEAD = "3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a";
+    const merge = (number: number, headOid: string, method = "squash") =>
+      ask("pull_request.merge", { workspace: "w", number, headOid, method });
+    expect(merge(91, HEAD).op).toBe("pull_request.merge");
+    expect(merge(91, "3F2A1B0", "rebase")).toHaveProperty("params.method", "rebase");
+    expect(merge(91, "a".repeat(MAX_OID), "merge").op).toBe("pull_request.merge");
+    expect(() => merge(0, HEAD)).toThrow(/names no pull request/);
+    for (const bad of [
+      "",
+      "3f2a1b",
+      "HEAD",
+      "--admin",
+      "3f2a1b0g",
+      `${HEAD}\n`,
+      ` ${HEAD}`,
+      "a".repeat(MAX_OID + 1),
+    ]) {
+      expect(() => merge(91, bad)).toThrow(/names no pull request/);
+    }
+    expect(() => merge(-1, HEAD)).toThrow(/out of range/);
+    expect(() => merge(91, HEAD, "fastForward")).toThrow(/not one this build knows/);
+    expect(() => ask("pull_request.merge", { workspace: "w", number: 91, headOid: HEAD })).toThrow(
+      /not a string/,
+    );
+
+    // Asking where a workspace stands, and pushing it, name the workspace and nothing else.
+    expect(ask("workspace.publish", { workspace: "w", forge: false })).toEqual(
+      ask("workspace.publish", { workspace: "w" }),
+    );
+    expect(ask("workspace.publish", { workspace: "w", forge: true })).toHaveProperty(
+      "params.forge",
+      true,
+    );
+    const push = ask("workspace.push", { workspace: "w", remote: "origin", branch: "main" });
+    expect((push as { params: object }).params).toEqual({ workspace: "w" });
+    for (const op of ["workspace.publish", "workspace.commit", "workspace.push"]) {
+      expect(() => ask(op, { workspace: "../w", message: "m" })).toThrow(/not an id/);
+    }
+  });
+
   test("an operation this build does not know is refused", () => {
     expect(() => ask("memory.edit", {})).toThrow(/not an operation/);
   });
@@ -457,6 +556,114 @@ describe("requests are checked as a host checks them", () => {
     expect(() => piece({ data: `${most}AAAA` })).toThrow(/longer than/);
     expect(() => piece({ size: 2 ** 53 })).toThrow(/out of range/);
     expect(() => piece({ done: undefined })).toThrow(/true or false/);
+  });
+
+  test("where a workspace stands, and its pull request, are held to their limits", () => {
+    const state = (more: Record<string, unknown> = {}) =>
+      decode(reply, { kind: "publish", ahead: 0, behind: 0, ...more });
+    // A state with nothing known is small, and what Rust leaves out reads as left out.
+    expect(state()).toEqual({ kind: "publish", ahead: 0, behind: 0 });
+    expect(
+      state({
+        branch: null,
+        base: null,
+        identity: null,
+        remote: false,
+        pushed: false,
+        unpushed: [],
+        pullRequest: null,
+        canOpen: false,
+        gh: false,
+        problem: null,
+      }),
+    ).toEqual(state());
+    expect(state({ branch: "ys/x", remote: true, canOpen: true, unpushed: ["One"] })).toEqual({
+      kind: "publish",
+      branch: "ys/x",
+      remote: true,
+      ahead: 0,
+      behind: 0,
+      unpushed: ["One"],
+      canOpen: true,
+    });
+    expect(() => state({ ahead: undefined })).toThrow(/whole number/);
+    expect(() => state({ behind: -1 })).toThrow(/out of range/);
+    for (const field of ["branch", "base"]) {
+      expect(state({ [field]: "b".repeat(MAX_BRANCH) }).kind).toBe("publish");
+      expect(() => state({ [field]: "b".repeat(MAX_BRANCH + 1) })).toThrow(/not a branch's name/);
+    }
+    for (const field of ["identity", "problem"]) {
+      expect(state({ [field]: "w".repeat(MAX_TEXT) }).kind).toBe("publish");
+      expect(() => state({ [field]: "w".repeat(MAX_TEXT + 1) })).toThrow(/longer than 256/);
+    }
+    const subjects = Array.from({ length: MAX_UNPUSHED + 1 }, (_, n) => `Commit ${n}`);
+    expect(state({ unpushed: subjects.slice(1) })).toHaveProperty("unpushed.length", MAX_UNPUSHED);
+    expect(() => state({ unpushed: subjects })).toThrow(/more than 20/);
+    expect(() => state({ unpushed: ["s".repeat(MAX_TEXT + 1)] })).toThrow(/longer than 256/);
+
+    const HEAD = "3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a";
+    const withPullRequest = (more: Record<string, unknown> = {}) =>
+      state({
+        pullRequest: {
+          number: 91,
+          url: "https://example.com/pull/91",
+          title: "Fix it",
+          state: "open",
+          checks: "none",
+          ...more,
+        },
+      });
+    const read = (more: Record<string, unknown> = {}) => {
+      const told = withPullRequest(more);
+      if (told.kind !== "publish" || !told.pullRequest) throw new Error("no pull request");
+      return told.pullRequest;
+    };
+    expect(read({ draft: false, conflicting: false, headOid: null })).toEqual({
+      number: 91,
+      url: "https://example.com/pull/91",
+      title: "Fix it",
+      state: "open",
+      checks: "none",
+    });
+    expect(read({ draft: true, conflicting: true, headOid: HEAD })).toMatchObject({
+      draft: true,
+      headOid: HEAD,
+      conflicting: true,
+    });
+    // A state, or checks, from a newer computer reads as unknown.
+    expect(read({ state: "queued", checks: "skipped" })).toMatchObject({
+      state: "unknown",
+      checks: "unknown",
+    });
+    expect(() => withPullRequest({ state: undefined })).toThrow(/not a string/);
+    expect(read({ title: "t".repeat(MAX_PULL_REQUEST_TITLE) }).title).toHaveLength(
+      MAX_PULL_REQUEST_TITLE,
+    );
+    expect(() => withPullRequest({ title: "t".repeat(MAX_PULL_REQUEST_TITLE + 1) })).toThrow(
+      /longer than 256/,
+    );
+    const long = `https://example.com/${"u".repeat(MAX_URL)}`;
+    expect(read({ url: long.slice(0, MAX_URL) }).url).toHaveLength(MAX_URL);
+    expect(() => withPullRequest({ url: long })).toThrow(/not a link/);
+    expect(() => withPullRequest({ url: "https://example.com/a\u001b[2J" })).toThrow(/not a link/);
+    // A head no merge could name is not one.
+    expect(read({ headOid: "a".repeat(MAX_OID) }).headOid).toHaveLength(MAX_OID);
+    for (const bad of ["", "HEAD", "--admin", "3f2a1b", "a".repeat(MAX_OID + 1)]) {
+      expect(() => withPullRequest({ headOid: bad })).toThrow(/not a commit's id/);
+    }
+    expect(() => withPullRequest({ number: -1 })).toThrow(/out of range/);
+
+    const opened = (url: unknown, created?: unknown) =>
+      decode(reply, { kind: "pullRequestOpened", url, created });
+    expect(opened("https://example.com/compare/main...x", false)).toEqual({
+      kind: "pullRequestOpened",
+      url: "https://example.com/compare/main...x",
+      created: false,
+    });
+    expect(() => opened(long, true)).toThrow(/not a link/);
+    expect(() => opened("https://example.com/a\nb", true)).toThrow(/not a link/);
+    // Whether the computer opened it is always said.
+    expect(() => opened("https://example.com/pull/1")).toThrow(/true or false/);
   });
 
   test("a response with neither a result nor an error is refused", () => {

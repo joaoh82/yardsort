@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
-import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   errorMessage,
   ipc,
@@ -23,6 +23,7 @@ import {
 import { linkText } from "@/features/sidebar/otherComputersText";
 import type { Viewing } from "@/stores/changes";
 import { useOtherComputersStore } from "@/stores/otherComputers";
+import { RemotePublishBar } from "./RemotePublishBar";
 import { recall, useProjectsStore } from "@/stores/projects";
 
 const CodeView = lazy(() =>
@@ -63,6 +64,9 @@ export function RemoteChangesPanel({
   const [shown, setShown] = useState<{ key: string; diff?: FileDiff; file?: Content } | null>(null);
   const [viewError, setViewError] = useState<string | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  // Bumped when something was committed from here: the list reads again without waiting.
+  const [committed, setCommitted] = useState(0);
+  const mayPublish = !!view?.mayPublish;
   const mode = useProjectsStore((s) => recall<DiffMode>(s.ui, DIFF_MODE_KEY, "inline"));
 
   useEffect(() => {
@@ -79,7 +83,7 @@ export function RemoteChangesPanel({
     return () => {
       stale = true;
     };
-  }, [mayLook, hostId, workspaceId, readAt]);
+  }, [mayLook, hostId, workspaceId, readAt, committed]);
 
   // What is open is read when it is opened, and again when that computer was read again.
   const viewingKey = viewing ? keyOf(viewing) : null;
@@ -112,19 +116,22 @@ export function RemoteChangesPanel({
     };
     // `viewing` is replaced on every press; its key says whether it is another file.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mayLook, hostId, workspaceId, viewingKey, readAt]);
+  }, [mayLook, hostId, workspaceId, viewingKey, readAt, committed]);
 
-  // The list is the whole panel until a file opens beside it. Both panels stay where they are,
-  // and the viewer's folds away: a list mounted again each time would fold its tree, and ask
-  // that computer for its folders again.
-  const viewerRef = usePanelRef();
-  const beside = viewing !== null && (expandedKey === null || expandedKey !== keyOf(viewing));
-  useEffect(() => {
-    const panel = viewerRef.current;
-    if (!panel || panel.isCollapsed() === !beside) return;
-    if (beside) panel.expand();
-    else panel.collapse();
-  }, [beside, viewerRef]);
+  // The tree's own state is kept here, above the list: the list is laid out again when a file
+  // opens beside it, and a tree that forgot its open folders then would fold, and ask that
+  // computer for them again.
+  const [openDirs, setOpenDirs] = useState<ReadonlySet<string>>(() => new Set());
+  // One map for as long as the panel is this workspace's: what each folder listed, kept where
+  // drawing the list again does not lose it.
+  const [folders] = useState(() => new Map<string, Listed>());
+  const toggleDir = useCallback((dir: string) => {
+    setOpenDirs((before) => {
+      const next = new Set(before);
+      if (!next.delete(dir)) next.add(dir);
+      return next;
+    });
+  }, []);
 
   const open = useCallback((next: Viewing | null) => {
     setViewing(next);
@@ -176,6 +183,9 @@ export function RemoteChangesPanel({
             depth={0}
             viewing={viewing}
             onOpen={open}
+            openDirs={openDirs}
+            onToggle={toggleDir}
+            known={folders}
           />
         </ul>
       ) : changes ? (
@@ -206,9 +216,6 @@ export function RemoteChangesPanel({
       ) : (
         <p className="p-3 text-ink-faint">Reading {name}…</p>
       )}
-      <p className="shrink-0 border-t border-line px-3 py-1.5 text-small text-ink-faint">
-        Read from {name}, and not kept here. Nothing is changed from this panel.
-      </p>
     </div>
   );
 
@@ -250,28 +257,38 @@ export function RemoteChangesPanel({
         </div>
       </header>
 
-      <Group orientation="vertical" className="min-h-0 flex-1">
-        <Panel id="list" minSize={80}>
-          {list}
-        </Panel>
-        <Separator
-          className={
-            beside
-              ? "h-px bg-line outline-none hover:bg-accent data-[separator=active]:bg-accent"
-              : "hidden"
-          }
+      {viewing && !expanded ? (
+        <Group orientation="vertical" className="min-h-0 flex-1">
+          <Panel id="list" defaultSize="40%" minSize={80}>
+            {list}
+          </Panel>
+          <Separator className="h-px bg-line outline-none hover:bg-accent data-[separator=active]:bg-accent" />
+          <Panel id="viewer" minSize={120}>
+            {viewer}
+          </Panel>
+        </Group>
+      ) : (
+        <div className="min-h-0 flex-1">{list}</div>
+      )}
+
+      {/* Below the list and the viewer, and not inside either: what is typed here stays when a
+          file opens or closes above it. */}
+      {tab === "changes" && mayPublish && changes && !error && (
+        <RemotePublishBar
+          hostId={hostId}
+          workspaceId={workspaceId}
+          name={name}
+          uncommitted={changes.uncommitted.length}
+          revision={readAt}
+          onChanged={() => setCommitted((count) => count + 1)}
         />
-        <Panel
-          id="viewer"
-          panelRef={viewerRef}
-          defaultSize="60%"
-          minSize={120}
-          collapsible
-          collapsedSize={0}
-        >
-          {beside && viewer}
-        </Panel>
-      </Group>
+      )}
+      <p className="shrink-0 border-t border-line px-3 py-1.5 text-small text-ink-faint">
+        Read from {name}, and not kept here.{" "}
+        {mayPublish
+          ? `Commits, pushes and pull requests are made by ${name}, as itself.`
+          : "Nothing is changed from this panel."}
+      </p>
 
       {viewing && expanded && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-6">
@@ -356,6 +373,13 @@ function Changed({
   );
 }
 
+/** One folder as that computer listed it, and at which reading. */
+interface Listed {
+  revision: number | null;
+  entries: FileEntry[];
+  more: boolean;
+}
+
 interface TreeProps {
   hostId: string;
   workspaceId: string;
@@ -363,20 +387,30 @@ interface TreeProps {
   revision: number | null;
   viewing: Viewing | null;
   onOpen: (viewing: Viewing) => void;
+  /** The folders that are open, by their path. Kept by the panel, so laying the list out again
+   *  does not fold the tree. */
+  openDirs: ReadonlySet<string>;
+  onToggle: (dir: string) => void;
+  /** What each folder listed at the last reading, so a folder drawn again is not asked again. */
+  known: Map<string, Listed>;
 }
 
 /** One folder of that workspace's tree, listed when it is opened. */
 function Folder(props: TreeProps & { dir: string; depth: number }) {
-  const { hostId, workspaceId, revision, dir, depth } = props;
-  const [listed, setListed] = useState<{ entries: FileEntry[]; more: boolean } | null>(null);
+  const { hostId, workspaceId, revision, dir, depth, known } = props;
+  const [listed, setListed] = useState<Listed | null>(() => known.get(dir) ?? null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Listed at this reading already, by this folder drawn before: not asked again.
+    if (known.get(dir)?.revision === revision) return;
     let stale = false;
     ipc.otherHostFiles(hostId, workspaceId, dir).then(
       (list) => {
         if (stale) return;
-        setListed(list);
+        const now = { ...list, revision };
+        known.set(dir, now);
+        setListed(now);
         setError(null);
       },
       (reason) => !stale && setError(errorMessage(reason)),
@@ -384,7 +418,7 @@ function Folder(props: TreeProps & { dir: string; depth: number }) {
     return () => {
       stale = true;
     };
-  }, [hostId, workspaceId, dir, revision]);
+  }, [hostId, workspaceId, dir, revision, known]);
 
   if (error) return <li className="px-3 py-1 text-red-400 select-text">{error}</li>;
   if (!listed) return null;
@@ -409,8 +443,8 @@ function Folder(props: TreeProps & { dir: string; depth: number }) {
 }
 
 function Entry(props: TreeProps & { entry: FileEntry; depth: number }) {
-  const { entry, depth, viewing, onOpen } = props;
-  const [open, setOpen] = useState(false);
+  const { entry, depth, viewing, onOpen, openDirs, onToggle } = props;
+  const open = entry.isDir && openDirs.has(entry.path);
   const selected = viewing?.kind === "file" && viewing.path === entry.path;
   return (
     <li
@@ -422,7 +456,7 @@ function Entry(props: TreeProps & { entry: FileEntry; depth: number }) {
       <button
         type="button"
         onClick={() =>
-          entry.isDir ? setOpen((value) => !value) : onOpen({ kind: "file", path: entry.path })
+          entry.isDir ? onToggle(entry.path) : onOpen({ kind: "file", path: entry.path })
         }
         style={{ paddingLeft: 12 + depth * 14 }}
         className={`flex h-7 w-full items-center gap-1.5 pr-2 text-left hover:bg-raised ${

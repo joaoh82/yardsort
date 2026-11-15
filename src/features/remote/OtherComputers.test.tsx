@@ -123,6 +123,7 @@ const shown: View = {
   mayResume: false,
   mayManage: false,
   mayLook: false,
+  mayPublish: false,
   readAt: 1_790_000_000_000,
   platform: "Linux",
   appVersion: "0.23.0",

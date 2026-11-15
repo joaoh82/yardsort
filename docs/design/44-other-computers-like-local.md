@@ -558,3 +558,107 @@ climbing path; this computer refuses it first, which is the stricter of the two,
 the relay test now say so.
 
 Not run: macOS and Windows, a second real computer, and a repository of real size.
+
+## 12 · Slice 5: commit, push and pull requests there
+
+**Built on 2026-11-15**, on Linux. Protocol minor 12 (`remote_proto::publish`), carried by the
+server unread. The window offers it to a host that lists `workspace.publish`
+(`OtherHostView.mayPublish`).
+
+**The protocol.** Five operations, all under `terminal:control`:
+
+- `workspace.publish`: where the workspace stands with its remote: its branch and base, who a
+  commit would be by, whether there is a remote and whether the branch was pushed, how far ahead
+  and behind, the subjects of what is unpushed, and whether a pull request can be opened. With
+  `forge`, the host asks the forge and says the branch's pull request: its number, title, address,
+  state, checks, the commit at its head and whether it conflicts. Without, only Git is asked.
+- `workspace.commit`: everything changed, with a message. `workspace.push`: the workspace's own
+  branch to the project's own remote. Both answer with the state after.
+- `pull_request.open`: a title, a description, draft or not. The host pushes first when the remote
+  lacks any of the branch. The answer is the pull request, or the forge's own form when the host
+  has no `gh` or is signed out of it.
+- `pull_request.merge`: a number, a method, and the commit the person saw at its head. The host
+  merges only the workspace's own pull request, open, not a draft, still at that commit, and asks
+  `gh` to match that commit too.
+
+No request names a remote, a branch to push to, a path or a credential.
+
+**What the host does** (`crates/core/src/remote/publish.rs`): `Git::commit_all`, `Git::push`,
+`Gh::create_pull_request` and `Gh::merge_pull_request`, with its own identity, credentials and
+sign-in. The app's own publish state lives in the app, with its cache of the forge's answers, so
+the host's is a smaller one written for the core, which `yardsort-host` has too.
+
+- **Its words, never Git's.** What Git and `gh` print when they refuse names folders and a
+  remote's address. A device gets a sentence the host wrote for each kind it can tell apart: the
+  remote has commits the branch lacks, a rule there refuses the push, the host's sign-in was not
+  accepted, nothing to commit, a hook refused the commit, the pull request exists, it changed.
+- **The forge is asked only when told to.** A reading in between asks Git alone.
+- **A remote is read as its configuration names it**, so a host that rewrites addresses still
+  knows which forge it is on.
+
+**What the window does.**
+
+- **`RemotePublishBar`**, under the changes of a workspace there: the commit message and
+  **Commit**, **Push _n_ commits**, **Open pull request** with its small form, and the pull
+  request's line with its address and **Merge…**, which asks first and names the commit shown.
+  Each is one press. The bar is outside what is laid out again when a file opens, so a half-typed
+  message stays.
+- **A lost answer** is said to be one that may have been done, and how the workspace stands is
+  read again. Nothing is sent a second time by itself.
+- **An address from that computer is opened only when it is `https`.**
+
+**What building it settled.**
+
+- **Simpler than the local bar.** No model writes the commit message or the pull request, there
+  is no dialog of commits to pick a title from beyond the first, and no closing or reopening.
+- **No pull request badge on the row in the tree yet.** The section's plan had one. It needs the
+  pull request in what a host lists for every workspace, which would have it ask the forge at
+  each reading; it is left for when the host caches the forge's answers as the app does.
+- **`gh` only.** As locally, another forge gets its own form in the browser.
+- **The tree's state moved up** in `RemoteChangesPanel`: its open folders and what each listed are
+  kept by the panel, since the list is laid out again when a file opens. The earlier way, a
+  viewer panel folded to nothing, made the panel library take presses meant for the commit box.
+
+**Its tests.** The wire and its bounds in `remote-proto`; the host against a real repository with
+a remote on disk behind a forge's address and a stand-in `gh`, including a push a hook refuses and
+a merge at another commit, in `crates/core/src/remote/serve/tests/start.rs`; a desktop through the
+real relay in `crates/server/tests/computer.rs`; the bar in `RemotePublishBar.test.tsx` and in the
+panel's tests.
+
+**Its smoke test.** `publish-there.yaml`, new, with the window steps `commits-there`,
+`pushes-there`, `opens-pull-request-there` and `merges-there`, the pretend phone's
+`cannot-publish`, and a stand-in for `gh` (`.yardsort/tests/support/standin-gh.sh`).
+
+**Run on 2026-11-15**, on Linux, against a `yardsort-host` on the stand-in server with the real
+window on a profile of its own: passed, 32 of 32 steps (run f10fecf0).
+
+- The window's commit was made on the host, by the host's own Git identity, with nothing left
+  uncommitted. Its push reached the remote.
+- With a hook on the remote refusing pushes, a second commit was not pushed, the remote stayed
+  where it was, and the window said why in a sentence with no folder in it.
+- Opening a pull request pushed first, asked the host's `gh` to create it, and its line showed in
+  the window.
+- A merge at another commit than the one at its head was refused, and `gh` was not asked. At its
+  head, `gh` was asked to merge exactly that commit. The window's question before a merge is the
+  system's dialog, which the test cannot press, so it asked the core as the window does once it
+  is answered; the question itself is in the unit tests.
+- A pretend phone let only watch was refused the state, a commit, a push and a pull request.
+
+The six earlier tests were run again on this build and passed: `desktop-client` (16 of 16, run
+ef5c9e10), `same-session` (21 of 21, 40f0a159), `remote-start-and-resume` (25 of 25, 4aee1a89),
+`run-on` (24 of 24, 209878c3), `run-on-full` (35 of 35, 52621f6a) and `changes-there` (25 of 25,
+e6057af7). `changes-there` checked that the panel offers nothing that writes; with this slice it
+offers the commit bar, so it now checks that nothing in it edits a file.
+
+**What the first run found, which was in the test and matters beyond it.** The first run
+(79091064) reached the pull request step and failed there: the host had run the owner's real
+`gh`, signed in, and not the stand-in. A host reads its environment from the login shell, whose
+startup files had put the owner's own programs ahead of the stand-in on `PATH`, and the test's
+remote was named as a repository on github.com. That repository does not exist, so nothing was
+created, but a test had asked a real forge, as the owner, to list and to create. Three changes
+keep it from happening again: the remote is under a name reserved for tests, which nothing can
+reach; the host in the test is started with a shell that reads no startup files; and a step stops
+the run unless the stand-in was the one asked, before anything is asked to be created. Any later
+smoke test that has a host ask a forge needs the same three.
+
+Not run: macOS and Windows, a second real computer, and a real forge on purpose.

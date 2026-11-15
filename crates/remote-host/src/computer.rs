@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub mod look;
+pub mod publish;
 pub mod start;
 pub mod terminal;
 

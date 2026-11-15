@@ -268,6 +268,42 @@ impl Starting for AppStarting {
         self.with(|starter| starter.content(workspace, path, old_path, of))
     }
 
+    fn publish(
+        &self,
+        workspace: &str,
+        forge: bool,
+    ) -> IpcResult<remote_proto::publish::PublishState> {
+        self.with(|starter| starter.publish(workspace, forge))
+    }
+    fn commit(
+        &self,
+        workspace: &str,
+        message: &str,
+    ) -> IpcResult<remote_proto::publish::PublishState> {
+        self.with(|starter| starter.commit(workspace, message))
+    }
+    fn push(&self, workspace: &str) -> IpcResult<remote_proto::publish::PublishState> {
+        self.with(|starter| starter.push(workspace))
+    }
+    fn open_pull_request(
+        &self,
+        workspace: &str,
+        title: &str,
+        body: &str,
+        draft: bool,
+    ) -> IpcResult<remote_proto::publish::PullRequestOpened> {
+        self.with(|starter| starter.open_pull_request(workspace, title, body, draft))
+    }
+    fn merge_pull_request(
+        &self,
+        workspace: &str,
+        number: u32,
+        head_oid: &str,
+        method: remote_proto::publish::MergeMethod,
+    ) -> IpcResult<()> {
+        self.with(|starter| starter.merge_pull_request(workspace, number, head_oid, method))
+    }
+
     fn session(
         &self,
         workspace: &str,

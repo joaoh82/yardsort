@@ -88,6 +88,12 @@ workspace is answered. It is what the same device could read by typing `git diff
 terminal, so it comes with letting it type and not with a permission of its own. What is read
 passes through the server as terminal output does: carried, and not kept.
 
+It can also commit everything changed in a workspace here, push the workspace's branch to its
+project's remote, and open and merge its pull request, as the person there presses for each. This
+computer does them as itself: with its own Git identity, its own Git credentials and its own `gh`
+sign-in. No request names a remote, a branch to push to or a credential, and a merge goes ahead
+only for the workspace's own pull request, open, not a draft, at the commit the request names.
+
 - **New workspace**, on a computer's screen, asks for the project, the agent and what it should do. This
   computer makes the workspace as its [composer](workspaces.md#starting-one-the-composer) does: a branch
   named after the message, from the project's default branch, with the project's setup run, and the
@@ -234,8 +240,8 @@ when that was.
 **Its changes and files.** The right panel shows them as it shows a local workspace's, read from
 that computer when you look: **Changes** lists what is uncommitted and what is on its branch, and
 a file there opens as a diff, inline or side by side; **Files** is its file tree, a folder listed
-when you open it, and a file opens as text. It is read-only. There is no commit box, no editor and
-nothing to publish from here yet, and nothing read is kept on this computer. The panel reads again
+when you open it, and a file opens as text. Files are read-only: there is no editor, and nothing
+read is kept on this computer. The panel reads again
 whenever this computer reads that one again, which is when something happens there and every 20
 seconds otherwise.
 
@@ -243,6 +249,32 @@ What it does not show: files Git ignores there, and `.git`, are not in the tree;
 other file that is not text is said to be binary; a file over 1 MB is said to be too large. The
 panel needs that computer to let this one type, and Yardsort 0.35.0 there. Otherwise it keeps its
 place and says why it is empty.
+
+**Commit, push and the pull request.** Under **Changes**, for a computer that lets you type and
+has Yardsort 0.35.0:
+
+- **Commit** commits everything changed in the workspace there, with your message. It is that
+  computer's Git that commits, so the commit is by the name and email Git has there, which the
+  button's tooltip shows. With none set there, the bar says so and nothing can be committed.
+- **Push _n_ commits** pushes the workspace's branch from that computer to its project's remote,
+  with that computer's Git credentials. A push the remote refuses says why in a sentence: it has
+  commits this branch lacks, a rule there protects the branch, or that computer's sign-in was not
+  accepted. Git's own output is not sent here, since it names that computer's folders and the
+  remote's address; open a shell in the workspace to read it.
+- **Open pull request** asks for a title, a description and whether it is a draft. That computer
+  pushes the branch if the remote lacks any of it, then opens the pull request with its own `gh`
+  sign-in. Without `gh` there, or signed out of it, the forge's own form opens in this computer's
+  browser with both branches filled in.
+- **The pull request**, once there is one, is a line with its number and title, whether it is
+  open, a draft, merged or closed, and what its checks say. The title opens its page. **Merge…**
+  is offered for an open one that is not a draft and has no conflicts, with squash, merge commit
+  or rebase beside it. You are asked first, and that computer merges only if the pull request is
+  still at the commit you were shown. Its branch is not deleted.
+
+Each of these is one press of yours. Nothing commits, pushes or merges by itself, nothing is
+offered to an agent, and nothing is tried again when an answer is lost: the bar then says it may
+have been done, and reads how the workspace stands. The forge is asked about the pull request when
+the bar opens and after a push, an open or a merge, not at every reading.
 
 **Who has control.** A terminal there shows what it shows on that computer, at its size there, and
 the bar says who has control: nobody, the person at that computer, or a device by its name. Watching

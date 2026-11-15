@@ -185,6 +185,59 @@ const FIXTURES: Record<string, (name: string) => void> = {
     delete first.params.offset;
     expect(JSON.parse(JSON.stringify(decode(request, first)))).toEqual(raw(name));
   },
+  "request-workspace-publish.json": (name) => {
+    const publish = pinned<Request>(request, name);
+    if (publish.op !== "workspace.publish") throw new Error("not a publish");
+    expect(scopeOf(publish.op)).toBe("terminal:control");
+    expect(publish.params.forge).toBe(true);
+    // Not asking the forge is saying nothing of it, as Rust writes it.
+    const quiet = raw(name) as { params: Record<string, unknown> };
+    quiet.params.forge = false;
+    const written = JSON.parse(JSON.stringify(decode(request, quiet))) as { params: object };
+    expect(written.params).toEqual({ workspace: publish.params.workspace });
+  },
+  "request-workspace-commit.json": (name) => {
+    const commit = pinned<Request>(request, name);
+    if (commit.op !== "workspace.commit") throw new Error("not a commit");
+    expect(scopeOf(commit.op)).toBe("terminal:control");
+    expect(commit.params.message).toBe("Fix the login page's spacing");
+  },
+  "request-workspace-push.json": (name) => {
+    const push = pinned<Request>(request, name);
+    if (push.op !== "workspace.push") throw new Error("not a push");
+    expect(scopeOf(push.op)).toBe("terminal:control");
+    // A workspace and nothing else: no remote, and no branch to push to.
+    expect(push.params).toEqual({ workspace: "0b6c1f0e-8f8e-4a57-9a43-5c1d2a0e9f11" } as never);
+  },
+  "request-pull-request-open.json": (name) => {
+    const open = pinned<Request>(request, name);
+    if (open.op !== "pull_request.open") throw new Error("not an open");
+    expect(scopeOf(open.op)).toBe("terminal:control");
+    expect(open.params.title).toBe("Fix the login page's spacing");
+    expect(open.params.body).toBe("Small screens lost the gap under the heading.");
+    expect(open.params.draft).toBe(true);
+    // No description, and not a draft, are each left out, as Rust writes them.
+    const plain = raw(name) as { params: Record<string, unknown> };
+    plain.params.body = "";
+    plain.params.draft = false;
+    const written = JSON.parse(JSON.stringify(decode(request, plain))) as { params: object };
+    expect(written.params).toEqual({
+      workspace: open.params.workspace,
+      title: open.params.title,
+    });
+  },
+  "request-pull-request-merge.json": (name) => {
+    const merge = pinned<Request>(request, name);
+    if (merge.op !== "pull_request.merge") throw new Error("not a merge");
+    expect(scopeOf(merge.op)).toBe("terminal:control");
+    expect(merge.params.number).toBe(91);
+    expect(merge.params.headOid).toBe("3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a");
+    expect(merge.params.method).toBe("squash");
+    // A way of merging this build does not know is not guessed at.
+    const other = raw(name) as { params: Record<string, unknown> };
+    other.params.method = "fastForward";
+    expect(() => decode(request, other)).toThrow(/not one this build knows/);
+  },
   "request-session-resume.json": (name) => {
     const resume = pinned<Request>(request, name);
     expect(resume.op).toBe("session.resume");
@@ -315,6 +368,45 @@ const FIXTURES: Record<string, (name: string) => void> = {
     const newer = decode(response, json);
     if (!("result" in newer) || newer.result.kind !== "file") throw new Error("not a file");
     expect(newer.result.state).toBe("unknown");
+  },
+  "response-publish.json": (name) => {
+    const state = result(name);
+    if (state.kind !== "publish") throw new Error("not a publish state");
+    expect(state.branch).toBe("ys/fix-login");
+    expect(state.base).toBe("main");
+    expect([state.remote, state.pushed, state.gh]).toEqual([true, true, true]);
+    expect([state.ahead, state.behind]).toEqual([1, 0]);
+    expect(state.unpushed).toEqual(["Fix the login page's spacing"]);
+    expect(state.pullRequest).toEqual({
+      number: 91,
+      url: "https://github.com/example/example-app/pull/91",
+      title: "Fix the login page's spacing",
+      state: "open",
+      checks: "passing",
+      headOid: "3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a",
+    });
+    // One is open already, so opening another is not offered, which is said by saying nothing.
+    expect(state.canOpen).toBeUndefined();
+    expect(state.problem).toBeUndefined();
+    // What is false or empty is left out, as Rust writes it.
+    const json = raw(name) as { result: Record<string, unknown> };
+    json.result.canOpen = false;
+    (json.result.pullRequest as Record<string, unknown>).draft = false;
+    (json.result.pullRequest as Record<string, unknown>).conflicting = false;
+    expect(JSON.parse(JSON.stringify(decode(response, json)))).toEqual(raw(name));
+    // A newer computer's state, or its checks, reads as unknown, not as a failure.
+    (json.result.pullRequest as Record<string, unknown>).state = "queued";
+    (json.result.pullRequest as Record<string, unknown>).checks = "skipped";
+    const newer = decode(response, json);
+    if (!("result" in newer) || newer.result.kind !== "publish") throw new Error("not a state");
+    expect(newer.result.pullRequest?.state).toBe("unknown");
+    expect(newer.result.pullRequest?.checks).toBe("unknown");
+  },
+  "response-pull-request-opened.json": (name) => {
+    const opened = result(name);
+    if (opened.kind !== "pullRequestOpened") throw new Error("not an opened pull request");
+    expect(opened.url).toBe("https://github.com/example/example-app/pull/91");
+    expect(opened.created).toBe(true);
   },
   "response-done.json": (name) => {
     expect(result(name)).toEqual({ kind: "done" });
@@ -568,7 +660,7 @@ const FIXTURES: Record<string, (name: string) => void> = {
 describe("the fixtures", () => {
   test("are each read here, and none is left out", () => {
     const names = readdirSync(DIR).sort();
-    expect(names.length).toBeGreaterThanOrEqual(79);
+    expect(names.length).toBeGreaterThanOrEqual(86);
     expect(names).toEqual(Object.keys(FIXTURES).sort());
   });
 

@@ -1345,7 +1345,7 @@ all five slices are built.
 - [x] Slice 3: protocol minor 10: name, model, effort and branch for a start there, a clone there
       when the project is missing, a shell, rename, archive and delete.
 - [x] Slice 4: changes and files there, read-only.
-- [ ] Slice 5: commit, push and pull requests there.
+- [x] Slice 5: commit, push and pull requests there.
 
 _Exit:_ a person starts a task on another computer from the composer, follows it in the same window
 as a local workspace, reviews what it changed and opens its pull request, without that computer's

@@ -112,6 +112,31 @@ fn requests_match_their_fixtures() {
             "file.read",
             Scope::TerminalControl,
         ),
+        (
+            "request-workspace-publish.json",
+            "workspace.publish",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-commit.json",
+            "workspace.commit",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-push.json",
+            "workspace.push",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-pull-request-open.json",
+            "pull_request.open",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-pull-request-merge.json",
+            "pull_request.merge",
+            Scope::TerminalControl,
+        ),
     ] {
         let request: Request = pinned(name);
         assert_eq!(request.operation.name(), op, "{name}");
@@ -204,6 +229,8 @@ fn responses_match_their_fixtures() {
         "response-files.json",
         "response-file.json",
         "response-file-too-large.json",
+        "response-publish.json",
+        "response-pull-request-opened.json",
     ] {
         let _: Response = pinned(name);
     }
@@ -531,6 +558,29 @@ fn every_operation_has_the_name_it_is_sent_under() {
             old_path: None,
             of: FileOf::Working,
             offset: 0,
+        }),
+        Operation::WorkspacePublish(publish::WorkspacePublishParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            forge: false,
+        }),
+        Operation::WorkspaceCommit(publish::WorkspaceCommitParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            message: "m".into(),
+        }),
+        Operation::WorkspacePush(WorkspaceRef {
+            workspace: WorkspaceId::new("w").unwrap(),
+        }),
+        Operation::PullRequestOpen(publish::PullRequestOpenParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            title: "t".into(),
+            body: String::new(),
+            draft: false,
+        }),
+        Operation::PullRequestMerge(publish::PullRequestMergeParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            number: 1,
+            head_oid: "abcdef0".into(),
+            method: publish::MergeMethod::Squash,
         }),
     ];
     assert_eq!(all.len(), OPERATIONS.len());
@@ -1225,4 +1275,70 @@ fn reading_changes_and_files_is_bounded_and_never_names_a_path_outside() {
     };
     assert!(encode_response(&response).len() < MAX_CONTROL_FRAME);
     assert_eq!(look::not_sent(FileState::Absent, 0).data, "");
+}
+
+#[test]
+fn committing_and_pull_requests_are_bounded() {
+    use publish::*;
+    let workspace = || WorkspaceId::new("w").unwrap();
+    let commit = |message: &str| {
+        Operation::WorkspaceCommit(WorkspaceCommitParams {
+            workspace: workspace(),
+            message: message.into(),
+        })
+        .validate()
+    };
+    assert!(commit("Fix it\n\nWith a body.").is_ok());
+    assert!(commit("  \n").is_err());
+    assert!(commit("a\0b").is_err());
+    assert!(commit(&"m".repeat(MAX_COMMIT_MESSAGE + 1)).is_err());
+    let open = |title: &str, body: &str| {
+        Operation::PullRequestOpen(PullRequestOpenParams {
+            workspace: workspace(),
+            title: title.into(),
+            body: body.into(),
+            draft: false,
+        })
+        .validate()
+    };
+    assert!(open("Fix the spacing", "").is_ok());
+    assert!(open(" ", "").is_err());
+    assert!(
+        open("--web", "").is_err(),
+        "nothing that reads as an option"
+    );
+    assert!(open("two\nlines", "").is_err());
+    assert!(open(&"t".repeat(MAX_PULL_REQUEST_TITLE + 1), "").is_err());
+    assert!(open("ok", &"b".repeat(MAX_PULL_REQUEST_BODY + 1)).is_err());
+    let merge = |number: u32, oid: &str| {
+        Operation::PullRequestMerge(PullRequestMergeParams {
+            workspace: workspace(),
+            number,
+            head_oid: oid.into(),
+            method: MergeMethod::Squash,
+        })
+        .validate()
+    };
+    assert!(merge(91, "3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a").is_ok());
+    assert!(merge(0, "3f2a1b0").is_err());
+    assert!(
+        merge(91, "").is_err(),
+        "the head the person saw must be named"
+    );
+    assert!(merge(91, "HEAD").is_err());
+    assert!(merge(91, "--admin").is_err());
+    assert!(merge(91, &"a".repeat(MAX_OID + 1)).is_err());
+    // A state from a newer host reads as unknown, and a state with nothing known is small.
+    let read: PullRequest = serde_json::from_value(serde_json::json!({
+        "number": 1, "url": "u", "title": "t", "state": "queued", "checks": "skipped"
+    }))
+    .unwrap();
+    assert_eq!(
+        (read.state, read.checks),
+        (PullRequestState::Unknown, Checks::Unknown)
+    );
+    assert_eq!(
+        serde_json::to_value(PublishState::default()).unwrap(),
+        serde_json::json!({"ahead": 0, "behind": 0})
+    );
 }

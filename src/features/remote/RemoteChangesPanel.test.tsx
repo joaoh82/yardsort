@@ -9,6 +9,8 @@ const core = vi.hoisted(() => ({
   otherHostFiles: vi.fn(),
   otherHostDiff: vi.fn(),
   otherHostFile: vi.fn(),
+  otherHostPublishState: vi.fn(),
+  otherHostCommit: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -34,6 +36,7 @@ const there: OtherHostView = {
   mayResume: true,
   mayManage: true,
   mayLook: true,
+  mayPublish: false,
   readAt: 1_000,
   platform: "Linux",
   appVersion: "0.35.0",
@@ -177,6 +180,49 @@ describe("the changes of a workspace on another computer", () => {
   });
 });
 
+describe("sending on from a workspace on another computer", () => {
+  const stands = {
+    branch: "ys/fix-login",
+    base: "main",
+    identity: "Ana <ana@example.com>",
+    remote: true,
+    pushed: false,
+    ahead: 0,
+    behind: 0,
+    unpushed: [],
+    pullRequest: null,
+    canOpen: false,
+    gh: true,
+    problem: null,
+  };
+
+  it("offers to commit where that computer takes it, and reads the list again once it has", async () => {
+    core.otherHostPublishState.mockResolvedValue(stands);
+    core.otherHostCommit.mockResolvedValue({ ...stands, ahead: 1 });
+    const panel = open({ ...there, mayPublish: true });
+    const bar = await within(panel).findByRole("group", { name: "Send on from Build box" });
+    expect(panel).toHaveTextContent(
+      "Commits, pushes and pull requests are made by Build box, as itself.",
+    );
+    await userEvent.type(within(bar).getByRole("textbox", { name: "Commit message" }), "Fix it");
+    expect(core.otherHostChanges).toHaveBeenCalledTimes(1);
+    await userEvent.click(within(bar).getByRole("button", { name: "Commit" }));
+    expect(core.otherHostCommit).toHaveBeenCalledWith("h-1", "w-1", "Fix it");
+    await vi.waitFor(() => expect(core.otherHostChanges).toHaveBeenCalledTimes(2));
+    // On the Files tab there is nothing to commit from.
+    await userEvent.click(within(panel).getByRole("tab", { name: "Files" }));
+    expect(within(panel).queryByRole("group", { name: "Send on from Build box" })).toBeNull();
+  });
+
+  it("offers none of it where that computer's Yardsort cannot be asked", async () => {
+    const panel = open();
+    await within(panel).findByRole("tab", { name: "Changes 3" });
+    expect(within(panel).queryByRole("group", { name: /Send on/ })).toBeNull();
+    expect(core.otherHostPublishState).not.toHaveBeenCalled();
+    expect(panel).toHaveTextContent("Nothing is changed from this panel.");
+  });
+});
+
 describe("the files of a workspace on another computer", () => {
   it("lists a folder when it is opened, and opens a file read from that computer", async () => {
     const panel = open();
@@ -194,13 +240,21 @@ describe("the files of a workspace on another computer", () => {
     await userEvent.click(within(file).getByRole("button"));
     expect(core.otherHostFile).toHaveBeenCalledWith("h-1", "w-1", "src/login.tsx");
     expect(await shown()).toEqual({ path: "src/login.tsx", text: "on its disk\n" });
-    expect(file).toHaveAttribute("aria-selected", "true");
+    // The list was laid out again beside the viewer: its folder is still open, its file is the
+    // one selected, and that computer was not asked for either folder again.
+    const still = within(panel).getByRole("treeitem", { name: "src" });
+    expect(still).toHaveAttribute("aria-expanded", "true");
+    expect(within(still).getByRole("treeitem", { name: "login.tsx" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(core.otherHostFiles).toHaveBeenCalledTimes(2);
   });
 
   it("says a file is too large, not text, or gone, in place of it", async () => {
     const panel = open();
     await userEvent.click(within(panel).getByRole("tab", { name: "Files" }));
-    const readme = await within(panel).findByRole("treeitem", { name: "README.md" });
+    await within(panel).findByRole("treeitem", { name: "README.md" });
     for (const [content, said] of [
       [{ type: "tooLarge", bytes: 5_242_880 }, /too large to show \(5\.0 MB\)/],
       [{ type: "binary" }, /Binary file/],
@@ -211,6 +265,7 @@ describe("the files of a workspace on another computer", () => {
       ],
     ] as const) {
       core.otherHostFile.mockResolvedValueOnce(content);
+      const readme = within(panel).getByRole("treeitem", { name: "README.md" });
       await userEvent.click(within(readme).getByRole("button"));
       expect(await within(panel).findByText(said)).toBeInTheDocument();
       await userEvent.click(within(panel).getByRole("button", { name: "Close viewer" }));

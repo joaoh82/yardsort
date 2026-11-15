@@ -4,7 +4,7 @@
 /**
  * The remote protocol: what a device asks a computer through the relay, and what it answers. The
  * types follow `crates/remote-proto` (`lib.rs`, `model.rs`, `terminal.rs`, `grant.rs`, `ids.rs`,
- * `start.rs`, `manage.rs`, `look.rs`), which is the source; the fixtures in
+ * `start.rs`, `manage.rs`, `look.rs`, `publish.rs`), which is the source; the fixtures in
  * `crates/remote-proto/fixtures/v1/` hold both to the same wire.
  *
  * Every message from a computer is decoded as untrusted, though it comes from one the person
@@ -50,6 +50,7 @@ import {
   MAX_CLIENT_NAME,
   MAX_COMMAND,
   MAX_CODE_LEN,
+  MAX_COMMIT_MESSAGE,
   MAX_CURSOR_LEN,
   MAX_FILE,
   MAX_FILE_CHUNK,
@@ -59,19 +60,24 @@ import {
   MAX_LINK,
   MAX_LISTED_BYTES,
   MAX_NOTE,
+  MAX_OID,
   MAX_PAGE,
   MAX_PATH,
   MAX_PROJECT_NAME,
   MAX_PROMPT,
+  MAX_PULL_REQUEST_BODY,
+  MAX_PULL_REQUEST_TITLE,
   MAX_REMOTE,
   MAX_SAID,
   MAX_TASKS,
   MAX_TERMINALS,
   MAX_TEXT,
   MAX_TURN_TEXT,
+  MAX_UNPUSHED,
   MAX_UPLOAD,
   MAX_UPLOAD_CHUNK,
   MAX_UPLOAD_NAME,
+  MAX_URL,
   MAX_WORKSPACE_NAME,
   PROTOCOL_MAJOR,
   PROTOCOL_MINOR,
@@ -1317,14 +1323,17 @@ const changedFiles = listed(
   (file) => utf8Length(file.path) + utf8Length(file.oldPath ?? ""),
 );
 
+/** A branch a computer names as it stands, held only to a branch's length. */
+const branchAsItIs: Decoder<string> = (value, path) => {
+  const branch = text()(value, path);
+  if (utf8Length(branch) > MAX_BRANCH) throw new DecodeError(path, "is not a branch's name");
+  return branch;
+};
+
 const workspaceChangesFields = {
   uncommitted: changedFiles,
   committed: changedFiles,
-  base: optional((value, path) => {
-    const base = text()(value, path);
-    if (utf8Length(base) > MAX_BRANCH) throw new DecodeError(path, "is not a branch's name");
-    return base;
-  }),
+  base: optional(branchAsItIs),
   more: flag,
 };
 
@@ -1349,6 +1358,169 @@ const fileChunkFields = {
   data: nonEmpty(text(Math.ceil(MAX_FILE_CHUNK / 3) * 4)),
   done: bool,
 };
+
+// --- sending a workspace's work on (minor 12) -------------------------------------------------
+
+// What the computer's own commit box and publish bar do, asked of it by the workspace's id. It
+// commits with its own Git identity, pushes with its own credentials and asks the forge with its
+// own sign-in: no request carries a credential, a remote, a branch to push to, or a path. Each of
+// these but `workspace.publish` changes a repository, so one is sent only at its person's press.
+// All of it needs `terminal:control`.
+
+/** `workspace.publish`: where a workspace stands with its remote. */
+export interface WorkspacePublishParams {
+  workspace: WorkspaceId;
+  /**
+   * Ask the forge again about its pull request, which takes the computer a network round trip.
+   * Without it, only what Git knows is answered, and `pullRequest` is absent.
+   */
+  forge?: boolean;
+}
+
+export const CHECKS = ["none", "running", "passing", "failing", "unknown"] as const;
+/**
+ * What the forge's checks say about a pull request's head commit. One from a newer computer reads
+ * as `unknown`.
+ */
+export type Checks = (typeof CHECKS)[number];
+
+export const PULL_REQUEST_STATES = ["open", "merged", "closed", "unknown"] as const;
+/** Whether a pull request is open still. A state from a newer computer reads as `unknown`. */
+export type PullRequestState = (typeof PULL_REQUEST_STATES)[number];
+
+/** The pull request of a workspace's branch. */
+export interface PullRequest {
+  number: number;
+  /** Its page on the forge. At most {@link MAX_URL} bytes. */
+  url: string;
+  /** At most {@link MAX_PULL_REQUEST_TITLE} characters. */
+  title: string;
+  state: PullRequestState;
+  /** Absent when it is not a draft. */
+  draft?: boolean;
+  checks: Checks;
+  /** The commit at its head, to name when merging it. Absent when the forge did not say. */
+  headOid?: string;
+  /** The forge says it does not merge cleanly into its base. Absent when it does not say so. */
+  conflicting?: boolean;
+}
+
+/** The reply to `workspace.publish`, `workspace.commit` and `workspace.push`. */
+export interface PublishState {
+  /** Absent when the workspace is not on a branch: there is nothing to push or open. */
+  branch?: string;
+  /** What a pull request would merge into. */
+  base?: string;
+  /** Who commits there would be by. Absent when Git has no name and email on the computer. */
+  identity?: string;
+  /** The project has a remote to push to. Absent when it has none. */
+  remote?: boolean;
+  /** The branch has been pushed, and tracks its remote branch. Absent when it has not. */
+  pushed?: boolean;
+  /** Commits the remote does not have. */
+  ahead: number;
+  behind: number;
+  /** The subjects of those commits, newest first: at most {@link MAX_UNPUSHED}. Absent when none. */
+  unpushed?: string[];
+  /** Absent when there is none, and when the forge was not asked. */
+  pullRequest?: PullRequest;
+  /** Opening one makes sense: a branch that is not its own base, on a forge, with none open. */
+  canOpen?: boolean;
+  /** The computer has the forge's own program and can open and merge without a browser. */
+  gh?: boolean;
+  /** Why the forge gave no answer, when it was asked. */
+  problem?: string;
+}
+
+/** `workspace.commit`: commit everything changed in a workspace. */
+export interface WorkspaceCommitParams {
+  workspace: WorkspaceId;
+  /** Not empty, at most {@link MAX_COMMIT_MESSAGE} bytes. */
+  message: string;
+}
+
+/**
+ * `pull_request.open`: open a pull request for a workspace's branch, pushing it first when the
+ * remote does not have it all.
+ */
+export interface PullRequestOpenParams {
+  workspace: WorkspaceId;
+  /** Not empty, at most {@link MAX_PULL_REQUEST_TITLE} characters, on one line. */
+  title: string;
+  /** At most {@link MAX_PULL_REQUEST_BODY} bytes. */
+  body?: string;
+  draft?: boolean;
+}
+
+/** The reply to `pull_request.open`. */
+export interface PullRequestOpened {
+  /** The pull request, or the forge's own form to finish in a browser. At most {@link MAX_URL}. */
+  url: string;
+  /** The computer opened it. When false, `url` is the form, with both branches filled in. */
+  created: boolean;
+}
+
+export const MERGE_METHODS = ["squash", "merge", "rebase"] as const;
+export type MergeMethod = (typeof MERGE_METHODS)[number];
+
+/**
+ * `pull_request.merge`: merge the pull request of a workspace's branch, if it is still open, not a
+ * draft, and at the commit named.
+ */
+export interface PullRequestMergeParams {
+  workspace: WorkspaceId;
+  number: number;
+  /** The commit the person saw at its head. At most {@link MAX_OID} characters, all hexadecimal. */
+  headOid: string;
+  method: MergeMethod;
+}
+
+/** A link to the forge in a reply: within its length, and nothing that redraws a screen. */
+const forgeLink: Decoder<string> = (value, path) => {
+  const url = text()(value, path);
+  if (utf8Length(url) > MAX_URL || hasControl(url)) {
+    throw new DecodeError(path, "is not a link the protocol carries");
+  }
+  return url;
+};
+
+/** A commit's id as a request may give one: hexadecimal, of 7 to {@link MAX_OID} characters. */
+const OID = new RegExp(`^[0-9A-Fa-f]{7,${MAX_OID}}$`);
+
+/** A commit's id in a reply: one a request could give back. */
+const commitId: Decoder<string> = (value, path) => {
+  const oid = text()(value, path);
+  if (!OID.test(oid)) throw new DecodeError(path, "is not a commit's id");
+  return oid;
+};
+
+const pullRequest = object({
+  number: u32,
+  url: forgeLink,
+  title: text(MAX_PULL_REQUEST_TITLE),
+  state: oneOf(PULL_REQUEST_STATES, "unknown"),
+  draft: flag,
+  checks: oneOf(CHECKS, "unknown"),
+  headOid: optional(commitId),
+  conflicting: flag,
+});
+
+const publishStateFields = {
+  branch: optional(branchAsItIs),
+  base: optional(branchAsItIs),
+  identity: optional(text(MAX_TEXT)),
+  remote: flag,
+  pushed: flag,
+  ahead: u32,
+  behind: u32,
+  unpushed: unlessEmpty(text(MAX_TEXT), MAX_UNPUSHED),
+  pullRequest: optional(pullRequest),
+  canOpen: flag,
+  gh: flag,
+  problem: optional(text(MAX_TEXT)),
+};
+
+const pullRequestOpenedFields = { url: forgeLink, created: bool };
 
 /** Everything a client can ask a host: `op` names it, `params` carries its parameters. */
 export type Operation =
@@ -1396,7 +1568,12 @@ export type Operation =
   | { op: "workspace.delete"; params: WorkspaceRemoveParams }
   | { op: "workspace.changes"; params: { workspace: WorkspaceId } }
   | { op: "workspace.files"; params: WorkspaceFilesParams }
-  | { op: "file.read"; params: FileReadParams };
+  | { op: "file.read"; params: FileReadParams }
+  | { op: "workspace.publish"; params: WorkspacePublishParams }
+  | { op: "workspace.commit"; params: WorkspaceCommitParams }
+  | { op: "workspace.push"; params: { workspace: WorkspaceId } }
+  | { op: "pull_request.open"; params: PullRequestOpenParams }
+  | { op: "pull_request.merge"; params: PullRequestMergeParams };
 
 export type OperationName = Operation["op"];
 
@@ -1438,6 +1615,11 @@ export const OPERATIONS: readonly OperationName[] = [
   "workspace.changes",
   "workspace.files",
   "file.read",
+  "workspace.publish",
+  "workspace.commit",
+  "workspace.push",
+  "pull_request.open",
+  "pull_request.merge",
 ];
 
 const leaseRefFields = { terminal: id<TerminalId>(), lease: id<LeaseId>(), generation: u64 };
@@ -1546,6 +1728,21 @@ const params: Record<string, Decoder<unknown>> = {
     oldPath: optional(text()),
     of: oneOf(FILE_SIDES),
     offset: orElse(u64, () => 0),
+  }),
+  "workspace.publish": object({ workspace: id<WorkspaceId>(), forge: flag }),
+  "workspace.commit": object({ workspace: id<WorkspaceId>(), message: text() }),
+  "workspace.push": object({ workspace: id<WorkspaceId>() }),
+  "pull_request.open": object({
+    workspace: id<WorkspaceId>(),
+    title: text(),
+    body: nonEmpty(text()),
+    draft: flag,
+  }),
+  "pull_request.merge": object({
+    workspace: id<WorkspaceId>(),
+    number: u32,
+    headOid: text(),
+    method: oneOf(MERGE_METHODS),
   }),
 };
 
@@ -1678,6 +1875,19 @@ export function validate(operation: Operation): string | null {
       if (invalid) return invalid;
       return offset > MAX_FILE ? "starts past the end of any file a computer sends" : null;
     }
+    case "workspace.commit": {
+      const { message } = operation.params;
+      if (BLANK.test(message)) return "commits with no message";
+      return utf8Length(message) > MAX_COMMIT_MESSAGE || message.includes("\0")
+        ? "carries a commit message no request may"
+        : null;
+    }
+    case "pull_request.open":
+      return openInvalid(operation.params);
+    case "pull_request.merge":
+      return operation.params.number === 0 || !OID.test(operation.params.headOid)
+        ? "names no pull request and the commit at its head"
+        : null;
     default:
       return null;
   }
@@ -1786,6 +1996,23 @@ function pathInvalid(path: string): string | null {
     : null;
 }
 
+/** A title on one line that is no option, as the host reads it with what is around it trimmed. */
+function openInvalid(params: PullRequestOpenParams): string | null {
+  const title = params.title.replace(ENDS, "");
+  if (
+    title === "" ||
+    chars(title) > MAX_PULL_REQUEST_TITLE ||
+    title.startsWith("-") ||
+    hasControl(title)
+  ) {
+    return "gives a pull request a title that is not 1 to 256 characters on one line";
+  }
+  const body = params.body ?? "";
+  return utf8Length(body) > MAX_PULL_REQUEST_BODY || body.includes("\0")
+    ? "carries a longer description than one request may"
+    : null;
+}
+
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /** Whether a piece of an upload is padded standard base64 of 1 byte to {@link MAX_UPLOAD_CHUNK}. */
@@ -1868,6 +2095,8 @@ export type Reply =
   | ({ kind: "changes" } & WorkspaceChanges)
   | ({ kind: "files" } & FileList)
   | ({ kind: "file" } & FileChunk)
+  | ({ kind: "publish" } & PublishState)
+  | ({ kind: "pullRequestOpened" } & PullRequestOpened)
   | { kind: "done" };
 
 export const reply: Decoder<Reply> = tagged<Reply>("kind", {
@@ -1901,6 +2130,8 @@ export const reply: Decoder<Reply> = tagged<Reply>("kind", {
   changes: variant("kind", "changes", workspaceChangesFields),
   files: variant("kind", "files", fileListFields),
   file: variant("kind", "file", fileChunkFields),
+  publish: variant("kind", "publish", publishStateFields),
+  pullRequestOpened: variant("kind", "pullRequestOpened", pullRequestOpenedFields),
   done: variant("kind", "done", {}),
 });
 

@@ -50,6 +50,11 @@ pub(super) fn is_start(operation: &Operation) -> bool {
             | Operation::WorkspaceChanges(_)
             | Operation::WorkspaceFiles(_)
             | Operation::FileRead(_)
+            | Operation::WorkspacePublish(_)
+            | Operation::WorkspaceCommit(_)
+            | Operation::WorkspacePush(_)
+            | Operation::PullRequestOpen(_)
+            | Operation::PullRequestMerge(_)
     )
 }
 
@@ -251,6 +256,60 @@ impl Visitor {
                         .content(&row.id, &read.path, read.old_path.as_deref(), read.of)
                         .map_err(|e| start_error(&e))?;
                     piece(content, read.offset).map(Reply::File)
+                });
+                Ok(None)
+            }
+            Operation::WorkspacePublish(publish) => {
+                let (row, _) = facade.reachable_workspace(grant, &publish.workspace)?;
+                let forge = publish.forge;
+                self.later(request, move || {
+                    starting
+                        .publish(&row.id, forge)
+                        .map(Reply::Publish)
+                        .map_err(|e| start_error(&e))
+                });
+                Ok(None)
+            }
+            Operation::WorkspaceCommit(commit) => {
+                let (row, _) = facade.reachable_workspace(grant, &commit.workspace)?;
+                let message = commit.message.clone();
+                self.later(request, move || {
+                    starting
+                        .commit(&row.id, &message)
+                        .map(Reply::Publish)
+                        .map_err(|e| start_error(&e))
+                });
+                Ok(None)
+            }
+            Operation::WorkspacePush(remote_proto::WorkspaceRef { workspace }) => {
+                let (row, _) = facade.reachable_workspace(grant, workspace)?;
+                self.later(request, move || {
+                    starting
+                        .push(&row.id)
+                        .map(Reply::Publish)
+                        .map_err(|e| start_error(&e))
+                });
+                Ok(None)
+            }
+            Operation::PullRequestOpen(open) => {
+                let (row, _) = facade.reachable_workspace(grant, &open.workspace)?;
+                let open = open.clone();
+                self.later(request, move || {
+                    starting
+                        .open_pull_request(&row.id, &open.title, &open.body, open.draft)
+                        .map(Reply::PullRequestOpened)
+                        .map_err(|e| start_error(&e))
+                });
+                Ok(None)
+            }
+            Operation::PullRequestMerge(merge) => {
+                let (row, _) = facade.reachable_workspace(grant, &merge.workspace)?;
+                let merge = merge.clone();
+                self.later(request, move || {
+                    starting
+                        .merge_pull_request(&row.id, merge.number, &merge.head_oid, merge.method)
+                        .map(|()| Reply::Done)
+                        .map_err(|e| start_error(&e))
                 });
                 Ok(None)
             }

@@ -8,8 +8,8 @@
 
 /** The major this client speaks. */
 export const PROTOCOL_MAJOR = 1;
-/** The minor this client speaks: 11, reading a workspace's changes and files. */
-export const PROTOCOL_MINOR = 11;
+/** The minor this client speaks: 12, committing, pushing, and opening and merging a pull request. */
+export const PROTOCOL_MINOR = 12;
 
 /** The largest JSON message either side reads, in bytes. */
 export const MAX_CONTROL_FRAME = 64 * 1024;
@@ -114,3 +114,16 @@ export const MAX_FILE_CHUNK = 32 * 1024;
  * `more`. Minor 11.
  */
 export const MAX_LISTED_BYTES = 40 * 1024;
+
+/** Longest commit message a request carries, in bytes. Minor 12. */
+export const MAX_COMMIT_MESSAGE = 16 * 1024;
+/** Longest pull request title, in characters. Minor 12. */
+export const MAX_PULL_REQUEST_TITLE = 256;
+/** Longest pull request body a request carries, in bytes. Minor 12. */
+export const MAX_PULL_REQUEST_BODY = 32 * 1024;
+/** The most unpushed commits a reply names. Minor 12. */
+export const MAX_UNPUSHED = 20;
+/** Longest commit id a request or a reply carries, in characters. Minor 12. */
+export const MAX_OID = 64;
+/** Longest link in a reply about a pull request, in bytes. Minor 12. */
+export const MAX_URL = 1024;

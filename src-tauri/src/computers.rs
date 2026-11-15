@@ -167,6 +167,9 @@ pub struct OtherHostView {
     /// Whether this computer may read that computer's changes and files: it may type, and that
     /// computer's Yardsort is new enough.
     pub may_look: bool,
+    /// Whether this computer may commit, push, and open and merge a pull request there: it may
+    /// type, and that computer's Yardsort is new enough.
+    pub may_publish: bool,
     /// When it was last read; `None` until it has been.
     pub read_at: Option<f64>,
     pub platform: Option<String>,
@@ -387,6 +390,7 @@ fn view(host_id: &str, name: String, view: HostView, may_type: bool) -> OtherHos
             may_resume: false,
             may_manage: false,
             may_look: false,
+            may_publish: false,
             read_at: None,
             platform: None,
             app_version: None,
@@ -498,6 +502,7 @@ fn view(host_id: &str, name: String, view: HostView, may_type: bool) -> OtherHos
         may_resume: answers(computer::start::RESUME),
         may_manage: answers(computer::start::MANAGE),
         may_look: answers(computer::look::LOOK),
+        may_publish: answers(computer::publish::PUBLISH),
         link: link(&view.link),
         may_type,
         read_at: Some(shown.read_at_ms as f64),
@@ -1010,6 +1015,209 @@ pub async fn other_host_file(
     )
     .await
     .map(content_there)
+    .map_err(ipc)
+}
+
+/// The pull request of a workspace's branch on another computer.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherPullRequest {
+    pub number: u32,
+    /// Its page on the forge, when that is an `https` address.
+    pub url: Option<String>,
+    pub title: String,
+    /// `open`, `merged`, `closed` or `unknown`.
+    pub state: String,
+    pub draft: bool,
+    /// `none`, `running`, `passing`, `failing` or `unknown`.
+    pub checks: String,
+    /// The commit at its head, to name when merging it.
+    pub head_oid: Option<String>,
+    pub conflicting: bool,
+}
+
+/// Where a workspace on another computer stands with its remote.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherPublishState {
+    pub branch: Option<String>,
+    pub base: Option<String>,
+    /// Who commits there would be by.
+    pub identity: Option<String>,
+    pub remote: bool,
+    pub pushed: bool,
+    pub ahead: u32,
+    pub behind: u32,
+    /// The subjects of the commits its remote does not have, newest first.
+    pub unpushed: Vec<String>,
+    /// Its pull request, when that computer was asked to ask the forge and there is one.
+    pub pull_request: Option<OtherPullRequest>,
+    pub can_open: bool,
+    /// That computer can open and merge a pull request without a browser.
+    pub gh: bool,
+    pub problem: Option<String>,
+}
+
+impl From<remote_proto::publish::PublishState> for OtherPublishState {
+    fn from(state: remote_proto::publish::PublishState) -> Self {
+        let word = |value: serde_json::Result<serde_json::Value>| {
+            value
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "unknown".into())
+        };
+        Self {
+            branch: state.branch,
+            base: state.base,
+            identity: state.identity,
+            remote: state.remote,
+            pushed: state.pushed,
+            ahead: state.ahead,
+            behind: state.behind,
+            unpushed: state.unpushed,
+            pull_request: state.pull_request.map(|pr| OtherPullRequest {
+                number: pr.number,
+                // Its address came from that computer: only a web page is ever opened.
+                url: Some(pr.url).filter(|url| url.starts_with("https://")),
+                title: pr.title,
+                state: word(serde_json::to_value(pr.state)),
+                draft: pr.draft,
+                checks: word(serde_json::to_value(pr.checks)),
+                head_oid: pr.head_oid,
+                conflicting: pr.conflicting,
+            }),
+            can_open: state.can_open,
+            gh: state.gh,
+            problem: state.problem,
+        }
+    }
+}
+
+/// A pull request another computer opened, or the forge's form to finish in a browser.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherPullRequestOpened {
+    pub url: String,
+    /// That computer opened it. When false the address is the forge's own form.
+    pub created: bool,
+}
+
+/// How to merge a pull request on another computer.
+#[derive(Debug, Clone, Copy, serde::Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum OtherMergeMethod {
+    Squash,
+    Merge,
+    Rebase,
+}
+
+/// Where a workspace on another computer stands with its remote. With `forge`, that computer
+/// asks the forge about its pull request, which takes it a network round trip.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_publish_state(
+    app: AppHandle,
+    host_id: String,
+    workspace_id: String,
+    forge: bool,
+) -> IpcResult<OtherPublishState> {
+    computer::publish::state(&home(&app), &host_id, &workspace_id, forge)
+        .await
+        .map(OtherPublishState::from)
+        .map_err(ipc)
+}
+
+/// Commit everything changed in a workspace on another computer, with that computer's own Git
+/// identity. Only ever at the person's press.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_commit(
+    app: AppHandle,
+    host_id: String,
+    workspace_id: String,
+    message: String,
+) -> IpcResult<OtherPublishState> {
+    computer::publish::commit(&home(&app), &host_id, &workspace_id, &message)
+        .await
+        .map(OtherPublishState::from)
+        .map_err(ipc)
+}
+
+/// Push a workspace's branch on another computer to its project's remote, with that computer's
+/// own credentials. Only ever at the person's press.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_push(
+    app: AppHandle,
+    host_id: String,
+    workspace_id: String,
+) -> IpcResult<OtherPublishState> {
+    computer::publish::push(&home(&app), &host_id, &workspace_id)
+        .await
+        .map(OtherPublishState::from)
+        .map_err(ipc)
+}
+
+/// Open a pull request for a workspace's branch on another computer, with that computer's own
+/// forge sign-in, pushing first when it needs it.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_open_pull_request(
+    app: AppHandle,
+    host_id: String,
+    workspace_id: String,
+    title: String,
+    body: String,
+    draft: bool,
+) -> IpcResult<OtherPullRequestOpened> {
+    let opened = computer::publish::open_pull_request(
+        &home(&app),
+        &host_id,
+        &workspace_id,
+        &title,
+        &body,
+        draft,
+    )
+    .await
+    .map_err(ipc)?;
+    if !opened.url.starts_with("https://") {
+        return Err(IpcError::new(
+            "remote_refused",
+            "That computer answered with an address this computer will not open.",
+        ));
+    }
+    Ok(OtherPullRequestOpened {
+        url: opened.url,
+        created: opened.created,
+    })
+}
+
+/// Merge the pull request of a workspace on another computer, if it is still open and at the
+/// commit the person saw.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_merge_pull_request(
+    app: AppHandle,
+    host_id: String,
+    workspace_id: String,
+    number: u32,
+    head_oid: String,
+    method: OtherMergeMethod,
+) -> IpcResult<()> {
+    let method = match method {
+        OtherMergeMethod::Squash => remote_proto::publish::MergeMethod::Squash,
+        OtherMergeMethod::Merge => remote_proto::publish::MergeMethod::Merge,
+        OtherMergeMethod::Rebase => remote_proto::publish::MergeMethod::Rebase,
+    };
+    computer::publish::merge_pull_request(
+        &home(&app),
+        &host_id,
+        &workspace_id,
+        number,
+        &head_oid,
+        method,
+    )
+    .await
     .map_err(ipc)
 }
 
