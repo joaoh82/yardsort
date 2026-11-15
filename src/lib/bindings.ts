@@ -361,6 +361,12 @@ export const commands = {
 	/**  The other computers' workspaces of a project that syncs here. */
 	projectSyncWorkspaces: (projectId: string) => typedError<SyncedWorkspace[], IpcError>(__TAURI_INVOKE("project_sync_workspaces", { projectId })),
 	/**
+	 *  Check out here a workspace another computer has: its branch, fetched from the project's remote,
+	 *  and a workspace of this computer's own on it. The other computer's record is left as it is.
+	 *  Answers the new workspace's id.
+	 */
+	projectSyncCheckOut: (projectId: string, synced: string) => typedError<string, IpcError>(__TAURI_INVOKE("project_sync_check_out", { projectId, synced })),
+	/**
 	 *  Turn Remote on with the server at `server_url`, as `name`: sign in through the browser, then
 	 *  register this computer as a host. Waits for the browser, for up to ten minutes, unless
 	 *  [`remote_cancel`] is called.

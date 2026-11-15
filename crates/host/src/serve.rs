@@ -212,6 +212,9 @@ async fn one(home: &Arc<HostHome>, ask: Ask) -> account::Result<Reply> {
         Ask::SyncLink { project, synced } => crate::sync::link(home, &project, &synced).await?,
         Ask::SyncStop { project } => crate::sync::stop(home, &project).await?,
         Ask::SyncRemove { project } => crate::sync::remove(home, &project)?,
+        Ask::SyncCheckout { project, workspace } => {
+            crate::sync::check_out(home, &project, &workspace)?
+        }
         Ask::MemoryList { project } => crate::memory::list(home, &project)?,
         Ask::MemoryWrite { project, text } => crate::memory::write(home, &project, &text)?,
         Ask::MemoryDecide { entry, decision } => crate::memory::decide(home, &entry, &decision)?,

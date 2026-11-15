@@ -109,7 +109,7 @@ pub fn behind(git: &Git, root: &Path, pr: &PullRequest, branch: &str) -> IpcResu
     Ok(git.commits_between(root, branch, &head)?)
 }
 
-fn not_checked_out(git: &Git, root: &Path, branch: &str) -> IpcResult<()> {
+pub(crate) fn not_checked_out(git: &Git, root: &Path, branch: &str) -> IpcResult<()> {
     let holder = git
         .worktrees(root)?
         .into_iter()

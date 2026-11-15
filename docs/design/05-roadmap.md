@@ -1100,7 +1100,10 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       workspaces seen elsewhere, was built the same day (42 §12): the outbox in the workspace
       methods, written only by the host a workspace lives on, and **on other computers** under
       each project, with nothing made for them; its local smoke test, `sync-workspaces.yaml`,
-      passed.
+      passed. Slice 5, checking a branch out here, was built the same day (42 §13): **Check out
+      here** and `yardsort-host sync checkout`, fetching from the remote and never moving a branch
+      with commits of its own; its local smoke test, `sync-checkout.yaml`, passed. All five
+      slices are built; the gate's runs through staging are the owner's.
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is

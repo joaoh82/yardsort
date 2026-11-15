@@ -482,7 +482,9 @@ is not sent again.
 **on other computers (n)**: each with its name, the computer it is on, its branch and the task it was
 started from, and _archived_ when it is. They are only a list. Nothing of them is on this computer:
 no worktree, no branch, no folder and no terminal is made for one, and there is nothing here to open
-or delete. Each changes when it changes on its computer, which alone writes it: made, renamed,
+or delete, except **Check out here**, which fetches its branch from the project's remote and makes a
+[workspace of this computer's own](workspaces.md#workspaces-on-your-other-computers) on it. Each
+changes when it changes on its computer, which alone writes it: made, renamed,
 archived, restored or deleted there. A workspace you make here, in the app or with `ys`, shows on
 your other computers within seconds. The project's own checkout is not listed, since each computer
 has its own.

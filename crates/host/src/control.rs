@@ -63,6 +63,13 @@ pub enum Ask {
     SyncRemove {
         project: String,
     },
+    /// Check out here a workspace another computer has, by its name or the start of its id: its
+    /// branch, fetched from the project's remote, and a workspace on it. Refused unless a person
+    /// at a terminal asked: nothing appears here without their act.
+    SyncCheckout {
+        project: String,
+        workspace: String,
+    },
     /// A project's memory, every note in every state, shared with its agents or not. Refused
     /// unless a person at a terminal asked: an agent reads only `ys memory`'s approved, shared
     /// notes.
@@ -104,6 +111,7 @@ impl Ask {
                 | Ask::SyncLink { .. }
                 | Ask::SyncStop { .. }
                 | Ask::SyncRemove { .. }
+                | Ask::SyncCheckout { .. }
                 | Ask::MemoryList { .. }
                 | Ask::MemoryWrite { .. }
                 | Ask::MemoryDecide { .. }
@@ -366,6 +374,10 @@ mod tests {
             },
             Ask::SyncStop { project: project() },
             Ask::SyncRemove { project: project() },
+            Ask::SyncCheckout {
+                project: project(),
+                workspace: "fix-login".into(),
+            },
         ] {
             assert!(ask.guarded(), "{ask:?}");
         }

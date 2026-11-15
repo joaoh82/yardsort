@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::git::Git;
+
+pub mod checkout;
 use crate::store::{Store, StoreResult};
 
 /// What a project's record says. Schema 1.

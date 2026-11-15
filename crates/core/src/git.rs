@@ -516,6 +516,12 @@ impl Git {
             .map(drop)
     }
 
+    /// Move the local `branch`, which nothing has checked out, to `to`. For a branch that has no
+    /// commit `to` lacks: nothing on it is lost.
+    pub fn branch_move(&self, root: &Path, branch: &str, to: &str) -> GitResult<()> {
+        self.run(root, &["branch", "--force", branch, to]).map(drop)
+    }
+
     /// Record that `branch` is a checkout of pull request `number`: its upstream becomes the
     /// pull request's head on `remote`, the way `gh pr checkout` leaves a fork's branch. So
     /// `git pull` there follows the pull request, a plain `git push` refuses (the names do not

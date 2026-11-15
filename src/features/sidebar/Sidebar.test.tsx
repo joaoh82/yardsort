@@ -45,6 +45,7 @@ const core = vi.hoisted(() => ({
   memoryGet: vi.fn(),
   onSyncChanged: vi.fn(async (_handler: () => void) => () => {}),
   projectSyncWorkspaces: vi.fn(),
+  projectSyncCheckOut: vi.fn(),
   outcomeLabel: vi.fn(),
   onActivityChanged: vi.fn(),
   onTrackedPullRequestsChanged: vi.fn(),
@@ -2255,7 +2256,36 @@ describe("Sidebar", () => {
     await user.click(within(group).getByRole("button", { name: /on other computers/ }));
     const row = screen.getByRole("treeitem", { name: "fix-login on Build box" });
     expect(row).toHaveTextContent("Build box · ys/fix-login · #91 Login fails");
-    expect(within(row).queryByRole("button")).toBeNull();
+    // One thing to do with it, and only when asked: nothing is made here before.
+    expect(
+      within(row)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Check out here"]);
+    expect(core.projectSyncCheckOut).not.toHaveBeenCalled();
+
+    // Refused, and said where it was asked.
+    core.projectSyncCheckOut.mockRejectedValueOnce({
+      code: "branch_diverged",
+      message: '"ys/fix-login" here has 1 commit that origin\'s has not. It was left as it is.',
+    });
+    await user.click(within(row).getByRole("button", { name: "Check out here" }));
+    expect(core.projectSyncCheckOut).toHaveBeenLastCalledWith(
+      "p-alpha",
+      "4b3c2d1e-0f9a-4b8c-9d7e-6f5a4b3c2d1e",
+    );
+    expect(await within(row).findByRole("alert")).toHaveTextContent("It was left as it is.");
+
+    // Checked out: the projects are read again, with the new workspace among them.
+    const alpha = project("alpha");
+    const made = { ...worktree("alpha", "fix-login"), branch: "ys/fix-login" };
+    core.projectSyncCheckOut.mockResolvedValueOnce(made.id);
+    core.projectsList.mockResolvedValue([
+      { ...alpha, workspaces: [...alpha.workspaces, made] },
+      project("beta"),
+    ]);
+    await user.click(within(row).getByRole("button", { name: "Check out here" }));
+    expect(await screen.findByRole("treeitem", { name: "fix-login" })).toBeInTheDocument();
 
     // Deleted there: the next pass says so, and it goes here.
     core.projectSyncWorkspaces.mockResolvedValue([]);

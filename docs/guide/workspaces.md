@@ -162,10 +162,18 @@ touching its folder or its branch.
 
 In a project that [syncs](remote.md#syncing-projects) with your other computers, their workspaces
 of it are listed under the project, folded into **on other computers (n)** below the archived ones:
-name, computer, branch and task. They are there to read. None of them is a workspace here, and
-nothing is made for one: no worktree, no branch, no folder. Your own workspaces are listed on those
-computers the same way, renamed, archived or gone as you rename, archive or delete them here, and
-forgetting one takes it off their lists.
+name, computer, branch and task. None of them is a workspace here, and nothing is made for one by
+itself: no worktree, no branch, no folder. Your own workspaces are listed on those computers the
+same way, renamed, archived or gone as you rename, archive or delete them here, and forgetting one
+takes it off their lists.
+
+**Check out here**, on one of them, makes it a workspace here too, of this computer's own. Push its
+branch from the other computer first: Yardsort fetches it from the project's remote (`origin`, or
+the only one), never from the server, which has no commits. A branch of that name here is used if it
+has nothing the remote's has not, and moved up to the remote's when it is behind; one with commits of
+its own is left exactly as it is, and checking out is refused until you bring the two together with
+Git. Refused too: a branch already checked out here, or a workspace here on it already. The other
+computer's workspace stays as it is, and listed as its own.
 
 ## The workspace menu
 
