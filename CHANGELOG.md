@@ -87,6 +87,13 @@ has the downloads and the full commit lists.
   confirmation. That computer does each as itself, with its own Git identity, credentials and
   `gh` sign-in, and only at your press. A refused push or commit is explained in a sentence
   rather than with Git's own output, which stays on that computer.
+- **One line installs the headless host on a Linux server.** `install.sh` takes the newest
+  release's tarball, puts `yardsort-host` and `ys` in place for one user with the systemd service,
+  and prints the sign-ins that are left. Run as root with `--user`, as a new cloud server's first
+  boot does, it makes the user too. Run again, it upgrades. The guide also says how to give that
+  computer git and GitHub, and how to hand it less than your whole account. See
+  [Installing](docs/guide/headless-host.md#installing) and
+  [Git and GitHub](docs/guide/headless-host.md#git-and-github).
 
 ## 0.34.1
 

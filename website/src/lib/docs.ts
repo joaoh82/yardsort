@@ -144,7 +144,7 @@ export const DOCS_NAV: DocSection[] = [
         slug: "guide/headless-host",
         title: "A computer with no screen",
         description:
-          "Run yardsort-host on a Linux server as a host your phone reaches: sign in from another browser, pair a device at a terminal, add projects and start agents with ys.",
+          "Run yardsort-host on a Linux server as a host your phone reaches: install it with one line, sign in from another browser, pair a device at a terminal, set up git and GitHub, add projects and start agents with ys.",
       },
       {
         slug: "guide/smoke-tests",
