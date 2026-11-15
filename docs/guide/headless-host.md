@@ -344,8 +344,9 @@ the other computer's beside it. `settle` keeps the one that stands (`--standing`
 computer's (`--other`), or a third (`--text`), on every computer the project
 [syncs](memory.md#on-your-other-computers) with. A note from another computer says which.
 
-Every one but `list` is behind [the guard](#only-a-person-can-pair-a-device), as `pair` is, so no
-agent approves its own proposal.
+All of them are behind [the guard](#only-a-person-can-pair-a-device), as `pair` is, `list` included:
+no agent approves its own proposal, and none reads more of the memory than
+[`ys memory`](cli.md#ys-memory) gives it, the approved notes of a project that shares them.
 
 ## Upgrading
 

@@ -5,7 +5,7 @@ description: >-
   as the same account, each through a cable it can be unplugged from. A project syncs on the first
   and is linked on the second. A note written on the first arrives approved on the second, saying
   where it is from, and is in the first message of an agent started there; an agent's proposal
-  there stays there, and no shell that is not a terminal approves it. Then both are unplugged,
+  there stays there, and no shell that is not a terminal approves it, or even lists it. Then both are unplugged,
   each edits the note, and both are plugged back in: the same text stands on both, with the other
   beside it as a conflict on both, until one of them settles it, once, for both. Last, the first
   revokes the note while the second, unplugged, edits it: once plugged back in, it is revoked on
@@ -99,14 +99,21 @@ steps:
       write widgets 'The tests need TZ=UTC.'" /dev/null < /dev/null
     expect:
       stdout_contains: Written and approved
+  - id: not_listed_to_a_shell_that_is_not_a_terminal
+    action: shell
+    # Every state, shared or not: more than `ys memory` gives an agent.
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets <
+      /dev/null
+    expect:
+      exit: nonzero
   - id: it_arrives_approved_on_the_second_saying_where_from
     action: wait_for
     program: sh
     args:
       - -c
       - >-
-        YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh yardsort-host memory list
-        widgets-copy | grep -A1 "^Approved:" | grep -q "The tests need TZ=UTC.  (from the user, on here)"
+        YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy" /dev/null < /dev/null | tr -d '\r' | grep -A1 "^Approved:" | grep -q "The tests need TZ=UTC.  (from the user, on here)"
     timeout: 60s
   - id: an_agent_there_starts
     action: shell
@@ -131,8 +138,7 @@ steps:
     line: >-
       dir=$(dirname "$(find "$YS_RUN_DIR/there-worktrees" -name first-message.txt | head -1)") && top=$PWD && (cd
       "$dir" && YS_PROFILE="$YS_RUN_DIR/there" sh "$top/.yardsort/tests/support/headless.sh" ys memory propose
-      "Agents propose; people approve.") > /dev/null && id=$(YS_PROFILE="$YS_RUN_DIR/there" sh
-      .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy | awk '/Agents propose/ {print
+      "Agents propose; people approve.") > /dev/null && id=$(YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy" /dev/null < /dev/null | tr -d '\r' | awk '/Agents propose/ {print
       $1; exit}') && ! YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh yardsort-host memory
       approve "$id" < /dev/null 2> /dev/null && YS_PROFILE="$YS_RUN_DIR/there" sh
       .yardsort/tests/support/headless.sh yardsort-host sync status | grep -c "Waiting to go up" || true
@@ -142,8 +148,7 @@ steps:
     action: shell
     line: >-
       for at in here there; do kill "$(cat "$YS_RUN_DIR/$at.cable.pid")"; done && sleep 2 && for at in here
-      there; do project=widgets; [ $at = there ] && project=widgets-copy; id=$(YS_PROFILE="$YS_RUN_DIR/$at" sh
-      .yardsort/tests/support/headless.sh yardsort-host memory list $project | awk '/TZ=UTC/ {print $1; exit}');
+      there; do project=widgets; [ $at = there ] && project=widgets-copy; id=$(YS_PROFILE="$YS_RUN_DIR/$at" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list $project" /dev/null < /dev/null | tr -d '\r' | awk '/TZ=UTC/ {print $1; exit}');
       text="The tests need TZ=UTC and LANG=C."; [ $at = there ] && text="Run the tests with TZ=UTC.";
       YS_PROFILE="$YS_RUN_DIR/$at" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory edit
       $id '$text'" /dev/null < /dev/null || exit 1; done && for at in here there; do YS_PROFILE="$YS_RUN_DIR/$at"
@@ -163,16 +168,13 @@ steps:
     args:
       - -c
       - >-
-        a=$(YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh yardsort-host memory list
-        widgets | grep -A2 "two computers at once") && b=$(YS_PROFILE="$YS_RUN_DIR/there" sh
-        .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy | grep -A2 "two computers at
+        a=$(YS_PROFILE="$YS_RUN_DIR/here" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets" /dev/null < /dev/null | tr -d '\r' | grep -A2 "two computers at once") && b=$(YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy" /dev/null < /dev/null | tr -d '\r' | grep -A2 "two computers at
         once") && [ "$(echo "$a" | grep -o 'stands now: .*')" = "$(echo "$b" | grep -o 'stands now: .*')" ]
     timeout: 120s
   - id: settle_it_on_the_second
     action: shell
     line: >-
-      list=$(YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh yardsort-host memory list
-      widgets-copy) && id=$(echo "$list" | awk '/stands now:/ {print $1; exit}') && echo "$list" | sed -nE
+      list=$(YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy" /dev/null < /dev/null | tr -d '\r') && id=$(echo "$list" | awk '/stands now:/ {print $1; exit}') && echo "$list" | sed -nE
       's/^ +from [^:]+: (.*)$/\1/p' > "$YS_RUN_DIR/kept" && YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh
       .yardsort/tests/support/headless.sh yardsort-host memory settle $id --other" /dev/null < /dev/null
     expect:
@@ -184,18 +186,15 @@ steps:
       - -c
       - >-
         kept=$(cat "$YS_RUN_DIR/kept") && for at in here there; do project=widgets; [ $at = there ] &&
-        project=widgets-copy; list=$(YS_PROFILE="$YS_RUN_DIR/$at" sh .yardsort/tests/support/headless.sh
-        yardsort-host memory list $project); echo "$list" | grep -q "two computers at once" && exit 1; echo
+        project=widgets-copy; list=$(YS_PROFILE="$YS_RUN_DIR/$at" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list $project" /dev/null < /dev/null | tr -d '\r'); echo "$list" | grep -q "two computers at once" && exit 1; echo
         "$list" | grep -A1 "^Approved:" | grep -qF "$kept" || exit 1; done
     timeout: 60s
   - id: revoke_on_the_first_while_the_second_edits_unplugged
     action: shell
     line: >-
-      kill "$(cat "$YS_RUN_DIR/there.cable.pid")" && sleep 2 && id=$(YS_PROFILE="$YS_RUN_DIR/here" sh
-      .yardsort/tests/support/headless.sh yardsort-host memory list widgets | awk '/TZ=UTC/ {print $1; exit}') &&
+      kill "$(cat "$YS_RUN_DIR/there.cable.pid")" && sleep 2 && id=$(YS_PROFILE="$YS_RUN_DIR/here" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets" /dev/null < /dev/null | tr -d '\r' | awk '/TZ=UTC/ {print $1; exit}') &&
       YS_PROFILE="$YS_RUN_DIR/here" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory
-      revoke $id" /dev/null < /dev/null > /dev/null && other=$(YS_PROFILE="$YS_RUN_DIR/there" sh
-      .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy | awk '/TZ=UTC/ {print $1;
+      revoke $id" /dev/null < /dev/null > /dev/null && other=$(YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy" /dev/null < /dev/null | tr -d '\r' | awk '/TZ=UTC/ {print $1;
       exit}') && YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh
       yardsort-host memory edit $other 'Deploy the tests with TZ=UTC.'" /dev/null < /dev/null > /dev/null && port=$(sed
       -E 's#.*:([0-9]+)/#\1#' "$YS_RUN_DIR/there.cable") && (setsid bun .yardsort/tests/support/cable.ts
@@ -210,7 +209,7 @@ steps:
       - -c
       - >-
         for at in here there; do project=widgets; [ $at = there ] && project=widgets-copy;
-        YS_PROFILE="$YS_RUN_DIR/$at" sh .yardsort/tests/support/headless.sh yardsort-host memory list $project |
+        YS_PROFILE="$YS_RUN_DIR/$at" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list $project" /dev/null < /dev/null | tr -d '\r' |
         grep -A1 "^Revoked:" | grep -q "TZ=UTC" || exit 1; done
     timeout: 120s
   - id: nothing_left_to_go_up

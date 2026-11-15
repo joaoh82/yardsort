@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use remote_proto::sync::{Action, OpResult, SyncId, SyncOp, SyncRecord};
+use remote_proto::sync::{Action, OpResult, RecordKind, SyncId, SyncOp, SyncRecord};
 use remote_proto::{ErrorCode, HostId, RemoteError};
 
 use super::*;
@@ -115,14 +115,22 @@ impl Host {
 
     fn push(&self, server: &mut Server) {
         for _ in 0..20 {
-            let ops = self.store.sync_outbox(100).unwrap();
-            if ops.is_empty() {
+            if !self.push_once(server) {
                 return;
             }
-            let results = server.push(self.id, ops);
-            self.store.settle_sync(&results, 1).unwrap();
         }
         panic!("the outbox never emptied");
+    }
+
+    /// One push, as the loop makes it. False when there was nothing to send.
+    fn push_once(&self, server: &mut Server) -> bool {
+        let ops = self.store.sync_batch(100).unwrap();
+        if ops.is_empty() {
+            return false;
+        }
+        let results = server.push(self.id, ops);
+        self.store.settle_sync(&results, 1).unwrap();
+        true
     }
 
     fn pull(&self, server: &Server) {
@@ -384,6 +392,100 @@ fn a_revoke_wins_over_an_edit_made_meanwhile_and_never_comes_back() {
 }
 
 #[test]
+fn several_edits_made_offline_never_undo_a_revoke_made_meanwhile() {
+    let mut server = Server::default();
+    let (here, mine, there, theirs) = linked(&mut server);
+    let first = memory::write(&here.store, &mine, "Deploy on Fridays.").unwrap();
+    here.sync(&mut server);
+    there.sync(&mut server);
+    let other = there.note(&theirs, "Deploy on Fridays.").id;
+
+    // There, offline, edits it twice; here revokes it.
+    memory::edit(&there.store, &other, "Deploy on Fridays, after noon.").unwrap();
+    memory::edit(&there.store, &other, "Deploy on Fridays, after one.").unwrap();
+    memory::decide(&here.store, &first, Decision::Revoke).unwrap();
+    here.sync(&mut server);
+    there.sync(&mut server);
+    here.sync(&mut server);
+
+    for (host, id) in [(&here, &first), (&there, &other)] {
+        let note = host.store.memory_entry(id).unwrap().unwrap();
+        assert_eq!(note.state, "revoked", "revoked on both: {note:?}");
+    }
+    let record = server
+        .records
+        .values()
+        .find(|r| r.kind == RecordKind::Note)
+        .unwrap();
+    assert!(record.revoked, "and on the server");
+}
+
+#[test]
+fn several_edits_made_apart_each_meet_the_conflict_not_each_other() {
+    let mut server = Server::default();
+    let (here, mine, there, theirs) = linked(&mut server);
+    let first = memory::write(&here.store, &mine, "Use bun.").unwrap();
+    here.sync(&mut server);
+    there.sync(&mut server);
+    let other = there.note(&theirs, "Use bun.").id;
+
+    memory::edit(&here.store, &first, "Use bun 1.3.").unwrap();
+    memory::edit(&there.store, &other, "Use bun, not npm.").unwrap();
+    memory::edit(&there.store, &other, "Use bun, never npm.").unwrap();
+    here.sync(&mut server);
+    there.sync(&mut server);
+    here.sync(&mut server);
+
+    for (host, id) in [(&here, &first), (&there, &other)] {
+        let note = host.store.memory_entry(id).unwrap().unwrap();
+        assert_eq!(
+            note.text, "Use bun 1.3.",
+            "the first to reach the server stands"
+        );
+        assert_eq!(
+            note.conflict.map(|c| c.text).as_deref(),
+            Some("Use bun, never npm."),
+            "and the other's latest waits beside it"
+        );
+    }
+}
+
+#[test]
+fn a_conflict_that_meets_a_newer_text_on_its_way_up_keeps_this_hosts_text() {
+    let mut server = Server::default();
+    let (here, mine, there, theirs) = linked(&mut server);
+    let first = memory::write(&here.store, &mine, "Use bun.").unwrap();
+    here.sync(&mut server);
+    there.sync(&mut server);
+    let other = there.note(&theirs, "Use bun.").id;
+
+    memory::edit(&here.store, &first, "Use bun 1.3.").unwrap();
+    memory::edit(&there.store, &other, "Use bun, not npm.").unwrap();
+    here.sync(&mut server);
+    // There's edit meets here's: it takes here's text and queues its own beside it...
+    assert!(there.push_once(&mut server));
+    assert_eq!(
+        there.store.memory_entry(&other).unwrap().unwrap().text,
+        "Use bun 1.3."
+    );
+    // ...and before that goes up, here edits again.
+    memory::edit(&here.store, &first, "Use bun 1.4.").unwrap();
+    here.sync(&mut server);
+    there.sync(&mut server);
+    here.sync(&mut server);
+
+    for (host, id) in [(&here, &first), (&there, &other)] {
+        let note = host.store.memory_entry(id).unwrap().unwrap();
+        assert_eq!(note.text, "Use bun 1.4.");
+        assert_eq!(
+            note.conflict.map(|c| c.text).as_deref(),
+            Some("Use bun, not npm."),
+            "there's text still waits, on both"
+        );
+    }
+}
+
+#[test]
 fn linking_takes_the_same_note_as_one_and_sends_the_rest() {
     let mut server = Server::default();
     let here = Host::new("host-here", "Workstation");
@@ -437,10 +539,7 @@ fn a_project_that_does_not_sync_sends_no_notes() {
     here.sync(&mut server);
     memory::write(&here.store, &other, "Gadgets are private.").unwrap();
     assert!(here.store.sync_outbox(100).unwrap().is_empty());
-    assert!(server
-        .records
-        .values()
-        .all(|r| r.kind != remote_proto::sync::RecordKind::Note));
+    assert!(server.records.values().all(|r| r.kind != RecordKind::Note));
 }
 
 /// Every `Store` method that writes a note, and how it reaches the outbox. A method added

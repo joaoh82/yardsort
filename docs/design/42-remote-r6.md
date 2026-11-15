@@ -506,9 +506,10 @@ conflict, settles}` at schema 1: the local workspace and run never go. Revoked i
   from elsewhere is cited "from the user, on Build box", in the view and in an agent's first
   message.
 - **`yardsort-host memory`**: `list`, `write`, `approve`, `reject`, `revoke`, `restore`, `edit`
-  and `settle`, through the running host, which wakes its loop. All but `list` are behind `pair`'s
-  guard, so on a computer with no screen too, no agent approves its own proposal. `ys` gains
-  nothing.
+  and `settle`, through the running host, which wakes its loop. All of them are behind `pair`'s
+  guard, `list` too, since it shows every state whether the project shares its memory or not: on a
+  computer with no screen too, no agent approves its own proposal or reads more than `ys memory`
+  gives it. `ys` gains nothing.
 - **The preview** of turning sync on counts the approved notes that go with it, in the window and
   in `yardsort-host sync on`.
 
@@ -538,17 +539,31 @@ conflict, settles}` at schema 1: the local workspace and run never go. Revoked i
 - **A pass pushes again** after a project's first snapshot, so a link sends this host's notes at
   once, and pushes at most 20 times, since an answer can queue another op.
 
+**What its review settled** (#262):
+
+- **One op per record in a push.** An op's base is the revision the op before it makes, so it goes
+  only once that one is answered (`sync_batch`). Sent together, a second offline edit applied
+  against a revision another host had made, a revoke's, and restored the note when the first was
+  answered with a conflict.
+- **A conflict this host published can itself meet a newer text.** Its own text is then the one it
+  set beside the other, not the note's text here, so that is what goes beside the newer one; the
+  text that stood here before is kept in the history.
+- **`memory list` is behind the guard too.** It shows candidates and rejected notes, and a project's
+  notes whether it shares them with its agents or not, which `ys memory` does not.
+
 **Its tests.** `crates/core/src/sync/note_tests.rs`, 6, two stores through a stand-in that keeps
 the server's rules: a note arriving approved and cited, its history with it, nothing echoed, a
 candidate and a rejected note staying, a candidate approved later going; two edits apart, the same
 conflict on both, agents getting the standing text, and two settles at once settled once; a revoke
 winning over an edit made meanwhile, the edit in the history, the revoke recorded there, and a
 restore going everywhere; linking taking the same text as one note and sending the rest; a
-project that does not sync sending nothing; and the list of methods that write notes. Each of the
+project that does not sync sending nothing; and the list of methods that write notes. Three more
+from the review: two offline edits never undoing a revoke made meanwhile, nor meeting each other
+rather than the other host's edit, and a published conflict that meets a newer text keeping this
+host's; the first two fail without one op per record, the third without its fix. Each of the
 settle-once, revoke-wins and same-text rules was checked to fail its test without it.
 `crates/remote-host/tests/sync.rs` gains a link sending this host's notes in the same pass, which
-fails without the second push. `yardsort-host`'s control test pins the memory asks as guarded and
-`list` as not. The Memory view's tests, 2 more: both texts shown apart from Approved, each settle
+fails without the second push. `yardsort-host`'s control test pins every memory ask as guarded. The Memory view's tests, 2 more: both texts shown apart from Approved, each settle
 sent as chosen, Revoke, and the view reading again when another computer settles it.
 
 **Its smoke test.** `.yardsort/tests/sync-memory.yaml`, two throwaway `yardsort-host` profiles on the
@@ -560,7 +575,7 @@ to go up, and a shell that is not a terminal cannot approve it. Both unplugged, 
 note, each has one op waiting; plugged back in, the same text stands on both with the other beside
 it; settled on the second with `--other`, both end with that text and no conflict. Then the first
 revokes while the second, unplugged, edits: plugged back in, revoked on both, and nothing left to
-go up. Passed on 2026-11-15 with its steps run by hand, all 24, and no note's text was in the
+go up. Passed on 2026-11-15 with its steps run by hand, all 24, and again after its review, all 25 with the step it added, and no note's text was in the
 stand-in's log or either host's. Like the others, it waits for the owner's approval in the app
 before `ys test run` runs it.
 

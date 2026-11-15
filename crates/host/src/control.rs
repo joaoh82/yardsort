@@ -63,7 +63,9 @@ pub enum Ask {
     SyncRemove {
         project: String,
     },
-    /// A project's memory, every note in every state.
+    /// A project's memory, every note in every state, shared with its agents or not. Refused
+    /// unless a person at a terminal asked: an agent reads only `ys memory`'s approved, shared
+    /// notes.
     MemoryList {
         project: String,
     },
@@ -102,6 +104,7 @@ impl Ask {
                 | Ask::SyncLink { .. }
                 | Ask::SyncStop { .. }
                 | Ask::SyncRemove { .. }
+                | Ask::MemoryList { .. }
                 | Ask::MemoryWrite { .. }
                 | Ask::MemoryDecide { .. }
                 | Ask::MemoryEdit { .. }
@@ -352,7 +355,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_reading_sync_and_memory_is_left_unguarded() {
+    fn only_reading_sync_is_left_unguarded_and_all_of_memory_is_guarded() {
         let project = || "widgets".to_owned();
         for ask in [
             Ask::Pair,
@@ -367,6 +370,7 @@ mod tests {
             assert!(ask.guarded(), "{ask:?}");
         }
         for ask in [
+            Ask::MemoryList { project: project() },
             Ask::MemoryWrite {
                 project: project(),
                 text: "Use bun.".into(),
@@ -387,11 +391,7 @@ mod tests {
         ] {
             assert!(ask.guarded(), "{ask:?}");
         }
-        for ask in [
-            Ask::SyncStatus,
-            Ask::SyncPreview { project: project() },
-            Ask::MemoryList { project: project() },
-        ] {
+        for ask in [Ask::SyncStatus, Ask::SyncPreview { project: project() }] {
             assert!(!ask.guarded(), "{ask:?}");
         }
     }

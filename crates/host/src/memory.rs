@@ -1,7 +1,8 @@
 //! `yardsort-host memory`, the running host's side: a project's notes, and the operator's own
 //! decisions about them, which reach the account's other hosts when the project syncs. The rules
-//! are `yardsort_core::memory`, the same as the desktop's Memory view. Every act is behind the
-//! guard (`guard`), as `pair` is, so no agent approves its own proposal; only `list` is not.
+//! are `yardsort_core::memory`, the same as the desktop's Memory view. All of it is behind the
+//! guard (`guard`), as `pair` is: no agent approves its own proposal, and none reads more than
+//! `ys memory` gives it, the approved notes of a project that shares them.
 
 use std::sync::Arc;
 

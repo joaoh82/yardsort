@@ -261,7 +261,7 @@ async fn push(home: &impl Home, client: &Client, access: &Secret) -> Result<bool
     let store = home.store();
     let mut changed = false;
     for _ in 0..MAX_PUSHES {
-        let waiting = store.sync_outbox(MAX_PUSH_OPS).map_err(store_failed)?;
+        let waiting = store.sync_batch(MAX_PUSH_OPS).map_err(store_failed)?;
         let mut ops = Vec::new();
         let mut size = 64;
         for op in waiting {

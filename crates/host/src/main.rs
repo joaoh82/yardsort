@@ -149,8 +149,9 @@ mod cli {
         },
     }
 
-    /// Every one but `list` only from a terminal on this computer that no agent runs in, so an
-    /// agent never approves its own proposal. Notes are named by the id `list` shows.
+    /// Only from a terminal on this computer that no agent runs in, so an agent never approves
+    /// its own proposal, nor reads more than `ys memory` gives it. Notes are named by the id
+    /// `list` shows.
     #[derive(Subcommand)]
     enum Memory {
         /// A project's notes: waiting, approved, set aside, and any two computers changed at once.

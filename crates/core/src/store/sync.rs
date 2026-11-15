@@ -350,6 +350,23 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Up to `limit` ops to push now, oldest first: the oldest waiting for each record, and none
+    /// after it. The next op on a record is made against the revision the one before it makes, so
+    /// it goes only once that one is answered; sent together, a later one could apply against a
+    /// revision another host made, a revoke included, after the one before it was refused.
+    pub fn sync_batch(&self, limit: usize) -> StoreResult<Vec<SyncOp>> {
+        let conn = self.conn();
+        let mut statement = conn.prepare(&format!(
+            "SELECT {OP_COLUMNS} FROM sync_outbox o
+             WHERE refused IS NULL
+               AND seq = (SELECT MIN(seq) FROM sync_outbox
+                          WHERE sync_id = o.sync_id AND refused IS NULL)
+             ORDER BY seq LIMIT ?"
+        ))?;
+        let rows = statement.query_map([limit as i64], op_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Ops waiting to go up, refused ones included.
     pub fn sync_waiting(&self) -> StoreResult<usize> {
         Ok(self
@@ -1074,10 +1091,18 @@ fn note_conflict(
         let rows = statement.query_map([op.id.as_str()], op_row)?;
         rows.collect::<rusqlite::Result<_>>()?
     };
-    let settles = dropped.iter().rev().find_map(|op| {
-        let body: NoteBody = serde_json::from_value(op.body.clone()?).ok()?;
-        body.settles
-    });
+    let bodies: Vec<NoteBody> = dropped
+        .iter()
+        .filter_map(|op| serde_json::from_value(op.body.clone()?).ok())
+        .collect();
+    let settles = bodies.iter().rev().find_map(|body| body.settles.clone());
+    // The conflicts this host published, its own text beside another's: a body with one that does
+    // not settle anything is only ever sent by the host whose edit lost.
+    let published: Vec<String> = bodies
+        .iter()
+        .filter(|body| body.settles.is_none())
+        .filter_map(|body| body.conflict.as_ref().map(|c| c.id.clone()))
+        .collect();
     tx.execute(
         "DELETE FROM sync_outbox WHERE sync_id = ? AND refused IS NULL",
         [op.id.as_str()],
@@ -1134,23 +1159,38 @@ fn note_conflict(
         }
         return Ok(false);
     }
-    if theirs.text == local.text && theirs.conflict.is_none() && local.conflict.is_none() {
+    // This host's text: its own edit, or, while the conflict it published is on its way, the text
+    // it set beside another's, which is not the note's own here.
+    let mine = match local.conflict.as_ref() {
+        Some(open) if published.contains(&open.id) => open.text.clone(),
+        _ => local.text.clone(),
+    };
+    if theirs.text == mine {
         // The same text both ways: nothing to settle.
         apply_note(tx, &row.local_id, current, &theirs)?;
-        return Ok(false);
+        return Ok(local.conflict.is_some() || theirs.conflict.is_some());
+    }
+    if theirs.conflict.as_ref().is_some_and(|c| c.text == mine) {
+        // Already beside it there.
+        apply_note(tx, &row.local_id, current, &theirs)?;
+        return Ok(true);
     }
     // Two texts: theirs stands, and this host's goes beside it, here and on every host.
     let Some((_, here)) = this_host(tx)? else {
         return Ok(false);
     };
     apply_note(tx, &row.local_id, current, &theirs)?;
-    if let Some(waiting) = theirs.conflict.as_ref().filter(|c| c.text != local.text) {
+    if let Some(waiting) = theirs.conflict.as_ref() {
         // A third text while one waits: the one waiting is kept in the history.
         keep_replaced(tx, &row.local_id, &waiting.text, now)?;
     }
+    if local.text != mine && local.text != theirs.text {
+        // The text that stood here before is replaced too: kept in the history.
+        keep_replaced(tx, &row.local_id, &local.text, now)?;
+    }
     let conflict = NoteConflict {
         id: new_id(),
-        text: local.text,
+        text: mine,
         from: here,
         at: now,
     };
