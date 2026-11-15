@@ -5,6 +5,8 @@
 //   bun .yardsort/tests/support/host.ts <run dir> sign-in <name>
 //   bun .yardsort/tests/support/host.ts <run dir> pair [watching | window <port> [v|t]]
 //
+// It signs in to the stand-in, or to `YS_SERVER` when set: a cable to it (cable.ts), say.
+//
 // The pretend phone is let watch and type, or with `watching` only watch. With `window`, the app's
 // window is the device that asks, through its inspector on `port`. It asks to watch and type, as
 // the phone does, and is let watch (`v`, the default) or type too (`t`).
@@ -16,8 +18,9 @@ import { join } from "node:path";
 
 const [dir, doing, named, port, answer] = process.argv.slice(2);
 const HOST = ["sh", ".yardsort/tests/support/headless.sh", "yardsort-host"];
-const server = JSON.parse(readFileSync(join(dir, "stand-in.json"), "utf8").split("\n")[0]).ready
-  .server;
+const server =
+  process.env.YS_SERVER ??
+  JSON.parse(readFileSync(join(dir, "stand-in.json"), "utf8").split("\n")[0]).ready.server;
 
 /** This run's environment without a launched session's markers: the operator's own terminal. */
 function own(): Record<string, string> {

@@ -79,6 +79,11 @@ impl AppHome {
     }
 }
 
+/// Something sync carries changed here, as a note did: run a pass, when Remote is on.
+pub(crate) fn wake_sync(app: &AppHandle) {
+    remote_host::sync::wake(&AppHome::new(app));
+}
+
 impl Home for AppHome {
     fn remote(&self) -> &Remote {
         &self.state().remote.account

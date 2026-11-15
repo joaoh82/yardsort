@@ -10,7 +10,9 @@ use remote_proto::sync::SyncId;
 use serde::Serialize;
 use specta::Type;
 use tauri::AppHandle;
-use yardsort_core::sync::{project_hint, project_sync, same_remote, ProjectSync, SyncPreview};
+use yardsort_core::sync::{
+    approved_notes, project_hint, project_sync, same_remote, ProjectSync, SyncPreview,
+};
 
 use super::{ipc, store_failed, AppHome};
 use crate::error::{IpcError, IpcResult};
@@ -55,9 +57,11 @@ fn status(state: &AppState, project_id: &str) -> IpcResult<ProjectSyncStatus> {
         .map_err(store_failed)?
         .ok_or_else(|| IpcError::new("sync_refused", "There is no such project."))?;
     let remote_on = store.remote_host().map_err(store_failed)?.is_some();
+    let notes = approved_notes(store, project_id).map_err(store_failed)?;
     let sync = project_sync(store, project_id, remote_on, || SyncPreview {
         remote: hint(state, &project.root_path),
         name: project.name.clone(),
+        notes,
     })
     .map_err(store_failed)?;
     let pass = store.sync_state().map_err(store_failed)?;

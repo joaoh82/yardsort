@@ -9,7 +9,9 @@ use remote_host::account::{self, Failure};
 use remote_host::sync::{self, Loop};
 use remote_proto::sync::SyncId;
 use yardsort_core::store::ProjectRow;
-use yardsort_core::sync::{project_hint, project_sync, same_remote, ProjectSync, SyncPreview};
+use yardsort_core::sync::{
+    approved_notes, project_hint, project_sync, same_remote, ProjectSync, SyncPreview,
+};
 
 use crate::control::{Offered, Reply, SyncStatus, SyncedProject};
 use crate::home::HostHome;
@@ -23,7 +25,7 @@ fn store_failed(error: impl std::fmt::Display) -> Failure {
 }
 
 /// A project here, by its name (any case) or its id.
-fn project(home: &HostHome, named: &str) -> account::Result<ProjectRow> {
+pub(crate) fn project(home: &HostHome, named: &str) -> account::Result<ProjectRow> {
     let projects = home.store.projects().map_err(store_failed)?;
     let wanted = named.to_lowercase();
     let found: Vec<&ProjectRow> = projects
@@ -60,9 +62,11 @@ pub fn preview(home: &Arc<HostHome>, named: &str) -> account::Result<Reply> {
         return Err(refused(format!("{} syncs already.", project.name)));
     }
     let remote = hint(home, &project);
+    let notes = approved_notes(&home.store, &project.id).map_err(store_failed)?;
     Ok(Reply::Preview(SyncPreview {
         name: project.name,
         remote,
+        notes,
     }))
 }
 

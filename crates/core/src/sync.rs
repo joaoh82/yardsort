@@ -5,11 +5,13 @@
 //!
 //! A project syncs only where the person turned it on or linked it, at that machine. What goes
 //! up for it is its name and its fetch remote's address without any user or password, as a hint
-//! for linking it elsewhere; never its path, and no hint at all for a remote on this disk.
+//! for linking it elsewhere; never its path, and no hint at all for a remote on this disk. With it
+//! go its approved and revoked notes ([`NoteBody`]), never a candidate or a rejected one, so a
+//! note reaches another host's agents only once the person approved it.
 
 use std::path::Path;
 
-use remote_proto::sync::{Action, RecordKind, SyncRecord};
+use remote_proto::sync::{Action, RecordKind, SyncRecord, MAX_RECORD_BODY, SYNC_SCHEMA};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -34,6 +36,91 @@ impl ProjectBody {
     /// What a synced project's record says, when it says it in a way this version reads.
     pub fn of(record: &SyncRecord) -> Option<Self> {
         serde_json::from_value(record.body.clone()?).ok()
+    }
+}
+
+/// What an approved or revoked note's record says. Schema 1. Whether it is revoked is the
+/// record's own flag, not the body's: a revoke carries no body, and keeps the one before it.
+///
+/// Never a candidate or a rejected note, and never the local workspace or run: a note's source
+/// on another host is its names alone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteBody {
+    pub text: String,
+    /// `user` or `agent`.
+    pub author: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// The host it was written or approved on: its id, and its name as shown.
+    pub origin: String,
+    pub from: String,
+    pub created_at: i64,
+    /// Who did what, oldest first, as far as it fits.
+    #[serde(default)]
+    pub history: Vec<NoteHistory>,
+    /// The other text of two edited at once, until the person settles it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conflict: Option<NoteConflict>,
+    /// The conflict this text settles, so a second host settling it too yields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settles: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteHistory {
+    pub at: i64,
+    pub action: String,
+    pub by: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteConflict {
+    pub id: String,
+    pub text: String,
+    pub from: String,
+    pub at: i64,
+}
+
+/// The history actions and authors the local table holds; a line with any other is left out.
+const HISTORY_ACTIONS: &[&str] = &[
+    "proposed", "written", "approved", "edited", "rejected", "revoked", "restored",
+];
+
+impl NoteHistory {
+    pub fn fits_here(&self) -> bool {
+        HISTORY_ACTIONS.contains(&self.action.as_str())
+            && matches!(self.by.as_str(), "user" | "agent")
+    }
+}
+
+impl NoteBody {
+    /// As JSON, its oldest history lines dropped until it fits in a record.
+    pub fn to_value(&self) -> serde_json::Value {
+        let mut body = self.clone();
+        loop {
+            let value = serde_json::to_value(&body).expect("a note body is JSON");
+            let size = serde_json::to_vec(&value).map_or(usize::MAX, |b| b.len());
+            if size <= MAX_RECORD_BODY || body.history.is_empty() {
+                return value;
+            }
+            body.history.remove(0);
+        }
+    }
+
+    /// What a synced note's record says, when it says it in a way this version reads.
+    pub fn of(record: &SyncRecord) -> Option<Self> {
+        if record.schema > SYNC_SCHEMA {
+            return None;
+        }
+        let body: Self = serde_json::from_value(record.body.clone()?).ok()?;
+        matches!(body.author.as_str(), "user" | "agent").then_some(body)
     }
 }
 
@@ -117,6 +204,17 @@ pub enum ProjectSync {
 pub struct SyncPreview {
     pub name: String,
     pub remote: Option<String>,
+    /// How many approved notes go up with it, each with its text and history.
+    pub notes: u32,
+}
+
+/// How many of a project's notes are approved, which turning sync on sends.
+pub fn approved_notes(store: &Store, project_id: &str) -> StoreResult<u32> {
+    Ok(store
+        .memory_entries(project_id)?
+        .iter()
+        .filter(|e| e.state == "approved")
+        .count() as u32)
 }
 
 /// How a project stands. `remote_on` is whether Remote is on here; `preview` is only read when
@@ -150,5 +248,7 @@ pub fn project_sync(
     })
 }
 
+#[cfg(test)]
+mod note_tests;
 #[cfg(test)]
 mod tests;

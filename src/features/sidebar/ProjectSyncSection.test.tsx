@@ -21,7 +21,7 @@ vi.mock("@/lib/ipc", async (original) => ({
 }));
 
 const off = (remote: string | null = "github.com/acme/demo"): ProjectSyncStatus => ({
-  sync: { state: "off", preview: { name: "demo", remote } },
+  sync: { state: "off", preview: { name: "demo", remote, notes: 2 } },
   syncedAt: null,
   problem: null,
 });
@@ -69,7 +69,11 @@ it("shows exactly what turning sync on sends, and that the server reads it", asy
   show();
   const preview = await screen.findByLabelText("What turning sync on sends");
   const values = within(preview).getAllByRole("definition");
-  expect(values.map((value) => value.textContent)).toEqual(["demo", "github.com/acme/demo"]);
+  expect(values.map((value) => value.textContent)).toEqual([
+    "demo",
+    "github.com/acme/demo",
+    "2 approved, each with its text and history",
+  ]);
   expect(screen.getByText(/Never its files, path or terminals/)).toBeInTheDocument();
   expect(
     screen.getByText("The server keeps these in plain text, readable by whoever runs it."),

@@ -25,6 +25,8 @@ import {
   type MemoryCheck,
   type MemoryDecision,
   type MemoryEntry,
+  type MemoryEntryConflict,
+  type MemorySettle,
   type MemoryWaiting,
   type ProjectMemory,
   type ProjectOutcomes,
@@ -273,6 +275,8 @@ export type {
   MemoryCheck,
   MemoryDecision,
   MemoryEntry,
+  MemoryEntryConflict,
+  MemorySettle,
   MemoryWaiting,
   ProjectMemory,
   ProjectOutcomes,
@@ -986,6 +990,8 @@ export const ipc = {
   memoryEdit: (id: string, text: string) => unwrap(commands.memoryEdit(id, text)),
   memoryDecide: (id: string, decision: MemoryDecision) =>
     unwrap(commands.memoryDecide(id, decision)),
+  /** Settle a synced note two hosts changed at once: keep one of the texts, or write a third. */
+  memorySettle: (id: string, how: MemorySettle) => unwrap(commands.memorySettle(id, how)),
   /** Whether a project's approved entries go into its agents' first messages. */
   memoryShare: (projectId: string, shared: boolean) =>
     unwrap(commands.memoryShare(projectId, shared)),
