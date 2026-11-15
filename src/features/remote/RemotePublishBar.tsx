@@ -46,10 +46,13 @@ export function RemotePublishBar({
   const [opened, setOpened] = useState<string | null>(null);
   const [method, setMethod] = useState<OtherMergeMethod>("squash");
 
-  // The forge is asked when the bar opens and after what moves it; a reading in between asks
-  // Git alone, and keeps what the forge last said about the pull request.
+  // The forge is asked when the bar opens and after what moves it, done or refused; a reading in
+  // between asks Git alone, and keeps what the forge last said about the pull request. So does
+  // one the forge did not answer: that says nothing about the pull request, not that it is gone.
   const take = (next: OtherPublishState, forge: boolean) =>
-    setState((before) => (forge ? next : { ...next, pullRequest: before?.pullRequest ?? null }));
+    setState((before) =>
+      forge && !next.problem ? next : { ...next, pullRequest: before?.pullRequest ?? null },
+    );
   const read = (forge: boolean) =>
     ipc.otherHostPublishState(hostId, workspaceId, forge).then(
       (next) => take(next, forge),
@@ -89,8 +92,14 @@ export function RemotePublishBar({
       return true;
     } catch (reason) {
       setError(errorMessage(reason));
-      // It may have been done all the same: what the workspace says now is what counts.
-      await read(false);
+      // It may have been done all the same, and a refusal can mean the forge has moved on: a pull
+      // request pushed to since it was read is refused at the commit shown here until the forge
+      // is read again. So this asks what the press would have asked, and leaves why it was
+      // refused in view whether or not that reading arrives.
+      await ipc.otherHostPublishState(hostId, workspaceId, forge).then(
+        (next) => take(next, forge),
+        () => {},
+      );
       onChanged();
       return false;
     } finally {

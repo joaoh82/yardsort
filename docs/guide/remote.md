@@ -339,7 +339,10 @@ has Yardsort 0.35.0:
 Each of these is one press of yours. Nothing commits, pushes or merges by itself, nothing is
 offered to an agent, and nothing is tried again when an answer is lost: the bar then says it may
 have been done, and reads how the workspace stands. The forge is asked about the pull request when
-the bar opens and after a push, an open or a merge, not at every reading.
+the bar opens and after a push, an open or a merge, whether it was done or refused, not at every
+reading. So a merge refused because the pull request was pushed to meanwhile shows the pull
+request as it is now, and **Merge…** then asks about that commit. If the forge does not answer,
+the bar says so and keeps what it last said.
 
 **Who has control.** A terminal there shows what it shows on that computer, at its size there, and
 the bar says who has control: nobody, the person at that computer, or a device by its name. Watching

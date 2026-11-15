@@ -596,7 +596,10 @@ the host's is a smaller one written for the core, which `yardsort-host` has too.
   remote's address. A device gets a sentence the host wrote for each kind it can tell apart: the
   remote has commits the branch lacks, a rule there refuses the push, the host's sign-in was not
   accepted, nothing to commit, a hook refused the commit, the pull request exists, it changed.
-- **The forge is asked only when told to.** A reading in between asks Git alone.
+- **The forge is asked only when told to.** A reading in between asks Git alone. The window asks
+  it after a push, an open or a merge, refused ones too: a pull request pushed to since the bar
+  read it is refused at the commit shown, and only the forge can say the new one. When the forge
+  does not answer, the window keeps the pull request it last heard of rather than dropping it.
 - **A remote is read as its configuration names it**, so a host that rewrites addresses still
   knows which forge it is on.
 
@@ -664,5 +667,12 @@ keep it from happening again: the remote is under a name reserved for tests, whi
 reach; the host in the test is started with a shell that reads no startup files; and a step stops
 the run unless the stand-in was the one asked, before anything is asked to be created. Any later
 smoke test that has a host ask a forge needs the same three.
+
+**Found in review of the pull request (#266), 2026-11-15.** After a merge refused because the
+pull request had moved, the bar read Git alone and kept the forge's old answer, so every later
+press sent the same old commit and was refused again, with no way out but opening the workspace
+again. The bar now asks the forge after a refused press as it does after a done one, and two unit
+tests cover it: the next merge is at the commit the forge has now, and a forge that does not
+answer leaves the pull request in view.
 
 Not run: macOS and Windows, a second real computer, and a real forge on purpose.

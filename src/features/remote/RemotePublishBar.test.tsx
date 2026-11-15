@@ -224,6 +224,64 @@ describe("a pull request on another computer", () => {
     expect(within(bar).queryByRole("button", { name: "Merge…" })).toBeNull();
   });
 
+  it("reads the forge again after a refused merge, so the next one is at the commit there now", async () => {
+    const { bar } = await open(standing({ pushed: true, pullRequest: request() }));
+    const line = within(bar).getByRole("group", { name: "Pull request #7" });
+    // Someone pushed to it since the bar read it: that computer refuses the commit shown here.
+    const NEWER = "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b";
+    core.otherHostMergePullRequest.mockRejectedValueOnce({
+      code: "pull_request_changed",
+      message: "The pull request changed since it was shown. Read it again.",
+    });
+    core.otherHostPublishState.mockResolvedValue(
+      standing({ pushed: true, pullRequest: request({ headOid: NEWER }) }),
+    );
+    native.confirm.mockResolvedValue(true);
+    await userEvent.click(within(line).getByRole("button", { name: "Merge…" }));
+    expect(await within(bar).findByRole("alert")).toHaveTextContent("changed since it was shown");
+    expect(core.otherHostPublishState).toHaveBeenLastCalledWith("h-1", "w-1", true);
+    // The same press again asks about, and sends, the commit the forge has now.
+    core.otherHostMergePullRequest.mockResolvedValue(undefined);
+    await userEvent.click(within(line).getByRole("button", { name: "Merge…" }));
+    await vi.waitFor(() =>
+      expect(core.otherHostMergePullRequest).toHaveBeenLastCalledWith(
+        "h-1",
+        "w-1",
+        7,
+        NEWER,
+        "squash",
+      ),
+    );
+    expect(native.confirm.mock.calls.at(-1)![0]).toContain("9a8b7c6");
+    expect(core.otherHostMergePullRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the pull request in view when the forge does not answer after a refusal", async () => {
+    const { bar } = await open(standing({ pushed: true, pullRequest: request() }));
+    const line = within(bar).getByRole("group", { name: "Pull request #7" });
+    core.otherHostMergePullRequest.mockRejectedValueOnce({
+      code: "forge_unreachable",
+      message: "The forge did not answer that computer just now, so nothing was merged.",
+    });
+    // Asked again, the forge still does not answer: that computer says so, and names no request.
+    core.otherHostPublishState.mockResolvedValue(
+      standing({
+        pushed: true,
+        pullRequest: null,
+        problem: "The forge did not answer that computer just now.",
+      }),
+    );
+    native.confirm.mockResolvedValue(true);
+    await userEvent.click(within(line).getByRole("button", { name: "Merge…" }));
+    expect(await within(bar).findByRole("alert")).toHaveTextContent("nothing was merged");
+    await vi.waitFor(() =>
+      expect(bar).toHaveTextContent("The forge did not answer that computer just now."),
+    );
+    // What the forge last said stays, and with it the way to try again.
+    expect(within(bar).getByRole("group", { name: "Pull request #7" })).toBeInTheDocument();
+    expect(within(bar).getByRole("button", { name: "Merge…" })).toBeEnabled();
+  });
+
   it.each([
     ["a draft", request({ draft: true })],
     ["one with conflicts", request({ conflicting: true })],
