@@ -3,6 +3,16 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## 0.35.0
+
+- **One line installs the headless host on a Linux server.** `install.sh` takes the newest
+  release's tarball, puts `yardsort-host` and `ys` in place for one user with the systemd service,
+  and prints the sign-ins that are left. Run as root with `--user`, as a new cloud server's first
+  boot does, it makes the user too. Run again, it upgrades. The guide also says how to give that
+  computer git and GitHub, and how to hand it less than your whole account. See
+  [Installing](docs/guide/headless-host.md#installing) and
+  [Git and GitHub](docs/guide/headless-host.md#git-and-github).
+
 ## 0.34.1
 
 - **New workspaces are named after what the work is about.** The composer shows the name before

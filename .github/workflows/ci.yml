@@ -180,6 +180,19 @@ jobs:
           # The newest glibc it needs: the oldest distribution it runs on must have this one.
           objdump -T "$bin/yardsort-host" "$bin/ys" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
 
+      # The one line the guide gives for a new server, against this tarball rather than a release's.
+      - name: The install script installs it for a user
+        run: |
+          version="$(basename "$TARBALL" | sed 's/^yardsort-host-\(.*\)-linux-.*$/\1/')"
+          mkdir -p "releases/download/v$version" && cp "$TARBALL" "releases/download/v$version/"
+          home="$(mktemp -d)"
+          env -i HOME="$home" PATH=/usr/bin:/bin YARDSORT_HOST_RELEASES="file://$PWD/releases" \
+            sh crates/host/packaging/install.sh --version "$version"
+          for program in yardsort-host ys; do
+            env -i HOME="$home" PATH=/usr/bin:/bin "$home/.local/bin/$program" --version | grep -F "$version"
+          done
+          test -f "$home/.config/systemd/user/yardsort-host.service"
+
       - uses: oven-sh/setup-bun@v2
         if: matrix.arch == 'x86_64'
         with:
