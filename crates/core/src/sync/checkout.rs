@@ -58,7 +58,10 @@ pub fn prepare_branch(git: &Git, root: &Path, branch: &str, host: &str) -> IpcRe
         git.branch_create(root, branch, &tracking, true)?;
         return Ok(Branch::Made);
     }
-    let own = git.commits_between(root, &tracking, branch)?;
+    // The branch by its full name: a tag of the same name would otherwise be read in its place,
+    // and a branch with commits of its own taken for one that is only behind.
+    let local = format!("refs/heads/{branch}");
+    let own = git.commits_between(root, &tracking, &local)?;
     if own > 0 {
         return Err(IpcError::new(
             "branch_diverged",
@@ -69,7 +72,7 @@ pub fn prepare_branch(git: &Git, root: &Path, branch: &str, host: &str) -> IpcRe
             ),
         ));
     }
-    if git.commits_between(root, branch, &tracking)? > 0 {
+    if git.commits_between(root, &local, &tracking)? > 0 {
         git.branch_move(root, branch, &tracking)?;
         return Ok(Branch::MovedUp);
     }

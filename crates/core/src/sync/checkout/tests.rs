@@ -265,6 +265,28 @@ fn a_branch_here_with_work_the_remote_has_not_is_refused_and_left_as_it_is() {
 }
 
 #[test]
+fn a_tag_of_the_same_name_does_not_hide_the_branchs_own_commits() {
+    let fx = here();
+    fx.push_from_elsewhere("ys/fix-login", "login.txt");
+    fx.run(&fx.root, &["fetch", "-q", "origin"]);
+    // A tag where the two last agreed, then a commit only here, then a newer one there.
+    fx.run(&fx.root, &["tag", "ys/fix-login", "origin/ys/fix-login"]);
+    fx.run(
+        &fx.root,
+        &["branch", "-q", "ys/fix-login", "origin/ys/fix-login"],
+    );
+    fx.run(&fx.root, &["checkout", "-q", "ys/fix-login"]);
+    fx.run(&fx.root, &["commit", "-q", "--allow-empty", "-m", "mine"]);
+    fx.run(&fx.root, &["checkout", "-q", "main"]);
+    let mine = fx.head("refs/heads/ys/fix-login");
+    fx.push_from_elsewhere("ys/fix-login", "more.txt");
+
+    let refused = check_out_here(&fx.workspaces(), &fx.project, SYNCED).unwrap_err();
+    assert_eq!(refused.code, "branch_diverged", "{refused:?}");
+    assert_eq!(fx.head("refs/heads/ys/fix-login"), mine, "not moved");
+}
+
+#[test]
 fn a_branch_here_that_is_only_behind_is_moved_up_to_the_remotes() {
     let fx = here();
     fx.push_from_elsewhere("ys/fix-login", "login.txt");

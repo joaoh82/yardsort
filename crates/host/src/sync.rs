@@ -8,7 +8,7 @@ use std::sync::Arc;
 use remote_host::account::{self, Failure};
 use remote_host::sync::{self, Loop};
 use remote_proto::sync::SyncId;
-use yardsort_core::store::ProjectRow;
+use yardsort_core::store::{ProjectRow, SyncedWorkspaceRow};
 use yardsort_core::sync::{
     approved_notes, project_hint, project_sync, same_remote, synced_workspace_count, ProjectSync,
     SyncPreview,
@@ -238,6 +238,37 @@ fn short(id: &SyncId) -> String {
     id.as_str()[..8].to_owned()
 }
 
+/// The one of the other computers' workspaces `wanted` names: by its name, any case, or the start
+/// of its id, at least four characters. Two of one name are told apart by the computer and id each
+/// is on, which `ys sync status` shows too.
+fn pick<'a>(
+    elsewhere: &'a [SyncedWorkspaceRow],
+    wanted: &str,
+    project: &str,
+) -> Result<&'a SyncedWorkspaceRow, String> {
+    let lower = wanted.to_lowercase();
+    let found: Vec<_> = elsewhere
+        .iter()
+        .filter(|w| {
+            w.name.to_lowercase() == lower || (lower.len() >= 4 && w.id.starts_with(&lower))
+        })
+        .collect();
+    match found.as_slice() {
+        [one] => Ok(*one),
+        [] => Err(format!(
+            "None of your other computers has a workspace {wanted:?} in {project}. See `ys sync status`."
+        )),
+        many => Err(format!(
+            "More than one of your other computers has a workspace {wanted:?}: {}. Give the start of \
+             the one's id instead.",
+            many.iter()
+                .map(|w| format!("{} on {} ({})", w.name, w.host, &w.id[..8.min(w.id.len())]))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
 /// Check out here a workspace another computer has: its branch, fetched, and a workspace on it.
 pub fn check_out(home: &Arc<HostHome>, named: &str, workspace: &str) -> account::Result<Reply> {
     let project = project(home, named)?;
@@ -245,27 +276,7 @@ pub fn check_out(home: &Arc<HostHome>, named: &str, workspace: &str) -> account:
         .store
         .synced_workspaces(&project.id)
         .map_err(store_failed)?;
-    let wanted = workspace.to_lowercase();
-    let found: Vec<_> = elsewhere
-        .iter()
-        .filter(|w| {
-            w.name.to_lowercase() == wanted || (wanted.len() >= 4 && w.id.starts_with(&wanted))
-        })
-        .collect();
-    let one = match found.as_slice() {
-        [one] => *one,
-        [] => {
-            return Err(refused(format!(
-                "None of your other computers has a workspace {workspace:?} in {}. See `ys sync status`.",
-                project.name
-            )))
-        }
-        _ => {
-            return Err(refused(format!(
-                "More than one of your other computers has a workspace {workspace:?}. Use the start of its id."
-            )))
-        }
-    };
+    let one = pick(&elsewhere, workspace, &project.name).map_err(refused)?;
     let env = home.env();
     let settings = home.settings.get();
     let git = home
@@ -299,4 +310,57 @@ pub fn check_out(home: &Arc<HostHome>, named: &str, workspace: &str) -> account:
             one.host
         ),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(id: &str, host: &str, name: &str) -> SyncedWorkspaceRow {
+        SyncedWorkspaceRow {
+            id: id.into(),
+            host: host.into(),
+            name: name.into(),
+            branch: Some(format!("ys/{name}")),
+            base_branch: None,
+            archived: false,
+            tasks: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn two_of_one_name_are_named_by_computer_and_id_and_either_is_picked_by_its_id() {
+        let elsewhere = [
+            row(
+                "4b3c2d1e-0f9a-4b8c-9d7e-6f5a4b3c2d1e",
+                "Build box",
+                "fix-login",
+            ),
+            row(
+                "9e8d7c6b-5a49-4382-b716-0f1e2d3c4b5a",
+                "Laptop",
+                "fix-login",
+            ),
+        ];
+        let why = pick(&elsewhere, "Fix-Login", "widgets").unwrap_err();
+        assert!(
+            why.contains("fix-login on Build box (4b3c2d1e), fix-login on Laptop (9e8d7c6b)"),
+            "{why}"
+        );
+        assert_eq!(
+            pick(&elsewhere, "9e8d7c6b", "widgets").unwrap().host,
+            "Laptop"
+        );
+        assert_eq!(
+            pick(&elsewhere, "4b3c", "widgets").unwrap().host,
+            "Build box"
+        );
+        assert!(
+            pick(&elsewhere, "4b3", "widgets").is_err(),
+            "too short to be an id"
+        );
+        assert!(pick(&elsewhere, "gone", "widgets")
+            .unwrap_err()
+            .contains("None of your other"));
+    }
 }

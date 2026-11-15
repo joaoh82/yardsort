@@ -700,12 +700,24 @@ computer's own, and only when the person asks.
 - **The new workspace is this computer's own**, synced as its own, and the other computer's record is
   untouched: both are listed on a third computer, each as its computer's.
 
-**Its tests.** `crates/core/src/sync/checkout/tests.rs`, 4, with a bare remote, the other
-computer's clone that pushes and this computer's clone: a pushed branch checked out as a workspace,
-at the pushed commit, tracking the remote's, the other's record still listed, and a second attempt
-refused; a branch here with a commit of its own refused, left where it was, no worktree made, which
+**What its review settled** (#268):
+
+- **The local branch by its full name.** Both counts of what one side has that the other has not
+  name it `refs/heads/<branch>`: a tag of the same name was otherwise read in its place, and a branch
+  with a commit of its own, taken for one only behind, moved up over that commit. `git worktree add`
+  takes the branch over such a tag, as checked by hand, so the workspace is on the branch.
+- **Two of one name are told apart.** `ys sync status` shows the start of each other computer's
+  workspace's id, in its text and its JSON, and `yardsort-host sync checkout` refusing a name two
+  have lists each with its computer and id.
+
+**Its tests.** `crates/core/src/sync/checkout/tests.rs`, 5 with one from the review: a tag of the
+branch's name where the two last agreed does not hide the branch's own commit, which fails without
+the full name. With a bare remote, the other computer's clone that pushes and this computer's
+clone: a pushed branch checked out as a workspace at the pushed commit, tracking the remote's, the
+other's record still listed, and a second attempt refused; a branch here with a commit of its own refused, left where it was, no worktree made, which
 fails without the check; a branch here that is only behind moved up; a branch never pushed refused
-with nothing made. `yardsort-host`'s control test pins `SyncCheckout` as guarded. The sidebar's
+with nothing made. `yardsort-host`'s control test pins `SyncCheckout` as guarded, and its own test
+picks between two workspaces of one name by id, after a refusal that names both. The sidebar's
 test: one button on each row and nothing done before it is pressed, a refusal shown under the row,
 and the new workspace listed after.
 

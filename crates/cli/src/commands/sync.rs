@@ -42,6 +42,9 @@ struct Project {
 
 #[derive(Serialize)]
 struct Elsewhere {
+    /// Its logical id: the start of it names it to `yardsort-host sync checkout` when two
+    /// computers have one of that name.
+    id: String,
     host: String,
     name: String,
     branch: Option<String>,
@@ -82,6 +85,7 @@ fn status(ys: &Yardsort, out: &Output) -> Result<(), Failure> {
                 .synced_workspaces(&project.id)?
                 .into_iter()
                 .map(|w| Elsewhere {
+                    id: w.id,
                     host: w.host,
                     name: w.name,
                     branch: w.branch,
@@ -121,7 +125,7 @@ fn status(ys: &Yardsort, out: &Output) -> Result<(), Failure> {
                 sayln!("On your other computers, in {}:", project.name);
                 for w in &project.elsewhere {
                     sayln!(
-                        "  {}  on {}  {}{}{}",
+                        "  {}  on {}  {}{}{}  ({})",
                         w.name,
                         w.host,
                         w.branch.as_deref().unwrap_or("no branch"),
@@ -130,7 +134,8 @@ fn status(ys: &Yardsort, out: &Output) -> Result<(), Failure> {
                         } else {
                             format!("  {}", w.tasks.join(", "))
                         },
-                        if w.archived { "  (archived)" } else { "" }
+                        if w.archived { "  (archived)" } else { "" },
+                        &w.id[..8.min(w.id.len())]
                     );
                 }
             }

@@ -343,7 +343,8 @@ does not, each by the start of its id, its name and its remote, and says which p
 the same remote; `link` takes that id or the name. Nothing is linked by itself. `--yes` skips the
 question `on` and `remove` ask.
 
-`checkout` takes a workspace as `ys sync status` lists it, by name or the start of its id: it
+`checkout` takes a workspace as `ys sync status` lists it, by name, or by the start of the id it
+shows when two of your other computers have one of that name, as the refusal then lists: it
 fetches the branch from the project's remote and makes a workspace on it here, refusing a branch here
 with commits the remote's has not, which it leaves as it is. Push the branch from the other computer
 first.

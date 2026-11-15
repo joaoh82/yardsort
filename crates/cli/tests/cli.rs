@@ -6142,7 +6142,7 @@ fn sync_status_is_read_from_the_records_and_nothing_else_is_offered() {
     let shown = fx.ys(&["sync", "status"]).ok();
     assert!(
         shown.contains(&format!("On your other computers, in {}:", fx.project_name))
-            && shown.contains("fix-login  on Build box  ys/fix-login  #91"),
+            && shown.contains("fix-login  on Build box  ys/fix-login  #91  (4b3c2d1e)"),
         "{shown}"
     );
 
