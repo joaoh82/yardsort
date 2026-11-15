@@ -511,6 +511,18 @@ impl Store {
                 forget_project(&tx, project)?;
                 changed = true;
             } else {
+                // Another host's workspace the snapshot does not have is gone, its tombstone
+                // pruned while this host was away.
+                let kept: Vec<&str> = records
+                    .iter()
+                    .filter(|r| r.kind == RecordKind::Workspace && r.project.as_str() == project)
+                    .map(|r| r.id.as_str())
+                    .collect();
+                changed |= tx.execute(
+                    "DELETE FROM synced_workspaces
+                     WHERE project = ? AND sync_id NOT IN (SELECT value FROM json_each(?))",
+                    params![project, serde_json::to_string(&kept).expect("ids are JSON")],
+                )? > 0;
                 let linked: Option<(String, bool)> = tx
                     .query_row(
                         "SELECT local_id, fresh FROM sync_ids WHERE kind = 'project' AND sync_id = ?",
@@ -535,6 +547,27 @@ impl Store {
         }
         tx.commit()?;
         Ok(changed)
+    }
+
+    /// Queue what an earlier version left unsent for the projects that sync here: approved notes
+    /// from before notes synced, workspaces from before workspaces did. Each pass asks; a record
+    /// already queued or sent is not queued again, so a pass after the first queues nothing. A
+    /// project just linked waits for its snapshot, which queues its own.
+    pub fn backfill_sync(&self, now: i64) -> StoreResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let projects: Vec<String> = {
+            let mut statement =
+                tx.prepare("SELECT local_id FROM sync_ids WHERE kind = 'project' AND fresh = 0")?;
+            let rows = statement.query_map([], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        for project in projects {
+            queue_unsynced_notes(&tx, &project, now)?;
+            queue_unsynced_workspaces(&tx, &project, now)?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// The projects linked here and not yet read from a snapshot.

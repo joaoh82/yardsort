@@ -629,7 +629,22 @@ host lists them and makes nothing for them.
   archiving are the window's. So the smoke test makes and deletes on a computer with no screen, and
   the core's tests cover renaming, archiving and task links.
 
-**Its tests.** `crates/core/src/sync/workspace_tests.rs`, 5, two stores through the notes' stand-in,
+**What its review settled** (#265):
+
+- **What an earlier version left unsent goes up.** A project already syncing before this slice has
+  workspaces with no record, and one syncing before slice 3 has approved notes with none. Each pass
+  first queues them (`Store::backfill_sync`); one queued or sent is not queued again, so after the
+  first pass it queues nothing. A project just linked waits for its snapshot, which does the same.
+- **A full snapshot drops the other hosts' workspaces it no longer has.** A host away past retention
+  never sees a deleted workspace's tombstone, which is pruned from snapshots; without this, the
+  workspace stayed listed for good.
+- **`sync-memory.yaml`'s proposal step** now checks that the proposal is not on the first host once
+  the second's outbox is empty, rather than that nothing is waiting to go up: the agent's workspace
+  syncs now, and waits a moment like any other record.
+
+**Its tests.** `crates/core/src/sync/workspace_tests.rs`, 7 with two from the review (a profile as
+slice 3 left it sending its old workspace and note once, and a full snapshot dropping a workspace
+whose tombstone was pruned, which fails without the fix), two stores through the notes' stand-in,
 which now applies deletes too: made with a task, renamed, archived and deleted on one, seen each
 time on the other with nothing made there and nothing echoed; the project's own checkout and a
 forgotten workspace not sent, and one revived before its delete went up becoming a new record;

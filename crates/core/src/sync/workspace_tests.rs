@@ -187,6 +187,75 @@ fn a_record_of_this_hosts_that_it_no_longer_knows_is_deleted_not_shown() {
     );
 }
 
+#[test]
+fn what_an_earlier_version_left_unsent_goes_up_once() {
+    let mut server = Server::default();
+    let (here, mine, there, theirs) = linked(&mut server);
+    // As slice 3 left a profile: the project syncs, and a workspace and an approved note it had
+    // before have no record. Written here past the store, as that version did not queue them.
+    {
+        let conn = here.store.conn();
+        conn.execute_batch(&format!(
+            "INSERT INTO workspaces (id, project_id, kind, name, path, branch, created_at)
+             VALUES ('old-ws', '{mine}', 'worktree', 'old-work', '/w/old', 'ys/old', 1);
+             INSERT INTO memory_entries (id, project_id, text, state, author, created_at, updated_at)
+             VALUES ('old-note', '{mine}', 'Run just check.', 'approved', 'user', 1, 1);"
+        ))
+        .unwrap();
+    }
+    assert!(here.store.sync_outbox(100).unwrap().is_empty());
+
+    here.store.backfill_sync(1).unwrap();
+    assert_eq!(here.store.sync_outbox(100).unwrap().len(), 2);
+    here.store.backfill_sync(1).unwrap();
+    assert_eq!(here.store.sync_outbox(100).unwrap().len(), 2, "queued once");
+    here.sync(&mut server);
+    there.sync(&mut server);
+    assert_eq!(
+        there.store.synced_workspaces(&theirs).unwrap()[0].name,
+        "old-work"
+    );
+    assert!(there
+        .store
+        .memory_entries(&theirs)
+        .unwrap()
+        .iter()
+        .any(|n| n.text == "Run just check."));
+    here.store.backfill_sync(1).unwrap();
+    assert!(
+        here.store.sync_outbox(100).unwrap().is_empty(),
+        "nothing more to send"
+    );
+}
+
+#[test]
+fn a_full_snapshot_drops_a_workspace_whose_tombstone_was_pruned() {
+    let mut server = Server::default();
+    let (here, mine, there, theirs) = linked(&mut server);
+    let made = here
+        .store
+        .add_worktree(&mine, "gone-soon", "/w/gone", Some("ys/gone"), None)
+        .unwrap();
+    here.sync(&mut server);
+    there.sync(&mut server);
+    assert_eq!(there.store.synced_workspaces(&theirs).unwrap().len(), 1);
+    here.store.remove_worktree(&made.id).unwrap();
+    here.sync(&mut server);
+
+    // There was away past retention: the tombstone is pruned, and its cursor expired.
+    let live: Vec<_> = server
+        .records
+        .values()
+        .filter(|r| !r.deleted)
+        .cloned()
+        .collect();
+    there
+        .store
+        .take_sync_snapshot(None, &live, server.head, 1)
+        .unwrap();
+    assert!(there.store.synced_workspaces(&theirs).unwrap().is_empty());
+}
+
 /// Every `Store` method that writes a workspace, and how it reaches the outbox. A method added
 /// without a line here fails this test.
 #[test]

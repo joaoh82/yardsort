@@ -186,8 +186,8 @@ async fn signed_in(home: &impl Home) -> Result<(Client, Secret)> {
     account::client(home, &row).await
 }
 
-/// One pass: what was removed here, then the outbox, then any project linked since the last
-/// pass, then everything that changed. True when anything a person sees changed.
+/// One pass: what was removed here, what an earlier version left unsent, then the outbox, then
+/// any project linked since the last pass, then everything that changed. True when anything a person sees changed.
 pub async fn pass(home: &impl Home) -> Result<bool> {
     let _turn = home.remote().sync_turn().await;
     let store = home.store();
@@ -213,6 +213,8 @@ pub async fn pass(home: &impl Home) -> Result<bool> {
         changed = true;
     }
 
+    // What an earlier version did not sync yet, as notes and workspaces were not.
+    store.backfill_sync(now_ms()).map_err(store_failed)?;
     changed |= push(home, &client, &access).await?;
 
     let fresh = store.fresh_synced_projects().map_err(store_failed)?;
