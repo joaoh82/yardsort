@@ -22,7 +22,7 @@ import { useLayoutStore, type SidePanel } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
 import { listenForQuitRequests } from "@/stores/quit";
 import { listenForPairingRequests } from "@/stores/remote";
-import { listenForOtherComputers } from "@/stores/otherComputers";
+import { listenForOtherComputers, useOtherComputersStore } from "@/stores/otherComputers";
 import { listenForTestRuns } from "@/stores/smokeTests";
 import { listenForSchedules } from "@/stores/schedules";
 import { listenForTriggers } from "@/stores/triggers";
@@ -47,7 +47,7 @@ export function AppShell() {
   const floorOpen = useCoordinatorStore((s) => s.open);
   useUpdateChecks();
   const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen);
-  const remoteHostOpen = useProjectsStore((s) => s.remoteHostId !== null);
+  const thereHostId = useProjectsStore((s) => (s.remote ?? s.composingThere)?.hostId ?? null);
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "yardsort.shell",
@@ -137,7 +137,7 @@ export function AppShell() {
           onResize={syncFromPanel("right")}
         >
           <div data-navigation="Changes" tabIndex={-1} className="h-full">
-            {remoteHostOpen ? <NoChangesHere /> : <ChangesPanel />}
+            {thereHostId ? <ChangesThere hostId={thereHostId} /> : <ChangesPanel />}
           </div>
         </Panel>
       </Group>
@@ -156,11 +156,20 @@ export function AppShell() {
   );
 }
 
-/** In place of Changes while another computer is open: its files are not this computer's. */
-function NoChangesHere() {
+/**
+ * In place of Changes while a workspace on another computer is open: its files are not this
+ * computer's, and nothing of them crosses to it yet. The panel keeps its place and says so.
+ */
+function ChangesThere({ hostId }: { hostId: string }) {
+  const name = useOtherComputersStore(
+    (s) => s.views[hostId]?.name || s.status?.hosts.find((h) => h.hostId === hostId)?.name,
+  );
   return (
-    <aside aria-label="Changes" className="h-full bg-surface p-4 text-ink-faint">
-      Changes and files are not shown for another computer&apos;s workspaces.
+    <aside aria-label="Changes" className="h-full bg-surface p-4">
+      <p className="text-ink-muted">Changes and files stay on {name ?? "that computer"}.</p>
+      <p className="mt-2 text-detail text-ink-faint">
+        This computer shows what runs there: its workspaces, agents and terminals.
+      </p>
     </aside>
   );
 }

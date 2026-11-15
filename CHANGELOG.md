@@ -3,6 +3,18 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## 0.35.0
+
+- **Other computers look like your own projects.** Under **Other computers** in the sidebar, each
+  computer you are paired with now has its projects and their workspaces under it, drawn as local
+  ones are, and it folds. A workspace there opens in the same panel as one of yours: the computer
+  and who has control across the top, its terminals as tabs, that computer's agents to start
+  beside them, and **Resume** for a conversation that ended. The page with the banner, **Watch**
+  and **Back** is gone. An agent you start there from this computer is yours to type into at once;
+  one that was already running still takes **Take control**. The workspace and tab shortcuts reach
+  workspaces there too. See
+  [Reaching another computer](docs/guide/remote.md#reaching-another-computer).
+
 ## 0.34.1
 
 - **New workspaces are named after what the work is about.** The composer shows the name before

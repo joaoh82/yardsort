@@ -263,7 +263,8 @@ applies as it starts (28). Staging's Neon free tier has room for records this si
 
 ## 8 · Later, not in these slices
 
-- Choosing where a task runs from the composer, and handing a task to another machine (35 §9).
+- Choosing where a task runs from the composer (proposed in [44](44-other-computers-like-local.md)),
+  and handing a task to another machine (35 §9).
 - Candidate notes, directory and global memory scopes, conversations and outcomes across machines.
 - End-to-end encryption of synced records (§3, question 1).
 - Account export and deletion, with backups that cannot bring back revoked records (R7).

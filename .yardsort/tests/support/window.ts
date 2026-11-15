@@ -134,14 +134,42 @@ const setField = (selector: string, value: string) =>
     field.dispatchEvent(new Event(field instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
     return true;
   })()`);
-/** Open the other computer called `name` from the sidebar, once it is online there. */
-const openOther = async (name: string) => {
-  const row = `aside[aria-label="Projects"] section[aria-label="Other computers"]`;
-  await until(`${name} online in the sidebar`, async () => (await textOf(row)).includes("online"));
+/** The other computers in the sidebar: a tree, each computer with its projects under it. */
+const TREE = `aside[aria-label="Projects"] [role="tree"][aria-label="Other computers"]`;
+/**
+ * Wait for the other computer called `name` to be online in the sidebar, and leave Settings. Its
+ * row says `online`, or `watch only` when this computer is let watch there and not type.
+ */
+const onlineThere = async (name: string) => {
+  await until(`${name} online in the sidebar`, async () =>
+    /online|watch only/.test(await textOf(`${TREE} [role="treeitem"][aria-label="${name}"] > div`)),
+  );
   await page(clicked("Done"));
-  await page(`document.querySelector(${JSON.stringify(`${row} button`)})?.click()`);
 };
-/** The text of what matches `selector`, or "" when nothing does. */
+/** Open the workspace called `workspace` under the other computer called `name`, as a click does. */
+const openThere = async (name: string, workspace: string) => {
+  await onlineThere(name);
+  const row = `${TREE} [role="treeitem"][aria-label="${name}"] [role="treeitem"][aria-label="${workspace}"] button`;
+  try {
+    await until(`${workspace} under ${name}`, () =>
+      page(`(() => {
+        const button = document.querySelector(${JSON.stringify(row)});
+        button?.click();
+        return Boolean(button);
+      })()`),
+    );
+    await until(
+      "the workspace there",
+      async () => (await textOf(viewThere(name, workspace))) !== "",
+    );
+  } catch (error) {
+    console.log(`the sidebar said: ${await textOf(TREE)}`);
+    throw error;
+  }
+};
+/** A workspace on another computer, in the center panel. */
+const viewThere = (name: string, workspace: string) =>
+  `section[aria-label="${workspace} on ${name}"]`;
 const textOf = (selector: string) =>
   page(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? ""`) as Promise<string>;
 
@@ -251,63 +279,67 @@ switch (doing) {
     break;
   }
   case "sees-the-host": {
-    // Here the last argument is the host's name.
+    // Here the last argument is the host's name. Its project and its workspace are under it in the
+    // sidebar, and the workspace opens as one of this computer's does, with nothing that acts.
     const name = runDir as string;
-    const row = `aside[aria-label="Projects"] section[aria-label="Other computers"]`;
-    await until(`${name} online in the sidebar`, async () => {
-      const said = await textOf(row);
-      return said.includes(name) && said.includes("online");
+    await onlineThere(name);
+    // The host let it watch and no more, and its row says so once the host was read.
+    await until(`${name}'s row saying watch only`, async () =>
+      (await textOf(`${TREE} [role="treeitem"][aria-label="${name}"] > div`)).includes(
+        "watch only",
+      ),
+    );
+    console.log(`saw: ${name}, online and watch only, under Other computers`);
+    await until("its project and its workspace under it", async () => {
+      const said = await textOf(`${TREE} [role="treeitem"][aria-label="${name}"]`);
+      return said.includes("repo") && said.includes("smoke");
     });
-    console.log(`saw: ${name}, online, under Other computers`);
-    await page(clicked("Done"));
-    await page(`document.querySelector(${JSON.stringify(`${row} button`)})?.click()`);
-    const view = `section[aria-label="${name}, another computer"]`;
-    await until("its page", async () =>
-      (await textOf(view)).includes(`${name} · another computer`),
+    console.log("saw: its project repo and its workspace smoke under it");
+    await openThere(name, "smoke");
+    const view = viewThere(name, "smoke");
+    await until("the computer's bar", async () =>
+      (await textOf(`${view} [role="group"][aria-label="${name}, another computer"]`)).includes(
+        "online",
+      ),
     );
     console.log(`saw: ${name} named across the top`);
-    await until("its workspace and its shell", async () => {
-      const said = await textOf(view);
-      return said.includes("smoke") && said.includes("sh");
-    });
-    console.log("saw: the workspace smoke and its shell");
-    const buttons = await page(
-      `[...document.querySelectorAll(${JSON.stringify(`${view} button`)})].map((b) => b.textContent.trim()).filter((t) => t !== "Watch").join(",")`,
+    await until("its shell, as a tab", async () =>
+      (await textOf(`${view} [role="tablist"]`)).includes("sh"),
     );
-    if (buttons !== "Close")
-      throw new Error(`It offers more than Close and Watch: ${String(buttons)}`);
-    console.log("saw: nothing to press but Close and Watch");
+    console.log("saw: the workspace smoke and its shell");
+    if (!(await textOf(`${view} footer`)).includes(name))
+      throw new Error(`The bottom line does not name ${name}.`);
+    console.log(`saw: ${name} named in the bottom line`);
+    // Let in to watch only: nothing takes control, and nothing starts.
+    const offered = await page(
+      `[...document.querySelectorAll(${JSON.stringify(`${view} button`)})].filter((b) => !b.matches('[role="tab"]')).map((b) => b.getAttribute("aria-label") ?? b.textContent.trim()).join(",")`,
+    );
+    if (offered !== "") throw new Error(`It offers something that acts: ${String(offered)}`);
+    console.log("saw: nothing to press but its tabs");
     const changes = await textOf(`[data-navigation="Changes"]`);
-    if (!changes.includes("Changes and files are not shown for another computer"))
+    if (!changes.includes(`Changes and files stay on ${name}`))
       throw new Error(`The Changes panel shows: ${changes}`);
     console.log("saw: no Changes panel for it");
     break;
   }
   case "watches": {
-    // Here the last argument is the host's name. Its one shell opens, watched, at its size there.
+    // Here the last argument is the host's name. Its workspace opens from the sidebar with its one
+    // shell in front, watched, at its size there.
     const name = runDir as string;
-    const row = `aside[aria-label="Projects"] section[aria-label="Other computers"]`;
-    await until(`${name} online in the sidebar`, async () =>
-      (await textOf(row)).includes("online"),
-    );
-    await page(clicked("Done"));
-    await page(`document.querySelector(${JSON.stringify(`${row} button`)})?.click()`);
-    const view = `section[aria-label="${name}, another computer"]`;
+    await openThere(name, "smoke");
     try {
-      await until("its shell, to watch", () => page(clicked("Watch")));
+      await until("the terminal", () => page(`Boolean(document.querySelector(".xterm"))`));
     } catch (error) {
-      console.log(`its page said: ${await textOf(view)}`);
       console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
       throw error;
     }
-    await until("the terminal", () => page(`Boolean(document.querySelector(".xterm"))`));
     console.log(`saw: the shell on ${name}, watched`);
     await until("who has control", async () =>
       /has control\./.test(await textOf(`[aria-label="Control"]`)),
     );
     console.log(`saw: ${await textOf(`[aria-label="Control"]`)}`);
-    if (await page(clicked("Release control")))
-      throw new Error("It had control before it was asked for.");
+    // It was running there already: its control is never taken without a press.
+    if (await page(clicked("Release"))) throw new Error("It had control before it was asked for.");
     break;
   }
   case "takes-control-and-types": {
@@ -353,42 +385,49 @@ switch (doing) {
   }
   case "starts-there": {
     // Here the last arguments are the host's name and what its agent is to do. A new workspace in
-    // its one project, with its stand-in agent, opens to watch once it has started.
+    // its one project, composed from the + on that project in the sidebar, with its stand-in
+    // agent. Once started it is in view, and this computer has control of it without a press.
     const name = runDir as string;
     const message = process.argv[5] as string;
-    await openOther(name);
-    await until("New workspace, offered", () => page(clickedNamed("New workspace in repo")));
-    const form = `section[aria-label="New workspace in repo"]`;
+    await onlineThere(name);
+    await until("New workspace, offered on its project", () =>
+      page(clickedNamed("New workspace in repo on")),
+    );
+    const form = `form[aria-label="New workspace on ${name}"]`;
     await until("its agents", () =>
       page(`Boolean(document.querySelector('${form} option[value="stand-in"]'))`),
     );
     await setField(`${form} select`, "stand-in");
     await setField(`${form} textarea`, message);
-    await click("Start workspace");
+    await click("Start");
     try {
       await until("the started agent's terminal", () =>
         page(`Boolean(document.querySelector(".xterm"))`),
+      );
+      await until("control of what it started", async () =>
+        (await textOf(`[aria-label="Control"]`)).includes("This computer has control."),
       );
     } catch (error) {
       console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
       throw error;
     }
+    console.log("saw: This computer has control, without a press");
     console.log(`saw: a workspace started on ${name}, watched`);
     break;
   }
   case "resumes-there": {
-    // Here the last argument is the host's name. Its one ended conversation is resumed, and opens.
+    // Here the last argument is the host's name. The workspace it started is still in view; its
+    // one ended conversation is resumed from there, and this computer has control of it at once.
     const name = runDir as string;
-    await page(clicked("Back"));
     try {
       await until("Resume, offered", () => page(clickedNamed("Resume ")));
-    } catch (error) {
-      console.log(
-        `its page said: ${await textOf(`section[aria-label="${name}, another computer"]`)}`,
+      await until("control of what it resumed", async () =>
+        (await textOf(`[aria-label="Control"]`)).includes("This computer has control."),
       );
+    } catch (error) {
+      console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
       throw error;
     }
-    await click("Resume");
     await until("the resumed agent's terminal", () =>
       page(`Boolean(document.querySelector(".xterm"))`),
     );

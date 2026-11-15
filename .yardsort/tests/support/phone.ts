@@ -264,7 +264,9 @@ switch (doing) {
     let ended!: () => void;
     const exited = new Promise<void>((resolve) => (ended = resolve));
     const attachment = await channel.attach(terminal, { output() {}, exited: () => ended() });
-    const control = await channel.acquire(terminal, { takeOver: false });
+    // The window has control of an agent it started, so the phone takes it over, as a person
+    // with both would; with nobody in control, this is an ordinary take.
+    const control = await channel.acquire(terminal, { takeOver: true });
     // An end of input, as Ctrl-D at a terminal: a stand-in agent stops reading, and ends.
     await control.input("\x04");
     const late = setTimeout(() => {

@@ -17,7 +17,7 @@ use remote_host::account::{self, Failure};
 use remote_host::computer::{self, Computer, ComputerHome, HostView, Link, Paired};
 use remote_proto::account::{DeviceKind, NewDevice};
 use remote_proto::pairing::GrantState;
-use remote_proto::{Platform, TerminalActivity, TerminalPurpose};
+use remote_proto::{Platform, TerminalActivity, TerminalPurpose, WorkspaceKind};
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager};
@@ -182,8 +182,14 @@ pub struct OtherProject {
 pub struct OtherWorkspace {
     pub id: String,
     pub name: String,
+    /// `local`, that project's own checkout, or `worktree`.
+    pub kind: String,
     pub branch: Option<String>,
     pub archived: bool,
+    /// Its folder should be there and is not.
+    pub missing: bool,
+    /// The tasks it was started from, on their forge.
+    pub tasks: Vec<OtherTask>,
     pub sessions: Vec<OtherSession>,
     pub terminals: Vec<OtherTerminal>,
 }
@@ -202,6 +208,15 @@ pub struct OtherSession {
     pub terminal: Option<String>,
     /// That computer can resume it: it has ended, and its agent can take it up again.
     pub resumable: bool,
+}
+
+/// A task a workspace on another computer was started from: what to call it, and its page.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherTask {
+    pub key: String,
+    pub title: String,
+    pub url: String,
 }
 
 /// An agent another computer can start.
@@ -354,8 +369,23 @@ fn view(host_id: &str, name: String, view: HostView, may_type: bool) -> OtherHos
         let entry = OtherWorkspace {
             id: workspace.id.to_string(),
             name: workspace.name,
+            kind: match workspace.kind {
+                WorkspaceKind::Local => "local",
+                WorkspaceKind::Worktree => "worktree",
+            }
+            .to_owned(),
             branch: workspace.branch.map(|b| b.label),
             archived: workspace.archived,
+            missing: workspace.missing,
+            tasks: workspace
+                .tasks
+                .into_iter()
+                .map(|task| OtherTask {
+                    key: task.key,
+                    title: task.title,
+                    url: task.url,
+                })
+                .collect(),
             sessions,
             terminals,
         };

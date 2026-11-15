@@ -59,19 +59,38 @@ describe("projects store", () => {
     expect(store().composingProjectId).toBe("p-app");
   });
 
-  it("another computer takes the center panel like any view, and gives it back to a workspace", () => {
+  it("a workspace on another computer takes the center panel like any view, and gives it back", () => {
     store().select("w-app");
     store().openUsage(true);
-    store().openRemoteHost("h-1");
-    expect(store().remoteHostId).toBe("h-1");
+    store().selectRemote("h-1", "w-there");
+    expect(store().remote).toEqual({ hostId: "h-1", workspaceId: "w-there" });
     expect(store().usageOpen).toBe(false);
+    // The local selection is kept beneath it.
     expect(store().selectedWorkspaceId).toBe("w-app");
 
     store().openTasks(true);
-    expect(store().remoteHostId).toBeNull();
-    store().openRemoteHost("h-1");
+    expect(store().remote).toBeNull();
+    store().selectRemote("h-1", "w-there");
     store().select("w-app");
-    expect(store().remoteHostId).toBeNull();
+    expect(store().remote).toBeNull();
+  });
+
+  it("composing on another computer takes the panel, and a workspace there or here takes it back", () => {
+    store().select("w-app");
+    store().composeThere({ hostId: "h-1", projectId: "p-there" });
+    expect(store().composingThere).toEqual({ hostId: "h-1", projectId: "p-there" });
+    expect(store().remote).toBeNull();
+
+    store().selectRemote("h-1", "w-there");
+    expect(store().composingThere).toBeNull();
+
+    store().composeThere({ hostId: "h-1", projectId: "p-there" });
+    store().compose("p-app");
+    expect(store().composingThere).toBeNull();
+    store().composeThere({ hostId: "h-1", projectId: "p-there" });
+    store().composeThere(null);
+    expect(store().composingThere).toBeNull();
+    expect(store().selectedWorkspaceId).toBe("w-app");
   });
 
   it("restores selection, collapsed projects and the last parent folder", async () => {

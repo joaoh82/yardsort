@@ -22,7 +22,10 @@ const core = vi.hoisted(() => ({
   remoteTerminalRelease: vi.fn(),
   remoteTerminalWrite: vi.fn(),
   remoteTerminalResize: vi.fn(),
+  uiStateSave: vi.fn(async () => {}),
 }));
+const opener = vi.hoisted(() => ({ openUrl: vi.fn(async () => {}) }));
+vi.mock("@tauri-apps/plugin-opener", () => opener);
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
   ipc: core,
@@ -59,10 +62,11 @@ vi.mock("@/features/terminal/TerminalView", async () => {
 });
 
 import { OtherComputersSettings } from "@/features/settings/OtherComputersSettings";
-import { OtherComputersList } from "@/features/sidebar/OtherComputersList";
-import { useOtherComputersStore } from "@/stores/otherComputers";
-import { useProjectsStore } from "@/stores/projects";
-import { OtherHostView } from "./OtherHostView";
+import { OtherComputersTree } from "@/features/sidebar/OtherComputersTree";
+import { thereKey, useOtherComputersStore } from "@/stores/otherComputers";
+import { recall, useProjectsStore } from "@/stores/projects";
+import { RemoteComposer } from "./RemoteComposer";
+import { RemoteWorkspaceView } from "./RemoteWorkspaceView";
 
 const signedOut: OtherComputers = {
   client: null,
@@ -116,10 +120,41 @@ const shown: View = {
       name: "service",
       workspaces: [
         {
+          id: "w-0",
+          name: "local",
+          kind: "local",
+          branch: "main",
+          archived: false,
+          missing: false,
+          tasks: [],
+          sessions: [
+            {
+              id: "s-0",
+              title: "Read the issue",
+              harness: "codex",
+              state: "ended",
+              startedAt: 0,
+              terminal: null,
+              // That computer could resume it, but nothing offers it unless this one is let.
+              resumable: true,
+            },
+          ],
+          terminals: [],
+        },
+        {
           id: "w-1",
           name: "fix-login",
+          kind: "worktree",
           branch: "ys/fix-login",
           archived: false,
+          missing: false,
+          tasks: [
+            {
+              key: "#91",
+              title: "Login is flaky",
+              url: "https://github.com/acme/service/issues/91",
+            },
+          ],
           sessions: [
             {
               id: "s-1",
@@ -130,187 +165,171 @@ const shown: View = {
               terminal: "t-1",
               resumable: false,
             },
-            {
-              id: "s-0",
-              title: "Read the issue",
-              harness: "codex",
-              state: "ended",
-              startedAt: 0,
-              terminal: null,
-              // That computer could resume it, but this view does not offer it unless let.
-              resumable: true,
-            },
           ],
           terminals: [{ id: "t-2", program: "bash", purpose: "shell", state: "quiet" }],
         },
       ],
     },
   ],
-  activity: [
-    {
-      id: "e-1",
-      kind: "turn.completed",
-      occurredAt: 1_790_000_000_000,
-      workspace: "fix-login",
-    },
-  ],
+  activity: [],
+};
+const able: View = { ...shown, mayStart: true, mayResume: true };
+const away: View = {
+  ...shown,
+  link: { kind: "offline", since: 1_790_000_000_000, why: "It is not connected" },
+};
+const agents = [
+  { id: "claude", name: "Claude Code" },
+  { id: "codex", name: "Codex" },
+];
+
+/** What that computer shows, as the window holds it once it has read it. */
+const showing = (view: View = shown, status: OtherComputers = paired) => {
+  core.otherComputers.mockResolvedValue(status);
+  core.otherHost.mockResolvedValue(view);
+  core.otherHostHarnesses.mockResolvedValue(agents);
+  useOtherComputersStore.setState({ status, views: { "h-1": view } });
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useOtherComputersStore.setState({ status: null, views: {}, error: null });
-  useProjectsStore.setState({ remoteHostId: null });
+  useOtherComputersStore.setState({
+    status: null,
+    views: {},
+    harnesses: {},
+    active: {},
+    startedHere: {},
+    taking: [],
+    error: null,
+    startProblem: null,
+  });
+  useProjectsStore.setState({ remote: null, composingThere: null, ui: {} });
 });
 
 describe("the sidebar's other computers", () => {
-  it("lists the hosts paired with or waiting, apart from the projects, and opens one", async () => {
-    useOtherComputersStore.setState({ status: paired });
-    render(<OtherComputersList />);
-    const list = screen.getByRole("region", { name: "Other computers" });
-    expect(within(list).getByRole("button", { name: /Build box/ })).toHaveTextContent("online");
-    expect(within(list).getByRole("button", { name: /Old laptop/ })).toBeDisabled();
+  it("lists each computer with its projects and workspaces under it, as local ones are, and opens one", async () => {
+    showing();
+    render(<OtherComputersTree />);
+    const tree = screen.getByRole("tree", { name: "Other computers" });
+    const computer = within(tree).getByRole("treeitem", { name: "Build box" });
+    expect(computer).toHaveAttribute("aria-expanded", "true");
+    expect(within(computer).getByRole("button", { name: /Build box/ })).toHaveTextContent("online");
+    // One still waiting to be let in is listed, and has nothing to open.
+    expect(within(tree).getByRole("button", { name: /Old laptop/ })).toBeDisabled();
+    expect(within(tree).getByRole("button", { name: /Old laptop/ })).toHaveTextContent("waiting");
     // Refused: in Settings, not here.
-    expect(within(list).queryByText("Refused one")).toBeNull();
+    expect(within(tree).queryByText("Refused one")).toBeNull();
 
-    await userEvent.click(within(list).getByRole("button", { name: /Build box/ }));
-    expect(useProjectsStore.getState().remoteHostId).toBe("h-1");
+    const project = within(computer).getByRole("treeitem", { name: "service" });
+    // `local` says its branch; a worktree's is its name.
+    expect(within(project).getByRole("treeitem", { name: "local" })).toHaveTextContent("main");
+    const workspace = within(project).getByRole("treeitem", { name: "fix-login" });
+    expect(workspace).not.toHaveTextContent("ys/fix-login");
+    expect(within(workspace).getByRole("img", { name: "busy" })).toBeInTheDocument();
+    expect(within(workspace).getByLabelText("1 open harness")).toBeInTheDocument();
+    await userEvent.click(
+      within(workspace).getByRole("button", { name: "Open task #91 — Login is flaky" }),
+    );
+    expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/acme/service/issues/91");
+
+    await userEvent.click(within(workspace).getByRole("button", { name: /fix-login/ }));
+    expect(useProjectsStore.getState().remote).toEqual({ hostId: "h-1", workspaceId: "w-1" });
+    expect(within(tree).getByRole("treeitem", { name: "fix-login" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("folds a computer and a project, and remembers both", async () => {
+    showing();
+    render(<OtherComputersTree />);
+    const tree = screen.getByRole("tree", { name: "Other computers" });
+    await userEvent.click(within(tree).getByRole("button", { name: "service" }));
+    expect(within(tree).queryByRole("treeitem", { name: "fix-login" })).toBeNull();
+    expect(recall(useProjectsStore.getState().ui, "sidebar.computerProjects", [])).toEqual([
+      "h-1/p-1",
+    ]);
+    await userEvent.click(within(tree).getByRole("button", { name: "service" }));
+    expect(within(tree).getByRole("treeitem", { name: "fix-login" })).toBeInTheDocument();
+
+    await userEvent.click(within(tree).getByRole("button", { name: /Build box/ }));
+    expect(within(tree).getByRole("treeitem", { name: "Build box" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(within(tree).queryByRole("treeitem", { name: "service" })).toBeNull();
+    expect(recall(useProjectsStore.getState().ui, "sidebar.computers", {})).toEqual({
+      "h-1": false,
+    });
+  });
+
+  it("folds an offline computer by itself, and shows what it last showed once opened", async () => {
+    const status = {
+      ...paired,
+      hosts: [{ ...paired.hosts[0]!, link: away.link }],
+    };
+    showing(away, status);
+    render(<OtherComputersTree />);
+    const tree = screen.getByRole("tree", { name: "Other computers" });
+    expect(within(tree).getByRole("treeitem", { name: "Build box" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(within(tree).getByRole("button", { name: /Build box/ })).toHaveTextContent(/offline · /);
+    await userEvent.click(within(tree).getByRole("button", { name: /Build box/ }));
+    expect(within(tree).getByRole("treeitem", { name: "fix-login" })).toBeInTheDocument();
+    // Nothing can be started on a computer that is away.
+    expect(within(tree).queryByRole("button", { name: /^New workspace/ })).toBeNull();
+  });
+
+  it("says when a computer lets this one only watch, and offers nothing to start there", () => {
+    showing({ ...shown, mayType: false });
+    render(<OtherComputersTree />);
+    const tree = screen.getByRole("tree", { name: "Other computers" });
+    expect(within(tree).getByRole("button", { name: /Build box/ })).toHaveTextContent("watch only");
+    expect(within(tree).queryByRole("button", { name: /^New workspace/ })).toBeNull();
+    expect(core.otherHostHarnesses).not.toHaveBeenCalled();
+  });
+
+  it("composes a new workspace in a project there, where this computer may start work", async () => {
+    showing(able);
+    render(<OtherComputersTree />);
+    const tree = screen.getByRole("tree", { name: "Other computers" });
+    await userEvent.click(
+      within(tree).getByRole("button", { name: "New workspace in service on Build box" }),
+    );
+    expect(useProjectsStore.getState().composingThere).toEqual({
+      hostId: "h-1",
+      projectId: "p-1",
+    });
+    // Where it will appear is shown, as under a local project.
+    expect(within(tree).getByText("new workspace…")).toBeInTheDocument();
+  });
+
+  it("filters its projects with the sidebar's search", () => {
+    showing();
+    const { rerender } = render(<OtherComputersTree query="serv" />);
+    expect(screen.getByRole("treeitem", { name: "service" })).toBeInTheDocument();
+    rerender(<OtherComputersTree query="nothing-like-it" />);
+    expect(screen.queryByRole("treeitem", { name: "Build box" })).toBeNull();
+    // By the computer's own name, all of it shows.
+    rerender(<OtherComputersTree query="build" />);
+    expect(screen.getByRole("treeitem", { name: "service" })).toBeInTheDocument();
   });
 
   it("shows nothing until this computer is signed in and paired", () => {
     useOtherComputersStore.setState({ status: signedOut });
-    const { container } = render(<OtherComputersList />);
+    const { container } = render(<OtherComputersTree />);
     expect(container).toBeEmptyDOMElement();
   });
 });
 
-describe("another computer's page", () => {
-  it("names the computer across the top, shows its work, and offers nothing that acts", async () => {
-    core.otherHost.mockResolvedValue(shown);
-    useOtherComputersStore.setState({ status: paired });
-    render(<OtherHostView hostId="h-1" />);
-    const banner = await screen.findByRole("banner", { name: "Another computer" });
-    expect(banner).toHaveTextContent("Build box · another computer");
-    expect(await screen.findByText("Fix the flaky login test")).toBeInTheDocument();
-    expect(screen.getByText("ys/fix-login")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Online: Linux, Yardsort 0.23.0.");
-    expect(within(screen.getByRole("region", { name: "Activity" })).getByText("turn.completed"));
-    // Nothing on it acts: it closes, and its terminals open to watch, an agent's as well as a
-    // shell's; one that has ended has none.
-    expect(
-      screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent),
-    ).toEqual(["Close", "Watch Fix the flaky login test", "Watch bash"]);
-  });
-
-  it("says when what it shows is from before the computer went away", async () => {
-    core.otherHost.mockResolvedValue({
-      ...shown,
-      link: { kind: "offline", since: 1_790_000_000_000, why: "it is not connected" },
-    });
-    render(<OtherHostView hostId="h-1" />);
-    const line = await screen.findByRole("status");
-    expect(line).toHaveTextContent(/^Offline since .*: it is not connected\. What it showed at /);
-    expect(screen.getByText("Fix the flaky login test")).toBeInTheDocument();
-  });
-});
-
-describe("starting work on another computer", () => {
-  const able: View = { ...shown, mayStart: true, mayResume: true };
-  const agents = [
-    { id: "claude", name: "Claude Code" },
-    { id: "codex", name: "Codex" },
-  ];
-  const started = { workspaceId: "w-1", terminal: "t-9", harness: "codex" };
-  const showing = async (view: View = able) => {
-    core.otherHost.mockResolvedValue(view);
-    core.otherHostHarnesses.mockResolvedValue(agents);
-    core.remoteTerminalOpen.mockResolvedValue(7);
-    core.remoteTerminalClose.mockResolvedValue(undefined);
-    useOtherComputersStore.setState({ status: paired });
-    render(<OtherHostView hostId="h-1" />);
-    await screen.findByText("Fix the flaky login test");
-  };
-
-  it("offers nothing to start where that computer does not let this one", async () => {
-    await showing({ ...able, mayStart: false, mayResume: false });
-    expect(screen.queryByRole("button", { name: /^New |^Resume / })).toBeNull();
-  });
-
-  it("starts a workspace there with the agent and message chosen, and watches it", async () => {
-    core.otherHostStartWorkspace.mockResolvedValue(started);
-    await showing();
-    await userEvent.click(screen.getByRole("button", { name: "New workspace in service" }));
-    const form = await screen.findByRole("region", { name: "New workspace in service" });
-    const go = within(form).getByRole("button", { name: "Start workspace" });
-    await vi.waitFor(() => expect(within(form).getByRole("combobox")).toHaveValue("claude"));
-    // A new workspace needs something to do.
-    expect(go).toBeDisabled();
-    await userEvent.selectOptions(within(form).getByRole("combobox", { name: "Agent" }), "codex");
-    await userEvent.type(
-      within(form).getByRole("textbox", { name: "What should it do?" }),
-      "Fix the spacing",
-    );
-    await userEvent.click(go);
-    expect(core.otherHostStartWorkspace).toHaveBeenCalledWith(
-      "h-1",
-      "p-1",
-      "Fix the spacing",
-      "codex",
-    );
-    await vi.waitFor(() =>
-      expect(core.remoteTerminalOpen).toHaveBeenCalledWith(
-        "h-1",
-        "t-9",
-        expect.any(Function),
-        expect.any(Function),
-      ),
-    );
-  });
-
-  it("starts another agent in a workspace with no message unless one is given", async () => {
-    core.otherHostStartSession.mockResolvedValue(started);
-    await showing();
-    await userEvent.click(screen.getByRole("button", { name: "New agent in fix-login" }));
-    const form = await screen.findByRole("region", { name: "New agent in fix-login" });
-    await vi.waitFor(() => expect(within(form).getByRole("combobox")).toHaveValue("claude"));
-    await userEvent.click(within(form).getByRole("button", { name: "Start agent" }));
-    expect(core.otherHostStartSession).toHaveBeenCalledWith("h-1", "w-1", "claude", null);
-  });
-
-  it("resumes an ended conversation there, and says why when it is refused", async () => {
-    core.otherHostResume.mockRejectedValueOnce({
-      code: "remote_lost",
-      message: "That computer's answer did not arrive, so it may have started anyway.",
-    });
-    core.otherHostResume.mockResolvedValueOnce(started);
-    await showing();
-    // One still running is not one to resume.
-    expect(screen.queryByRole("button", { name: "Resume Fix the flaky login test" })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "Resume Read the issue" }));
-    const form = await screen.findByRole("region", { name: "Resume Read the issue" });
-    expect(core.otherHostHarnesses).not.toHaveBeenCalled();
-    await userEvent.type(
-      within(form).getByRole("textbox", { name: "A message to go on with, if any" }),
-      "Carry on",
-    );
-    await userEvent.click(within(form).getByRole("button", { name: "Resume" }));
-    expect(await within(form).findByRole("alert")).toHaveTextContent(/may have started anyway/);
-    expect(core.remoteTerminalOpen).not.toHaveBeenCalled();
-    // Pressed again on purpose, it is asked again.
-    await userEvent.click(within(form).getByRole("button", { name: "Resume" }));
-    expect(core.otherHostResume).toHaveBeenLastCalledWith("h-1", "s-0", "Carry on");
-    await vi.waitFor(() => expect(core.remoteTerminalOpen).toHaveBeenCalled());
-  });
-});
-
-describe("another computer's terminal", () => {
+describe("a workspace on another computer", () => {
   let said: (seen: RemoteTerminalSeen) => void = () => {};
-  /** How opening it goes: at once, as number 7, unless a test says otherwise. */
+  /** How opening a terminal goes: at once, as number 7, unless a test says otherwise. */
   let opened: () => Promise<number> = async () => 7;
   beforeEach(() => {
     opened = async () => 7;
-  });
-  const open = async (view: View = shown) => {
-    core.otherHost.mockResolvedValue(view);
     core.remoteTerminalOpen.mockImplementation(async (_host, _terminal, _output, onSeen) => {
       said = (seen) => act(() => onSeen(seen));
       return opened();
@@ -318,38 +337,59 @@ describe("another computer's terminal", () => {
     core.remoteTerminalClose.mockResolvedValue(undefined);
     core.remoteTerminalTakeControl.mockResolvedValue(undefined);
     core.remoteTerminalRelease.mockResolvedValue(undefined);
-    useOtherComputersStore.setState({ status: paired });
-    render(<OtherHostView hostId="h-1" />);
-    await userEvent.click(
-      await screen.findByRole("button", { name: "Watch Fix the flaky login test" }),
-    );
-    await vi.waitFor(() =>
-      expect(core.remoteTerminalOpen).toHaveBeenCalledWith(
+  });
+  const watching = (terminal: string) =>
+    vi.waitFor(() =>
+      expect(core.remoteTerminalOpen).toHaveBeenLastCalledWith(
         "h-1",
-        "t-1",
+        terminal,
         expect.any(Function),
         expect.any(Function),
       ),
     );
+  const open = async (view: View = shown, workspaceId = "w-1") => {
+    showing(view);
+    render(<RemoteWorkspaceView hostId="h-1" workspaceId={workspaceId} />);
+    if (workspaceId === "w-1") await watching("t-1");
   };
   const surface = () => screen.getByTestId("surface");
+  const control = () => screen.getByRole("status", { name: "Control" });
+
+  it("is the panel a local workspace gets, with the computer named in the bar and the bottom line", async () => {
+    await open();
+    expect(screen.getByRole("group", { name: "Build box, another computer" })).toHaveTextContent(
+      "online",
+    );
+    // Its terminals are tabs: the agent's first and in front, then its shell.
+    const tabs = within(screen.getByRole("tablist", { name: "Terminals" })).getAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["claude", "bash"]);
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("through the relay").parentElement).toHaveTextContent(
+      "Build box/service/fix-login· ys/fix-loginthrough the relay",
+    );
+    // Nothing of the page it replaces.
+    expect(screen.queryByRole("button", { name: /Watch|Back|Close/ })).toBeNull();
+
+    // Another tab watches another terminal, and lets the first go.
+    await userEvent.click(tabs[1]!);
+    await watching("t-2");
+    expect(core.remoteTerminalClose).toHaveBeenCalledWith(7);
+  });
 
   it("watches at that computer's size, and types only once this computer takes control", async () => {
     await open();
     said({ kind: "controller", controller: { kind: "local" } });
-    expect(screen.getByRole("status", { name: "Control" })).toHaveTextContent(
-      "The person at that computer has control.",
-    );
+    expect(control()).toHaveTextContent("The person at that computer has control.");
     expect(surface()).toHaveAttribute("data-typing", "false");
     expect(surface()).toHaveAttribute("data-fits", "false");
+    // A terminal that was already running there is never taken by itself.
+    expect(core.remoteTerminalTakeControl).not.toHaveBeenCalled();
 
     await userEvent.click(screen.getByRole("button", { name: "Take control" }));
     expect(core.remoteTerminalTakeControl).toHaveBeenCalledWith(7);
     expect(screen.getByRole("button", { name: "Taking control…" })).toBeDisabled();
     said({ kind: "held" });
-    expect(screen.getByRole("status", { name: "Control" })).toHaveTextContent(
-      "This computer has control.",
-    );
+    expect(control()).toHaveTextContent("This computer has control.");
     expect(surface()).toHaveAttribute("data-typing", "true");
     expect(surface()).toHaveAttribute("data-fits", "true");
 
@@ -357,7 +397,7 @@ describe("another computer's terminal", () => {
     said({ kind: "controller", controller: { kind: "device", device: "d-2", name: "Phone" } });
     said({ kind: "notHeld", why: "Phone took control." });
     expect(screen.getByRole("alert")).toHaveTextContent("Phone took control.");
-    expect(screen.getByRole("status", { name: "Control" })).toHaveTextContent("Phone has control.");
+    expect(control()).toHaveTextContent("Phone has control.");
     expect(surface()).toHaveAttribute("data-typing", "false");
   });
 
@@ -399,23 +439,269 @@ describe("another computer's terminal", () => {
     expect(screen.getByRole("button", { name: "Take control" })).toBeDisabled();
   });
 
-  it("hands control back, and stops watching on the way back to the computer", async () => {
+  it("hands control back", async () => {
     await open();
     said({ kind: "held" });
-    await userEvent.click(screen.getByRole("button", { name: "Release control" }));
+    await userEvent.click(screen.getByRole("button", { name: "Release" }));
     expect(core.remoteTerminalRelease).toHaveBeenCalledWith(7);
-
-    await userEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(core.remoteTerminalClose).toHaveBeenCalledWith(7);
-    expect(await screen.findByText("Fix the flaky login test")).toBeInTheDocument();
   });
 
   it("offers no control where that computer lets this one only watch, and says when it is away", async () => {
     await open({ ...shown, mayType: false });
     expect(screen.queryByRole("button", { name: "Take control" })).toBeNull();
-    expect(screen.getByText("That computer lets this one watch, not type.")).toBeInTheDocument();
+    expect(control()).toHaveTextContent("Build box lets this computer watch, not type.");
     said({ kind: "away", why: "The connection dropped." });
     expect(screen.getByRole("alert")).toHaveTextContent("The connection dropped.");
+  });
+
+  it("says when what it shows is from before the computer went away", async () => {
+    await open(away);
+    expect(screen.getByRole("group", { name: "Build box, another computer" })).toHaveTextContent(
+      /offline since/,
+    );
+    expect(
+      screen.getByText(/It is not connected\. Shown as Build box last showed it, at /),
+    ).toBeInTheDocument();
+    // Nothing is offered to start on a computer that is away.
+    expect(screen.queryByRole("button", { name: /^Start / })).toBeNull();
+  });
+
+  it("offers nothing to start or resume where that computer does not let this one", async () => {
+    await open(shown, "w-0");
+    expect(screen.getByText("Nothing running in this workspace.")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Previous sessions" })).toHaveTextContent(
+      "Read the issue",
+    );
+    expect(screen.queryByRole("button", { name: /^Start |^Resume / })).toBeNull();
+    expect(core.otherHostHarnesses).not.toHaveBeenCalled();
+  });
+
+  it("starts one of that computer's agents from the tab bar, in front and this computer's to type into at once", async () => {
+    const started = { workspaceId: "w-1", terminal: "t-9", harness: "codex" };
+    core.otherHostStartSession.mockResolvedValue(started);
+    await open(able);
+    // What that computer shows once the agent runs there.
+    const workspace = able.projects[0]!.workspaces[1]!;
+    core.otherHost.mockResolvedValue({
+      ...able,
+      projects: [
+        {
+          ...able.projects[0]!,
+          workspaces: [
+            able.projects[0]!.workspaces[0]!,
+            {
+              ...workspace,
+              sessions: [
+                ...workspace.sessions,
+                {
+                  id: "s-9",
+                  title: "",
+                  harness: "codex",
+                  state: "starting",
+                  startedAt: 2,
+                  terminal: "t-9",
+                  resumable: false,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const listsIt = core.otherHost.getMockImplementation()!;
+    // That computer's next reading comes a moment after the start is answered.
+    let read!: () => void;
+    core.otherHost.mockImplementation(
+      () => new Promise((resolve) => (read = () => resolve(listsIt("h-1")))),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Start Codex" }));
+    expect(core.otherHostStartSession).toHaveBeenCalledWith("h-1", "w-1", "codex", null);
+    // Its terminal is in front at once, before it is listed.
+    await watching("t-9");
+    expect(screen.getByRole("tab", { name: /starting…/ })).toHaveAttribute("aria-selected", "true");
+    await act(async () => read());
+    expect(screen.getByRole("tab", { name: /codex/ })).toHaveAttribute("aria-selected", "true");
+
+    // Its control is asked for as soon as it says who has it, without a press.
+    said({ kind: "controller", controller: { kind: "nobody" } });
+    await vi.waitFor(() => expect(core.remoteTerminalTakeControl).toHaveBeenCalledTimes(1));
+    said({ kind: "held" });
+    expect(control()).toHaveTextContent("This computer has control.");
+    // Taken back there, it is not taken again by itself.
+    said({ kind: "controller", controller: { kind: "local" } });
+    said({ kind: "notHeld", why: "The person at that computer took control." });
+    await act(async () => {});
+    expect(core.remoteTerminalTakeControl).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Take control" })).toBeEnabled();
+  });
+
+  it("resumes an ended conversation there, and says why when that is refused", async () => {
+    core.otherHostResume.mockRejectedValueOnce({
+      code: "remote_lost",
+      message: "That computer's answer did not arrive, so it may have started anyway.",
+    });
+    core.otherHostResume.mockResolvedValueOnce({
+      workspaceId: "w-0",
+      terminal: "t-8",
+      harness: "codex",
+    });
+    await open(able, "w-0");
+    await userEvent.click(screen.getByRole("button", { name: "Resume Read the issue" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/may have started anyway/);
+    expect(core.remoteTerminalOpen).not.toHaveBeenCalled();
+    // Pressed again on purpose, it is asked again.
+    await userEvent.click(screen.getByRole("button", { name: "Resume Read the issue" }));
+    expect(core.otherHostResume).toHaveBeenLastCalledWith("h-1", "s-0", null);
+    await vi.waitFor(() =>
+      expect(useOtherComputersStore.getState().active[thereKey("h-1", "w-0")]).toBe("t-8"),
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  /** What that computer shows with `local`'s one conversation as `session` says. */
+  const withLocal = (
+    session: Partial<View["projects"][0]["workspaces"][0]["sessions"][0]>,
+  ): View => {
+    const local = able.projects[0]!.workspaces[0]!;
+    return {
+      ...able,
+      projects: [
+        {
+          ...able.projects[0]!,
+          workspaces: [
+            { ...local, sessions: [{ ...local.sessions[0]!, ...session }] },
+            able.projects[0]!.workspaces[1]!,
+          ],
+        },
+      ],
+    };
+  };
+  const reads = async (view: View) => {
+    core.otherHost.mockResolvedValue(view);
+    await act(() => useOtherComputersStore.getState().loadHost("h-1"));
+  };
+
+  it("offers to resume again once what it resumed has ended there, and keeps no tab for it", async () => {
+    core.otherHostResume.mockResolvedValue({
+      workspaceId: "w-0",
+      terminal: "t-8",
+      harness: "codex",
+    });
+    await open(able, "w-0");
+    await userEvent.click(screen.getByRole("button", { name: "Resume Read the issue" }));
+    await watching("t-8");
+    expect(screen.getByRole("tab", { name: /starting…/ })).toBeInTheDocument();
+    // That computer lists it while it runs, and no longer once it has ended.
+    await reads(withLocal({ state: "busy", terminal: "t-8" }));
+    expect(screen.getByRole("tab", { name: /codex/ })).toHaveAttribute("aria-selected", "true");
+    await reads(withLocal({ state: "ended", terminal: null }));
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.getByText("Nothing running in this workspace.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume Read the issue" })).toBeEnabled();
+  });
+
+  it("keeps no tab for what it started when a later reading there never listed it", async () => {
+    core.otherHostResume.mockResolvedValue({
+      workspaceId: "w-0",
+      terminal: "t-8",
+      harness: "codex",
+    });
+    await open(able, "w-0");
+    await userEvent.click(screen.getByRole("button", { name: "Resume Read the issue" }));
+    await watching("t-8");
+    // A reading from about when it started may have been taken before it: it is still to come.
+    await reads({ ...able, readAt: Date.now() });
+    expect(screen.getByRole("tab", { name: /starting…/ })).toBeInTheDocument();
+    // It ended before any reading listed it, and one well after its start does not list it.
+    await reads({ ...able, readAt: Date.now() + 60_000 });
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.getByRole("button", { name: "Resume Read the issue" })).toBeEnabled();
+    expect(useOtherComputersStore.getState().taking).toEqual([]);
+  });
+
+  it("says so when that computer no longer shows the workspace", async () => {
+    await open(shown, "w-gone");
+    expect(
+      screen.getByText("Build box no longer shows this workspace to this computer."),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("a new workspace on another computer", () => {
+  const composing = (view: View = able) => {
+    showing(view);
+    useProjectsStore.setState({ composingThere: { hostId: "h-1", projectId: "p-1" } });
+    render(<RemoteComposer hostId="h-1" projectId="p-1" />);
+    return screen.getByRole("form", { name: "New workspace on Build box" });
+  };
+
+  it("starts it there with the agent and the message, and opens it as this computer's to type into", async () => {
+    core.otherHostStartWorkspace.mockResolvedValue({
+      workspaceId: "w-9",
+      terminal: "t-9",
+      harness: "codex",
+    });
+    const form = composing();
+    expect(form).toHaveTextContent("New workspace in service on Build box");
+    const go = within(form).getByRole("button", { name: "Start" });
+    await vi.waitFor(() =>
+      expect(within(form).getByRole("combobox", { name: "Harness" })).toHaveValue("claude"),
+    );
+    // A new workspace needs something to do.
+    expect(go).toBeDisabled();
+    await userEvent.selectOptions(within(form).getByRole("combobox", { name: "Harness" }), "codex");
+    await userEvent.type(
+      within(form).getByRole("textbox", { name: "What should the agent work on?" }),
+      "Fix the spacing",
+    );
+    await userEvent.click(go);
+    expect(core.otherHostStartWorkspace).toHaveBeenCalledWith(
+      "h-1",
+      "p-1",
+      "Fix the spacing",
+      "codex",
+    );
+    await vi.waitFor(() =>
+      expect(useProjectsStore.getState().remote).toEqual({ hostId: "h-1", workspaceId: "w-9" }),
+    );
+    expect(useProjectsStore.getState().composingThere).toBeNull();
+    const others = useOtherComputersStore.getState();
+    expect(others.active[thereKey("h-1", "w-9")]).toBe("t-9");
+    expect(Object.keys(others.startedHere)).toEqual([thereKey("h-1", "t-9")]);
+  });
+
+  it("keeps the message and says why when the start fails, and does not try again by itself", async () => {
+    core.otherHostStartWorkspace.mockRejectedValue({
+      code: "remote_lost",
+      message: "That computer's answer did not arrive, so it may have started anyway.",
+    });
+    const form = composing();
+    const message = within(form).getByRole("textbox", { name: "What should the agent work on?" });
+    await userEvent.type(message, "Fix the spacing{Enter}");
+    expect(await within(form).findByRole("alert")).toHaveTextContent(/may have started anyway/);
+    expect(message).toHaveValue("Fix the spacing");
+    expect(core.otherHostStartWorkspace).toHaveBeenCalledTimes(1);
+    expect(useProjectsStore.getState().composingThere).not.toBeNull();
+  });
+
+  it("starts nothing on a computer that is away, and says nothing is queued", async () => {
+    const form = composing({ ...away, mayStart: true });
+    await userEvent.type(
+      within(form).getByRole("textbox", { name: "What should the agent work on?" }),
+      "Fix the spacing{Enter}",
+    );
+    expect(within(form).getByRole("button", { name: "Start" })).toBeDisabled();
+    expect(within(form).getByRole("alert")).toHaveTextContent(/nothing is queued for it/);
+    expect(core.otherHostStartWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("gives up on Escape", async () => {
+    const form = composing();
+    await userEvent.type(
+      within(form).getByRole("textbox", { name: "What should the agent work on?" }),
+      "{Escape}",
+    );
+    expect(useProjectsStore.getState().composingThere).toBeNull();
   });
 });
 

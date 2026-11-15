@@ -3,10 +3,12 @@ import {
   enterWorkspace,
   openProjectFromDisk,
 } from "@/features/sidebar/actions";
+import type { OtherWorkspace } from "@/lib/ipc";
 import type { CommandId } from "@/lib/shortcuts";
 import { useCoordinatorStore } from "@/stores/coordinator";
 import { useLayoutStore } from "@/stores/layout";
-import { useProjectsStore } from "@/stores/projects";
+import { findThere, tabsThere, thereKey, useOtherComputersStore } from "@/stores/otherComputers";
+import { type RemoteSelection, useProjectsStore } from "@/stores/projects";
 import { useSmokeTestsStore } from "@/stores/smokeTests";
 import { useTerminalStore } from "@/stores/terminals";
 
@@ -27,6 +29,27 @@ export function selectWorkspace(id: string) {
   if (state.collapsed.includes(item.project.id)) state.toggleCollapsed(item.project.id);
   enterWorkspace(id, item.workspace.kind === "worktree");
 }
+/** The workspaces on other computers that can be opened, in their tree's order. */
+export function workspacesThere(): RemoteSelection[] {
+  const others = useOtherComputersStore.getState();
+  const hosts = others.status?.client
+    ? others.status.hosts.filter((host) => host.pairing === "paired")
+    : [];
+  return hosts.flatMap((host) =>
+    (others.views[host.hostId]?.projects ?? []).flatMap((project) =>
+      project.workspaces
+        .filter((w) => !w.archived && !w.missing)
+        .map((workspace) => ({ hostId: host.hostId, workspaceId: workspace.id })),
+    ),
+  );
+}
+/** The workspace on another computer that is in view, with what its computer showed. */
+function inViewThere() {
+  const { remote } = useProjectsStore.getState();
+  return remote
+    ? findThere(useOtherComputersStore.getState().views, remote.hostId, remote.workspaceId)
+    : null;
+}
 export function focusPanel(panel: "Projects" | "Workspace" | "Changes") {
   const layout = useLayoutStore.getState();
   if (panel !== "Workspace") layout.setCollapsed(panel === "Projects" ? "left" : "right", false);
@@ -44,10 +67,21 @@ export function commandEnabled(id: CommandId): boolean {
   const projects = useProjectsStore.getState();
   const workspaceId = projects.selectedWorkspaceId;
   const usable = availableWorkspaces().some(({ workspace }) => workspace.id === workspaceId);
-  if (id === "newWorkspace") return projects.projects.some((p) => !p.missing);
+  // A workspace on another computer is in view, or one is being composed there: what acts on
+  // this computer's own selection, hidden beneath it, is not offered.
+  const there = projects.remote !== null || projects.composingThere !== null;
+  if (id === "newWorkspace") {
+    if (!projects.remote) return projects.projects.some((p) => !p.missing);
+    const view = inViewThere()?.view;
+    return !!view?.mayStart && view.link.kind === "online";
+  }
+  if (id === "previousTerminal" || id === "nextTerminal") {
+    if (projects.remote) return tabsThere(inViewThere()?.workspace ?? NO_TABS).length > 1;
+  }
   if (id === "newTerminal")
     return (
       usable &&
+      !there &&
       !projects.composingProjectId &&
       !projects.composingWorkspaceId &&
       !projects.workflowId &&
@@ -63,6 +97,7 @@ export function commandEnabled(id: CommandId): boolean {
       !!workspaceId &&
       (!!useTerminalStore.getState().active[workspaceId] ||
         (id === "closeTerminal" && !!useSmokeTestsStore.getState().shown[workspaceId])) &&
+      !there &&
       !projects.composingProjectId &&
       !projects.composingWorkspaceId &&
       !projects.workflowId &&
@@ -73,9 +108,12 @@ export function commandEnabled(id: CommandId): boolean {
       !projects.schedulesOpen &&
       !projects.triggersOpen
     );
-  if (["nextWorkspace", "previousWorkspace"].includes(id)) return availableWorkspaces().length > 0;
+  if (["nextWorkspace", "previousWorkspace"].includes(id))
+    return availableWorkspaces().length + workspacesThere().length > 0;
   return true;
 }
+/** A workspace with nothing in it, for one that is not shown any more. */
+const NO_TABS: Pick<OtherWorkspace, "sessions" | "terminals"> = { sessions: [], terminals: [] };
 export function runCommand(id: CommandId) {
   if (!commandEnabled(id)) return;
   const layout = useLayoutStore.getState();
@@ -122,9 +160,14 @@ export function runCommand(id: CommandId) {
     case "openProject":
       void openProjectFromDisk();
       break;
-    case "newWorkspace":
-      composeInCurrentProject();
+    case "newWorkspace": {
+      // From a workspace on another computer, the new one is made there too, in its project.
+      const there = inViewThere();
+      if (there && projects.remote)
+        projects.composeThere({ hostId: projects.remote.hostId, projectId: there.project.id });
+      else composeInCurrentProject();
       break;
+    }
     case "newTerminal":
       if (workspaceId) void terminals.open(workspaceId);
       break;
@@ -154,19 +197,41 @@ export function runCommand(id: CommandId) {
       break;
     case "previousWorkspace":
     case "nextWorkspace": {
-      const items = availableWorkspaces();
-      const index = items.findIndex(({ workspace }) => workspace.id === workspaceId);
-      const next =
-        index < 0
-          ? id === "nextWorkspace"
-            ? 0
-            : items.length - 1
-          : (index + (id === "nextWorkspace" ? 1 : -1) + items.length) % items.length;
-      selectWorkspace(items[next]!.workspace.id);
+      // This computer's workspaces, then the other computers', as the sidebar lists them.
+      const here = availableWorkspaces();
+      const there = workspacesThere();
+      const count = here.length + there.length;
+      const remote = projects.remote;
+      const index = remote
+        ? there.findIndex(
+            (w) => w.hostId === remote.hostId && w.workspaceId === remote.workspaceId,
+          ) + here.length
+        : here.findIndex(({ workspace }) => workspace.id === workspaceId);
+      const lost = remote ? index < here.length : index < 0;
+      const next = lost
+        ? id === "nextWorkspace"
+          ? 0
+          : count - 1
+        : (index + (id === "nextWorkspace" ? 1 : -1) + count) % count;
+      if (next < here.length) selectWorkspace(here[next]!.workspace.id);
+      else {
+        const target = there[next - here.length]!;
+        projects.selectRemote(target.hostId, target.workspaceId);
+      }
       break;
     }
     case "previousTerminal":
     case "nextTerminal": {
+      if (projects.remote) {
+        const { hostId, workspaceId: thereId } = projects.remote;
+        const others = useOtherComputersStore.getState();
+        const tabs = tabsThere(inViewThere()?.workspace ?? NO_TABS);
+        const front = others.active[thereKey(hostId, thereId)] ?? tabs[0]?.id;
+        const index = tabs.findIndex((t) => t.id === front);
+        const next = tabs[(index + (id === "nextTerminal" ? 1 : -1) + tabs.length) % tabs.length];
+        if (next) others.activate(hostId, thereId, next.id);
+        break;
+      }
       const tabs = terminals.tabs.filter((t) => t.workspaceId === workspaceId);
       const index = tabs.findIndex((t) => t.id === terminals.active[workspaceId!]);
       const next = tabs[(index + (id === "nextTerminal" ? 1 : -1) + tabs.length) % tabs.length];

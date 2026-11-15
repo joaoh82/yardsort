@@ -183,9 +183,10 @@ drag. A program on its alternate screen, as a full-screen program uses, has no h
 ## Reaching another computer
 
 The desktop app can reach another computer running Yardsort too, as your phone does: one with the app
-and Remote on, or one with no screen running [`yardsort-host`](headless-host.md). It shows that
-computer's workspaces, agents and activity, opens its terminals to watch, types into one once you
-take control of it, and starts work there.
+and Remote on, or one with no screen running [`yardsort-host`](headless-host.md). Its projects and
+workspaces are listed in the sidebar under that computer, and a workspace there opens like one of your
+own: its terminals as tabs, to watch and, once this computer has control, to type into, and that
+computer's agents to start.
 
 1. In **Settings → Remote**, under **Other computers**, give the server the other computer is signed in
    to and a name for this one, then press **Sign in to reach other computers**, which opens your
@@ -198,40 +199,59 @@ take control of it, and starts work there.
    When this computer asked to approve or answer workflows, they can allow that separately. Until
    then the pairing says _waiting for its answer_.
 
-Once let in, the other computer is listed under **Other computers** in the sidebar, below your projects,
-by its name: _online_, _connecting_, or _offline_ since when. Click it to open its page in the middle of
-the window, with its name across the top. It lists each of its projects' workspaces with their branches,
-the agents in each with what they are doing, the workspace's other terminals, and its recent activity,
-and updates as it changes. There is no Changes panel, no Git action and no file for another computer's
-workspace, and nothing of it is mixed into your own projects. While the other computer is away, the page
-keeps what it last showed, and says when that was.
+**In the sidebar.** Once let in, the other computer is listed under **Other computers**, below your
+projects, by its name and how it stands: _online_, _connecting_, _offline_ and for how long, _waiting_
+while its person has not answered, or _watch only_. Under it are its projects, and under each project
+its workspaces, drawn as your own are: the dot for what its terminals are doing, `local` with its
+branch, how many agents are open, and the task it was started from, which opens the task's page.
+Click a computer or a project to fold it; what you folded is remembered. A computer that is offline
+folds by itself, and opened, it shows what it last showed, dimmed. The search above your projects
+filters this list too, by a computer's name or a project's. The **+** beside the heading opens
+**Settings → Remote**, where pairing is. Nothing of another computer is mixed into your own projects.
 
-**Its terminals.** Press **Watch** beside an agent or a terminal to open its terminal there, with **Back** to the computer's
-page. It shows what that terminal shows, at its size on that computer, and says who has control: nobody,
-the person at that computer, or a device by its name. Watching takes nothing, and what you type goes
-nowhere. Press **Take control** to type into it: the terminal then fits this window, and the person at
-that computer sees who has it. **Release control** hands it back, and so does going **Back**. Control is
-taken only by pressing; if the person at that computer types, or a phone takes control, this window says
-who took it and offers **Take control** again. A computer that lets this one only watch offers no
-**Take control**, and says so; to change that, **Forget** it under **Pairings**, pair again, and let it
-type there. If the connection drops, the terminal is watched again by itself once the other computer
-is back, from where it was, and control has to be taken again. Something typed as it dropped may not
-have arrived, and the window says so: nothing is sent twice.
+**A workspace there.** Click one to open it in the middle of the window, as a workspace of your own
+opens. The bar across the top names the computer and says how it stands; the tabs are that
+workspace's agents and other terminals; the bottom line says the computer, the project, the
+workspace and its branch. While the other computer is away, it keeps what it last showed and says
+when that was. The right panel says that its changes and files stay on that computer: there is no
+Changes panel, no Git action and no file for another computer's workspace yet.
 
-**Starting work there.** When that computer lets this one type, its page offers what a phone may do
-there too, each by that computer's own projects, workspaces and agents:
+**Who has control.** A terminal there shows what it shows on that computer, at its size there, and
+the bar says who has control: nobody, the person at that computer, or a device by its name. Watching
+takes nothing, and what you type goes nowhere. Press **Take control** to type into it: the terminal
+then fits this window, and the person at that computer sees who has it. **Release** hands it back.
+For a terminal that was already running, control is taken only by pressing. If the person at that
+computer types, or a phone takes control, the bar says who took it and offers **Take control** again.
+A computer that lets this one only watch offers no **Take control**, and says so; to change that,
+**Forget** it under **Pairings**, pair again, and let it type there. If the connection drops, the
+terminal is watched again by itself once the other computer is back, from where it was, and control
+has to be taken again. Something typed as it dropped may not have arrived, and the window says so:
+nothing is sent twice.
 
-- **New workspace**, beside a project, makes a workspace there as that computer's composer does, with
-  the agent you choose from its list given what it should do.
-- **New agent**, beside a workspace, starts another agent in it, with a first message or none.
-- **Resume**, beside an agent that ended, takes its conversation up again, with a message to go on with
-  or none. It shows only beside one that computer could resume.
+**Starting work there.** When that computer lets this one type, you start work there as you do here,
+each by that computer's own projects, workspaces and agents:
 
-Once it has started, its terminal opens here to watch, and **Take control** types into it. It runs on
-that computer, with that computer's settings, and is listed under it, never among your own projects. If
-the connection drops before that computer answers, the window says it may have started anyway, and
-nothing is tried again by itself. A computer that lets this one only watch offers none of these, and nor
-does one whose Yardsort is too old for them.
+- **A new workspace:** the **+** on one of its projects, or **New workspace** in the project's menu,
+  opens the composer for that computer. Say what the agent should work on, pick one of that
+  computer's agents, and press Enter. That computer makes the workspace, names its branch after your
+  message and starts from its default branch.
+- **Another agent:** the buttons at the end of the tab bar start one of that computer's agents in the
+  workspace, waiting to be told what to do. A workspace's menu in the sidebar offers the same.
+- **Resume:** an agent that ended there offers **Resume** over its terminal, and under **Previous
+  sessions** when nothing runs in the workspace. It shows only for one that computer could resume.
+
+What you start from here is yours to type into at once: this computer asks for control of its
+terminal as soon as it opens, without a press. If that is refused, or the person there takes control
+back, it is **Take control** from then on. It runs on that computer, with that computer's settings,
+and is listed under it, never among your own projects. If the connection drops before that computer
+answers, the window says it may have started anyway, and nothing is tried again by itself. A computer
+that lets this one only watch offers none of these, and nor does one whose Yardsort is too old for
+them. Nothing can be started on a computer that is away, and nothing is queued for it.
+
+**The keyboard.** The next and previous workspace shortcuts go on from your own workspaces to the
+other computers', in the sidebar's order, and the next and previous tab shortcuts switch a workspace's
+tabs there. With a workspace there in view, the new workspace shortcut composes one on that computer,
+in the same project, and the new shell shortcut does nothing: a shell there is not offered yet.
 
 **This is a device of its own.** Signing in here makes a second device at the server, apart from this
 computer as a host: turning Remote on or off above leaves it signed in, and **Sign out** under Other

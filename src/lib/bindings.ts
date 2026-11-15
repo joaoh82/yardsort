@@ -2254,6 +2254,13 @@ export type OtherStarted = {
 	harness: string,
 };
 
+/**  A task a workspace on another computer was started from: what to call it, and its page. */
+export type OtherTask = {
+	key: string,
+	title: string,
+	url: string,
+};
+
 export type OtherTerminal = {
 	id: string,
 	program: string,
@@ -2265,8 +2272,14 @@ export type OtherTerminal = {
 export type OtherWorkspace = {
 	id: string,
 	name: string,
+	/**  `local`, that project's own checkout, or `worktree`. */
+	kind: string,
 	branch: string | null,
 	archived: boolean,
+	/**  Its folder should be there and is not. */
+	missing: boolean,
+	/**  The tasks it was started from, on their forge. */
+	tasks: OtherTask[],
 	sessions: OtherSession[],
 	terminals: OtherTerminal[],
 };
