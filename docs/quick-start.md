@@ -191,8 +191,8 @@ to reopen it with its conversation intact.
 - [Workflows](guide/workflows.md) — named agent work in steps, the built-in code review and
   software factory
 - [Smoke tests](guide/smoke-tests.md) — the ten-minute check written as a file an agent runs
-- [Remote](guide/remote.md) — your phone, through a server; still under development, and off until
-  you turn it on
+- [Remote](guide/remote.md) — your phone and your other computers, through a server; still under
+  development, and off until you turn it on
 - [Usage](guide/usage.md) — tokens, estimated API costs, plan limits and live CPU and memory
 - [Settings & harnesses](guide/settings.md) — make an agent start the way you like
 - [Keyboard shortcuts](guide/shortcuts.md)

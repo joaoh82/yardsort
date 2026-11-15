@@ -173,8 +173,9 @@ and [Assist](assist.md) for availability and API fallback behaviour.
 
 ## Remote
 
-Reach this computer from your phone through a Yardsort server. Still under development, and off until
-you turn it on: see [Remote](remote.md).
+Reach this computer from your phone or from another computer through a Yardsort server, and sync a
+project between your computers. Still under development, and off until you turn it on: see
+[Remote](remote.md).
 
 ## Environment variables
 

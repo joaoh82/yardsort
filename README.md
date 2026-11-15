@@ -195,7 +195,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   notification opens that item. You can answer or approve a workflow on the phone while this
   computer is online. On the phone a conversation reads as a chat, a column at the phone's width,
   and Claude Code's permission questions can be answered there, as can a smoke test waiting to
-  be let run. A workspace's pull request shows there too, with its checks and reviews, read-only.
+  be let run. A workspace's pull request shows there too, with its checks and reviews, read-only,
+  and a project folds to put its workspaces away.
   Installing a desktop update stays on the computer.
   Whoever runs the server
   can see what passes through it, and the phone app is not in the app stores yet. Expect it to
@@ -209,7 +210,11 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   reach another computer the same way: its projects and workspaces in the sidebar under that
   computer, opened like your own, with its terminals to watch and, once you have control, to type
   into. New work starts there from the same composer, by choosing the computer in its title, and
-  an ended conversation can be resumed there.
+  an ended conversation can be resumed there. A workspace there shows its changes and files,
+  read-only, and you can commit, push, and open or merge its pull request, which that computer
+  does as itself. Turn on **Sync** for a project and your computers share it: its approved notes
+  reach the agents on each, and each lists the others' workspaces under the project, with **Check
+  out here** to bring one's branch over. A project's files, its path and its terminals never sync.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
 
 <table>
@@ -632,7 +637,7 @@ says no.
 | [Smoke tests](docs/guide/smoke-tests.md)                                                         | A file an agent writes and Yardsort runs: steps, browser, approval, the Tests view   |
 | [Schedules](docs/guide/schedules.md)                                                             | A workflow or a smoke test at a set time, or on a routine                            |
 | [Triggers](docs/guide/triggers.md)                                                               | A workflow or a smoke test when something happens: done, a review, failing checks    |
-| [Remote](docs/guide/remote.md)                                                                   | Your phone, through a server. Still under development, and off until you turn it on  |
+| [Remote](docs/guide/remote.md)                                                                   | Your phone and your other computers, through a server. Still under development       |
 | [A computer with no screen](docs/guide/headless-host.md)                                         | `yardsort-host`: a Linux server your phone reaches. Still under development          |
 | [Usage](docs/guide/usage.md)                                                                     | Tokens spent and their cost; CPU and memory per agent                                |
 | [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                                           |
