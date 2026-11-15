@@ -6104,6 +6104,48 @@ fn sync_status_is_read_from_the_records_and_nothing_else_is_offered() {
         serde_json::from_str(&fx.ys(&["sync", "status", "--json"]).ok()).unwrap();
     assert_eq!(json["projects"][0]["state"], "waiting");
 
+    // Another computer's workspace of it: listed, and nothing made here.
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let synced = store.synced_project(&project.id).unwrap().unwrap().sync_id;
+    let elsewhere = yardsort_core::sync::WorkspaceBody {
+        name: "fix-login".into(),
+        branch: Some("ys/fix-login".into()),
+        base_branch: Some("main".into()),
+        archived: false,
+        tasks: vec![yardsort_core::sync::WorkspaceTask {
+            source: "github".into(),
+            repo: "github.com/acme/widgets".into(),
+            key: "#91".into(),
+            url: "https://github.com/acme/widgets/issues/91".into(),
+            title: "Login fails".into(),
+        }],
+        origin: "host-there".into(),
+        host: "Build box".into(),
+    };
+    let record = remote_proto::sync::SyncRecord {
+        kind: remote_proto::sync::RecordKind::Workspace,
+        id: remote_proto::sync::SyncId::new("4b3c2d1e-0f9a-4b8c-9d7e-6f5a4b3c2d1e").unwrap(),
+        project: synced,
+        revision: 1,
+        schema: 1,
+        body: Some(elsewhere.to_value()),
+        revoked: false,
+        deleted: false,
+        host: remote_proto::HostId::new("host-there").unwrap(),
+        changed_at: 3,
+        cursor: 3,
+    };
+    let before = store.workspaces().unwrap().len();
+    store.take_sync_records(&[record], Some(3)).unwrap();
+    assert_eq!(store.workspaces().unwrap().len(), before);
+    drop(store);
+    let shown = fx.ys(&["sync", "status"]).ok();
+    assert!(
+        shown.contains(&format!("On your other computers, in {}:", fx.project_name))
+            && shown.contains("fix-login  on Build box  ys/fix-login  #91  (4b3c2d1e)"),
+        "{shown}"
+    );
+
     // An agent in a Yardsort terminal can run anything `ys` offers, so it offers nothing that
     // changes sync.
     for verb in ["on", "link", "stop", "remove", "off"] {

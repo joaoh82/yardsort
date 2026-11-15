@@ -2,7 +2,7 @@
 
 > **Still under development, like the rest of [Remote](remote.md).** Expect it to change. Each release
 > since 0.23.0 carries a tarball of it for Linux, and since 0.30.0 two container images of it; see
-> [In a container](#in-a-container).
+> [Installing](#installing) and [In a container](#in-a-container).
 
 `yardsort-host` runs Yardsort on a computer with no display, such as a server you reach over SSH, as a
 host your phone reaches through a Yardsort server. You start agents there with [`ys`](cli.md), or from
@@ -25,6 +25,56 @@ GTK. Nothing it runs listens on the network: it reaches out to the server, as th
   comes with the agents whose licences allow it.
 
 ## Installing
+
+As the user that will run the host, one line installs the newest release, or brings it up to date:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/joaoh82/yardsort/main/crates/host/packaging/install.sh | sh
+```
+
+It takes the release's tarball for this computer, puts `yardsort-host` and `ys` in `~/.local/bin` and
+the systemd user service in `~/.config/systemd/user`, and keeps your services running after you log
+out where it may (`loginctl enable-linger`, with `sudo` if that asks for no password). It starts
+nothing and signs in to nothing: it prints what is left, which is [signing in](#signing-in),
+[the service](#as-a-service), [an agent](#installing-an-agent) and [pairing](#only-a-person-can-pair-a-device).
+`sh -s -- --version 0.34.1` after the pipe takes that release instead. Read
+[the script](../../crates/host/packaging/install.sh) first if you would rather know what it does.
+
+**On a new cloud server**, where the first login is root's, name the user it is for:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/joaoh82/yardsort/main/crates/host/packaging/install.sh | sh -s -- --user yardsort
+```
+
+As root it makes that user if there is none, installs `git` where `apt` can, and installs the same
+things for that user; the host itself never runs as root. Nothing is made until the release is
+downloaded, so a run that fails there can simply be run again.
+
+A user it made is given SSH keys, so that you can log in as it: yours, when you ran the line with
+`sudo`, and otherwise root's. Only keys with no options before them are given. Many cloud images
+turn root's login off by putting a command before root's key that says to log in as another user;
+that line is never handed on, and when there is no other key the script says the user has none yet
+and where to put yours.
+
+As a server's first boot, where your provider takes cloud-init's user data, make the user there with
+your key, and the script installs for it:
+
+```yaml
+#cloud-config
+users:
+  - default
+  - name: yardsort
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAA… you@laptop
+runcmd:
+  - curl -fsSL https://raw.githubusercontent.com/joaoh82/yardsort/main/crates/host/packaging/install.sh | sh -s -- --user yardsort
+```
+
+Then log in as that user over SSH for the rest. A shell from `su` or `sudo -iu` has no user session,
+and `systemctl --user` does not work in one.
+
+### By hand
 
 Each release carries `yardsort-host-<version>-linux-x86_64.tar.gz` and
 `yardsort-host-<version>-linux-aarch64.tar.gz`, from the
@@ -232,11 +282,88 @@ ys workspace new my-service "Fix the flaky login test"
 ys attach                        # watch it here; detaching leaves it running
 ```
 
+The repositories have to be on that computer first, with a way to push from it: see
+[Git and GitHub](#git-and-github).
+
 A paired device that may type can start work too: a new workspace, another agent in one, or a
 conversation that ended taken up again, as [Remote](remote.md#starting-work-from-the-phone) says, from
 the phone or from the desktop app on another computer
 ([Reaching another computer](remote.md#reaching-another-computer)). It offers the agents this profile
-has turned on and can find.
+has turned on and can find, with the models and efforts its settings list for them.
+
+The desktop app on another computer, let type, can also open a shell in a workspace here, rename,
+archive or delete a workspace, and have this host clone a repository and add it as a project. A
+clone goes into `~/Projects`, made when it is first needed, or the folder you name in
+`settings.toml`:
+
+```toml
+[remote]
+projects_dir = "~/code"   # a whole path, or one starting with ~ for this user's home
+```
+
+Such a computer can read a workspace's changes and files too, by paths inside the workspace, and
+commit, push and open or merge its pull request: see
+[Remote](remote.md#starting-work-from-the-phone). The host does those as itself, so give it a Git
+name and email (`git config --global user.name` and `user.email`), credentials that can push, and
+`gh auth login` if pull requests should be opened and merged from it.
+
+It is cloned with this host's own Git sign-in, from an HTTPS or SSH address, and never to a path a
+device names. In a container, point `projects_dir` at a folder in a volume if clones should outlast
+the container.
+
+## Git and GitHub
+
+The agents commit, push and open pull requests as the user that runs the host, with whatever that
+user can reach. Nothing of yours is there on a new server, so give it three things, as that user.
+
+**A name for its commits:**
+
+```sh
+git config --global user.name "Your Name"
+git config --global user.email you@example.com
+```
+
+**The GitHub CLI, signed in.** Yardsort opens and reads pull requests through
+[`gh`](https://cli.github.com), here as on a desk computer
+([Commits and pull requests](commits-and-pull-requests.md)), and `gh` can carry git's pushes too, so
+no SSH key is needed. Install it [as GitHub says](https://github.com/cli/cli/blob/trunk/docs/install_linux.md);
+the full container image has it. Then:
+
+```sh
+gh auth login --hostname github.com --git-protocol https --web
+```
+
+It prints a one-time code and an address. Open the address in a browser on any computer and type
+the code: nothing has to open on the server. Choosing HTTPS makes `gh` the one git asks for a
+password, so `git push` works from then on. A server has no keyring, so `gh` keeps its token in a
+file in that user's home, `~/.config/gh/hosts.yml`: guard that home as you would the host's sign-in.
+
+**The repositories**, cloned where you will add them from:
+
+```sh
+gh repo clone you/my-service ~/src/my-service
+ys project add ~/src/my-service
+```
+
+**What you sign in with is what every agent there can use.** `gh auth login` in a browser hands the
+server everything your account can do. To hand it less:
+
+- **A fine-grained token**, made in GitHub's settings for the repositories this computer works on
+  alone, with what the work needs: Contents and Pull requests, read and write, to push and open pull
+  requests. Give it to `gh` on its input, so that it is in no command line: `gh auth login --with-token`,
+  then paste it and press Ctrl-D. Then `gh auth setup-git`, for git to use it.
+- **A deploy key**, for git alone, on one repository: `ssh-keygen -t ed25519 -C "build box"` there,
+  and add `~/.ssh/id_ed25519.pub` under the repository's **Settings → Deploy keys**, with write
+  access. Clone by the SSH address. Pull requests still need `gh`.
+
+For another forge, give git a key or a token the same way; Yardsort's pull request features are
+GitHub's.
+
+In a container, run the same commands with `docker compose exec host` before them. They are kept in
+the home volume, with the agents' sign-ins.
+
+When the server goes, take them back: `gh auth logout` there, and delete the token or the key at
+GitHub, which is what makes a copy of the disk worth nothing.
 
 ## After a restart
 
@@ -311,19 +438,28 @@ yardsort-host sync status                     # what syncs, the last pass, and w
 yardsort-host sync on my-service              # shows what it sends, and asks
 yardsort-host sync link my-service fa737444   # to one another computer syncs
 yardsort-host sync stop my-service            # unlink this computer; the others keep it
+yardsort-host sync checkout my-service fix-login  # another computer's workspace, here too
 yardsort-host sync remove my-service          # from the server, for every computer; asks first
 ```
 
 A project is named as `ys project list` shows it, or by its id. `sync on` prints the project's
-name, its remote's address, without any user or password, and how many approved notes go with it,
+name, its remote's address, without any user or password, and how many approved notes and
+workspaces go with it,
 says the server keeps them in plain text, and asks before sending. `status` lists the projects your other computers sync that this one
 does not, each by the start of its id, its name and its remote, and says which project here has
 the same remote; `link` takes that id or the name. Nothing is linked by itself. `--yes` skips the
 question `on` and `remove` ask.
 
-Like `pair`, `on`, `link`, `stop` and `remove` are refused from a terminal Yardsort started, from
+`checkout` takes a workspace as `ys sync status` lists it, by name, or by the start of the id it
+shows when two of your other computers have one of that name, as the refusal then lists: it
+fetches the branch from the project's remote and makes a workspace on it here, refusing a branch here
+with commits the remote's has not, which it leaves as it is. Push the branch from the other computer
+first.
+
+Like `pair`, `on`, `link`, `stop`, `checkout` and `remove` are refused from a terminal Yardsort started, from
 anything an agent runs, and from input that is not a terminal ([the guard](#only-a-person-can-pair-a-device)).
-`status` is not; nor is [`ys sync status`](cli.md#ys-sync-status), which is all `ys` offers of sync.
+`status` is not; nor is [`ys sync status`](cli.md#ys-sync-status), which is all `ys` offers of sync,
+and which lists your other computers' workspaces of each synced project. None of them is made here.
 
 ## Memory there
 
@@ -350,7 +486,15 @@ no agent approves its own proposal, and none reads more of the memory than
 
 ## Upgrading
 
-Replace the two programs and restart `serve`:
+Replace the two programs and restart `serve`. The install line does the first, and keeps a service
+file you changed:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/joaoh82/yardsort/main/crates/host/packaging/install.sh | sh
+systemctl --user restart yardsort-host
+```
+
+Or from a tarball you unpacked:
 
 ```sh
 install -Dm755 bin/yardsort-host bin/ys -t ~/.local/bin/

@@ -1,0 +1,137 @@
+id: sync-workspaces
+name: A workspace made on one computer is seen on the other, and nothing is made there
+description: >-
+  Two computers with no screen, each a yardsort-host profile of its own, signed in to the stand-in
+  server as the same account, with a project synced on the first and linked on the second. A
+  workspace made on the first with `ys workspace new` is listed on the second by `ys sync status`,
+  with its computer and its branch, within seconds; on the second, no workspace, worktree, branch or
+  directory appears for it, before or after. Deleted on the first, it is gone from the second.
+  Renaming and archiving are the window's, and are covered by the core's tests. Linux only.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build
+    action: shell
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: two_computers_and_a_repository_on_each
+    action: shell
+    line: >-
+      for at in here there; do mkdir -p "$YS_RUN_DIR/$at" && cp .yardsort/tests/support/headless-settings.toml
+      "$YS_RUN_DIR/$at/settings.toml"; done && git init -q "$YS_RUN_DIR/widgets" && git -C "$YS_RUN_DIR/widgets"
+      -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m
+      first && git clone -q "$YS_RUN_DIR/widgets" "$YS_RUN_DIR/widgets-copy"
+
+steps:
+  - id: sign_in_both
+    action: shell
+    line: >-
+      for at in here there; do YS_PROFILE="$YS_RUN_DIR/$at" bun .yardsort/tests/support/host.ts "$YS_RUN_DIR"
+      sign-in "$at" || exit 1; done
+    expect:
+      stdout_contains: Signed in as there
+  - id: serve_both
+    action: shell
+    line: >-
+      for at in here there; do YS_PROFILE="$YS_RUN_DIR/$at" setsid sh .yardsort/tests/support/headless.sh
+      yardsort-host serve > "$YS_RUN_DIR/$at.log" 2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/$at.pid"; done
+  - id: both_linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        for at in here there; do YS_PROFILE="$YS_RUN_DIR/$at" sh .yardsort/tests/support/headless.sh
+        yardsort-host status | grep -q "Link: connected" || exit 1; done
+    timeout: 60s
+  - id: the_project_syncs_on_both
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh ys project add "$YS_RUN_DIR/widgets"
+      && YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh ys project add
+      "$YS_RUN_DIR/widgets-copy" && printf 'y\n' | YS_PROFILE="$YS_RUN_DIR/here" script -qefc "sh
+      .yardsort/tests/support/headless.sh yardsort-host sync on widgets" /dev/null > /dev/null && for i in $(seq
+      60); do YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh ys sync status | grep -Eq
+      "widgets +syncing" && break; sleep 1; done && YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh
+      .yardsort/tests/support/headless.sh yardsort-host sync link widgets-copy widgets" /dev/null < /dev/null
+    expect:
+      stdout_contains: widgets-copy is linked to the synced widgets
+  - id: what_the_second_has_before
+    action: shell
+    # Its workspaces, branches and folders, to compare with after.
+    line: >-
+      { YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh ys workspace list --project widgets-copy;
+      git -C "$YS_RUN_DIR/widgets-copy" branch --list; git -C "$YS_RUN_DIR/widgets-copy" worktree list
+      --porcelain; ls -A "$YS_RUN_DIR/there-worktrees" 2>/dev/null || true; } > "$YS_RUN_DIR/there-before" && wc -l <
+      "$YS_RUN_DIR/there-before"
+  - id: make_a_workspace_on_the_first
+    action: shell
+    # `ys` writes the database in a process of its own; nothing tells the host.
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh ys workspace new widgets "Fix the
+      login" --harness sh
+    expect:
+      stdout_contains: agent  sh
+  - id: seen_on_the_second_with_its_computer_and_branch
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh ys sync status | grep -A1 "On your
+        other computers, in widgets-copy:" | grep -Eq "^  [^ ]*login[^ ]*  on here  ys/[^ ]*login"
+    timeout: 60s
+  - id: nothing_made_on_the_second
+    action: shell
+    line: >-
+      { YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh ys workspace list --project widgets-copy;
+      git -C "$YS_RUN_DIR/widgets-copy" branch --list; git -C "$YS_RUN_DIR/widgets-copy" worktree list
+      --porcelain; ls -A "$YS_RUN_DIR/there-worktrees" 2>/dev/null || true; } > "$YS_RUN_DIR/there-after" && cmp
+      "$YS_RUN_DIR/there-before" "$YS_RUN_DIR/there-after" && echo unchanged
+    expect:
+      stdout_contains: unchanged
+  - id: delete_it_on_the_first
+    action: shell
+    line: >-
+      name=$(YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh ys workspace list --project widgets --json |
+      bun -e 'const all = JSON.parse(await Bun.stdin.text()); console.log((all.workspaces ?? all).find((w) =>
+      w.name.includes("login")).name)') && YS_PROFILE="$YS_RUN_DIR/here" sh
+      .yardsort/tests/support/headless.sh ys workspace delete "$name" --force
+  - id: gone_from_the_second
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        ! YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh ys sync status | grep -q "On your
+        other computers"
+    timeout: 60s
+  - id: and_still_nothing_made_there
+    action: shell
+    line: >-
+      { YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh ys workspace list --project widgets-copy;
+      git -C "$YS_RUN_DIR/widgets-copy" branch --list; git -C "$YS_RUN_DIR/widgets-copy" worktree list
+      --porcelain; ls -A "$YS_RUN_DIR/there-worktrees" 2>/dev/null || true; } > "$YS_RUN_DIR/there-last" && cmp
+      "$YS_RUN_DIR/there-before" "$YS_RUN_DIR/there-last" && echo unchanged
+    expect:
+      stdout_contains: unchanged
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      for at in here there; do kill "$(cat "$YS_RUN_DIR/$at.pid" 2>/dev/null)" 2>/dev/null; done; pkill -HUP -f
+      "yardsort-daemon .*$YS_RUN_DIR"; pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

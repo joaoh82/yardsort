@@ -10,7 +10,7 @@ import { useUpdatesStore } from "@/stores/updates";
 import { reviewVanishedWorkspaces } from "./actions";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { ProjectTree } from "./ProjectTree";
-import { OtherComputersList } from "./OtherComputersList";
+import { OtherComputersTree } from "./OtherComputersTree";
 import { WorkflowsRow } from "@/features/workflows/WorkflowsRow";
 import { PullRequestsRow } from "@/features/pull-requests/PullRequestsRow";
 import { usePullRequestPolling } from "@/features/pull-requests/usePullRequestPolling";
@@ -59,7 +59,10 @@ export function Sidebar() {
     const unlisten = ipc.onSessionStarted(() => void refresh());
     // A schedule can make a workspace for its run, and that run may start no agent.
     const unlistenSchedules = ipc.onSchedulesChanged(() => void refresh());
+    // A device through Remote can rename, archive or delete a workspace here, or clone a project.
+    const unlistenRemote = ipc.onRemoteChangedProjects(() => void refresh());
     return () => {
+      void unlistenRemote.then((stop) => stop());
       window.removeEventListener("focus", onFocus);
       void unlisten.then((stop) => stop());
       void unlistenSchedules.then((stop) => stop());
@@ -155,7 +158,7 @@ export function Sidebar() {
       ) : (
         <ProjectTree query={query} />
       )}
-      <OtherComputersList />
+      <OtherComputersTree query={query} />
 
       {pendingClones.map((request) => (
         <p key={request.id} role="status" className="px-3 py-2 text-ink-muted">

@@ -178,11 +178,91 @@ impl Starting for HostStarting {
 
     fn workspace(
         &self,
-        project: &str,
-        prompt: &str,
-        harness: &str,
+        new: &yardsort_core::remote::start::NewWorkspace,
     ) -> IpcResult<(String, SessionInfo)> {
-        self.with(|starter| starter.workspace(project, prompt, harness))
+        self.with(|starter| starter.workspace(new))
+    }
+
+    fn shell(&self, workspace: &str) -> IpcResult<SessionInfo> {
+        self.with(|starter| starter.shell(workspace))
+    }
+
+    fn branches(&self, project: &str) -> IpcResult<remote_proto::ProjectBranches> {
+        self.with(|starter| starter.branches(project))
+    }
+
+    fn clone_project(&self, remote: &str, name: Option<&str>) -> IpcResult<(String, String)> {
+        self.with(|starter| starter.clone_project(remote, name))
+    }
+
+    fn rename(&self, workspace: &str, name: &str) -> IpcResult<()> {
+        self.with(|starter| starter.rename(workspace, name))
+    }
+
+    fn archive(&self, workspace: &str, force: bool) -> IpcResult<()> {
+        self.with(|starter| starter.archive(workspace, force))
+    }
+
+    fn delete(&self, workspace: &str, force: bool) -> IpcResult<()> {
+        self.with(|starter| starter.delete(workspace, force))
+    }
+
+    fn changes(&self, workspace: &str) -> IpcResult<yardsort_core::changes::ChangeSet> {
+        self.with(|starter| starter.changes(workspace))
+    }
+
+    fn files(
+        &self,
+        workspace: &str,
+        dir: &str,
+    ) -> IpcResult<Vec<yardsort_core::file_tree::FileEntry>> {
+        self.with(|starter| starter.files(workspace, dir))
+    }
+
+    fn content(
+        &self,
+        workspace: &str,
+        path: &str,
+        old_path: Option<&str>,
+        of: remote_proto::FileOf,
+    ) -> IpcResult<yardsort_core::changes::Content> {
+        self.with(|starter| starter.content(workspace, path, old_path, of))
+    }
+
+    fn publish(
+        &self,
+        workspace: &str,
+        forge: bool,
+    ) -> IpcResult<remote_proto::publish::PublishState> {
+        self.with(|starter| starter.publish(workspace, forge))
+    }
+    fn commit(
+        &self,
+        workspace: &str,
+        message: &str,
+    ) -> IpcResult<remote_proto::publish::PublishState> {
+        self.with(|starter| starter.commit(workspace, message))
+    }
+    fn push(&self, workspace: &str) -> IpcResult<remote_proto::publish::PublishState> {
+        self.with(|starter| starter.push(workspace))
+    }
+    fn open_pull_request(
+        &self,
+        workspace: &str,
+        title: &str,
+        body: &str,
+        draft: bool,
+    ) -> IpcResult<remote_proto::publish::PullRequestOpened> {
+        self.with(|starter| starter.open_pull_request(workspace, title, body, draft))
+    }
+    fn merge_pull_request(
+        &self,
+        workspace: &str,
+        number: u32,
+        head_oid: &str,
+        method: remote_proto::publish::MergeMethod,
+    ) -> IpcResult<()> {
+        self.with(|starter| starter.merge_pull_request(workspace, number, head_oid, method))
     }
 
     fn session(

@@ -3,13 +3,19 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { Workspace } from "@/lib/ipc";
 import { useProjectsStore } from "@/stores/projects";
 
-/** Change a workspace's display name. Its folder and branch keep theirs. */
+/**
+ * Change a workspace's display name. Its folder and branch keep theirs. With `rename`, the
+ * workspace is somewhere else (on another computer) and that is how it is renamed there: it
+ * resolves to why it could not be, or `null`.
+ */
 export function RenameDialog({
   workspace,
   onClose,
+  rename,
 }: {
-  workspace: Workspace;
+  workspace: Pick<Workspace, "id" | "name">;
   onClose: () => void;
+  rename?: (name: string) => Promise<string | null>;
 }) {
   const [name, setName] = useState(workspace.name);
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +33,10 @@ export function RenameDialog({
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (rename) {
+      const problem = await rename(name);
+      return problem === null ? onClose() : setError(problem);
+    }
     const renamed = await useProjectsStore.getState().renameWorkspace(workspace.id, name);
     if (renamed) return onClose();
     // The store holds the reason; show it here, where the user is looking.

@@ -113,6 +113,28 @@ when a check fails or a review arrives is not built yet.
 A device you let type can start work here too. It is no more than it could do by typing into a terminal,
 so it needs nothing else from you.
 
+The same goes for what the desktop app on another computer can ask of this one, once you let it
+type ([Reaching another computer](#reaching-another-computer)): a shell in a workspace, a workspace
+renamed, archived or deleted, and a repository cloned and added as a project. None of them names a
+folder here. A clone goes into the folder under **Projects cloned for a device** in Settings →
+Remote, `~/Projects` unless you set another, and is fetched with this computer's own Git sign-in;
+a device let into only some of your projects cannot clone. Archiving and deleting keep the branch,
+and a workspace with uncommitted work is refused until the person at the other computer has been
+asked a second time. A device you let only watch can do none of this.
+
+Such a computer can also read a workspace's changes and files here: which files changed, the file
+tree without what Git ignores, and the text of a file inside the workspace, up to 1 MB. It is a
+path inside the workspace that is asked for, checked here, links included, and nothing outside a
+workspace is answered. It is what the same device could read by typing `git diff` or `cat` into a
+terminal, so it comes with letting it type and not with a permission of its own. What is read
+passes through the server as terminal output does: carried, and not kept.
+
+It can also commit everything changed in a workspace here, push the workspace's branch to its
+project's remote, and open and merge its pull request, as the person there presses for each. This
+computer does them as itself: with its own Git identity, its own Git credentials and its own `gh`
+sign-in. No request names a remote, a branch to push to or a credential, and a merge goes ahead
+only for the workspace's own pull request, open, not a draft, at the commit the request names.
+
 - **New workspace**, on a computer's screen, asks for the project, the agent and what it should do. This
   computer makes the workspace as its [composer](workspaces.md#starting-one-the-composer) does: a branch
   named after the message, from the project's default branch, with the project's setup run, and the
@@ -248,9 +270,10 @@ drag. A program on its alternate screen, as a full-screen program uses, has no h
 ## Reaching another computer
 
 The desktop app can reach another computer running Yardsort too, as your phone does: one with the app
-and Remote on, or one with no screen running [`yardsort-host`](headless-host.md). It shows that
-computer's workspaces, agents and activity, opens its terminals to watch, types into one once you
-take control of it, and starts work there.
+and Remote on, or one with no screen running [`yardsort-host`](headless-host.md). Its projects and
+workspaces are listed in the sidebar under that computer, and a workspace there opens like one of your
+own: its terminals as tabs, to watch and, once this computer has control, to type into, and that
+computer's agents to start.
 
 1. In **Settings → Remote**, under **Other computers**, give the server the other computer is signed in
    to and a name for this one, then press **Sign in to reach other computers**, which opens your
@@ -263,40 +286,160 @@ take control of it, and starts work there.
    When this computer asked to approve or answer workflows, they can allow that separately. Until
    then the pairing says _waiting for its answer_.
 
-Once let in, the other computer is listed under **Other computers** in the sidebar, below your projects,
-by its name: _online_, _connecting_, or _offline_ since when. Click it to open its page in the middle of
-the window, with its name across the top. It lists each of its projects' workspaces with their branches,
-the agents in each with what they are doing, the workspace's other terminals, and its recent activity,
-and updates as it changes. There is no Changes panel, no Git action and no file for another computer's
-workspace, and nothing of it is mixed into your own projects. While the other computer is away, the page
-keeps what it last showed, and says when that was.
+**In the sidebar.** Once let in, the other computer is listed under **Other computers**, below your
+projects, by its name and how it stands: _online_, _connecting_, _offline_ and for how long, _waiting_
+while its person has not answered, or _watch only_. Under it are its projects, and under each project
+its workspaces, drawn as your own are: the dot for what its terminals are doing, `local` with its
+branch, how many agents are open, and the task it was started from, which opens the task's page.
+Click a computer or a project to fold it; what you folded is remembered. A computer that is offline
+folds by itself, and opened, it shows what it last showed, dimmed. The search above your projects
+filters this list too, by a computer's name or a project's. The **+** beside the heading opens
+**Settings → Remote**, where pairing is. Nothing of another computer is mixed into your own projects.
 
-**Its terminals.** Press **Watch** beside an agent or a terminal to open its terminal there, with **Back** to the computer's
-page. It shows what that terminal shows, at its size on that computer, and says who has control: nobody,
-the person at that computer, or a device by its name. Watching takes nothing, and what you type goes
-nowhere. Press **Take control** to type into it: the terminal then fits this window, and the person at
-that computer sees who has it. **Release control** hands it back, and so does going **Back**. Control is
-taken only by pressing; if the person at that computer types, or a phone takes control, this window says
-who took it and offers **Take control** again. A computer that lets this one only watch offers no
-**Take control**, and says so; to change that, **Forget** it under **Pairings**, pair again, and let it
-type there. If the connection drops, the terminal is watched again by itself once the other computer
-is back, from where it was, and control has to be taken again. Something typed as it dropped may not
-have arrived, and the window says so: nothing is sent twice.
+**A workspace there.** Click one to open it in the middle of the window, as a workspace of your own
+opens. The bar across the top names the computer and says how it stands; the tabs are that
+workspace's agents and other terminals; the bottom line says the computer, the project, the
+workspace and its branch. While the other computer is away, it keeps what it last showed and says
+when that was.
 
-**Starting work there.** When that computer lets this one type, its page offers what a phone may do
-there too, each by that computer's own projects, workspaces and agents:
+**Its changes and files.** The right panel shows them as it shows a local workspace's, read from
+that computer when you look: **Changes** lists what is uncommitted and what is on its branch, and
+a file there opens as a diff, inline or side by side; **Files** is its file tree, a folder listed
+when you open it, and a file opens as text. Files are read-only: there is no editor, and nothing
+read is kept on this computer. The panel reads again
+whenever this computer reads that one again, which is when something happens there and every 20
+seconds otherwise.
 
-- **New workspace**, beside a project, makes a workspace there as that computer's composer does, with
-  the agent you choose from its list given what it should do.
-- **New agent**, beside a workspace, starts another agent in it, with a first message or none.
-- **Resume**, beside an agent that ended, takes its conversation up again, with a message to go on with
-  or none. It shows only beside one that computer could resume.
+What it does not show: files Git ignores there, and `.git`, are not in the tree; a picture or any
+other file that is not text is said to be binary; a file over 1 MB is said to be too large. The
+panel needs that computer to let this one type, and Yardsort 0.35.0 there. Otherwise it keeps its
+place and says why it is empty.
 
-Once it has started, its terminal opens here to watch, and **Take control** types into it. It runs on
-that computer, with that computer's settings, and is listed under it, never among your own projects. If
-the connection drops before that computer answers, the window says it may have started anyway, and
-nothing is tried again by itself. A computer that lets this one only watch offers none of these, and nor
-does one whose Yardsort is too old for them.
+**Commit, push and the pull request.** Under **Changes**, for a computer that lets you type and
+has Yardsort 0.35.0:
+
+- **Commit** commits everything changed in the workspace there, with your message. It is that
+  computer's Git that commits, so the commit is by the name and email Git has there, which the
+  button's tooltip shows. With none set there, the bar says so and nothing can be committed.
+- **Push _n_ commits** pushes the workspace's branch from that computer to its project's remote,
+  with that computer's Git credentials. A push the remote refuses says why in a sentence: it has
+  commits this branch lacks, a rule there protects the branch, or that computer's sign-in was not
+  accepted. Git's own output is not sent here, since it names that computer's folders and the
+  remote's address; open a shell in the workspace to read it.
+- **Open pull request** asks for a title, a description and whether it is a draft. That computer
+  pushes the branch if the remote lacks any of it, then opens the pull request with its own `gh`
+  sign-in. Without `gh` there, or signed out of it, the forge's own form opens in this computer's
+  browser with both branches filled in.
+- **The pull request**, once there is one, is a line with its number and title, whether it is
+  open, a draft, merged or closed, and what its checks say. The title opens its page. **Merge…**
+  is offered for an open one that is not a draft and has no conflicts, with squash, merge commit
+  or rebase beside it. You are asked first, and that computer merges only if the pull request is
+  still at the commit you were shown. Its branch is not deleted.
+
+Each of these is one press of yours. Nothing commits, pushes or merges by itself, nothing is
+offered to an agent, and nothing is tried again when an answer is lost: the bar then says it may
+have been done, and reads how the workspace stands. The forge is asked about the pull request when
+the bar opens and after a push, an open or a merge, whether it was done or refused, not at every
+reading. So a merge refused because the pull request was pushed to meanwhile shows the pull
+request as it is now, and **Merge…** then asks about that commit. If the forge does not answer,
+the bar says so and keeps what it last said.
+
+**Who has control.** A terminal there shows what it shows on that computer, at its size there, and
+the bar says who has control: nobody, the person at that computer, or a device by its name. Watching
+takes nothing, and what you type goes nowhere. Press **Take control** to type into it: the terminal
+then fits this window, and the person at that computer sees who has it. **Release** hands it back.
+For a terminal that was already running, control is taken only by pressing. If the person at that
+computer types, or a phone takes control, the bar says who took it and offers **Take control** again.
+A computer that lets this one only watch offers no **Take control**, and says so; to change that,
+**Forget** it under **Pairings**, pair again, and let it type there. If the connection drops, the
+terminal is watched again by itself once the other computer is back, from where it was, and control
+has to be taken again. Something typed as it dropped may not have arrived, and the window says so:
+nothing is sent twice.
+
+**Starting work there.** When that computer lets this one type, you start work there as you do here,
+each by that computer's own projects, workspaces and agents:
+
+- **A new workspace:** choose the computer in the composer. Its title ends in where the workspace
+  will run, **This computer** until you change it; press that and pick a computer. The **+** on one
+  of a computer's projects in the sidebar, or **New workspace** in that project's menu, opens the
+  composer with that computer already chosen. Say what the agent should work on, pick one of that
+  computer's agents, and press Enter. That computer makes the workspace. See [Run on](#run-on) below.
+- **Another agent:** the buttons at the end of the tab bar start one of that computer's agents in the
+  workspace, waiting to be told what to do. A workspace's menu in the sidebar offers the same.
+- **A shell:** the **+** after the tabs, or **New shell** in the workspace's menu, opens that
+  computer's shell in the workspace. It is yours to type into at once, like an agent you start.
+- **Rename, archive, delete:** in the menu of a workspace there, for every workspace but the
+  project's own checkout. **Rename…** changes the name shown; the folder and the branch keep
+  theirs. **Archive…** and **Delete workspace…** ask first, remove the folder on that computer and
+  keep its branch. If the workspace has uncommitted work there, you are asked a second time before
+  it is lost, and a no leaves everything as it was. Restoring an archived workspace is done at that
+  computer.
+- **Resume:** an agent that ended there offers **Resume** over its terminal, and under **Previous
+  sessions** when nothing runs in the workspace. It shows only for one that computer could resume.
+
+What you start from here is yours to type into at once: this computer asks for control of its
+terminal as soon as it opens, without a press. If that is refused, or the person there takes control
+back, it is **Take control** from then on. It runs on that computer, with that computer's settings,
+and is listed under it, never among your own projects. If the connection drops before that computer
+answers, the window says it may have started anyway, and nothing is tried again by itself. A computer
+that lets this one only watch offers none of these. One whose Yardsort is older than 0.35.0 starts
+agents and resumes them, and does not offer the shell, the rename, archive and delete, or the fuller
+composer described below. Nothing can be started on a computer that is away, and nothing is queued
+for it.
+
+### Run on
+
+Once this computer is signed in to reach other computers, the title of the composer for a new
+workspace reads _New workspace in project on **This computer**_. The last part is a menu:
+
+- **This computer**, then every computer you are paired with and how it stands.
+- A computer that is **online** can be chosen. One that is offline, still connecting, or that lets
+  this computer only watch is listed with the reason and cannot be chosen. Nothing is queued for a
+  computer that is away.
+- **Pair another computer…** opens Settings → Remote.
+
+Choosing a computer keeps what you have typed and changes the rest of the composer to that
+computer's:
+
+- **Harness**, **Model** and **Effort** list that computer's agents, the models its settings
+  suggest and the efforts each agent takes there.
+- **Branch** lists that project's branches on that computer: start a new branch from one, or open
+  one that no workspace there has out.
+- **Name** is the new workspace's folder there and its branch after that computer's prefix. Left
+  empty, that computer names it after your message.
+
+That computer adds its project memory and runs its setup by its own settings, and the triggers of
+the new workspace are set there. A computer whose Yardsort is older than 0.35.0 shows only its
+agents, and says that it names the branch and picks where to start itself. Choosing **This
+computer** brings the local composer back, again with what you typed; the model, effort and branch
+you picked for one computer do not carry to another.
+
+**Project on _computer_** says which of that computer's projects the workspace will be made in. A
+project here and one there are separate, so Yardsort offers one and says why: the one you chose
+last time for this project, or else the one that is the same repository (both fetched from the
+same place), or else the one with the same name. You can pick another. The choice is remembered on
+this computer once something starts.
+
+When that computer has no such project, the composer says so and offers **Clone it there**. Start
+then has that computer clone the repository into its own projects folder and add it as a project,
+and makes the workspace in it. Only the repository's address goes over, with any user name and
+password taken out; that computer clones with its own Git sign-in, so a private repository it
+cannot read fails there and the composer says so. Where it goes is that computer's setting
+(**Projects cloned for a device** in its Settings → Remote, or `projects_dir` under `[remote]` in
+a headless host's `settings.toml`), `~/Projects` by default. **Clone it there** is not offered
+when this project has no remote another computer could reach, or when that computer's Yardsort is
+older; and that computer refuses it when you are let into only some of its projects. Then add the
+project there yourself (**Add project** in its window, or `ys project add` in its terminal).
+
+The menu is offered for a plain new workspace only. A fork, a task from the Tasks view, a pull
+request's branch and a run in an existing workspace all start from something on this computer, so
+they stay here.
+
+**The keyboard.** The next and previous workspace shortcuts go on from your own workspaces to the
+other computers', in the sidebar's order, and the next and previous tab shortcuts switch a workspace's
+tabs there. With a workspace there in view, the new workspace shortcut composes one on that computer,
+in the same project, and the new shell shortcut opens that computer's shell in it. Closing a tab
+there is not offered: its terminals are ended at that computer, or by the program in them.
 
 **This is a device of its own.** Signing in here makes a second device at the server, apart from this
 computer as a host: turning Remote on or off above leaves it signed in, and **Sign out** under Other
@@ -309,14 +452,14 @@ again makes a new pairing, which shows.
 ## Syncing projects
 
 Your computers can share a project through the server: two computers with Remote on, signed in to
-the same account on the same server. That is the project itself, its name and its remote, and its
-[approved notes](memory.md#on-your-other-computers), which reach every computer's agents; its
-workspaces will follow in a later update. Nothing syncs until you turn it on for a project, and
-**never its files, its path or its terminals**.
+the same account on the same server. That is the project itself, its name and its remote; its
+[approved notes](memory.md#on-your-other-computers), which reach every computer's agents; and its
+workspaces, which every other computer shows and never makes. Nothing syncs until you turn it on for
+a project, and **never its files, its path or its terminals**.
 
 Open **Project settings…** from the project's menu. Its **Sync** section shows what turning sync on
 sends: the project's name, the address of its Git remote (`origin`) without any user or password in
-it, or none for a remote that is a folder, and how many approved notes go with it. **The server
+it, or none for a remote that is a folder, and how many approved notes and workspaces go with it. **The server
 keeps synced records in plain text, readable by whoever runs it.** Press **Turn on sync**. The section says _Waiting to reach the
 server…_ until the server has it, then _Syncing with your other computers_, and when it last
 synced. With Remote off, the section says sync needs it and links to **Settings → Remote**.
@@ -334,6 +477,17 @@ another computer changed something, and every five minutes otherwise. When the s
 reached, it tries again by itself, waiting longer each time, up to five minutes, and the section
 says why the last attempt failed. When the server refuses something, the section says why, and it
 is not sent again.
+
+**Your other computers' workspaces** of the project are listed under it in the sidebar, folded into
+**on other computers (n)**: each with its name, the computer it is on, its branch and the task it was
+started from, and _archived_ when it is. They are only a list. Nothing of them is on this computer:
+no worktree, no branch, no folder and no terminal is made for one, and there is nothing here to open
+or delete, except **Check out here**, which fetches its branch from the project's remote and makes a
+[workspace of this computer's own](workspaces.md#workspaces-on-your-other-computers) on it. Each
+changes when it changes on its computer, which alone writes it: made, renamed,
+archived, restored or deleted there. A workspace you make here, in the app or with `ys`, shows on
+your other computers within seconds. The project's own checkout is not listed, since each computer
+has its own.
 
 - **Stop syncing** unlinks this computer. The project stays here as it is, its notes included, and
   your other computers keep syncing it.

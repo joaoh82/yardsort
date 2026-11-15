@@ -7,7 +7,9 @@
 //! up for it is its name and its fetch remote's address without any user or password, as a hint
 //! for linking it elsewhere; never its path, and no hint at all for a remote on this disk. With it
 //! go its approved and revoked notes ([`NoteBody`]), never a candidate or a rejected one, so a
-//! note reaches another host's agents only once the person approved it.
+//! note reaches another host's agents only once the person approved it. And its workspaces
+//! ([`WorkspaceBody`]): their names, branches and tasks, shown on the other hosts and never made
+//! there.
 
 use std::path::Path;
 
@@ -16,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::git::Git;
+
+pub mod checkout;
 use crate::store::{Store, StoreResult};
 
 /// What a project's record says. Schema 1.
@@ -124,6 +128,50 @@ impl NoteBody {
     }
 }
 
+/// What a workspace's record says. Schema 1. Only the host it lives on writes it; every other
+/// host only shows it, and makes nothing for it: no worktree, no branch, no directory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBody {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_branch: Option<String>,
+    #[serde(default)]
+    pub archived: bool,
+    /// The tasks it was started from.
+    #[serde(default)]
+    pub tasks: Vec<WorkspaceTask>,
+    /// The host it lives on: its id, and its name as shown.
+    pub origin: String,
+    pub host: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceTask {
+    pub source: String,
+    pub repo: String,
+    pub key: String,
+    pub url: String,
+    pub title: String,
+}
+
+impl WorkspaceBody {
+    pub fn to_value(&self) -> serde_json::Value {
+        serde_json::to_value(self).expect("a workspace body is JSON")
+    }
+
+    /// What a synced workspace's record says, when it says it in a way this version reads.
+    pub fn of(record: &SyncRecord) -> Option<Self> {
+        if record.schema > SYNC_SCHEMA {
+            return None;
+        }
+        serde_json::from_value(record.body.clone()?).ok()
+    }
+}
+
 /// The hint for a project at `root`: its push remote's address, without credentials, or `None`
 /// when it has none, or one on this disk.
 pub fn project_hint(git: &Git, root: &Path) -> Option<String> {
@@ -206,6 +254,18 @@ pub struct SyncPreview {
     pub remote: Option<String>,
     /// How many approved notes go up with it, each with its text and history.
     pub notes: u32,
+    /// How many of its workspaces go up with it, by name, branch and task.
+    pub workspaces: u32,
+}
+
+/// How many of a project's workspaces sync: its worktrees, not its own checkout, and not one
+/// forgotten.
+pub fn synced_workspace_count(store: &Store, project_id: &str) -> StoreResult<u32> {
+    Ok(store
+        .workspaces()?
+        .iter()
+        .filter(|w| w.project_id == project_id && w.kind == "worktree" && !w.forgotten)
+        .count() as u32)
 }
 
 /// How many of a project's notes are approved, which turning sync on sends.
@@ -252,3 +312,5 @@ pub fn project_sync(
 mod note_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod workspace_tests;

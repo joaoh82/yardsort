@@ -1,0 +1,7 @@
+{
+  "requestId": "r-41",
+  "result": {
+    "kind": "files",
+    "entries": [{ "name": "providers", "dir": true }, { "name": "session.ts" }]
+  }
+}

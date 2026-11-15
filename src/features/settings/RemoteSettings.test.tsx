@@ -14,6 +14,8 @@ const core = vi.hoisted(() => ({
   remoteAnswer: vi.fn(),
   remoteRevoke: vi.fn(),
   onRemotePairingRequested: vi.fn(),
+  remoteProjectsDir: vi.fn(),
+  remoteSetProjectsDir: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -56,6 +58,7 @@ beforeEach(() => {
   core.remoteStatus.mockResolvedValue(off);
   core.remoteRequests.mockResolvedValue({ requests: [], status: on });
   core.onRemotePairingRequested.mockResolvedValue(() => {});
+  core.remoteProjectsDir.mockResolvedValue({ set: null, used: "/home/me/Projects" });
   useRemoteStore.setState({ asking: [] });
   useProjectsStore.setState({
     projects: [
@@ -502,4 +505,35 @@ it("offers signing in again only when it has to", async () => {
   render(<RemoteSettings />);
   await screen.findByRole("button", { name: "Pair a device" });
   expect(screen.queryByRole("button", { name: "Sign in again" })).toBeNull();
+});
+
+describe("where a project cloned for a device goes", () => {
+  it("says the folder in use, and saves another or goes back to the default", async () => {
+    core.remoteStatus.mockResolvedValue(on);
+    core.remoteSetProjectsDir
+      .mockRejectedValueOnce({
+        code: "invalid_folder",
+        message: "Give the whole path of a folder.",
+      })
+      .mockResolvedValueOnce({ set: "~/code", used: "/home/me/code" })
+      .mockResolvedValueOnce({ set: null, used: "/home/me/Projects" });
+    render(<RemoteSettings />);
+    const section = await screen.findByRole("region", { name: "Projects cloned for a device" });
+    expect(section).toHaveTextContent("/home/me/Projects (the default)");
+    const folder = within(section).getByRole("textbox", { name: "Folder" });
+    const save = within(section).getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    await userEvent.type(folder, "code");
+    await userEvent.click(save);
+    expect(core.remoteSetProjectsDir).toHaveBeenLastCalledWith("code");
+    expect(await within(section).findByRole("alert")).toHaveTextContent("whole path");
+    await userEvent.clear(folder);
+    await userEvent.type(folder, "~/code");
+    await userEvent.click(save);
+    await vi.waitFor(() => expect(section).toHaveTextContent("/home/me/code."));
+    expect(within(section).queryByRole("alert")).toBeNull();
+    await userEvent.click(within(section).getByRole("button", { name: "Use the default" }));
+    expect(core.remoteSetProjectsDir).toHaveBeenLastCalledWith(null);
+    await vi.waitFor(() => expect(section).toHaveTextContent("(the default)"));
+  });
 });

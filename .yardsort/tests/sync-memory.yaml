@@ -133,15 +133,20 @@ steps:
     timeout: 60s
   - id: its_proposal_stays_there_unapproved
     action: shell
-    # Proposed from the agent's own workspace, as an agent does; nothing goes up for it, and a
-    # shell that is not a terminal cannot approve it.
+    # Proposed from the agent's own workspace, as an agent does, and a shell that is not a terminal
+    # cannot approve it. Once everything the second has queued is up (the agent's workspace, which
+    # syncs), the first has no such note.
     line: >-
       dir=$(dirname "$(find "$YS_RUN_DIR/there-worktrees" -name first-message.txt | head -1)") && top=$PWD && (cd
       "$dir" && YS_PROFILE="$YS_RUN_DIR/there" sh "$top/.yardsort/tests/support/headless.sh" ys memory propose
-      "Agents propose; people approve.") > /dev/null && id=$(YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy" /dev/null < /dev/null | tr -d '\r' | awk '/Agents propose/ {print
-      $1; exit}') && ! YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh yardsort-host memory
-      approve "$id" < /dev/null 2> /dev/null && YS_PROFILE="$YS_RUN_DIR/there" sh
-      .yardsort/tests/support/headless.sh yardsort-host sync status | grep -c "Waiting to go up" || true
+      "Agents propose; people approve.") > /dev/null && id=$(YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh
+      .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy" /dev/null < /dev/null | tr -d
+      '\r' | awk '/Agents propose/ {print $1; exit}') && ! YS_PROFILE="$YS_RUN_DIR/there" sh
+      .yardsort/tests/support/headless.sh yardsort-host memory approve "$id" < /dev/null 2> /dev/null && for i in
+      $(seq 30); do YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh ys sync status | grep -q
+      "Waiting to go up" || break; sleep 1; done && sleep 2 && YS_PROFILE="$YS_RUN_DIR/here" script -qefc "sh
+      .yardsort/tests/support/headless.sh yardsort-host memory list widgets" /dev/null < /dev/null | tr -d '\r' |
+      grep -c "Agents propose" || true
     expect:
       stdout_contains: "0"
   - id: unplug_both_and_edit_on_each

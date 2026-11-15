@@ -1,0 +1,11 @@
+{
+  "requestId": "r-42",
+  "result": {
+    "kind": "file",
+    "state": "text",
+    "size": 20,
+    "offset": 0,
+    "data": "ZXhwb3J0IGNvbnN0IGEgPSAxOwo=",
+    "done": true
+  }
+}

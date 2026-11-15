@@ -1096,7 +1096,14 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       notes, was built on 2026-11-15 (42 §11): the outbox in the memory methods' transactions,
       conflicts kept on the server and shown on every host until settled once, the Memory view's
       **Conflicts** section and `yardsort-host memory` behind the guard; its local smoke test,
-      `sync-memory.yaml`, passed, and its owner run, the gate's, is the owner's to make.
+      `sync-memory.yaml`, passed, and its owner run, the gate's, is the owner's to make. Slice 4,
+      workspaces seen elsewhere, was built the same day (42 §12): the outbox in the workspace
+      methods, written only by the host a workspace lives on, and **on other computers** under
+      each project, with nothing made for them; its local smoke test, `sync-workspaces.yaml`,
+      passed. Slice 5, checking a branch out here, was built the same day (42 §13): **Check out
+      here** and `yardsort-host sync checkout`, fetching from the remote and never moving a branch
+      with commits of its own; its local smoke test, `sync-checkout.yaml`, passed. All five
+      slices are built; the gate's runs through staging are the owner's.
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is
@@ -1361,6 +1368,25 @@ history a line at a time.
 _Exit:_ on a phone, a person reads an agent's whole conversation without scrolling sideways,
 answers its permission question, and sends it the next message, while the computer's terminal
 stays as it was.
+
+## M33 — Other computers, like local projects
+
+Proposed in Figma and approved on 2026-11-14
+([44-other-computers-like-local](44-other-computers-like-local.md)), after the owner found that
+work on another computer looked, and was, completely different from local work. Released only when
+all five slices are built.
+
+- [x] Slice 1: the other computers as a tree in the sidebar, a workspace there in the panel a local
+      one gets, control taken at once for what is started from here. No protocol change.
+- [x] Slice 2: **Run on** in the composer, with what a start there can say today.
+- [x] Slice 3: protocol minor 12: name, model, effort and branch for a start there, a clone there
+      when the project is missing, a shell, rename, archive and delete.
+- [x] Slice 4: changes and files there, read-only.
+- [x] Slice 5: commit, push and pull requests there.
+
+_Exit:_ a person starts a task on another computer from the composer, follows it in the same window
+as a local workspace, reviews what it changed and opens its pull request, without that computer's
+screen.
 
 ## Later (unordered)
 

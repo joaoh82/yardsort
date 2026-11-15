@@ -15,8 +15,9 @@ use std::sync::Arc;
 use remote_client::channel::ChannelError;
 use remote_client::Channel;
 use remote_proto::{
-    HarnessSummary, ProjectId, SessionRecordId, SessionResumeParams, SessionStartParams, Started,
-    WorkspaceId, WorkspaceStartParams,
+    ErrorCode, HarnessSummary, ProjectBranches, ProjectCloneParams, ProjectCloned, ProjectId,
+    ProjectRef, SessionRecordId, SessionResumeParams, SessionStartParams, ShellStartParams,
+    Started, WorkspaceId, WorkspaceRemoveParams, WorkspaceRenameParams, WorkspaceStartParams,
 };
 
 use super::{lock, ComputerHome};
@@ -26,6 +27,21 @@ use crate::account::Failure;
 pub const START: &str = "workspace.start";
 /// What the host answers that can resume a conversation: one from before minor 6 cannot.
 pub const RESUME: &str = "session.resume";
+/// What the host answers that reads a start's name, model, effort and branch, lists a project's
+/// branches, clones, starts a shell, and renames, archives and deletes a workspace: one from
+/// before minor 12 does none of them.
+pub const MANAGE: &str = "project.branches";
+
+/// What a new workspace on another computer may say beyond its project and its first message.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Said {
+    pub harness: Option<String>,
+    pub name: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub base_branch: Option<String>,
+    pub existing_branch: Option<String>,
+}
 
 /// The agents `host` can start, its default first.
 pub async fn harnesses<H: ComputerHome>(
@@ -36,24 +52,122 @@ pub async fn harnesses<H: ComputerHome>(
     channel.harnesses().await.map_err(|e| refused(&e, false))
 }
 
-/// A new workspace in `project` on `host`, named after `prompt`, with an agent given it.
+/// A new workspace in `project` on `host`, with an agent given `prompt`. What else is `said`
+/// (a name, a model, an effort, a branch) is sent only to a host that reads it: an older one is
+/// not asked, since it would start something other than what was chosen.
 pub async fn workspace<H: ComputerHome>(
     home: &Arc<H>,
     host: &str,
     project: &str,
     prompt: &str,
-    harness: Option<&str>,
+    said: Said,
 ) -> Result<Started, Failure> {
     let project = ProjectId::new(project.to_owned()).map_err(|_| no_such())?;
-    let channel = open(home.as_ref(), host, START)?;
-    let started = channel
-        .start_workspace(WorkspaceStartParams {
-            project,
-            prompt: prompt.to_owned(),
-            harness: harness.map(str::to_owned),
+    let text = |part: Option<String>| part.filter(|p| !p.trim().is_empty());
+    let params = WorkspaceStartParams {
+        project,
+        prompt: prompt.to_owned(),
+        harness: text(said.harness),
+        name: text(said.name),
+        model: text(said.model),
+        effort: text(said.effort),
+        base_branch: text(said.base_branch),
+        existing_branch: text(said.existing_branch),
+    };
+    let needs = if params.says_more() { MANAGE } else { START };
+    let channel = open(home.as_ref(), host, needs)?;
+    done(home.as_ref(), channel.start_workspace(params).await)
+}
+
+/// The branches a new workspace in `project` on `host` can start from or open.
+pub async fn branches<H: ComputerHome>(
+    home: &Arc<H>,
+    host: &str,
+    project: &str,
+) -> Result<ProjectBranches, Failure> {
+    let project = ProjectId::new(project.to_owned()).map_err(|_| no_such())?;
+    let channel = open(home.as_ref(), host, MANAGE)?;
+    channel
+        .branches(ProjectRef { project })
+        .await
+        .map_err(|e| refused(&e, false))
+}
+
+/// Have `host` clone the repository at `remote` into its own projects folder, with its own Git
+/// credentials, and add it as a project. `remote` is an address with no credentials in it; where
+/// it goes is that computer's setting.
+pub async fn clone<H: ComputerHome>(
+    home: &Arc<H>,
+    host: &str,
+    remote: &str,
+) -> Result<ProjectCloned, Failure> {
+    let channel = open(home.as_ref(), host, MANAGE)?;
+    let cloned = channel
+        .clone_project(ProjectCloneParams {
+            remote: remote.trim().to_owned(),
+            name: None,
         })
-        .await;
-    done(home.as_ref(), started)
+        .await
+        .map_err(|e| refused(&e, true))?;
+    home.computer().reread.notify_waiters();
+    Ok(cloned)
+}
+
+/// That computer's shell in `workspace` on `host`.
+pub async fn shell<H: ComputerHome>(
+    home: &Arc<H>,
+    host: &str,
+    workspace: &str,
+) -> Result<Started, Failure> {
+    let workspace = WorkspaceId::new(workspace.to_owned()).map_err(|_| no_such())?;
+    let channel = open(home.as_ref(), host, MANAGE)?;
+    done(
+        home.as_ref(),
+        channel.start_shell(ShellStartParams { workspace }).await,
+    )
+}
+
+/// Change what `workspace` on `host` is called.
+pub async fn rename<H: ComputerHome>(
+    home: &Arc<H>,
+    host: &str,
+    workspace: &str,
+    name: &str,
+) -> Result<(), Failure> {
+    let workspace = WorkspaceId::new(workspace.to_owned()).map_err(|_| no_such())?;
+    let channel = open(home.as_ref(), host, MANAGE)?;
+    changed(
+        home.as_ref(),
+        channel
+            .rename_workspace(WorkspaceRenameParams {
+                workspace,
+                name: name.trim().to_owned(),
+            })
+            .await,
+    )
+}
+
+/// Put `workspace` on `host` away, or with `delete` remove it. Both keep its branch. Without
+/// `force`, one with uncommitted work is refused as `remote_uncommitted`, for the person to be
+/// asked a second time.
+pub async fn remove<H: ComputerHome>(
+    home: &Arc<H>,
+    host: &str,
+    workspace: &str,
+    delete: bool,
+    force: bool,
+) -> Result<(), Failure> {
+    let workspace = WorkspaceId::new(workspace.to_owned()).map_err(|_| no_such())?;
+    let channel = open(home.as_ref(), host, MANAGE)?;
+    let params = WorkspaceRemoveParams { workspace, force };
+    changed(
+        home.as_ref(),
+        if delete {
+            channel.delete_workspace(params).await
+        } else {
+            channel.archive_workspace(params).await
+        },
+    )
 }
 
 /// Another agent in `workspace` on `host`, with a first message or none.
@@ -99,7 +213,11 @@ fn given(prompt: Option<&str>) -> Option<String> {
 }
 
 /// The channel open to `host` now, if it answers `capability`.
-fn open(home: &impl ComputerHome, host: &str, capability: &str) -> Result<Arc<Channel>, Failure> {
+pub(super) fn open(
+    home: &impl ComputerHome,
+    host: &str,
+    capability: &str,
+) -> Result<Arc<Channel>, Failure> {
     let channel = {
         let known = lock(home.computer());
         let link = known
@@ -129,6 +247,8 @@ fn open(home: &impl ComputerHome, host: &str, capability: &str) -> Result<Arc<Ch
             if capability == RESUME {
                 "That computer's Yardsort is too old to resume a conversation from here. Update it, \
                  then try again."
+            } else if [MANAGE, super::look::LOOK, super::publish::PUBLISH].contains(&capability) {
+                "That computer's Yardsort is too old for this from here. Update it, then try again."
             } else {
                 "That computer's Yardsort is too old to start work from here. Update it, then try \
                  again."
@@ -148,8 +268,18 @@ fn done(
     Ok(started)
 }
 
-fn refused(error: &ChannelError, starting: bool) -> Failure {
+/// What a change to a workspace came to. Made, the host's view is read again, so it shows.
+fn changed(home: &impl ComputerHome, made: Result<(), ChannelError>) -> Result<(), Failure> {
+    made.map_err(|e| refused(&e, true))?;
+    home.computer().reread.notify_waiters();
+    Ok(())
+}
+
+pub(super) fn refused(error: &ChannelError, starting: bool) -> Failure {
     match error {
+        ChannelError::Remote(remote) if remote.code == ErrorCode::UncommittedWork => {
+            Failure::new("remote_uncommitted", remote.message.clone())
+        }
         ChannelError::Closed(_) if starting => Failure::new(
             "remote_lost",
             "That computer's answer did not arrive, so it may have started anyway. Look at its \
@@ -160,6 +290,6 @@ fn refused(error: &ChannelError, starting: bool) -> Failure {
     }
 }
 
-fn no_such() -> Failure {
+pub(super) fn no_such() -> Failure {
     Failure::new("remote_unknown", "That is not one of that computer's.")
 }

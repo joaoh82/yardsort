@@ -1,6 +1,13 @@
 import { treeNavigation } from "@/lib/treeNavigation";
 import { useEffect, useState } from "react";
-import { hasCore, ipc, type Project, type Workspace } from "@/lib/ipc";
+import {
+  errorMessage,
+  hasCore,
+  ipc,
+  type Project,
+  type SyncedWorkspace,
+  type Workspace,
+} from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { shownFor, usePublishStore } from "@/stores/publish";
@@ -196,6 +203,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
             </li>
           )}
           <ArchivedGroup project={project} />
+          <ElsewhereGroup project={project} />
         </ul>
       )}
       {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
@@ -246,6 +254,109 @@ function ArchivedGroup({ project }: { project: Project }) {
   );
 }
 
+/**
+ * The project's workspaces on the person's other computers, when it syncs: named with the
+ * computer, the branch and the task. They are records only: nothing of them is on this disk, so
+ * there is nothing here to open, run or delete. **Check out here** is the one thing to do with
+ * one: fetch its branch and make a workspace of this computer's own on it, only when asked.
+ */
+function ElsewhereGroup({ project }: { project: Project }) {
+  const [elsewhere, setElsewhere] = useState<SyncedWorkspace[]>([]);
+  const [checking, setChecking] = useState<string | null>(null);
+  const [refused, setRefused] = useState<{ id: string; message: string } | null>(null);
+  const checkOut = async (workspace: SyncedWorkspace) => {
+    setChecking(workspace.id);
+    setRefused(null);
+    try {
+      const id = await ipc.projectSyncCheckOut(project.id, workspace.id);
+      await useProjectsStore.getState().refresh();
+      enterWorkspace(id);
+    } catch (reason) {
+      setRefused({ id: workspace.id, message: errorMessage(reason) });
+    } finally {
+      setChecking(null);
+    }
+  };
+  const key = `sidebar.showElsewhere.${project.id}`;
+  const open = useProjectsStore((s) => recall(s.ui, key, false));
+  useEffect(() => {
+    if (!hasCore()) return;
+    let gone = false;
+    const load = () =>
+      ipc.projectSyncWorkspaces(project.id).then(
+        (list) => !gone && setElsewhere(list),
+        () => {},
+      );
+    void load();
+    const unlisten = ipc.onSyncChanged(() => void load());
+    return () => {
+      gone = true;
+      void unlisten.then((stop) => stop());
+    };
+  }, [project.id]);
+  if (elsewhere.length === 0) return null;
+
+  return (
+    <li role="treeitem" aria-expanded={open} aria-label="On other computers">
+      <button
+        type="button"
+        onClick={() => useProjectsStore.getState().remember(key, !open)}
+        className="flex h-7 w-full items-center gap-1 pl-8 text-left text-small text-ink-faint hover:text-ink-muted"
+      >
+        <span aria-hidden className={`w-3 text-micro ${open ? "rotate-90" : ""}`}>
+          ▶
+        </span>
+        on other computers ({elsewhere.length})
+      </button>
+      {open && (
+        <ul role="group">
+          {elsewhere.map((workspace) => (
+            <li
+              key={workspace.id}
+              role="treeitem"
+              aria-label={`${workspace.name} on ${workspace.host}`}
+              title={`On ${workspace.host}. Nothing of it is on this computer.`}
+              className="group flex min-h-7 flex-col justify-center py-0.5 pr-2 pl-12"
+            >
+              <span className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-ink-muted">
+                  {workspace.name}
+                  {workspace.archived && <span className="text-ink-faint"> · archived</span>}
+                </span>
+                {workspace.branch && (
+                  <button
+                    type="button"
+                    disabled={checking !== null}
+                    onClick={() => void checkOut(workspace)}
+                    title={`Fetch ${workspace.branch} from the project's remote and make a workspace on it here. ${workspace.host}'s is left as it is.`}
+                    className="shrink-0 rounded px-1 text-micro text-ink-faint opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-ink disabled:opacity-40"
+                  >
+                    {checking === workspace.id ? "Checking out…" : "Check out here"}
+                  </button>
+                )}
+              </span>
+              <span className="truncate text-micro text-ink-faint">
+                {[
+                  workspace.host,
+                  workspace.branch,
+                  ...workspace.tasks.map((task) => `${task.key} ${task.title}`),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+              {refused?.id === workspace.id && (
+                <span role="alert" className="text-micro text-red-400 select-text">
+                  {refused.message}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
 function WorkspaceNode({
   workspace,
   projectId,
@@ -262,7 +373,9 @@ function WorkspaceNode({
       s.workflowId === null &&
       !s.usageOpen &&
       !s.pullRequestsOpen &&
-      !s.tasksOpen,
+      !s.tasksOpen &&
+      s.remote === null &&
+      s.composingThere === null,
   );
   // Select the project's own entry, never a derived object: a selector that built one would
   // hand back a new value on every render and re-render for ever.

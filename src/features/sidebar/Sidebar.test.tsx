@@ -43,12 +43,15 @@ const core = vi.hoisted(() => ({
   ptyClose: vi.fn(),
   memoryWaiting: vi.fn(),
   memoryGet: vi.fn(),
-  onSyncChanged: vi.fn(async () => () => {}),
+  onSyncChanged: vi.fn(async (_handler: () => void) => () => {}),
+  projectSyncWorkspaces: vi.fn(),
+  projectSyncCheckOut: vi.fn(),
   outcomeLabel: vi.fn(),
   onActivityChanged: vi.fn(),
   onTrackedPullRequestsChanged: vi.fn(),
   onSessionStarted: vi.fn(),
   onSchedulesChanged: vi.fn(),
+  onRemoteChangedProjects: vi.fn(),
   workflowList: vi.fn(),
   workflowPreview: vi.fn(),
   workflowPreviewNew: vi.fn(),
@@ -137,10 +140,13 @@ describe("Sidebar", () => {
     core.ptySpawn.mockImplementation(async ({ workspaceId }) => shellIn(workspaceId));
     core.sessionsList.mockResolvedValue([]);
     core.memoryWaiting.mockResolvedValue([]);
+    core.projectSyncWorkspaces.mockResolvedValue([]);
+    core.onSyncChanged.mockResolvedValue(() => {});
     core.onActivityChanged.mockResolvedValue(() => {});
     core.onTrackedPullRequestsChanged.mockResolvedValue(() => {});
     core.onSessionStarted.mockResolvedValue(() => {});
     core.onSchedulesChanged.mockResolvedValue(() => {});
+    core.onRemoteChangedProjects.mockResolvedValue(() => {});
     useMemoryStore.setState({ waiting: {} });
     useOutcomesStore.setState({ asking: null, error: null });
     opener.openUrl.mockResolvedValue(undefined);
@@ -2206,5 +2212,86 @@ describe("Sidebar", () => {
     await user.click(count);
     expect(await screen.findByRole("dialog", { name: "Memory — alpha" })).toBeInTheDocument();
     expect(core.memoryGet).toHaveBeenCalledWith("p-alpha");
+  });
+
+  it("lists another computer's workspaces under the project, folded, to read and nothing more", async () => {
+    const user = userEvent.setup();
+    const listening: (() => void)[] = [];
+    const changed = () => listening.forEach((handler) => handler());
+    core.onSyncChanged.mockImplementation(async (handler: () => void) => {
+      listening.push(handler);
+      return () => {};
+    });
+    core.projectSyncWorkspaces.mockImplementation(async (id: string) =>
+      id === "p-alpha"
+        ? [
+            {
+              id: "4b3c2d1e-0f9a-4b8c-9d7e-6f5a4b3c2d1e",
+              host: "Build box",
+              name: "fix-login",
+              branch: "ys/fix-login",
+              baseBranch: "main",
+              archived: false,
+              tasks: [
+                {
+                  source: "github",
+                  repo: "github.com/acme/alpha",
+                  key: "#91",
+                  url: "https://github.com/acme/alpha/issues/91",
+                  title: "Login fails",
+                },
+              ],
+            },
+          ]
+        : [],
+    );
+    await renderSidebar("alpha", "beta");
+    const group = await screen.findByRole("treeitem", { name: "On other computers" });
+    expect(group).toHaveTextContent("on other computers (1)");
+    expect(screen.queryByRole("treeitem", { name: "fix-login on Build box" })).toBeNull();
+    // Only the project that has some.
+    const beta = screen.getByRole("treeitem", { name: "beta" });
+    expect(within(beta).queryByRole("treeitem", { name: "On other computers" })).toBeNull();
+
+    await user.click(within(group).getByRole("button", { name: /on other computers/ }));
+    const row = screen.getByRole("treeitem", { name: "fix-login on Build box" });
+    expect(row).toHaveTextContent("Build box · ys/fix-login · #91 Login fails");
+    // One thing to do with it, and only when asked: nothing is made here before.
+    expect(
+      within(row)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Check out here"]);
+    expect(core.projectSyncCheckOut).not.toHaveBeenCalled();
+
+    // Refused, and said where it was asked.
+    core.projectSyncCheckOut.mockRejectedValueOnce({
+      code: "branch_diverged",
+      message: '"ys/fix-login" here has 1 commit that origin\'s has not. It was left as it is.',
+    });
+    await user.click(within(row).getByRole("button", { name: "Check out here" }));
+    expect(core.projectSyncCheckOut).toHaveBeenLastCalledWith(
+      "p-alpha",
+      "4b3c2d1e-0f9a-4b8c-9d7e-6f5a4b3c2d1e",
+    );
+    expect(await within(row).findByRole("alert")).toHaveTextContent("It was left as it is.");
+
+    // Checked out: the projects are read again, with the new workspace among them.
+    const alpha = project("alpha");
+    const made = { ...worktree("alpha", "fix-login"), branch: "ys/fix-login" };
+    core.projectSyncCheckOut.mockResolvedValueOnce(made.id);
+    core.projectsList.mockResolvedValue([
+      { ...alpha, workspaces: [...alpha.workspaces, made] },
+      project("beta"),
+    ]);
+    await user.click(within(row).getByRole("button", { name: "Check out here" }));
+    expect(await screen.findByRole("treeitem", { name: "fix-login" })).toBeInTheDocument();
+
+    // Deleted there: the next pass says so, and it goes here.
+    core.projectSyncWorkspaces.mockResolvedValue([]);
+    changed();
+    await waitFor(() =>
+      expect(screen.queryByRole("treeitem", { name: "On other computers" })).toBeNull(),
+    );
   });
 });

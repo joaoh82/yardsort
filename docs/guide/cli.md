@@ -420,10 +420,14 @@ went:
 NAME      SYNC
 widgets   syncing
 gadgets   waiting
+On your other computers, in widgets:
+  fix-login  on Build box  ys/fix-login  #91  (4b3c2d1e)
 Last synced: 2m ago
 ```
 
-A project's state is `syncing`, `waiting` (to reach the server), `removing` (from the server) or
+Under the projects, each synced project's workspaces on your other computers: name, computer,
+branch, the tasks it was started from, _(archived)_ when it is, and the start of its id. Checking one out here is yours, in
+the window or with [`yardsort-host sync checkout`](headless-host.md#syncing-projects). A project's state is `syncing`, `waiting` (to reach the server), `removing` (from the server) or
 `refused`, with the server's reason. A problem with the last pass, and how many changes wait to go
 up, are shown when there are any. With Remote off it says so. It reads the records only, and that
 is all `ys` offers of sync: turning a project on, linking, stopping and removing are yours, in the

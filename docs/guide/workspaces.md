@@ -26,6 +26,11 @@ Press **+** on a project row, or `Ctrl+Shift+N` / `⌘N` for the project you are
 Under the pickers, **Import worktrees…** opens the same dialog as the project menu, for worktrees
 that already exist — see [Worktrees made elsewhere](#worktrees-made-elsewhere).
 
+When this computer is signed in to reach other computers with [Remote](remote.md), the composer's
+title ends in where the workspace will run: _New workspace in project on **This computer**_. Press
+it to run the workspace on a computer you are paired with instead — see
+[Run on](remote.md#run-on). Without Remote the title is as before.
+
 When the project [shares its memory](memory.md#giving-agents-the-memory), a line under the pickers says its approved entries go after your message — or, while nothing is approved yet, that the agent will be asked to propose some — **Show** reads what is added, and unticking leaves it out of this one launch. Your message stays the task on record.
 
 Started in a workspace that already has another conversation, in a project that
@@ -152,6 +157,23 @@ learns about it. An imported workspace is named after its folder; rename it if y
 
 To go the other way, **Forget…** in the workspace menu takes a workspace out of Yardsort without
 touching its folder or its branch.
+
+## Workspaces on your other computers
+
+In a project that [syncs](remote.md#syncing-projects) with your other computers, their workspaces
+of it are listed under the project, folded into **on other computers (n)** below the archived ones:
+name, computer, branch and task. None of them is a workspace here, and nothing is made for one by
+itself: no worktree, no branch, no folder. Your own workspaces are listed on those computers the
+same way, renamed, archived or gone as you rename, archive or delete them here, and forgetting one
+takes it off their lists.
+
+**Check out here**, on one of them, makes it a workspace here too, of this computer's own. Push its
+branch from the other computer first: Yardsort fetches it from the project's remote (`origin`, or
+the only one), never from the server, which has no commits. A branch of that name here is used if it
+has nothing the remote's has not, and moved up to the remote's when it is behind; one with commits of
+its own is left exactly as it is, and checking out is refused until you bring the two together with
+Git. Refused too: a branch already checked out here, or a workspace here on it already. The other
+computer's workspace stays as it is, and listed as its own.
 
 ## The workspace menu
 

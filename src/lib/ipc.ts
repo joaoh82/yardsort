@@ -67,6 +67,8 @@ import {
   type Project,
   type ProjectSyncStatus,
   type SyncOffer,
+  type SyncedWorkspace,
+  type WorkspaceTask,
   type ProjectAutomation,
   type ProjectPullRequests,
   type ProjectTasks,
@@ -136,12 +138,24 @@ import {
   type PrFacts,
   type OtherComputers,
   type OtherHost,
+  type LocalRepository,
+  type OtherBranches,
+  type OtherChanges,
+  type OtherFiles,
+  type OtherCloned,
   type OtherHarness,
+  type OtherMergeMethod,
+  type OtherNewWorkspace,
+  type OtherPublishState,
+  type OtherPullRequest,
+  type ProjectsDir,
   type OtherHostView,
   type OtherLink,
   type RemoteController,
   type RemoteTerminalSeen,
   type OtherPairing,
+  type OtherProject,
+  type OtherTask,
   type OtherSession,
   type OtherStarted,
   type OtherTerminal,
@@ -318,14 +332,28 @@ export type {
   Project,
   ProjectSyncStatus,
   SyncOffer,
+  SyncedWorkspace,
+  WorkspaceTask,
   ProjectPullRequests,
   ProjectTasks,
   OtherComputers,
   OtherHost,
+  LocalRepository,
+  OtherBranches,
+  OtherChanges,
+  OtherCloned,
+  OtherFiles,
   OtherHarness,
+  OtherMergeMethod,
+  OtherNewWorkspace,
+  OtherPublishState,
+  OtherPullRequest,
+  ProjectsDir,
   OtherHostView,
   OtherLink,
   OtherPairing,
+  OtherProject,
+  OtherTask,
   RemoteController,
   RemoteTerminalSeen,
   OtherSession,
@@ -889,6 +917,12 @@ export const ipc = {
   projectSyncStop: (projectId: string) => unwrap(commands.projectSyncStop(projectId)),
   /** Remove its records from the server, for every computer. Each keeps its own copy. */
   projectSyncRemove: (projectId: string) => unwrap(commands.projectSyncRemove(projectId)),
+  /** The other computers' workspaces of a project that syncs here: shown, never made here. */
+  projectSyncWorkspaces: (projectId: string): Promise<SyncedWorkspace[]> =>
+    unwrap(commands.projectSyncWorkspaces(projectId)),
+  /** Check another computer's workspace out here: its branch, fetched, and a workspace on it. */
+  projectSyncCheckOut: (projectId: string, synced: string): Promise<string> =>
+    unwrap(commands.projectSyncCheckOut(projectId, synced)),
   /** Sync changed something it shows: a project stopped syncing, or a pass failed or recovered. */
   onSyncChanged: (handler: () => void) => events.syncChanged.listen(() => handler()),
 
@@ -910,12 +944,83 @@ export const ipc = {
    * own settings. A start whose answer is lost is not tried again.
    */
   otherHostHarnesses: (hostId: string) => unwrap(commands.otherHostHarnesses(hostId)),
-  otherHostStartWorkspace: (
+  otherHostStartWorkspace: (hostId: string, request: OtherNewWorkspace) =>
+    unwrap(commands.otherHostStartWorkspace(hostId, request)),
+  /** The branches a new workspace in one of that computer's projects can start from or open. */
+  otherHostBranches: (hostId: string, projectId: string) =>
+    unwrap(commands.otherHostBranches(hostId, projectId)),
+  /**
+   * Have that computer clone the repository of one of this computer's projects into its own
+   * projects folder, with its own Git sign-in, and add it there. Only the address goes over.
+   */
+  otherHostClone: (hostId: string, projectId: string) =>
+    unwrap(commands.otherHostClone(hostId, projectId)),
+  /** That computer's shell in one of its workspaces. */
+  otherHostStartShell: (hostId: string, workspaceId: string) =>
+    unwrap(commands.otherHostStartShell(hostId, workspaceId)),
+  otherHostRenameWorkspace: (hostId: string, workspaceId: string, name: string) =>
+    done(commands.otherHostRenameWorkspace(hostId, workspaceId, name)),
+  /**
+   * Archive a workspace there, or with `remove` delete it; both keep its branch. Rejects with
+   * `remote_uncommitted` unless `force` when it has uncommitted work there.
+   */
+  otherHostRemoveWorkspace: (
     hostId: string,
-    projectId: string,
-    prompt: string,
-    harness: string | null,
-  ) => unwrap(commands.otherHostStartWorkspace(hostId, projectId, prompt, harness)),
+    workspaceId: string,
+    remove: boolean,
+    force: boolean,
+  ) => done(commands.otherHostRemoveWorkspace(hostId, workspaceId, remove, force)),
+  /**
+   * Reading a workspace on another computer: what changed in it, a folder of its file tree, both
+   * sides of a change, and a file as it is on its disk. Each is read from that computer when
+   * asked, by a path inside the workspace, and nothing is kept here.
+   */
+  otherHostChanges: (hostId: string, workspaceId: string) =>
+    unwrap(commands.otherHostChanges(hostId, workspaceId)),
+  otherHostFiles: (hostId: string, workspaceId: string, dir: string) =>
+    unwrap(commands.otherHostFiles(hostId, workspaceId, dir)),
+  otherHostDiff: (
+    hostId: string,
+    workspaceId: string,
+    path: string,
+    oldPath: string | null,
+    scope: Scope,
+  ) => unwrap(commands.otherHostDiff(hostId, workspaceId, path, oldPath, scope)),
+  otherHostFile: (hostId: string, workspaceId: string, path: string) =>
+    unwrap(commands.otherHostFile(hostId, workspaceId, path)),
+  /**
+   * Sending on from a workspace on another computer. That computer commits with its own Git
+   * identity, pushes with its own credentials and asks the forge with its own sign-in. Each is
+   * for one press by the person, and is never tried again by itself.
+   */
+  otherHostPublishState: (hostId: string, workspaceId: string, forge: boolean) =>
+    unwrap(commands.otherHostPublishState(hostId, workspaceId, forge)),
+  otherHostCommit: (hostId: string, workspaceId: string, message: string) =>
+    unwrap(commands.otherHostCommit(hostId, workspaceId, message)),
+  otherHostPush: (hostId: string, workspaceId: string) =>
+    unwrap(commands.otherHostPush(hostId, workspaceId)),
+  otherHostOpenPullRequest: (
+    hostId: string,
+    workspaceId: string,
+    title: string,
+    body: string,
+    draft: boolean,
+  ) => unwrap(commands.otherHostOpenPullRequest(hostId, workspaceId, title, body, draft)),
+  otherHostMergePullRequest: (
+    hostId: string,
+    workspaceId: string,
+    number: number,
+    headOid: string,
+    method: OtherMergeMethod,
+  ) => done(commands.otherHostMergePullRequest(hostId, workspaceId, number, headOid, method)),
+  /** Which repository one of this computer's projects is, to offer the same one elsewhere. */
+  projectRepository: (projectId: string) => unwrap(commands.projectRepository(projectId)),
+  /** Where a repository another device has this computer clone goes. */
+  remoteProjectsDir: () => unwrap(commands.remoteProjectsDir()),
+  remoteSetProjectsDir: (dir: string | null) => unwrap(commands.remoteSetProjectsDir(dir)),
+  /** A device through Remote renamed, archived or deleted a workspace here, or cloned a project. */
+  onRemoteChangedProjects: (handler: () => void) =>
+    events.remoteChangedProjects.listen(() => handler()),
   otherHostStartSession: (
     hostId: string,
     workspaceId: string,

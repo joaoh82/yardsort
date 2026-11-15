@@ -1,4 +1,5 @@
-//! `ys sync …`: how sync stands here, read from the records. Nothing more: turning sync on,
+//! `ys sync …`: how sync stands here, read from the records, and the other computers' workspaces
+//! of each synced project. Nothing more: turning sync on,
 //! linking, stopping and removing are the person's, in the app or with `yardsort-host sync` at a
 //! terminal of their own, since an agent in a Yardsort terminal can run anything `ys` offers.
 
@@ -35,6 +36,21 @@ struct Project {
     /// `syncing`, `waiting`, `removing` or `refused`.
     state: &'static str,
     refused: Option<String>,
+    /// The other computers' workspaces of it, shown here and never made here.
+    elsewhere: Vec<Elsewhere>,
+}
+
+#[derive(Serialize)]
+struct Elsewhere {
+    /// Its logical id: the start of it names it to `yardsort-host sync checkout` when two
+    /// computers have one of that name.
+    id: String,
+    host: String,
+    name: String,
+    branch: Option<String>,
+    archived: bool,
+    /// The tasks it was started from, as their forge names them: `#91`.
+    tasks: Vec<String>,
 }
 
 fn status(ys: &Yardsort, out: &Output) -> Result<(), Failure> {
@@ -64,6 +80,19 @@ fn status(ys: &Yardsort, out: &Output) -> Result<(), Failure> {
                 (None, false, true) => "syncing",
             },
             refused,
+            elsewhere: ys
+                .store
+                .synced_workspaces(&project.id)?
+                .into_iter()
+                .map(|w| Elsewhere {
+                    id: w.id,
+                    host: w.host,
+                    name: w.name,
+                    branch: w.branch,
+                    archived: w.archived,
+                    tasks: w.tasks.into_iter().map(|t| t.key).collect(),
+                })
+                .collect(),
         });
     }
     let status = Status {
@@ -92,6 +121,24 @@ fn status(ys: &Yardsort, out: &Output) -> Result<(), Failure> {
                 ]
             }));
             table(&rows);
+            for project in status.projects.iter().filter(|p| !p.elsewhere.is_empty()) {
+                sayln!("On your other computers, in {}:", project.name);
+                for w in &project.elsewhere {
+                    sayln!(
+                        "  {}  on {}  {}{}{}  ({})",
+                        w.name,
+                        w.host,
+                        w.branch.as_deref().unwrap_or("no branch"),
+                        if w.tasks.is_empty() {
+                            String::new()
+                        } else {
+                            format!("  {}", w.tasks.join(", "))
+                        },
+                        if w.archived { "  (archived)" } else { "" },
+                        &w.id[..8.min(w.id.len())]
+                    );
+                }
+            }
         }
         match status.synced_at {
             Some(at) => sayln!("Last synced: {}", ago(at)),

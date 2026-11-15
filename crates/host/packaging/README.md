@@ -24,5 +24,8 @@ yardsort-host pair
 
 `~/.local/bin` must be on your `PATH`, in your login shell's profile: you and the agents find `ys` by it.
 
+The guide's install line does the two `install` lines for you, from the newest release, and upgrades
+the same way.
+
 `yardsort-host install-agent claude` (or `cursor`, `grok`, `codex`, `opencode`, `pi`, `omp`) installs an
 agent into `~/.local`, as you, from its vendor's own installer or from npm.

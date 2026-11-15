@@ -1,0 +1,234 @@
+id: changes-there
+name: The window reads the changes and the files of a workspace on a computer with no screen
+description: >-
+  A yardsort-host on the stand-in server, serving a shell in a workspace of its one project. A
+  file is changed in that workspace, another is added, one is ignored, and a link in it points
+  outside. The real window, on a profile of its own, signs in as a client and is let type. With
+  the workspace open, its right panel lists the changed files, opens the change and shows the new line, and offers nothing that edits a file; when the file changes again on the host, the open change
+  follows. The Files tab lists the tree, a folder when it is opened, without `.git` and the
+  ignored file. A file is read by a path inside the workspace: one that climbs out is refused by this
+  computer before it is sent, the link that leads out is refused by the host, and a file in it is
+  read. A pretend phone let only watch
+  is refused the changes and the files. Linux only, since the window stands in for the browser
+  with xdg-open. A window opens while it runs; nothing needs clicking.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_app
+    action: run
+    program: bun
+    args: [tauri, build, --debug, --no-bundle]
+    timeout: 20m
+  - id: build_the_host
+    action: shell
+    # The stand-in server too, and the host's bin folder in $YS_RUN_DIR/bin.
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: a_repository_and_a_shell_harness
+    action: shell
+    line: >-
+      mkdir -p "$YS_RUN_DIR/repo" "$YS_RUN_DIR/profile" && git -C "$YS_RUN_DIR/repo" init -q && git -C
+      "$YS_RUN_DIR/repo" -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false
+      commit -q --allow-empty -m first && cp .yardsort/tests/support/headless-settings.toml
+      "$YS_RUN_DIR/profile/settings.toml"
+
+steps:
+  - id: the_host_signs_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", sign-in, Smoke box]
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: serve
+    action: shell
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: a_file_to_change
+    action: shell
+    line: >-
+      cd "$YS_RUN_DIR/repo" && printf 'first\n' > README.md && printf 'secret.env\n' > .gitignore &&
+      mkdir docs && printf 'a guide\n' > docs/guide.md && git add . && git -c user.name=Smoke -c
+      user.email=smoke@example.invalid -c commit.gpgsign=false commit -q -m "a readme" && echo
+      committed
+    expect:
+      stdout_contains: committed
+  - id: add_the_project
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, project, add, "{{ run.dir }}/repo"]
+    expect:
+      stdout_contains: Added repo
+  - id: start_a_shell
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, workspace, new, repo, smoke, --harness, sh]
+    expect:
+      stdout_contains: agent  sh
+  - id: work_is_done_in_it
+    action: shell
+    # What an agent there would leave: a changed file, a new one, an ignored one, and a link
+    # that leads out of the workspace to a file beside it.
+    line: >-
+      path="$(git -C "$YS_RUN_DIR/repo" worktree list --porcelain | sed -n 's/^worktree //p' | grep
+      '/smoke$')" && echo "$path" > "$YS_RUN_DIR/smoke.path" && printf 'first\nsecond-line\n' >
+      "$path/README.md" && printf 'not committed\n' > "$path/notes.txt" && printf 'TOKEN=1\n' >
+      "$path/secret.env" && printf 'not yours\n' > "$path/../outside.txt" && ln -s ../outside.txt
+      "$path/link.txt" && echo written
+    expect:
+      stdout_contains: written
+
+  - id: open_the_window
+    action: shell
+    # A profile of its own: the host has the run's.
+    line: YS_APP_DIR="$YS_RUN_DIR/app" sh .yardsort/tests/support/app.sh open
+  - id: window_up
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+  - id: the_window_signs_in_as_a_client
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", client-sign-in, "{{ run.dir }}"]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: Signed in as Smoke laptop"
+  - id: the_window_is_let_type
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair, window, "{{ run.port }}", t]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+  - id: a_phone_let_only_watch
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair, watching]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+
+  - id: the_window_lists_what_changed_and_opens_it
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/window.ts,
+        "{{ run.port }}",
+        reads-changes-there,
+        Smoke box,
+        smoke,
+        second-line,
+      ]
+    timeout: 150s
+    expect:
+      stdout_contains: "saw: nothing in the panel that edits a file"
+  - id: the_file_changes_again_on_the_host
+    action: shell
+    line: printf 'first\nsecond-line\nthird-line\n' > "$(cat "$YS_RUN_DIR/smoke.path")/README.md" && echo written
+    expect:
+      stdout_contains: written
+  - id: and_the_open_change_follows
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/window.ts,
+        "{{ run.port }}",
+        reads-changes-there,
+        Smoke box,
+        smoke,
+        third-line,
+      ]
+    timeout: 150s
+    expect:
+      stdout_contains: "saw: the change to README.md, with third-line"
+  - id: its_files_without_what_git_ignores
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", reads-files-there, Smoke box]
+    timeout: 120s
+    expect:
+      stdout_contains: "saw: the files of the workspace on Smoke box, a folder opened, nothing ignored"
+  - id: a_file_inside_it_is_read
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/window.ts,
+        "{{ run.port }}",
+        outside-there,
+        Smoke box,
+        smoke,
+        notes.txt,
+      ]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: notes.txt read: text"
+  - id: one_that_climbs_out_is_never_sent
+    action: run
+    # This computer's own client refuses a path that climbs before anything is sent, which it
+    # says as a failure of its own and not as that computer's refusal.
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/window.ts,
+        "{{ run.port }}",
+        outside-there,
+        Smoke box,
+        smoke,
+        ../outside.txt,
+      ]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: ../outside.txt refused: remote_failed"
+  - id: and_so_is_a_link_that_leads_out
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/window.ts,
+        "{{ run.port }}",
+        outside-there,
+        Smoke box,
+        smoke,
+        link.txt,
+      ]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: link.txt refused: remote_refused"
+  - id: a_device_that_only_watches_reads_none_of_it
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", cannot-read, Smoke box]
+    timeout: 60s
+    expect:
+      stdout_contains: "refused: reading its changes and its files"
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      YS_APP_DIR="$YS_RUN_DIR/app" sh .yardsort/tests/support/app.sh stop-everything; kill "$(cat
+      "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true
