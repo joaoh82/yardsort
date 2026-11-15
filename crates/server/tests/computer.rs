@@ -564,9 +564,28 @@ struct Stand {
     terminals: Arc<PtyHost>,
     workspace: String,
     asked: Mutex<Vec<String>>,
+    /// The project a clone is added as.
+    cloned: String,
+    /// Whether its workspace has uncommitted work, which archiving or deleting would lose.
+    dirty: std::sync::atomic::AtomicBool,
 }
 
 impl Stand {
+    fn note(&self, asked: String) {
+        self.asked.lock().unwrap().push(asked);
+    }
+
+    fn unless_dirty(&self, force: bool) -> IpcResult<()> {
+        if self.dirty.load(std::sync::atomic::Ordering::SeqCst) && !force {
+            // As the core says it, with a folder in it that must not reach the other computer.
+            return Err(IpcError::new(
+                "worktree_dirty",
+                "/home/someone/worktrees/w has uncommitted changes.",
+            ));
+        }
+        Ok(())
+    }
+
     fn run(&self, asked: String) -> IpcResult<pty_host::SessionInfo> {
         self.asked.lock().unwrap().push(asked);
         self.terminals
@@ -580,16 +599,168 @@ impl Starting for Stand {
         vec![remote_proto::HarnessSummary {
             id: "stand-in".into(),
             name: "Stand-in".into(),
+            models: vec!["large".into()],
+            efforts: vec!["high".into()],
         }]
     }
     fn workspace(
         &self,
-        project: &str,
-        prompt: &str,
-        harness: &str,
+        new: &yardsort_core::remote::start::NewWorkspace,
     ) -> IpcResult<(String, pty_host::SessionInfo)> {
-        let info = self.run(format!("workspace {project} {harness} {prompt}"))?;
+        let said = [
+            &new.name,
+            &new.model,
+            &new.effort,
+            &new.base_branch,
+            &new.existing_branch,
+        ]
+        .map(|part| part.as_deref().unwrap_or("-"))
+        .join(" ");
+        let extra = if said == "- - - - -" {
+            String::new()
+        } else {
+            format!(" [{said}]")
+        };
+        let info = self.run(format!(
+            "workspace {} {} {}{extra}",
+            new.project, new.harness, new.prompt
+        ))?;
         Ok((self.workspace.clone(), info))
+    }
+    fn shell(&self, workspace: &str) -> IpcResult<pty_host::SessionInfo> {
+        self.run(format!("shell {workspace}"))
+    }
+    fn branches(&self, project: &str) -> IpcResult<remote_proto::ProjectBranches> {
+        self.note(format!("branches {project}"));
+        Ok(remote_proto::manage::bounded_branches(
+            vec!["main".into(), "develop".into()],
+            Some("main".into()),
+            vec!["main".into()],
+        ))
+    }
+    fn clone_project(&self, remote: &str, name: Option<&str>) -> IpcResult<(String, String)> {
+        self.note(format!("clone {remote} {name:?}"));
+        if remote.contains("private") {
+            return Err(IpcError::new(
+                "clone_failed",
+                "Could not clone /secret/path",
+            ));
+        }
+        Ok((self.cloned.clone(), "cloned".into()))
+    }
+    fn rename(&self, workspace: &str, name: &str) -> IpcResult<()> {
+        self.note(format!("rename {workspace} {name}"));
+        Ok(())
+    }
+    fn archive(&self, workspace: &str, force: bool) -> IpcResult<()> {
+        self.note(format!("archive {workspace} {force}"));
+        self.unless_dirty(force)
+    }
+    fn delete(&self, workspace: &str, force: bool) -> IpcResult<()> {
+        self.note(format!("delete {workspace} {force}"));
+        self.unless_dirty(force)
+    }
+    fn changes(&self, workspace: &str) -> IpcResult<yardsort_core::changes::ChangeSet> {
+        self.note(format!("changes {workspace}"));
+        Ok(yardsort_core::changes::ChangeSet {
+            uncommitted: vec![yardsort_core::changes::FileChange {
+                path: "src/big.txt".into(),
+                old_path: None,
+                kind: yardsort_core::changes::ChangeKind::Modified,
+                additions: Some(3),
+                deletions: Some(1),
+            }],
+            committed: vec![],
+            base: Some("main".into()),
+        })
+    }
+    fn files(
+        &self,
+        workspace: &str,
+        dir: &str,
+    ) -> IpcResult<Vec<yardsort_core::file_tree::FileEntry>> {
+        self.note(format!("files {workspace} {dir:?}"));
+        Ok(vec![yardsort_core::file_tree::FileEntry {
+            name: "big.txt".into(),
+            path: "src/big.txt".into(),
+            is_dir: false,
+            ignored: false,
+        }])
+    }
+    fn content(
+        &self,
+        _workspace: &str,
+        path: &str,
+        _old_path: Option<&str>,
+        of: remote_proto::FileOf,
+    ) -> IpcResult<yardsort_core::changes::Content> {
+        use yardsort_core::changes::Content;
+        Ok(match (path, of) {
+            // Larger than one piece carries, and with a character that a piece may split.
+            ("src/big.txt", remote_proto::FileOf::Working) => Content::Text {
+                text: "é".repeat(40_000),
+            },
+            ("src/big.txt", _) => Content::Absent,
+            ("logo.png", _) => Content::Binary,
+            ("huge.log", _) => Content::TooLarge { bytes: 5_000_000 },
+            _ => return Err(IpcError::new("bad_path", "/home/someone/w is outside")),
+        })
+    }
+    fn publish(
+        &self,
+        workspace: &str,
+        forge: bool,
+    ) -> IpcResult<remote_proto::publish::PublishState> {
+        self.note(format!("publish {workspace} {forge}"));
+        Ok(remote_proto::publish::PublishState {
+            branch: Some("ys/tidy".into()),
+            base: Some("main".into()),
+            remote: true,
+            ahead: 1,
+            unpushed: vec!["Tidy it".into()],
+            can_open: true,
+            gh: true,
+            ..Default::default()
+        })
+    }
+    fn commit(
+        &self,
+        workspace: &str,
+        message: &str,
+    ) -> IpcResult<remote_proto::publish::PublishState> {
+        self.note(format!("commit {workspace} {message}"));
+        self.publish(workspace, false)
+    }
+    fn push(&self, workspace: &str) -> IpcResult<remote_proto::publish::PublishState> {
+        self.note(format!("push {workspace}"));
+        // As the core says a refused push: in its own words, with nothing of Git's.
+        Err(IpcError::new(
+            "push_rejected",
+            "The remote has commits this branch does not have, so it refused the push.",
+        ))
+    }
+    fn open_pull_request(
+        &self,
+        workspace: &str,
+        title: &str,
+        body: &str,
+        draft: bool,
+    ) -> IpcResult<remote_proto::publish::PullRequestOpened> {
+        self.note(format!("open {workspace} {title} {body:?} {draft}"));
+        Ok(remote_proto::publish::PullRequestOpened {
+            url: "https://forge.example/acme/app/pull/7".into(),
+            created: true,
+        })
+    }
+    fn merge_pull_request(
+        &self,
+        workspace: &str,
+        number: u32,
+        head_oid: &str,
+        method: remote_proto::publish::MergeMethod,
+    ) -> IpcResult<()> {
+        self.note(format!("merge {workspace} {number} {head_oid} {method:?}"));
+        Ok(())
     }
     fn session(
         &self,
@@ -659,6 +830,8 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
         terminals: Arc::clone(&terminals),
         workspace: workspace.id.clone(),
         asked: Mutex::default(),
+        cloned: project.id.clone(),
+        dirty: std::sync::atomic::AtomicBool::new(false),
     });
     let here = Arc::new(Here {
         _dir: dir,
@@ -739,7 +912,10 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
         host,
         &project.id,
         "Fix the spacing",
-        Some("stand-in"),
+        start::Said {
+            harness: Some("stand-in".into()),
+            ..start::Said::default()
+        },
     )
     .await
     .unwrap();
@@ -768,6 +944,183 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
         .unwrap_err();
     assert_eq!(refused.code, "remote_refused");
     assert_eq!(stand.asked.lock().unwrap().len(), 3);
+
+    // Since minor 12: what a start says beyond its message reaches the host, each part as said.
+    let said = |effort: &str| start::Said {
+        harness: Some("stand-in".into()),
+        name: Some("tidy".into()),
+        model: Some("large".into()),
+        effort: Some(effort.into()),
+        base_branch: Some("develop".into()),
+        existing_branch: None,
+    };
+    start::workspace(&desk, host, &project.id, "Tidy it", said("high"))
+        .await
+        .unwrap();
+    // An effort that agent does not have there is refused, and nothing is made for it.
+    let odd = start::workspace(&desk, host, &project.id, "Tidy it", said("ludicrous"))
+        .await
+        .unwrap_err();
+    assert_eq!(odd.code, "remote_refused");
+    let branches = start::branches(&desk, host, &project.id).await.unwrap();
+    assert_eq!(branches.branches, ["main", "develop"]);
+    assert_eq!(branches.default.as_deref(), Some("main"));
+    assert_eq!(branches.checked_out, ["main"]);
+    let shell = start::shell(&desk, host, &workspace.id).await.unwrap();
+    assert_eq!(shell.workspace.as_str(), workspace.id);
+    assert_eq!(shell.harness, "", "a shell is no harness");
+    start::rename(&desk, host, &workspace.id, " Login spacing ")
+        .await
+        .unwrap();
+    // Uncommitted work there: archiving and deleting are refused until asked a second time, and
+    // the host's own words, which name its folder, do not come over.
+    stand.dirty.store(true, std::sync::atomic::Ordering::SeqCst);
+    for delete in [false, true] {
+        let dirty = start::remove(&desk, host, &workspace.id, delete, false)
+            .await
+            .unwrap_err();
+        assert_eq!(dirty.code, "remote_uncommitted");
+        assert!(!dirty.message.contains("/home"), "{}", dirty.message);
+        start::remove(&desk, host, &workspace.id, delete, true)
+            .await
+            .unwrap();
+    }
+    // A clone is asked for by its address, and the project it was added as comes back. One the
+    // host cannot clone says so without its folders.
+    let cloned = start::clone(&desk, host, " https://example.com/acme/app.git ")
+        .await
+        .unwrap();
+    assert_eq!(cloned.project.as_str(), project.id);
+    assert_eq!(cloned.name, "cloned");
+    let failed = start::clone(&desk, host, "https://example.com/acme/private.git")
+        .await
+        .unwrap_err();
+    assert_eq!(failed.code, "remote_refused");
+    assert!(!failed.message.contains("/secret"), "{}", failed.message);
+    assert_eq!(
+        stand.asked.lock().unwrap()[3..],
+        [
+            format!(
+                "workspace {} stand-in Tidy it [tidy large high develop -]",
+                project.id
+            ),
+            format!("branches {}", project.id),
+            format!("shell {}", workspace.id),
+            format!("rename {} Login spacing", workspace.id),
+            format!("archive {} false", workspace.id),
+            format!("archive {} true", workspace.id),
+            format!("delete {} false", workspace.id),
+            format!("delete {} true", workspace.id),
+            "clone https://example.com/acme/app.git None".to_owned(),
+            "clone https://example.com/acme/private.git None".to_owned(),
+        ]
+    );
+    // Since minor 13: what changed there, its tree, and a file put together from its pieces.
+    use remote_host::computer::look;
+    let changed = look::changes(&desk, host, &workspace.id).await.unwrap();
+    assert_eq!(changed.uncommitted[0].path, "src/big.txt");
+    assert_eq!(changed.base.as_deref(), Some("main"));
+    let tree = look::files(&desk, host, &workspace.id, "src")
+        .await
+        .unwrap();
+    assert_eq!(tree.entries[0].name, "big.txt");
+    let read = |path: &'static str, of| look::file(&desk, host, &workspace.id, path, None, of);
+    let big = read("src/big.txt", remote_proto::FileOf::Working)
+        .await
+        .unwrap();
+    assert_eq!(big.state, remote_proto::FileState::Text);
+    // 80 000 bytes: three pieces, the first two ending inside a character.
+    assert_eq!(String::from_utf8(big.bytes).unwrap(), "é".repeat(40_000));
+    let before = read("src/big.txt", remote_proto::FileOf::UncommittedOld)
+        .await
+        .unwrap();
+    assert_eq!(before.state, remote_proto::FileState::Absent);
+    let picture = read("logo.png", remote_proto::FileOf::Working)
+        .await
+        .unwrap();
+    assert_eq!(picture.state, remote_proto::FileState::Binary);
+    assert!(picture.bytes.is_empty());
+    let huge = read("huge.log", remote_proto::FileOf::Working)
+        .await
+        .unwrap();
+    assert_eq!(
+        (huge.state, huge.size),
+        (remote_proto::FileState::TooLarge, 5_000_000)
+    );
+    // A path the host refuses is refused in its own words, without its folders; one that climbs
+    // out is refused by this computer's client, and never sent.
+    let climbing = read("../up.txt", remote_proto::FileOf::Working)
+        .await
+        .unwrap_err();
+    assert_eq!(climbing.code, "remote_failed");
+    let outside = read("elsewhere.txt", remote_proto::FileOf::Working)
+        .await
+        .unwrap_err();
+    assert_eq!(outside.code, "remote_refused");
+    assert!(!outside.message.contains("/home"), "{}", outside.message);
+    assert!(read("../up.txt", remote_proto::FileOf::Working)
+        .await
+        .is_err());
+    // Since minor 14: commit, push and the pull request, each done by the host as itself.
+    use remote_host::computer::publish;
+    let asked_before = stand.asked.lock().unwrap().len();
+    let stands = publish::state(&desk, host, &workspace.id, true)
+        .await
+        .unwrap();
+    assert_eq!(stands.branch.as_deref(), Some("ys/tidy"));
+    assert!(stands.can_open && stands.gh);
+    let committed = publish::commit(&desk, host, &workspace.id, "  Tidy it\n\nA body.  ")
+        .await
+        .unwrap();
+    assert_eq!(committed.unpushed, ["Tidy it"]);
+    // A push the remote refuses is said in the host's own words.
+    let refused = publish::push(&desk, host, &workspace.id).await.unwrap_err();
+    assert_eq!(refused.code, "remote_refused");
+    assert!(
+        refused.message.contains("refused the push"),
+        "{}",
+        refused.message
+    );
+    let opened = publish::open_pull_request(&desk, host, &workspace.id, " Tidy it ", "Why.", true)
+        .await
+        .unwrap();
+    assert!(opened.created);
+    assert_eq!(opened.url, "https://forge.example/acme/app/pull/7");
+    publish::merge_pull_request(
+        &desk,
+        host,
+        &workspace.id,
+        7,
+        "0123456789abcdef",
+        remote_proto::publish::MergeMethod::Rebase,
+    )
+    .await
+    .unwrap();
+    // What no host would take is refused by this computer's client, and never sent.
+    assert!(publish::commit(&desk, host, &workspace.id, "  ")
+        .await
+        .is_err());
+    assert!(publish::merge_pull_request(
+        &desk,
+        host,
+        &workspace.id,
+        7,
+        "HEAD",
+        remote_proto::publish::MergeMethod::Squash
+    )
+    .await
+    .is_err());
+    assert_eq!(
+        stand.asked.lock().unwrap()[asked_before..],
+        [
+            format!("publish {} true", workspace.id),
+            format!("commit {} Tidy it\n\nA body.", workspace.id),
+            format!("publish {} false", workspace.id),
+            format!("push {}", workspace.id),
+            format!("open {} Tidy it \"Why.\" true", workspace.id),
+            format!("merge {} 7 0123456789abcdef Rebase", workspace.id),
+        ]
+    );
     for terminal in here.terminals.list() {
         let _ = here.terminals.kill(&terminal.id);
     }

@@ -23,13 +23,15 @@ use remote_proto::terminal::FrameError;
 use remote_proto::{
     AcquireRequest, ActivityBatch, ActivityListParams, ActivityPage, ActivitySubscribeParams,
     ActivityUnsubscribeParams, AttachRequest, AttachStart, Attached, Controller, Cursor,
-    DetachRequest, ErrorCode, Event, HarnessSummary, Hello, HelloReply, HostDescription, HostId,
-    InputRequest, Lease, LeaseRef, Operation, OutputFrame, ProgramExit, ProtocolVersion,
+    DetachRequest, ErrorCode, Event, FileChunk, FileList, FileReadParams, HarnessSummary, Hello,
+    HelloReply, HostDescription, HostId, InputRequest, Lease, LeaseRef, Operation, OutputFrame,
+    ProgramExit, ProjectBranches, ProjectCloneParams, ProjectCloned, ProjectRef, ProtocolVersion,
     RemoteError, Reply, Request, RequestId, ResizeRequest, Response, SessionListParams,
-    SessionPage, SessionResumeParams, SessionStartParams, Started, StreamId, StreamPosition,
-    SubscriptionId, TermSize, TerminalId, WorkspaceDetail, WorkspaceId, WorkspaceListParams,
-    WorkspacePage, WorkspaceRef, WorkspaceStartParams, MAX_CLIENT_NAME, MAX_CONTROL_FRAME,
-    MAX_OUTPUT_CHUNK, PROTOCOL_MAJOR,
+    SessionPage, SessionResumeParams, SessionStartParams, ShellStartParams, Started, StreamId,
+    StreamPosition, SubscriptionId, TermSize, TerminalId, WorkspaceChanges, WorkspaceDetail,
+    WorkspaceFilesParams, WorkspaceId, WorkspaceListParams, WorkspacePage, WorkspaceRef,
+    WorkspaceRemoveParams, WorkspaceRenameParams, WorkspaceStartParams, MAX_CLIENT_NAME,
+    MAX_CONTROL_FRAME, MAX_OUTPUT_CHUNK, PROTOCOL_MAJOR,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -278,6 +280,171 @@ impl Channel {
         started(self.ask(Operation::SessionResume(params)).await?)
     }
 
+    /// The branches a new workspace in a project can start from or open. Minor 12.
+    pub async fn branches(&self, params: ProjectRef) -> Result<ProjectBranches> {
+        match self.ask(Operation::ProjectBranches(params)).await? {
+            Reply::Branches(branches) => Ok(branches),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// A repository cloned into the host's projects folder and added as a project. The reply
+    /// comes once the clone is done, which can take as long as the repository is large. Minor 12.
+    pub async fn clone_project(&self, params: ProjectCloneParams) -> Result<ProjectCloned> {
+        match self.ask(Operation::ProjectClone(params)).await? {
+            Reply::Cloned(cloned) => Ok(cloned),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// The host's shell in a workspace. Minor 12.
+    pub async fn start_shell(&self, params: ShellStartParams) -> Result<Started> {
+        started(self.ask(Operation::ShellStart(params)).await?)
+    }
+
+    /// Change what a workspace is called. Minor 12.
+    pub async fn rename_workspace(&self, params: WorkspaceRenameParams) -> Result<()> {
+        done(self.ask(Operation::WorkspaceRename(params)).await?)
+    }
+
+    /// Put a workspace away, keeping its branch and its record. Minor 12.
+    pub async fn archive_workspace(&self, params: WorkspaceRemoveParams) -> Result<()> {
+        done(self.ask(Operation::WorkspaceArchive(params)).await?)
+    }
+
+    /// Remove a workspace, keeping its branch. Minor 12.
+    pub async fn delete_workspace(&self, params: WorkspaceRemoveParams) -> Result<()> {
+        done(self.ask(Operation::WorkspaceDelete(params)).await?)
+    }
+
+    /// What changed in a workspace. Minor 13.
+    pub async fn changes(&self, workspace: WorkspaceId) -> Result<WorkspaceChanges> {
+        match self
+            .ask(Operation::WorkspaceChanges(WorkspaceRef { workspace }))
+            .await?
+        {
+            Reply::Changes(changes) => Ok(changes),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// One folder of a workspace's file tree. Minor 13.
+    pub async fn files(&self, params: WorkspaceFilesParams) -> Result<FileList> {
+        match self.ask(Operation::WorkspaceFiles(params)).await? {
+            Reply::Files(files) => Ok(files),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// One piece of a file in a workspace. Minor 13.
+    pub async fn read_file(&self, params: FileReadParams) -> Result<FileChunk> {
+        match self.ask(Operation::FileRead(params)).await? {
+            Reply::File(chunk) => Ok(chunk),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// Where a workspace stands with its remote; with `forge`, its pull request too. Minor 14.
+    pub async fn publish_state(
+        &self,
+        params: remote_proto::publish::WorkspacePublishParams,
+    ) -> Result<remote_proto::publish::PublishState> {
+        publish(self.ask(Operation::WorkspacePublish(params)).await?)
+    }
+
+    /// Commit everything changed in a workspace. Minor 14.
+    pub async fn commit(
+        &self,
+        params: remote_proto::publish::WorkspaceCommitParams,
+    ) -> Result<remote_proto::publish::PublishState> {
+        publish(self.ask(Operation::WorkspaceCommit(params)).await?)
+    }
+
+    /// Push a workspace's branch to its project's remote. Minor 14.
+    pub async fn push(
+        &self,
+        workspace: WorkspaceId,
+    ) -> Result<remote_proto::publish::PublishState> {
+        publish(
+            self.ask(Operation::WorkspacePush(WorkspaceRef { workspace }))
+                .await?,
+        )
+    }
+
+    /// Open a pull request for a workspace's branch. Minor 14.
+    pub async fn open_pull_request(
+        &self,
+        params: remote_proto::publish::PullRequestOpenParams,
+    ) -> Result<remote_proto::publish::PullRequestOpened> {
+        match self.ask(Operation::PullRequestOpen(params)).await? {
+            Reply::PullRequestOpened(opened) => Ok(opened),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// Merge a workspace's pull request, if it is still at the commit named. Minor 14.
+    pub async fn merge_pull_request(
+        &self,
+        params: remote_proto::publish::PullRequestMergeParams,
+    ) -> Result<()> {
+        done(self.ask(Operation::PullRequestMerge(params)).await?)
+    }
+
+    /// A whole file in a workspace, read piece by piece and put together. A file that changes
+    /// while it is read is read again from the start, a few times at most. Minor 13.
+    pub async fn whole_file(&self, first: FileReadParams) -> Result<WholeFile> {
+        use base64::Engine;
+        let broken = |why: &str| ChannelError::Unexpected(why.into());
+        'reading: for _ in 0..3 {
+            let mut bytes: Vec<u8> = Vec::new();
+            let mut size = None;
+            loop {
+                let chunk = self
+                    .read_file(FileReadParams {
+                        offset: bytes.len() as u64,
+                        ..first.clone()
+                    })
+                    .await?;
+                if chunk.state != remote_proto::FileState::Text {
+                    return Ok(WholeFile {
+                        state: chunk.state,
+                        size: chunk.size,
+                        bytes: Vec::new(),
+                    });
+                }
+                if chunk.size > remote_proto::MAX_FILE || chunk.offset != bytes.len() as u64 {
+                    return Err(broken("the computer sent a piece that does not fit"));
+                }
+                // Another size than a moment ago: it was written to meanwhile.
+                if size.is_some_and(|before| before != chunk.size) {
+                    continue 'reading;
+                }
+                size = Some(chunk.size);
+                let piece = base64::engine::general_purpose::STANDARD
+                    .decode(&chunk.data)
+                    .map_err(|_| broken("the computer sent a piece that is not base64"))?;
+                if piece.len() > remote_proto::MAX_FILE_CHUNK
+                    || bytes.len() + piece.len() > chunk.size as usize
+                    || (piece.is_empty() && !chunk.done)
+                {
+                    return Err(broken("the computer sent a piece that does not fit"));
+                }
+                bytes.extend_from_slice(&piece);
+                if chunk.done {
+                    if bytes.len() as u64 != chunk.size {
+                        continue 'reading;
+                    }
+                    return Ok(WholeFile {
+                        state: chunk.state,
+                        size: chunk.size,
+                        bytes,
+                    });
+                }
+            }
+        }
+        Err(broken("the file kept changing while it was read"))
+    }
+
     pub async fn activity(&self, params: ActivityListParams) -> Result<ActivityPage> {
         match self.ask(Operation::ActivityList(params)).await? {
             Reply::Activity(page) => Ok(page),
@@ -362,6 +529,30 @@ fn check_name(name: &str) -> Result<()> {
 fn started(reply: Reply) -> Result<Started> {
     match reply {
         Reply::Started(started) => Ok(started),
+        _ => Err(something_else()),
+    }
+}
+
+/// A file read whole from a host: its bytes when it is text, or why it was not sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WholeFile {
+    pub state: remote_proto::FileState,
+    /// Its size on the host, also when it was not sent.
+    pub size: u64,
+    /// Empty unless `state` is text.
+    pub bytes: Vec<u8>,
+}
+
+fn publish(reply: Reply) -> Result<remote_proto::publish::PublishState> {
+    match reply {
+        Reply::Publish(state) => Ok(state),
+        _ => Err(something_else()),
+    }
+}
+
+fn done(reply: Reply) -> Result<()> {
+    match reply {
+        Reply::Done => Ok(()),
         _ => Err(something_else()),
     }
 }

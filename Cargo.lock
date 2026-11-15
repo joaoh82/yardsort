@@ -8159,6 +8159,7 @@ dependencies = [
  "croner",
  "dunce",
  "hmac 0.12.1",
+ "ignore",
  "libc",
  "notify",
  "pty-host",

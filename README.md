@@ -206,9 +206,10 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   [A computer with no screen](docs/guide/headless-host.md). Its agents keep
   running when the host restarts, and when a reboot ends them, `ys session resume` brings their
   conversations back. The desktop app can
-  reach another computer the same way: its workspaces, agents and activity, its terminals to
-  watch and, once you take control, to type into, and new work or a resumed conversation to start
-  there.
+  reach another computer the same way: its projects and workspaces in the sidebar under that
+  computer, opened like your own, with its terminals to watch and, once you have control, to type
+  into. New work starts there from the same composer, by choosing the computer in its title, and
+  an ended conversation can be resumed there.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
 
 <table>

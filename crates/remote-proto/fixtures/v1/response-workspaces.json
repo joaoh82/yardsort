@@ -3,7 +3,12 @@
   "result": {
     "kind": "workspaces",
     "projects": [
-      { "id": "6f0d2b1c-3a4e-4f5a-9b8c-7d6e5f4a3b2c", "name": "example-app", "missing": false }
+      {
+        "id": "6f0d2b1c-3a4e-4f5a-9b8c-7d6e5f4a3b2c",
+        "name": "example-app",
+        "missing": false,
+        "remote": "https://github.com/example/example-app.git"
+      }
     ],
     "workspaces": [
       {

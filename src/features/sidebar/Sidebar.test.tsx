@@ -50,6 +50,7 @@ const core = vi.hoisted(() => ({
   onTrackedPullRequestsChanged: vi.fn(),
   onSessionStarted: vi.fn(),
   onSchedulesChanged: vi.fn(),
+  onRemoteChangedProjects: vi.fn(),
   workflowList: vi.fn(),
   workflowPreview: vi.fn(),
   workflowPreviewNew: vi.fn(),
@@ -144,6 +145,7 @@ describe("Sidebar", () => {
     core.onTrackedPullRequestsChanged.mockResolvedValue(() => {});
     core.onSessionStarted.mockResolvedValue(() => {});
     core.onSchedulesChanged.mockResolvedValue(() => {});
+    core.onRemoteChangedProjects.mockResolvedValue(() => {});
     useMemoryStore.setState({ waiting: {} });
     useOutcomesStore.setState({ asking: null, error: null });
     opener.openUrl.mockResolvedValue(undefined);

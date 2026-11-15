@@ -1366,6 +1366,25 @@ _Exit:_ on a phone, a person reads an agent's whole conversation without scrolli
 answers its permission question, and sends it the next message, while the computer's terminal
 stays as it was.
 
+## M33 — Other computers, like local projects
+
+Proposed in Figma and approved on 2026-11-14
+([44-other-computers-like-local](44-other-computers-like-local.md)), after the owner found that
+work on another computer looked, and was, completely different from local work. Released only when
+all five slices are built.
+
+- [x] Slice 1: the other computers as a tree in the sidebar, a workspace there in the panel a local
+      one gets, control taken at once for what is started from here. No protocol change.
+- [x] Slice 2: **Run on** in the composer, with what a start there can say today.
+- [x] Slice 3: protocol minor 12: name, model, effort and branch for a start there, a clone there
+      when the project is missing, a shell, rename, archive and delete.
+- [x] Slice 4: changes and files there, read-only.
+- [x] Slice 5: commit, push and pull requests there.
+
+_Exit:_ a person starts a task on another computer from the composer, follows it in the same window
+as a local workspace, reviews what it changed and opens its pull request, without that computer's
+screen.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

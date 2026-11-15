@@ -47,8 +47,8 @@ function connect(): Promise<(expression: string) => Promise<unknown>> {
   });
 }
 
-async function until<T>(what: string, look: () => Promise<T>): Promise<T> {
-  const deadline = Date.now() + WAIT_MS;
+async function until<T>(what: string, look: () => Promise<T>, waitMs = WAIT_MS): Promise<T> {
+  const deadline = Date.now() + waitMs;
   for (;;) {
     const found = await look();
     if (found) return found;
@@ -129,19 +129,81 @@ const setField = (selector: string, value: string) =>
   page(`(() => {
     const field = document.querySelector(${JSON.stringify(selector)});
     if (!field) return false;
-    const kind = field instanceof HTMLSelectElement ? HTMLSelectElement : HTMLTextAreaElement;
+    const kind =
+      field instanceof HTMLSelectElement
+        ? HTMLSelectElement
+        : field instanceof HTMLInputElement
+          ? HTMLInputElement
+          : HTMLTextAreaElement;
     Object.getOwnPropertyDescriptor(kind.prototype, "value").set.call(field, ${JSON.stringify(value)});
     field.dispatchEvent(new Event(field instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
     return true;
   })()`);
-/** Open the other computer called `name` from the sidebar, once it is online there. */
-const openOther = async (name: string) => {
-  const row = `aside[aria-label="Projects"] section[aria-label="Other computers"]`;
-  await until(`${name} online in the sidebar`, async () => (await textOf(row)).includes("online"));
+/** The other computers in the sidebar: a tree, each computer with its projects under it. */
+const TREE = `aside[aria-label="Projects"] [role="tree"][aria-label="Other computers"]`;
+/**
+ * Wait for the other computer called `name` to be online in the sidebar, and leave Settings. Its
+ * row says `online`, or `watch only` when this computer is let watch there and not type.
+ */
+const onlineThere = async (name: string) => {
+  await until(`${name} online in the sidebar`, async () =>
+    /online|watch only/.test(await textOf(`${TREE} [role="treeitem"][aria-label="${name}"] > div`)),
+  );
   await page(clicked("Done"));
-  await page(`document.querySelector(${JSON.stringify(`${row} button`)})?.click()`);
 };
-/** The text of what matches `selector`, or "" when nothing does. */
+/** Open the workspace called `workspace` under the other computer called `name`, as a click does. */
+const openThere = async (name: string, workspace: string) => {
+  await onlineThere(name);
+  const row = `${TREE} [role="treeitem"][aria-label="${name}"] [role="treeitem"][aria-label="${workspace}"] button`;
+  try {
+    await until(`${workspace} under ${name}`, () =>
+      page(`(() => {
+        const button = document.querySelector(${JSON.stringify(row)});
+        button?.click();
+        return Boolean(button);
+      })()`),
+    );
+    await until(
+      "the workspace there",
+      async () => (await textOf(viewThere(name, workspace))) !== "",
+    );
+  } catch (error) {
+    console.log(`the sidebar said: ${await textOf(TREE)}`);
+    throw error;
+  }
+};
+/** The composer for a new workspace on this computer. */
+const HERE = `form[aria-label="New workspace"]`;
+/** Open the composer for this computer's own project called `project`, as its + does. */
+const composeHere = async (project: string) => {
+  const plus = `aside[aria-label="Projects"] button[aria-label="New workspace in ${project}"]`;
+  await until(`the + on ${project}`, () =>
+    page(`(() => {
+      const button = document.querySelector(${JSON.stringify(plus)});
+      button?.click();
+      return Boolean(button);
+    })()`),
+  );
+  await until("this computer's composer", async () =>
+    (await textOf(HERE)).includes(`New workspace in ${project} on`),
+  );
+};
+/** In the composer's title, choose the other computer called `name`, which must be offered. */
+const chooseThere = async (name: string) => {
+  await until("the menu", () => page(clickedNamed("Run on: This computer")));
+  const row = `[role="menu"][aria-label="Run on"] [role="menuitemradio"][aria-label="${name}, online"]`;
+  await until(`${name}, offered in the menu`, () =>
+    page(`(() => {
+      const row = document.querySelector(${JSON.stringify(row)});
+      if (!row || row.disabled) return false;
+      row.click();
+      return true;
+    })()`),
+  );
+};
+/** A workspace on another computer, in the center panel. */
+const viewThere = (name: string, workspace: string) =>
+  `section[aria-label="${workspace} on ${name}"]`;
 const textOf = (selector: string) =>
   page(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? ""`) as Promise<string>;
 
@@ -150,11 +212,28 @@ switch (doing) {
     // As adding a folder in the window does, without the system's folder picker. The inspector
     // does not wait for a promise, so its outcome is left on the window and looked for.
     await page(
-      `void window.__TAURI_INTERNALS__.invoke("project_open", { path: ${JSON.stringify(`${runDir}/repo`)}, initGit: false }).then(() => { window.__added = "added"; }, (e) => { window.__added = JSON.stringify(e); })`,
+      `void (window.__added = "", window.__TAURI_INTERNALS__.invoke("project_open", { path: ${JSON.stringify(`${runDir}/${process.argv[5] ?? "repo"}`)}, initGit: false }).then(() => { window.__added = "added"; }, (e) => { window.__added = JSON.stringify(e); }))`,
     );
     const added = await until("the project added", () => page(`window.__added ?? ""`));
     if (added !== "added") throw new Error(`The project was not added: ${String(added)}`);
     console.log("added the project");
+    break;
+  }
+  case "load-again":
+    // The window reads its projects when it loads, so one added past it, through the core, shows
+    // once it is loaded again. Whatever looks next connects anew, to the page as it then is.
+    void page(`location.reload()`);
+    await Bun.sleep(1_000);
+    console.log("asked the window to load again");
+    break;
+  case "shows-projects": {
+    // Here the last arguments are the names of projects that must be in the sidebar.
+    const names = process.argv.slice(4);
+    await until(`${names.join(" and ")} in the sidebar`, async () => {
+      const said = await textOf(`aside[aria-label="Projects"]`);
+      return names.every((name) => said.includes(name));
+    });
+    console.log(`saw: ${names.join(" and ")} among this computer's projects`);
     break;
   }
   case "sees":
@@ -251,63 +330,67 @@ switch (doing) {
     break;
   }
   case "sees-the-host": {
-    // Here the last argument is the host's name.
+    // Here the last argument is the host's name. Its project and its workspace are under it in the
+    // sidebar, and the workspace opens as one of this computer's does, with nothing that acts.
     const name = runDir as string;
-    const row = `aside[aria-label="Projects"] section[aria-label="Other computers"]`;
-    await until(`${name} online in the sidebar`, async () => {
-      const said = await textOf(row);
-      return said.includes(name) && said.includes("online");
+    await onlineThere(name);
+    // The host let it watch and no more, and its row says so once the host was read.
+    await until(`${name}'s row saying watch only`, async () =>
+      (await textOf(`${TREE} [role="treeitem"][aria-label="${name}"] > div`)).includes(
+        "watch only",
+      ),
+    );
+    console.log(`saw: ${name}, online and watch only, under Other computers`);
+    await until("its project and its workspace under it", async () => {
+      const said = await textOf(`${TREE} [role="treeitem"][aria-label="${name}"]`);
+      return said.includes("repo") && said.includes("smoke");
     });
-    console.log(`saw: ${name}, online, under Other computers`);
-    await page(clicked("Done"));
-    await page(`document.querySelector(${JSON.stringify(`${row} button`)})?.click()`);
-    const view = `section[aria-label="${name}, another computer"]`;
-    await until("its page", async () =>
-      (await textOf(view)).includes(`${name} · another computer`),
+    console.log("saw: its project repo and its workspace smoke under it");
+    await openThere(name, "smoke");
+    const view = viewThere(name, "smoke");
+    await until("the computer's bar", async () =>
+      (await textOf(`${view} [role="group"][aria-label="${name}, another computer"]`)).includes(
+        "online",
+      ),
     );
     console.log(`saw: ${name} named across the top`);
-    await until("its workspace and its shell", async () => {
-      const said = await textOf(view);
-      return said.includes("smoke") && said.includes("sh");
-    });
-    console.log("saw: the workspace smoke and its shell");
-    const buttons = await page(
-      `[...document.querySelectorAll(${JSON.stringify(`${view} button`)})].map((b) => b.textContent.trim()).filter((t) => t !== "Watch").join(",")`,
+    await until("its shell, as a tab", async () =>
+      (await textOf(`${view} [role="tablist"]`)).includes("sh"),
     );
-    if (buttons !== "Close")
-      throw new Error(`It offers more than Close and Watch: ${String(buttons)}`);
-    console.log("saw: nothing to press but Close and Watch");
+    console.log("saw: the workspace smoke and its shell");
+    if (!(await textOf(`${view} footer`)).includes(name))
+      throw new Error(`The bottom line does not name ${name}.`);
+    console.log(`saw: ${name} named in the bottom line`);
+    // Let in to watch only: nothing takes control, and nothing starts.
+    const offered = await page(
+      `[...document.querySelectorAll(${JSON.stringify(`${view} button`)})].filter((b) => !b.matches('[role="tab"]')).map((b) => b.getAttribute("aria-label") ?? b.textContent.trim()).join(",")`,
+    );
+    if (offered !== "") throw new Error(`It offers something that acts: ${String(offered)}`);
+    console.log("saw: nothing to press but its tabs");
     const changes = await textOf(`[data-navigation="Changes"]`);
-    if (!changes.includes("Changes and files are not shown for another computer"))
+    if (!changes.includes(`Changes and files stay on ${name}`))
       throw new Error(`The Changes panel shows: ${changes}`);
     console.log("saw: no Changes panel for it");
     break;
   }
   case "watches": {
-    // Here the last argument is the host's name. Its one shell opens, watched, at its size there.
+    // Here the last argument is the host's name. Its workspace opens from the sidebar with its one
+    // shell in front, watched, at its size there.
     const name = runDir as string;
-    const row = `aside[aria-label="Projects"] section[aria-label="Other computers"]`;
-    await until(`${name} online in the sidebar`, async () =>
-      (await textOf(row)).includes("online"),
-    );
-    await page(clicked("Done"));
-    await page(`document.querySelector(${JSON.stringify(`${row} button`)})?.click()`);
-    const view = `section[aria-label="${name}, another computer"]`;
+    await openThere(name, "smoke");
     try {
-      await until("its shell, to watch", () => page(clicked("Watch")));
+      await until("the terminal", () => page(`Boolean(document.querySelector(".xterm"))`));
     } catch (error) {
-      console.log(`its page said: ${await textOf(view)}`);
       console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
       throw error;
     }
-    await until("the terminal", () => page(`Boolean(document.querySelector(".xterm"))`));
     console.log(`saw: the shell on ${name}, watched`);
     await until("who has control", async () =>
       /has control\./.test(await textOf(`[aria-label="Control"]`)),
     );
     console.log(`saw: ${await textOf(`[aria-label="Control"]`)}`);
-    if (await page(clicked("Release control")))
-      throw new Error("It had control before it was asked for.");
+    // It was running there already: its control is never taken without a press.
+    if (await page(clicked("Release"))) throw new Error("It had control before it was asked for.");
     break;
   }
   case "takes-control-and-types": {
@@ -353,46 +436,482 @@ switch (doing) {
   }
   case "starts-there": {
     // Here the last arguments are the host's name and what its agent is to do. A new workspace in
-    // its one project, with its stand-in agent, opens to watch once it has started.
+    // its one project, composed from the + on that project in the sidebar, with its stand-in
+    // agent. Once started it is in view, and this computer has control of it without a press.
     const name = runDir as string;
     const message = process.argv[5] as string;
-    await openOther(name);
-    await until("New workspace, offered", () => page(clickedNamed("New workspace in repo")));
-    const form = `section[aria-label="New workspace in repo"]`;
+    await onlineThere(name);
+    await until("New workspace, offered on its project", () =>
+      page(clickedNamed("New workspace in repo on")),
+    );
+    const form = `form[aria-label="New workspace on ${name}"]`;
     await until("its agents", () =>
       page(`Boolean(document.querySelector('${form} option[value="stand-in"]'))`),
     );
-    await setField(`${form} select`, "stand-in");
+    await setField(`${form} select[aria-label="Harness"]`, "stand-in");
     await setField(`${form} textarea`, message);
-    await click("Start workspace");
+    await click("Start");
     try {
       await until("the started agent's terminal", () =>
         page(`Boolean(document.querySelector(".xterm"))`),
+      );
+      await until("control of what it started", async () =>
+        (await textOf(`[aria-label="Control"]`)).includes("This computer has control."),
       );
     } catch (error) {
       console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
       throw error;
     }
+    console.log("saw: This computer has control, without a press");
     console.log(`saw: a workspace started on ${name}, watched`);
     break;
   }
   case "resumes-there": {
-    // Here the last argument is the host's name. Its one ended conversation is resumed, and opens.
+    // Here the last argument is the host's name. The workspace it started is still in view; its
+    // one ended conversation is resumed from there, and this computer has control of it at once.
     const name = runDir as string;
-    await page(clicked("Back"));
     try {
       await until("Resume, offered", () => page(clickedNamed("Resume ")));
-    } catch (error) {
-      console.log(
-        `its page said: ${await textOf(`section[aria-label="${name}, another computer"]`)}`,
+      await until("control of what it resumed", async () =>
+        (await textOf(`[aria-label="Control"]`)).includes("This computer has control."),
       );
+    } catch (error) {
+      console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
       throw error;
     }
-    await click("Resume");
     await until("the resumed agent's terminal", () =>
       page(`Boolean(document.querySelector(".xterm"))`),
     );
     console.log(`saw: a conversation resumed on ${name}, watched`);
+    break;
+  }
+  case "runs-on": {
+    // Here the last arguments are the host's name and what its agent is to do. From the composer
+    // of this computer's own project repo: the host is chosen in its title, its project of the
+    // same name is the one offered, what was typed comes along, and Start makes the workspace
+    // there, under the host in the sidebar and this computer's to type into.
+    const name = runDir as string;
+    const message = process.argv[5] as string;
+    await onlineThere(name);
+    await composeHere("repo");
+    await setField(`${HERE} textarea`, message);
+    await chooseThere(name);
+    const form = `form[aria-label="New workspace on ${name}"]`;
+    await until("the composer for it", async () => (await textOf(form)) !== "");
+    const typed = await page(`document.querySelector(${JSON.stringify(`${form} textarea`)}).value`);
+    if (typed !== message) throw new Error(`What was typed did not come along: ${String(typed)}`);
+    console.log("saw: what was typed, in the composer for it");
+    const offered = await page(
+      `(() => { const field = document.querySelector(${JSON.stringify(`${form} select:not([aria-label])`)}); return field?.selectedOptions[0]?.textContent ?? ""; })()`,
+    );
+    if (offered !== "repo") throw new Error(`The project offered there is: ${String(offered)}`);
+    if (!(await textOf(form)).includes("same name as here"))
+      throw new Error(`It does not say why repo is offered: ${await textOf(form)}`);
+    console.log(`saw: Project on ${name} is repo, same name as here`);
+    await until("its agents", () =>
+      page(`Boolean(document.querySelector('${form} option[value="stand-in"]'))`),
+    );
+    await setField(`${form} select[aria-label="Harness"]`, "stand-in");
+    await click("Start");
+    try {
+      await until("the started agent's terminal", () =>
+        page(`Boolean(document.querySelector(".xterm"))`),
+      );
+      await until("control of what it started", async () =>
+        (await textOf(`[aria-label="Control"]`)).includes("This computer has control."),
+      );
+      await until("the new workspace under it in the sidebar", () =>
+        page(
+          `Boolean(document.querySelector(${JSON.stringify(`${TREE} [role="treeitem"][aria-label="${name}"] [role="treeitem"][aria-label="repo"] [role="treeitem"][aria-selected="true"]`)}))`,
+        ),
+      );
+    } catch (error) {
+      console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
+      throw error;
+    }
+    console.log(`saw: a workspace started on ${name} from this computer's composer`);
+    break;
+  }
+  case "missing-there": {
+    // Here the last argument is the host's name. This computer's project notes has no namesake
+    // there: the composer says so, and Start waits.
+    const name = runDir as string;
+    await composeHere("notes");
+    await chooseThere(name);
+    const form = `form[aria-label="New workspace on ${name}"]`;
+    await until("its project said to be missing", async () =>
+      (await textOf(`${form} [role="alert"]`)).includes(`${name} has no project called notes`),
+    );
+    await setField(`${form} textarea`, "nothing to start");
+    const waits = await page(
+      `[...document.querySelectorAll(${JSON.stringify(`${form} button[type="submit"]`)})].every((b) => b.disabled)`,
+    );
+    if (!waits) throw new Error("Start is offered with no project there.");
+    console.log(`saw: ${name} has no project called notes, and Start waits`);
+    break;
+  }
+  case "not-offered-away": {
+    // Here the last argument is the host's name, which has just stopped. It is listed in the
+    // composer's menu as offline, and cannot be chosen.
+    const name = runDir as string;
+    await until(
+      `${name} offline in the sidebar`,
+      async () =>
+        (await textOf(`${TREE} [role="treeitem"][aria-label="${name}"] > div`)).includes("offline"),
+      90_000,
+    );
+    await composeHere("repo");
+    await until("the menu", () => page(clickedNamed("Run on: This computer")));
+    const row = `[role="menu"][aria-label="Run on"] [role="menuitemradio"][aria-label^="${name}, offline"]`;
+    const away = await until("its row in the menu", () =>
+      page(
+        `(() => { const row = document.querySelector(${JSON.stringify(row)}); return row ? (row.disabled ? "disabled" : "offered") : ""; })()`,
+      ),
+    );
+    if (away !== "disabled") throw new Error(`${name} is away and still offered.`);
+    console.log(`saw: ${name} listed as offline, and not offered`);
+    break;
+  }
+  case "runs-on-saying": {
+    // Here the last arguments are the host's name and what its agent is to do. As runs-on, with
+    // what a host from 0.35.0 takes: a name, a model, an effort and the branch to start from,
+    // each chosen from the host's own lists.
+    const name = runDir as string;
+    const message = process.argv[5] as string;
+    await onlineThere(name);
+    await composeHere("repo");
+    await setField(`${HERE} textarea`, message);
+    await chooseThere(name);
+    const form = `form[aria-label="New workspace on ${name}"]`;
+    await until("its branches", () =>
+      page(
+        `Boolean(document.querySelector(${JSON.stringify(`${form} select[aria-label="Branch"] option[value="new:develop"]`)}))`,
+      ),
+    );
+    await until("its agents", () =>
+      page(`Boolean(document.querySelector('${form} option[value="stand-in"]'))`),
+    );
+    await setField(`${form} select[aria-label="Harness"]`, "stand-in");
+    await until("that agent's efforts", () =>
+      page(
+        `Boolean(document.querySelector(${JSON.stringify(`${form} select[aria-label="Effort"] option[value="high"]`)}))`,
+      ),
+    );
+    await setField(`${form} input[placeholder^="named by"]`, "tidy");
+    await setField(`${form} input[aria-label="Model"]`, "large");
+    await setField(`${form} select[aria-label="Effort"]`, "high");
+    await setField(`${form} select[aria-label="Branch"]`, "new:develop");
+    console.log("saw: a name, a model, an effort and a branch to choose, from its own lists");
+    await click("Start");
+    try {
+      await until("control of what it started", async () =>
+        (await textOf(`[aria-label="Control"]`)).includes("This computer has control."),
+      );
+    } catch (error) {
+      console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
+      throw error;
+    }
+    console.log(`saw: a workspace started on ${name}, saying all four`);
+    break;
+  }
+  case "clones-there":
+  case "clone-fails-there": {
+    // Here the last arguments are the host's name and this computer's project, which the host has
+    // none for. The composer offers Clone it there, never by itself; chosen, Start has the host
+    // clone the repository and makes the workspace in it. One the host cannot clone says so.
+    const name = runDir as string;
+    const project = process.argv[5] as string;
+    await composeHere(project);
+    await setField(`${HERE} textarea`, `in-the-clone-of-${project}`);
+    await chooseThere(name);
+    const form = `form[aria-label="New workspace on ${name}"]`;
+    await until("Clone it there, offered", () => page(clicked("Clone it there")));
+    await until("the clone chosen", async () =>
+      (await textOf(form)).includes("projects folder when you start"),
+    );
+    await until("its agents", () =>
+      page(`Boolean(document.querySelector('${form} option[value="stand-in"]'))`),
+    );
+    await setField(`${form} select[aria-label="Harness"]`, "stand-in");
+    await click("Start");
+    if (doing === "clone-fails-there") {
+      await until("why it could not be cloned", async () =>
+        (await textOf(`${form} [role="alert"]`)).includes("could not clone"),
+      );
+      const kept = await page(
+        `document.querySelector(${JSON.stringify(`${form} textarea`)}).value`,
+      );
+      if (kept !== `in-the-clone-of-${project}`) throw new Error("The message was not kept.");
+      console.log(`saw: ${name} could not clone ${project}, and the message is still here`);
+      break;
+    }
+    try {
+      await until("control of what it started", async () =>
+        (await textOf(`[aria-label="Control"]`)).includes("This computer has control."),
+      );
+      await until("the clone under it in the sidebar", () =>
+        page(
+          `Boolean(document.querySelector(${JSON.stringify(`${TREE} [role="treeitem"][aria-label="${name}"] [role="treeitem"][aria-label="${project}"] [role="treeitem"][aria-selected="true"]`)}))`,
+        ),
+      );
+    } catch (error) {
+      console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
+      throw error;
+    }
+    console.log(`saw: ${project} cloned on ${name}, and a workspace started in it`);
+    break;
+  }
+  case "shell-there": {
+    // Here the last arguments are the host's name and one of its workspaces. Its + opens the
+    // host's shell there as another tab, this computer's to type into at once.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    await openThere(name, workspace);
+    const view = viewThere(name, workspace);
+    const tabs = () =>
+      page(`document.querySelectorAll(${JSON.stringify(`${view} [role="tab"]`)}).length`);
+    const before = Number(await tabs());
+    await until("New shell, offered", () => page(clickedNamed("New shell")));
+    await until("another tab", async () => Number(await tabs()) > before, 60_000);
+    await until("control of the shell", async () =>
+      (await textOf(`[aria-label="Control"]`)).includes("This computer has control."),
+    );
+    console.log(`saw: a shell on ${name} in ${workspace}, with control`);
+    break;
+  }
+  case "remove-there": {
+    // Here the last arguments are the host's name, one of its workspaces, and `force` or nothing.
+    // The window's questions are the system's own dialogs, which nothing here can press, so the
+    // core is asked as the window asks it once the person has answered: without force first.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    const force = process.argv[6] === "force";
+    // The inspector does not wait for a promise, so its outcome is left on the window and looked for.
+    await page(`void (window.__removed = "", (async () => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const status = await invoke("other_computers");
+      const host = status.hosts.find((h) => h.name === ${JSON.stringify(name)});
+      const view = await invoke("other_host", { hostId: host.hostId });
+      const found = view.projects.flatMap((p) => p.workspaces).find((w) => w.name === ${JSON.stringify(workspace)});
+      if (!found) return "no such workspace";
+      try {
+        await invoke("other_host_remove_workspace", { hostId: host.hostId, workspaceId: found.id, remove: true, force: ${force} });
+        return "deleted";
+      } catch (error) {
+        return "refused: " + error.code;
+      }
+    })().then((outcome) => { window.__removed = outcome; }, (error) => { window.__removed = "failed: " + String(error); }))`);
+    const asked = await until("that computer's answer", () => page(`window.__removed ?? ""`));
+
+    console.log(`saw: ${String(asked)}`);
+    break;
+  }
+  case "reads-changes-there": {
+    // Here the last arguments are the host's name, one of its workspaces, and a word its changed
+    // file must hold. The right panel lists what changed there and opens the change; nothing in
+    // it edits a file.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    const word = process.argv[6] as string;
+    await openThere(name, workspace);
+    const panel = `aside[aria-label="Changes"]`;
+    await until("its changed files", async () => {
+      const said = await textOf(panel);
+      return said.includes("README.md") && said.includes("notes.txt");
+    });
+    console.log("saw: README.md and notes.txt among its changes");
+    const row = `${panel} section[aria-label="Uncommitted"] button[title="README.md"]`;
+    await until("the change opened", () =>
+      page(`(() => {
+        const button = document.querySelector(${JSON.stringify(row)});
+        button?.click();
+        return Boolean(button);
+      })()`),
+    );
+    await until(
+      `its diff, with ${word}`,
+      async () => (await textOf(`${panel} section[aria-label="Viewing README.md"]`)).includes(word),
+      60_000,
+    );
+    console.log(`saw: the change to README.md, with ${word}`);
+    // Committing and pushing are under the list, in a bar of their own, and are that computer's
+    // to do. Nothing here edits a file: there is no editor, and no way to one.
+    const edits = await page(
+      `[...document.querySelectorAll(${JSON.stringify(`${panel} button, ${panel} textarea, ${panel} input`)})].filter((b) => !b.closest('[role="group"][aria-label^="Send on from"]')).map((b) => (b.getAttribute("aria-label") ?? b.textContent ?? "").trim()).filter((t) => /edit|save|commit|push/i.test(t)).join(",")`,
+    );
+    if (edits !== "") throw new Error(`The panel offers something that edits: ${String(edits)}`);
+    console.log("saw: nothing in the panel that edits a file");
+    break;
+  }
+  case "reads-files-there": {
+    // Here the last argument is the host's name. With its workspace in view: the Files tab lists
+    // its tree, a folder when it is opened, and leaves out `.git` and what Git ignores there.
+    const name = runDir as string;
+    const panel = `aside[aria-label="Changes"]`;
+    await until("the Files tab", () =>
+      page(`(() => {
+        const tab = [...document.querySelectorAll(${JSON.stringify(`${panel} [role="tab"]`)})].find((t) => t.textContent.trim() === "Files");
+        tab?.click();
+        return Boolean(tab);
+      })()`),
+    );
+    const tree = `${panel} [role="tree"][aria-label="Files"]`;
+    await until("its tree", async () => (await textOf(tree)).includes("README.md"));
+    const listed = await textOf(tree);
+    for (const hidden of [".git", "secret.env"]) {
+      if (listed.replace(".gitignore", "").includes(hidden))
+        throw new Error(`The tree lists ${hidden}: ${listed}`);
+    }
+    await until("the folder opened", () =>
+      page(`(() => {
+        const folder = document.querySelector(${JSON.stringify(`${tree} [role="treeitem"][aria-label="docs"] > button`)});
+        folder?.click();
+        return Boolean(folder);
+      })()`),
+    );
+    await until("what is in it", async () => (await textOf(tree)).includes("guide.md"));
+    console.log(`saw: the files of the workspace on ${name}, a folder opened, nothing ignored`);
+    break;
+  }
+  case "outside-there": {
+    // Here the last arguments are the host's name, one of its workspaces, and a path. The core
+    // is asked for that file as the panel asks: one outside the workspace is refused there.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    const path = process.argv[6] as string;
+    await page(`void (window.__read = "", (async () => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const status = await invoke("other_computers");
+      const host = status.hosts.find((h) => h.name === ${JSON.stringify(name)});
+      const view = await invoke("other_host", { hostId: host.hostId });
+      const found = view.projects.flatMap((p) => p.workspaces).find((w) => w.name === ${JSON.stringify(workspace)});
+      if (!found) return "no such workspace";
+      try {
+        const file = await invoke("other_host_file", { hostId: host.hostId, workspaceId: found.id, path: ${JSON.stringify(path)} });
+        return "read: " + file.type;
+      } catch (error) {
+        return "refused: " + error.code;
+      }
+    })().then((outcome) => { window.__read = outcome; }, (error) => { window.__read = "failed: " + String(error); }))`);
+    const asked = await until("that computer's answer", () => page(`window.__read ?? ""`));
+    console.log(`saw: ${path} ${String(asked)}`);
+    break;
+  }
+  case "commits-there": {
+    // Here the last arguments are the host's name, one of its workspaces and a commit message.
+    // With what changed there listed, the message is typed under it and Commit pressed: the host
+    // commits, and the bar then offers to push what it has that its remote lacks.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    const message = process.argv[6] as string;
+    await openThere(name, workspace);
+    const bar = `aside[aria-label="Changes"] [role="group"][aria-label="Send on from ${name}"]`;
+    await until("something to commit there", async () =>
+      /Commit \d+ files? on/.test(
+        String(
+          await page(
+            `document.querySelector(${JSON.stringify(`${bar} textarea`)})?.placeholder ?? ""`,
+          ),
+        ),
+      ),
+    );
+    await setField(`${bar} textarea`, message);
+    await until("Commit, pressed", () => page(clicked("Commit")));
+    await until(
+      "the commit, to push",
+      async () => /Push \d+ commits?/.test(await textOf(bar)),
+      60_000,
+    );
+    console.log(`saw: committed on ${name}, with a commit to push`);
+    break;
+  }
+  case "pushes-there": {
+    // Here the last arguments are the host's name and `refused` or nothing. Push is pressed: the
+    // host pushes and nothing is left to push, or its remote refuses and the bar says why in the
+    // host's own words.
+    const name = runDir as string;
+    const refusal = process.argv[5] === "refused";
+    const bar = `aside[aria-label="Changes"] [role="group"][aria-label="Send on from ${name}"]`;
+    await until("Push, pressed", () =>
+      page(`(() => {
+        const button = [...document.querySelectorAll(${JSON.stringify(`${bar} button`)})].find((b) => /^Push \\d+ commits?$/.test(b.textContent.trim()));
+        button?.click();
+        return Boolean(button);
+      })()`),
+    );
+    if (refusal) {
+      await until(
+        "why it was refused",
+        async () => (await textOf(`${bar} [role="alert"]`)).includes("refused the push"),
+        60_000,
+      );
+      const said = await textOf(`${bar} [role="alert"]`);
+      if (said.includes("/")) throw new Error(`It names a folder or an address: ${said}`);
+      console.log(`saw: the push refused, said in a sentence with no folder in it`);
+      break;
+    }
+    await until(
+      "nothing left to push",
+      async () => {
+        const said = await textOf(bar);
+        return said !== "" && !/Push \d+ commit/.test(said) && !/Pushing/.test(said);
+      },
+      60_000,
+    );
+    console.log(`saw: pushed from ${name}, nothing left to push`);
+    break;
+  }
+  case "opens-pull-request-there": {
+    // Here the last arguments are the host's name and a title. Open pull request is pressed, the
+    // title given and Open pressed: the host opens it, and its line shows under the changes.
+    const name = runDir as string;
+    const title = process.argv[5] as string;
+    const bar = `aside[aria-label="Changes"] [role="group"][aria-label="Send on from ${name}"]`;
+    await until("Open pull request, pressed", () => page(clicked("Open pull request")));
+    const form = `${bar} form[aria-label="Open pull request"]`;
+    await until("its form", async () => (await textOf(form)) !== "");
+    await setField(`${form} input`, title);
+    await until("Open, pressed", () => page(clicked("Open")));
+    await until(
+      "its pull request",
+      async () =>
+        (await textOf(`${bar} [role="group"][aria-label^="Pull request #"]`)).includes(title),
+      60_000,
+    );
+    console.log(`saw: ${await textOf(`${bar} [role="group"][aria-label^="Pull request #"]`)}`);
+    break;
+  }
+  case "merges-there": {
+    // Here the last arguments are the host's name, one of its workspaces, and `stale` or nothing.
+    // The window's question before a merge is the system's own dialog, which nothing here can
+    // press, so the core is asked as the window asks it once the person has said yes: with the
+    // commit the forge says is at the pull request's head, or with another for `stale`.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    const stale = process.argv[6] === "stale";
+    await page(`void (window.__merged = "", (async () => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const status = await invoke("other_computers");
+      const host = status.hosts.find((h) => h.name === ${JSON.stringify(name)});
+      const view = await invoke("other_host", { hostId: host.hostId });
+      const found = view.projects.flatMap((p) => p.workspaces).find((w) => w.name === ${JSON.stringify(workspace)});
+      if (!found) return "no such workspace";
+      const stands = await invoke("other_host_publish_state", { hostId: host.hostId, workspaceId: found.id, forge: true });
+      const pr = stands.pullRequest;
+      if (!pr || !pr.headOid) return "no pull request to merge";
+      try {
+        await invoke("other_host_merge_pull_request", { hostId: host.hostId, workspaceId: found.id, number: pr.number, headOid: ${stale} ? "0123456789abcdef0123456789abcdef01234567" : pr.headOid, method: "squash" });
+        return "merged #" + pr.number + " at " + pr.headOid;
+      } catch (error) {
+        return "refused: " + error.message;
+      }
+    })().then((outcome) => { window.__merged = outcome; }, (error) => { window.__merged = "failed: " + String(error); }))`);
+    const asked = await until(
+      "that computer's answer",
+      () => page(`window.__merged ?? ""`),
+      60_000,
+    );
+    console.log(`saw: ${String(asked)}`);
     break;
   }
   default:

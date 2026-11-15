@@ -580,6 +580,8 @@ pub async fn enable<H: Home>(
             server_url: Some(row.server_url.clone()),
             name: Some(row.name.clone()),
             left_host: None,
+            // Where clones go is this computer's choice, whichever server it is a host at.
+            projects_dir: s.remote.projects_dir.take(),
         }
     });
     *home.remote().session.lock().await = Some(session);

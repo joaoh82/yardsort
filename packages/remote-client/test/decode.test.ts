@@ -14,10 +14,28 @@ import {
   encodeFrame,
   event,
   FrameError,
+  fromBase64,
   id,
+  MAX_BRANCH,
+  MAX_BRANCHES,
+  MAX_CHOICES,
+  MAX_COMMIT_MESSAGE,
+  MAX_FILE,
+  MAX_FILE_CHUNK,
   MAX_ID_LEN,
   MAX_INPUT_BYTES,
+  MAX_LABEL,
+  MAX_LISTED_BYTES,
+  MAX_OID,
+  MAX_PATH,
+  MAX_PROJECT_NAME,
+  MAX_PULL_REQUEST_BODY,
+  MAX_PULL_REQUEST_TITLE,
+  MAX_REMOTE,
   MAX_TEXT,
+  MAX_UNPUSHED,
+  MAX_URL,
+  MAX_WORKSPACE_NAME,
   normalizeCode,
   parsePairingLink,
   reply,
@@ -161,7 +179,7 @@ describe("enums", () => {
       name: "n",
       platform: "plan9",
       appVersion: "1",
-      protocol: { major: 1, minor: 9 },
+      protocol: { major: 1, minor: 12 },
       capabilities: [],
     });
     expect(host.kind === "host" && host.platform).toBe("other");
@@ -206,8 +224,446 @@ describe("requests are checked as a host checks them", () => {
     } as unknown as Request);
   });
 
+  test("what a start says since minor 12 is each within its bounds", () => {
+    const start = (more: Record<string, unknown>) =>
+      ask("workspace.start", { project: "p", prompt: "Fix it", ...more });
+    expect(start({}).op).toBe("workspace.start");
+    expect(start({ name: "fix-login" }).op).toBe("workspace.start");
+    expect(start({ name: "n".repeat(MAX_WORKSPACE_NAME) }).op).toBe("workspace.start");
+    expect(() => start({ name: "  " })).toThrow(/a name of no characters/);
+    expect(() => start({ name: "n".repeat(MAX_WORKSPACE_NAME + 1) })).toThrow(/or over 80/);
+    expect(() => start({ name: "two\nlines" })).toThrow(/a name of no characters/);
+    expect(start({ model: "opus", effort: "high" }).op).toBe("workspace.start");
+    expect(() => start({ model: "--dangerously" })).toThrow(/names no model/);
+    expect(() => start({ model: " " })).toThrow(/names no model/);
+    expect(() => start({ effort: "e".repeat(MAX_LABEL + 1) })).toThrow(/names no effort/);
+    expect(start({ baseBranch: "develop" }).op).toBe("workspace.start");
+    expect(() => start({ baseBranch: "--upload-pack=x" })).toThrow(/names no branch/);
+    expect(() => start({ baseBranch: "" })).toThrow(/names no branch/);
+    expect(() => start({ baseBranch: "a b" })).toThrow(/names no branch/);
+    // Counted as UTF-8, as the host counts it.
+    expect(start({ baseBranch: "b".repeat(MAX_BRANCH) }).op).toBe("workspace.start");
+    expect(() => start({ baseBranch: "b".repeat(MAX_BRANCH + 1) })).toThrow(/names no branch/);
+    expect(() => start({ baseBranch: "é".repeat(Math.ceil(MAX_BRANCH / 2)) })).toThrow(
+      /names no branch/,
+    );
+    expect(start({ existingBranch: "ys/kept" }).op).toBe("workspace.start");
+    expect(() => start({ existingBranch: "-x" })).toThrow(/names no branch/);
+    // An existing branch is opened as it is: it has no base, and it names itself.
+    expect(() => start({ existingBranch: "ys/kept", baseBranch: "main" })).toThrow(
+      /no name and no base/,
+    );
+    expect(() => start({ existingBranch: "ys/kept", name: "kept" })).toThrow(/no name and no base/);
+  });
+
+  test("a clone names an address and nothing that reads as an option", () => {
+    const clone = (remote: string, name?: string) => ask("project.clone", { remote, name });
+    expect(clone("https://github.com/example/app.git").op).toBe("project.clone");
+    expect(clone("git@github.com:example/app.git", "app").op).toBe("project.clone");
+    // What is around it is the host's to trim, as it trims one typed into its own window.
+    expect(clone(" https://example.com/a\n").op).toBe("project.clone");
+    for (const bad of [
+      "",
+      "   ",
+      "--upload-pack=touch /tmp/x",
+      "-u",
+      "https://example.com/a b",
+      "https://example.com/a\tb",
+      "https://example.com/a\u001bb",
+      `https://example.com/${"a".repeat(MAX_REMOTE)}`,
+    ]) {
+      expect(() => clone(bad)).toThrow(/no repository's address/);
+    }
+    for (const bad of ["", " ", "../up", "a\\b", "n".repeat(MAX_PROJECT_NAME + 1)]) {
+      expect(() => clone("https://example.com/a", bad)).toThrow(/a name none can have/);
+    }
+    expect(clone("https://example.com/a", "n".repeat(MAX_PROJECT_NAME)).op).toBe("project.clone");
+  });
+
+  test("a workspace is renamed to something, and removed by force only when it says so", () => {
+    const rename = (name: string) => ask("workspace.rename", { workspace: "w", name });
+    expect(rename("Login spacing").op).toBe("workspace.rename");
+    expect(() => rename(" ")).toThrow(/a name of no characters/);
+    expect(() => rename("n".repeat(MAX_WORKSPACE_NAME + 1))).toThrow(/or over 80/);
+    for (const op of ["workspace.archive", "workspace.delete"]) {
+      // A force of false is left out, as Rust writes it.
+      expect(ask(op, { workspace: "w", force: false })).toEqual(ask(op, { workspace: "w" }));
+      expect("force" in (ask(op, { workspace: "w" }) as { params: object }).params).toBe(false);
+      expect(ask(op, { workspace: "w", force: true })).toHaveProperty("params.force", true);
+      expect(() => ask(op, { workspace: "w", force: "yes" })).toThrow(/true or false/);
+      expect(() => ask(op, { workspace: "w", force: null })).toThrow(/true or false/);
+    }
+  });
+
+  test("a file is named by a path inside the workspace, and read from within any file's length", () => {
+    const read = (path: string, oldPath?: string, offset?: number) =>
+      ask("file.read", { workspace: "w", path, oldPath, of: "working", offset });
+    expect(read("src/login.tsx").op).toBe("file.read");
+    expect(read(".env.example", "old name.txt", MAX_FILE).op).toBe("file.read");
+    // Without one, a read starts at the start, and says so.
+    expect(read("a")).toHaveProperty("params.offset", 0);
+    for (const outside of [
+      "",
+      "/etc/passwd",
+      "../secrets",
+      "src/../../secrets",
+      "src//login.tsx",
+      "src/",
+      "C:\\Users\\me",
+      "C:/Users/me",
+      "\\\\server\\share",
+      "-x",
+      "a\u0000b",
+      "a\u001b[2J",
+    ]) {
+      expect(() => read(outside)).toThrow(/no path inside the workspace/);
+      expect(() => read("ok", outside)).toThrow(/no path inside the workspace/);
+    }
+    // Counted as UTF-8, as the host counts it.
+    expect(read("p".repeat(MAX_PATH)).op).toBe("file.read");
+    expect(() => read("p".repeat(MAX_PATH + 1))).toThrow(/no path inside the workspace/);
+    expect(() => read("é".repeat(MAX_PATH / 2 + 1))).toThrow(/no path inside the workspace/);
+    // A drive's letter is the second byte, as the host reads it: a name may hold a colon later.
+    expect(read("é:x").op).toBe("file.read");
+    expect(read("notes: today.md").op).toBe("file.read");
+    expect(() => read("a", undefined, MAX_FILE + 1)).toThrow(/past the end of any file/);
+    expect(() => read("a", undefined, -1)).toThrow(/out of range/);
+    expect(() => ask("file.read", { workspace: "w", path: "a", of: "stagedOld" })).toThrow(
+      /not one this build knows/,
+    );
+
+    const files = (dir?: string) => ask("workspace.files", { workspace: "w", dir });
+    // The root: no folder, or an empty one, which is left out as Rust writes it.
+    expect(files()).toEqual(files(""));
+    expect("dir" in (files("") as { params: object }).params).toBe(false);
+    expect(files("src/auth")).toHaveProperty("params.dir", "src/auth");
+    for (const outside of ["../up", "/abs", "C:/x", "-x", "src/", "a\u0007"]) {
+      expect(() => files(outside)).toThrow(/no path inside the workspace/);
+    }
+    expect(ask("workspace.changes", { workspace: "w" }).op).toBe("workspace.changes");
+    expect(() => ask("workspace.changes", { workspace: "../w" })).toThrow(/not an id/);
+  });
+
+  test("a commit says something, and a pull request has a title on one line", () => {
+    const commit = (message: unknown) => ask("workspace.commit", { workspace: "w", message });
+    expect(commit("Fix it\n\nWith a body.").op).toBe("workspace.commit");
+    for (const empty of ["", "  \n", "\u00a0\t"]) {
+      expect(() => commit(empty)).toThrow(/commits with no message/);
+    }
+    expect(() => commit("a\u0000b")).toThrow(/a commit message no request may/);
+    // Counted as UTF-8, as the host counts it.
+    expect(commit("m".repeat(MAX_COMMIT_MESSAGE)).op).toBe("workspace.commit");
+    expect(() => commit("m".repeat(MAX_COMMIT_MESSAGE + 1))).toThrow(
+      /a commit message no request may/,
+    );
+    expect(() => commit("é".repeat(MAX_COMMIT_MESSAGE / 2 + 1))).toThrow(
+      /a commit message no request may/,
+    );
+    expect(() => commit(undefined)).toThrow(/not a string/);
+
+    const open = (title: string, more: Record<string, unknown> = {}) =>
+      ask("pull_request.open", { workspace: "w", title, ...more });
+    expect(open("Fix the spacing").op).toBe("pull_request.open");
+    // What is around a title is the host's to trim, so it is measured without it.
+    expect(open(" Fix the spacing\n").op).toBe("pull_request.open");
+    expect(open(` ${"t".repeat(MAX_PULL_REQUEST_TITLE)} `).op).toBe("pull_request.open");
+    // In characters, as the host counts them.
+    expect(open("\u{1f600}".repeat(MAX_PULL_REQUEST_TITLE)).op).toBe("pull_request.open");
+    for (const bad of [
+      "",
+      " ",
+      "--web",
+      "  -x",
+      "two\nlines",
+      "a\u001b[2J",
+      "t".repeat(MAX_PULL_REQUEST_TITLE + 1),
+    ]) {
+      expect(() => open(bad)).toThrow(/not 1 to 256 characters on one line/);
+    }
+    expect(open("ok", { body: "b".repeat(MAX_PULL_REQUEST_BODY) }).op).toBe("pull_request.open");
+    expect(() => open("ok", { body: "b".repeat(MAX_PULL_REQUEST_BODY + 1) })).toThrow(
+      /a longer description/,
+    );
+    expect(() => open("ok", { body: "é".repeat(MAX_PULL_REQUEST_BODY / 2 + 1) })).toThrow(
+      /a longer description/,
+    );
+    expect(() => open("ok", { body: "a\u0000b" })).toThrow(/a longer description/);
+    // No description, and not a draft, are each left out, as Rust writes them.
+    expect(open("ok", { body: "", draft: false })).toEqual(open("ok"));
+    expect((open("ok") as { params: object }).params).toEqual({ workspace: "w", title: "ok" });
+    expect(open("ok", { body: "Why.", draft: true })).toHaveProperty("params.draft", true);
+    expect(() => open("ok", { draft: "yes" })).toThrow(/true or false/);
+    expect(() => open("ok", { body: null })).toThrow(/not a string/);
+  });
+
+  test("a merge names its pull request and the commit seen at its head", () => {
+    const HEAD = "3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a";
+    const merge = (number: number, headOid: string, method = "squash") =>
+      ask("pull_request.merge", { workspace: "w", number, headOid, method });
+    expect(merge(91, HEAD).op).toBe("pull_request.merge");
+    expect(merge(91, "3F2A1B0", "rebase")).toHaveProperty("params.method", "rebase");
+    expect(merge(91, "a".repeat(MAX_OID), "merge").op).toBe("pull_request.merge");
+    expect(() => merge(0, HEAD)).toThrow(/names no pull request/);
+    for (const bad of [
+      "",
+      "3f2a1b",
+      "HEAD",
+      "--admin",
+      "3f2a1b0g",
+      `${HEAD}\n`,
+      ` ${HEAD}`,
+      "a".repeat(MAX_OID + 1),
+    ]) {
+      expect(() => merge(91, bad)).toThrow(/names no pull request/);
+    }
+    expect(() => merge(-1, HEAD)).toThrow(/out of range/);
+    expect(() => merge(91, HEAD, "fastForward")).toThrow(/not one this build knows/);
+    expect(() => ask("pull_request.merge", { workspace: "w", number: 91, headOid: HEAD })).toThrow(
+      /not a string/,
+    );
+
+    // Asking where a workspace stands, and pushing it, name the workspace and nothing else.
+    expect(ask("workspace.publish", { workspace: "w", forge: false })).toEqual(
+      ask("workspace.publish", { workspace: "w" }),
+    );
+    expect(ask("workspace.publish", { workspace: "w", forge: true })).toHaveProperty(
+      "params.forge",
+      true,
+    );
+    const push = ask("workspace.push", { workspace: "w", remote: "origin", branch: "main" });
+    expect((push as { params: object }).params).toEqual({ workspace: "w" });
+    for (const op of ["workspace.publish", "workspace.commit", "workspace.push"]) {
+      expect(() => ask(op, { workspace: "../w", message: "m" })).toThrow(/not an id/);
+    }
+  });
+
   test("an operation this build does not know is refused", () => {
-    expect(() => ask("workspace.delete", {})).toThrow(/not an operation/);
+    expect(() => ask("memory.edit", {})).toThrow(/not an operation/);
+  });
+
+  test("branches, choices and a project's address are held to their limits", () => {
+    const branches = (more: Record<string, unknown>) =>
+      decode(reply, { kind: "branches", branches: ["main"], ...more });
+    expect(branches({})).toEqual({ kind: "branches", branches: ["main"] });
+    // What Rust leaves out reads as left out, however it came.
+    expect(branches({ checkedOut: [], more: false })).toEqual({
+      kind: "branches",
+      branches: ["main"],
+    });
+    expect(branches({ default: "main", checkedOut: ["main"], more: true })).toEqual({
+      kind: "branches",
+      branches: ["main"],
+      default: "main",
+      checkedOut: ["main"],
+      more: true,
+    });
+    const many = Array.from({ length: MAX_BRANCHES + 1 }, (_, n) => `b${n}`);
+    expect(branches({ branches: many.slice(1) }).kind).toBe("branches");
+    expect(() => branches({ branches: many })).toThrow(/more than 100/);
+    // A name no request could give back is not one.
+    for (const bad of ["-x", "a b", "", "b".repeat(MAX_BRANCH + 1)]) {
+      expect(() => branches({ branches: [bad] })).toThrow(/not a branch's name/);
+      expect(() => branches({ default: bad })).toThrow(/not a branch's name/);
+    }
+
+    const harness = (models: string[]) =>
+      decode(reply, { kind: "harnesses", harnesses: [{ id: "claude", name: "Claude", models }] });
+    const models = Array.from({ length: MAX_CHOICES + 1 }, (_, n) => `m${n}`);
+    expect(harness(models.slice(1)).kind).toBe("harnesses");
+    expect(() => harness(models)).toThrow(/more than 32/);
+    expect(() => harness(["m".repeat(MAX_LABEL + 1)])).toThrow(/longer than 64/);
+
+    const project = (remote: string) =>
+      decode(reply, {
+        kind: "workspaces",
+        projects: [{ id: "p", name: "n", missing: false, remote }],
+        workspaces: [],
+        next: null,
+      });
+    expect(project("r".repeat(MAX_REMOTE)).kind).toBe("workspaces");
+    expect(() => project("r".repeat(MAX_REMOTE + 1))).toThrow(/not an address/);
+    expect(() => project("https://example.com/a\u001b[2J")).toThrow(/not an address/);
+  });
+
+  test("changes, a folder's entries and a piece of a file are held to their limits", () => {
+    const changes = (more: Record<string, unknown>) =>
+      decode(reply, { kind: "changes", uncommitted: [], committed: [], ...more });
+    expect(changes({})).toEqual({ kind: "changes", uncommitted: [], committed: [] });
+    // What Rust leaves out reads as left out, however it came.
+    expect(changes({ base: null, more: false })).toEqual(changes({}));
+    const file = (path: string, more: Record<string, unknown> = {}) => ({
+      path,
+      kind: "modified",
+      ...more,
+    });
+    expect(changes({ committed: [file("a b/c.txt", { oldPath: "a.txt" })], more: true })).toEqual({
+      kind: "changes",
+      uncommitted: [],
+      committed: [{ path: "a b/c.txt", oldPath: "a.txt", kind: "modified" }],
+      more: true,
+    });
+    // A path no request could give back is not one.
+    for (const bad of ["", "../outside", "/etc/passwd", "C:/x", "-x", "a\u001b[2J"]) {
+      expect(() => changes({ uncommitted: [file(bad)] })).toThrow(/not a path inside/);
+    }
+    for (const bad of ["../outside", "/etc/passwd", "p".repeat(MAX_PATH + 1)]) {
+      expect(() => changes({ committed: [file("a", { oldPath: bad })] })).toThrow(
+        /not a path inside/,
+      );
+    }
+    expect(() => changes({ uncommitted: [file("a", { additions: -1 })] })).toThrow(/out of range/);
+    expect(() => changes({ base: "b".repeat(MAX_BRANCH + 1) })).toThrow(/not a branch's name/);
+    // A list is no longer than a computer cuts one.
+    const long = (n: number) => file(`${"d".repeat(MAX_PATH - 8)}/${n}`);
+    const fits = Math.floor(MAX_LISTED_BYTES / MAX_PATH);
+    expect(changes({ uncommitted: Array.from({ length: fits }, (_, n) => long(n)) }).kind).toBe(
+      "changes",
+    );
+    expect(() =>
+      changes({ uncommitted: Array.from({ length: fits + 2 }, (_, n) => long(n)) }),
+    ).toThrow(/more than a reply carries/);
+
+    const folder = (entries: unknown[], more?: unknown) =>
+      decode(reply, { kind: "files", entries, more });
+    expect(
+      folder(
+        [
+          { name: "src", dir: true },
+          { name: "a.txt", dir: false },
+        ],
+        false,
+      ),
+    ).toEqual({
+      kind: "files",
+      entries: [{ name: "src", dir: true }, { name: "a.txt" }],
+    });
+    expect(folder([{ name: "n".repeat(255) }], true)).toHaveProperty("more", true);
+    for (const bad of ["", "n".repeat(256), "a\u001b[2J", "two\nlines"]) {
+      expect(() => folder([{ name: bad }])).toThrow(/not a file's name/);
+    }
+    const names = (count: number) =>
+      Array.from({ length: count }, (_, n) => ({ name: `${"f".repeat(200)}${n}` }));
+    expect(folder(names(190)).kind).toBe("files");
+    expect(() => folder(names(210))).toThrow(/more than a reply carries/);
+
+    const piece = (more: Record<string, unknown>) =>
+      decode(reply, { kind: "file", state: "text", size: 3, offset: 0, done: true, ...more });
+    // A piece of no bytes says nothing of them, as Rust writes it.
+    expect(piece({ data: "" })).toEqual(piece({}));
+    expect("data" in piece({ data: "" })).toBe(false);
+    const most = "A".repeat(Math.ceil(MAX_FILE_CHUNK / 3) * 4);
+    expect(piece({ data: most })).toHaveProperty("data", most);
+    expect(() => piece({ data: `${most}AAAA` })).toThrow(/longer than/);
+    expect(() => piece({ size: 2 ** 53 })).toThrow(/out of range/);
+    expect(() => piece({ done: undefined })).toThrow(/true or false/);
+  });
+
+  test("where a workspace stands, and its pull request, are held to their limits", () => {
+    const state = (more: Record<string, unknown> = {}) =>
+      decode(reply, { kind: "publish", ahead: 0, behind: 0, ...more });
+    // A state with nothing known is small, and what Rust leaves out reads as left out.
+    expect(state()).toEqual({ kind: "publish", ahead: 0, behind: 0 });
+    expect(
+      state({
+        branch: null,
+        base: null,
+        identity: null,
+        remote: false,
+        pushed: false,
+        unpushed: [],
+        pullRequest: null,
+        canOpen: false,
+        gh: false,
+        problem: null,
+      }),
+    ).toEqual(state());
+    expect(state({ branch: "ys/x", remote: true, canOpen: true, unpushed: ["One"] })).toEqual({
+      kind: "publish",
+      branch: "ys/x",
+      remote: true,
+      ahead: 0,
+      behind: 0,
+      unpushed: ["One"],
+      canOpen: true,
+    });
+    expect(() => state({ ahead: undefined })).toThrow(/whole number/);
+    expect(() => state({ behind: -1 })).toThrow(/out of range/);
+    for (const field of ["branch", "base"]) {
+      expect(state({ [field]: "b".repeat(MAX_BRANCH) }).kind).toBe("publish");
+      expect(() => state({ [field]: "b".repeat(MAX_BRANCH + 1) })).toThrow(/not a branch's name/);
+    }
+    for (const field of ["identity", "problem"]) {
+      expect(state({ [field]: "w".repeat(MAX_TEXT) }).kind).toBe("publish");
+      expect(() => state({ [field]: "w".repeat(MAX_TEXT + 1) })).toThrow(/longer than 256/);
+    }
+    const subjects = Array.from({ length: MAX_UNPUSHED + 1 }, (_, n) => `Commit ${n}`);
+    expect(state({ unpushed: subjects.slice(1) })).toHaveProperty("unpushed.length", MAX_UNPUSHED);
+    expect(() => state({ unpushed: subjects })).toThrow(/more than 20/);
+    expect(() => state({ unpushed: ["s".repeat(MAX_TEXT + 1)] })).toThrow(/longer than 256/);
+
+    const HEAD = "3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a";
+    const withPullRequest = (more: Record<string, unknown> = {}) =>
+      state({
+        pullRequest: {
+          number: 91,
+          url: "https://example.com/pull/91",
+          title: "Fix it",
+          state: "open",
+          checks: "none",
+          ...more,
+        },
+      });
+    const read = (more: Record<string, unknown> = {}) => {
+      const told = withPullRequest(more);
+      if (told.kind !== "publish" || !told.pullRequest) throw new Error("no pull request");
+      return told.pullRequest;
+    };
+    expect(read({ draft: false, conflicting: false, headOid: null })).toEqual({
+      number: 91,
+      url: "https://example.com/pull/91",
+      title: "Fix it",
+      state: "open",
+      checks: "none",
+    });
+    expect(read({ draft: true, conflicting: true, headOid: HEAD })).toMatchObject({
+      draft: true,
+      headOid: HEAD,
+      conflicting: true,
+    });
+    // A state, or checks, from a newer computer reads as unknown.
+    expect(read({ state: "queued", checks: "skipped" })).toMatchObject({
+      state: "unknown",
+      checks: "unknown",
+    });
+    expect(() => withPullRequest({ state: undefined })).toThrow(/not a string/);
+    expect(read({ title: "t".repeat(MAX_PULL_REQUEST_TITLE) }).title).toHaveLength(
+      MAX_PULL_REQUEST_TITLE,
+    );
+    expect(() => withPullRequest({ title: "t".repeat(MAX_PULL_REQUEST_TITLE + 1) })).toThrow(
+      /longer than 256/,
+    );
+    const long = `https://example.com/${"u".repeat(MAX_URL)}`;
+    expect(read({ url: long.slice(0, MAX_URL) }).url).toHaveLength(MAX_URL);
+    expect(() => withPullRequest({ url: long })).toThrow(/not a link/);
+    expect(() => withPullRequest({ url: "https://example.com/a\u001b[2J" })).toThrow(/not a link/);
+    // A head no merge could name is not one.
+    expect(read({ headOid: "a".repeat(MAX_OID) }).headOid).toHaveLength(MAX_OID);
+    for (const bad of ["", "HEAD", "--admin", "3f2a1b", "a".repeat(MAX_OID + 1)]) {
+      expect(() => withPullRequest({ headOid: bad })).toThrow(/not a commit's id/);
+    }
+    expect(() => withPullRequest({ number: -1 })).toThrow(/out of range/);
+
+    const opened = (url: unknown, created?: unknown) =>
+      decode(reply, { kind: "pullRequestOpened", url, created });
+    expect(opened("https://example.com/compare/main...x", false)).toEqual({
+      kind: "pullRequestOpened",
+      url: "https://example.com/compare/main...x",
+      created: false,
+    });
+    expect(() => opened(long, true)).toThrow(/not a link/);
+    expect(() => opened("https://example.com/a\nb", true)).toThrow(/not a link/);
+    // Whether the computer opened it is always said.
+    expect(() => opened("https://example.com/pull/1")).toThrow(/true or false/);
   });
 
   test("a response with neither a result nor an error is refused", () => {
@@ -250,6 +706,37 @@ describe("output frames", () => {
     const padded = new Uint8Array(wire.length + 8);
     padded.set(wire, 4);
     expect(decodeFrame(padded.subarray(4, 4 + wire.length)).position).toEqual({ epoch: 1, seq: 9 });
+  });
+});
+
+describe("base64", () => {
+  test("reads back what was written, whatever its length", () => {
+    for (let length = 0; length < 70; length++) {
+      const bytes = Uint8Array.from({ length }, (_, n) => (n * 151 + length) % 256);
+      expect(fromBase64(Buffer.from(bytes).toString("base64"))).toEqual(bytes);
+    }
+    expect(fromBase64("")).toEqual(new Uint8Array());
+  });
+
+  test("what is not padded standard base64 is refused, as the host's decoder refuses it", () => {
+    for (const bad of [
+      "QQ",
+      "QUI",
+      "QQ=",
+      "Q===",
+      "====",
+      "QQ==QQ==",
+      "Q=Q=",
+      "QU-_",
+      "QUJ\n",
+      " QUJD",
+      "QUJ\u00e9",
+      // Bits left over after the last byte.
+      "QR==",
+      "QUJ=",
+    ]) {
+      expect(fromBase64(bad)).toBeNull();
+    }
   });
 });
 

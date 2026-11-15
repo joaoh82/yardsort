@@ -1,0 +1,8 @@
+{
+  "requestId": "r-53",
+  "result": {
+    "kind": "pullRequestOpened",
+    "url": "https://github.com/example/example-app/pull/91",
+    "created": true
+  }
+}

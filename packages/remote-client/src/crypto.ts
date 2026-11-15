@@ -54,6 +54,37 @@ export function base64(bytes: Uint8Array): string {
   return out.padEnd(Math.ceil(out.length / 4) * 4, "=");
 }
 
+const VALUES = new Int8Array(128).fill(-1);
+for (let i = 0; i < BASE64.length; i++) VALUES[BASE64.charCodeAt(i)] = i;
+
+/**
+ * The bytes of standard base64, padded: as a file's pieces come. `null` for anything else, as
+ * Rust's decoder refuses it: a length that is not whole fours, a character outside the alphabet,
+ * padding anywhere but the end, or bits left over after the last byte.
+ */
+export function fromBase64(text: string): Uint8Array | null {
+  if (text.length % 4 !== 0) return null;
+  const padding = text.endsWith("==") ? 2 : text.endsWith("=") ? 1 : 0;
+  const bytes = new Uint8Array((text.length / 4) * 3 - padding);
+  let at = 0;
+  for (let i = 0; i < text.length; i += 4) {
+    const digits = i + 4 === text.length ? 4 - padding : 4;
+    let bits = 0;
+    for (let j = 0; j < 4; j++) {
+      const unit = text.charCodeAt(i + j);
+      const value = j >= digits ? 0 : unit < 128 ? (VALUES[unit] as number) : -1;
+      if (value < 0) return null;
+      bits = (bits << 6) | value;
+    }
+    // Two digits carry one byte and three carry two: what they hold past that has to be nothing.
+    if ((digits === 2 && bits & 0xffff) || (digits === 3 && bits & 0xff)) return null;
+    bytes[at++] = bits >> 16;
+    if (digits > 2) bytes[at++] = (bits >> 8) & 255;
+    if (digits > 3) bytes[at++] = bits & 255;
+  }
+  return bytes;
+}
+
 /** 256 random bits as base64url: a verifier of 43 characters. */
 export function newVerifier(crypto: Crypto): string {
   return base64url(crypto.random(32));

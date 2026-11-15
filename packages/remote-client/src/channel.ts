@@ -21,12 +21,14 @@
  */
 
 import { ClientError, type Client } from "./client.ts";
-import { base64 } from "./crypto.ts";
+import { base64, fromBase64 } from "./crypto.ts";
 import { DecodeError, isObject, utf8Length } from "./decode.ts";
 import { decodeFrame, FrameError, type OutputFrame } from "./frame.ts";
 import {
   MAX_CLIENT_NAME,
   MAX_CONTROL_FRAME,
+  MAX_FILE,
+  MAX_FILE_CHUNK,
   MAX_OUTPUT_CHUNK,
   MAX_UPLOAD_CHUNK,
   OUTPUT_HEADER_LEN,
@@ -42,6 +44,10 @@ import {
   CURRENT,
   type Cursor,
   EVENTS,
+  type FileChunk,
+  type FileList,
+  type FileReadParams,
+  type FileState,
   type HarnessSummary,
   event as eventDecoder,
   helloReply,
@@ -51,7 +57,15 @@ import {
   type MemoryListParams,
   type MemoryPage,
   type Operation,
+  type ProjectBranches,
+  type ProjectCloned,
+  type ProjectCloneParams,
+  type ProjectId,
   type ProtocolVersion,
+  type PublishState,
+  type PullRequestMergeParams,
+  type PullRequestOpened,
+  type PullRequestOpenParams,
   type RemoteError,
   type Reply,
   request as requestDecoder,
@@ -79,7 +93,13 @@ import {
   type WorkspaceDetail,
   type WorkspaceId,
   type WorkspaceListParams,
+  type WorkspaceChanges,
+  type WorkspaceCommitParams,
+  type WorkspaceFilesParams,
   type WorkspacePage,
+  type WorkspacePublishParams,
+  type WorkspaceRemoveParams,
+  type WorkspaceRenameParams,
   type WorkflowChallenge,
   type WorkflowDecideParams,
   type WorkflowDecision,
@@ -128,6 +148,18 @@ export interface ChannelEnd {
   code: number | null;
   /** A few words for a person. */
   text: string;
+}
+
+/** Which file to read, and which of its contents: `file.read`'s parameters but where to start. */
+export type FileRead = Omit<FileReadParams, "offset">;
+
+/** A file read whole by {@link Channel.wholeFile}. */
+export interface WholeFile {
+  state: FileState;
+  /** Its size in bytes: for one too large to send, how large. */
+  size: number;
+  /** Its contents, to read as UTF-8. Empty unless `state` is `text`. */
+  bytes: Uint8Array;
 }
 
 /** A request that could not be answered because the channel ended first. */
@@ -336,6 +368,9 @@ export class Channel {
   /**
    * A new workspace, named after `prompt`, with an agent given it as its first message. The reply
    * comes once the agent has started, which can take as long as the project's setup does.
+   *
+   * A name, a model, an effort and a branch are for a computer whose capabilities list
+   * `project.branches`: an earlier one does not read them. Minor 12.
    */
   async startWorkspace(params: WorkspaceStartParams): Promise<Started> {
     const { kind: _, ...started } = expect(
@@ -352,6 +387,216 @@ export class Channel {
       "started",
     );
     return started;
+  }
+
+  /** The computer's shell in a workspace. Its `harness` is empty. Minor 12. */
+  async startShell(workspace: WorkspaceId): Promise<Started> {
+    const { kind: _, ...started } = expect(
+      await this.ask({ op: "shell.start", params: { workspace } }),
+      "started",
+    );
+    return started;
+  }
+
+  // --- looking after projects and workspaces ---------------------------------------------------
+
+  /** The branches a new workspace in a project can start from or open. Minor 12. */
+  async branches(project: ProjectId): Promise<ProjectBranches> {
+    const { kind: _, ...branches } = expect(
+      await this.ask({ op: "project.branches", params: { project } }),
+      "branches",
+    );
+    return branches;
+  }
+
+  /**
+   * A repository cloned into the computer's projects folder and added as a project. The reply
+   * comes once the clone is done, which can take as long as the repository is large. Minor 12.
+   */
+  async cloneProject(params: ProjectCloneParams): Promise<ProjectCloned> {
+    const { kind: _, ...cloned } = expect(
+      await this.ask({ op: "project.clone", params }),
+      "cloned",
+    );
+    return cloned;
+  }
+
+  /** Change what a workspace is called. Minor 12. */
+  async renameWorkspace(params: WorkspaceRenameParams): Promise<void> {
+    expect(await this.ask({ op: "workspace.rename", params }), "done");
+  }
+
+  /**
+   * Put a workspace away, keeping its branch and its record. One with uncommitted work is refused
+   * as `uncommitted_work` unless `force` is set, which is for after the person was asked again.
+   * Minor 12.
+   */
+  async archiveWorkspace(params: WorkspaceRemoveParams): Promise<void> {
+    expect(await this.ask({ op: "workspace.archive", params }), "done");
+  }
+
+  /**
+   * Remove a workspace, keeping its branch. Refused as {@link Channel.archiveWorkspace} is.
+   * Minor 12.
+   */
+  async deleteWorkspace(params: WorkspaceRemoveParams): Promise<void> {
+    expect(await this.ask({ op: "workspace.delete", params }), "done");
+  }
+
+  // --- reading a workspace's changes and files -------------------------------------------------
+
+  /**
+   * Which files changed in a workspace: those not committed, and those committed on its branch.
+   * Minor 13.
+   */
+  async changes(workspace: WorkspaceId): Promise<WorkspaceChanges> {
+    const { kind: _, ...changes } = expect(
+      await this.ask({ op: "workspace.changes", params: { workspace } }),
+      "changes",
+    );
+    return changes;
+  }
+
+  /**
+   * One folder of a workspace's file tree, folders first: its root when no `dir` is given.
+   * Minor 13.
+   */
+  async files(params: WorkspaceFilesParams): Promise<FileList> {
+    const { kind: _, ...list } = expect(await this.ask({ op: "workspace.files", params }), "files");
+    return list;
+  }
+
+  /**
+   * One piece of a file in a workspace, from `offset`, or from its start: on disk, or on one side
+   * of a change. {@link Channel.wholeFile} reads all of them. Minor 13.
+   */
+  async readFile(params: FileRead & { offset?: number }): Promise<FileChunk> {
+    const { kind: _, ...chunk } = expect(
+      await this.ask({ op: "file.read", params: { offset: 0, ...params } }),
+      "file",
+    );
+    return chunk;
+  }
+
+  /**
+   * A whole file in a workspace, read piece by piece and put together. A file that changes while
+   * it is read is read again from the start, a few times at most. One that is not text comes with
+   * its state and no bytes. Minor 13.
+   */
+  async wholeFile(params: FileRead): Promise<WholeFile> {
+    for (let reading = 0; reading < 3; reading++) {
+      const whole = await this.#reading(params);
+      if (whole) return whole;
+    }
+    throw new ClientError("unexpected", "The file kept changing while it was read.");
+  }
+
+  /** One reading of a file from its start. `null` when it changed meanwhile. */
+  async #reading(params: FileRead): Promise<WholeFile | null> {
+    const misfit = () =>
+      new ClientError("unexpected", "The computer sent a piece of a file that does not fit.");
+    const pieces: Uint8Array[] = [];
+    let read = 0;
+    let size: number | null = null;
+    for (;;) {
+      const chunk = await this.readFile({ ...params, offset: read });
+      if (chunk.state !== "text") {
+        return { state: chunk.state, size: chunk.size, bytes: new Uint8Array() };
+      }
+      if (chunk.size > MAX_FILE || chunk.offset !== read) throw misfit();
+      // Another size than a moment ago: it was written to meanwhile.
+      if (size !== null && size !== chunk.size) return null;
+      size = chunk.size;
+      const piece = fromBase64(chunk.data ?? "");
+      if (!piece) {
+        throw new ClientError(
+          "unexpected",
+          "The computer sent a piece of a file that is not base64.",
+        );
+      }
+      if (
+        piece.length > MAX_FILE_CHUNK ||
+        read + piece.length > chunk.size ||
+        (piece.length === 0 && !chunk.done)
+      ) {
+        throw misfit();
+      }
+      pieces.push(piece);
+      read += piece.length;
+      if (!chunk.done) continue;
+      if (read !== chunk.size) return null;
+      const bytes = new Uint8Array(read);
+      let at = 0;
+      for (const each of pieces) {
+        bytes.set(each, at);
+        at += each.length;
+      }
+      return { state: chunk.state, size: chunk.size, bytes };
+    }
+  }
+
+  // --- sending a workspace's work on -----------------------------------------------------------
+
+  // The computer commits with its own Git identity, pushes with its own credentials and asks the
+  // forge with its own sign-in. All but `publishState` change a repository: each is for its
+  // person's press, and none is sent again by itself.
+
+  /**
+   * Where a workspace stands with its remote: its branch, what is not pushed, and whether a pull
+   * request can be opened. With `forge`, the computer asks the forge about its pull request too,
+   * which takes it a network round trip; without, `pullRequest` is absent. Minor 14.
+   */
+  async publishState(params: WorkspacePublishParams): Promise<PublishState> {
+    const { kind: _, ...state } = expect(
+      await this.ask({ op: "workspace.publish", params }),
+      "publish",
+    );
+    return state;
+  }
+
+  /**
+   * Commit everything changed in a workspace. The reply is where it stands afterwards, as Git
+   * knows it: the forge is not asked. Minor 14.
+   */
+  async commit(params: WorkspaceCommitParams): Promise<PublishState> {
+    const { kind: _, ...state } = expect(
+      await this.ask({ op: "workspace.commit", params }),
+      "publish",
+    );
+    return state;
+  }
+
+  /**
+   * Push a workspace's branch to its project's remote. The reply is where it stands afterwards,
+   * as Git knows it: the forge is not asked. Minor 14.
+   */
+  async push(workspace: WorkspaceId): Promise<PublishState> {
+    const { kind: _, ...state } = expect(
+      await this.ask({ op: "workspace.push", params: { workspace } }),
+      "publish",
+    );
+    return state;
+  }
+
+  /**
+   * Open a pull request for a workspace's branch, which the computer pushes first when the remote
+   * does not have it all. When `created` is false the computer could not open it, and `url` is the
+   * forge's own form to finish in a browser. Minor 14.
+   */
+  async openPullRequest(params: PullRequestOpenParams): Promise<PullRequestOpened> {
+    const { kind: _, ...opened } = expect(
+      await this.ask({ op: "pull_request.open", params }),
+      "pullRequestOpened",
+    );
+    return opened;
+  }
+
+  /**
+   * Merge the pull request of a workspace's branch, if it is still open, not a draft, and at the
+   * commit named: the `headOid` its person saw, from {@link Channel.publishState}. Minor 14.
+   */
+  async mergePullRequest(params: PullRequestMergeParams): Promise<void> {
+    expect(await this.ask({ op: "pull_request.merge", params }), "done");
   }
 
   /** Workflow runs this computer is driving, newest first. */
