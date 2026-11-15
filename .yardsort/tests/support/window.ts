@@ -686,7 +686,8 @@ switch (doing) {
     const name = runDir as string;
     const workspace = process.argv[5] as string;
     const force = process.argv[6] === "force";
-    const asked = await page(`(async () => {
+    // The inspector does not wait for a promise, so its outcome is left on the window and looked for.
+    await page(`void (window.__removed = "", (async () => {
       const invoke = window.__TAURI_INTERNALS__.invoke;
       const status = await invoke("other_computers");
       const host = status.hosts.find((h) => h.name === ${JSON.stringify(name)});
@@ -699,7 +700,9 @@ switch (doing) {
       } catch (error) {
         return "refused: " + error.code;
       }
-    })()`);
+    })().then((outcome) => { window.__removed = outcome; }, (error) => { window.__removed = "failed: " + String(error); }))`);
+    const asked = await until("that computer's answer", () => page(`window.__removed ?? ""`));
+
     console.log(`saw: ${String(asked)}`);
     break;
   }

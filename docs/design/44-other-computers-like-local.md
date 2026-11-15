@@ -446,4 +446,34 @@ start.rs`; a desktop reaching a host through the real relay in `crates/server/te
 the composer, the clone, the menu and the questions in `OtherComputers.test.tsx`; the folder
 setting in `RemoteSettings.test.tsx`.
 
-**Its smoke test.** `run-on-full.yaml`. Its record is below once it is run.
+**Its smoke test.** `run-on-full.yaml`, new, with the window steps `runs-on-saying`,
+`clones-there`, `clone-fails-there`, `shell-there` and `remove-there`.
+
+**Run on 2026-11-15**, on Linux, against a `yardsort-host` on the stand-in server with the real
+window on a profile of its own: passed, 35 of 35 steps (run ce4adcb0).
+
+- The composer said a name, a model, an effort and the branch `develop`, each chosen from the
+  host's lists. A pretend phone saw the host's agent begin with the model and the effort, and the
+  new branch was at the commit `develop` is at and the default branch is not.
+- From `notes`, which the host had no project for, **Clone it there** had the host clone the
+  repository into its own projects folder, from an address its git rewrites to a repository on
+  this disk, and the workspace was made in the clone. This computer's repository kept its one
+  checkout.
+- From `gone`, whose repository is not there, the composer said the host could not clone it, kept
+  the message, and nothing was left in the host's folder.
+- The **+** in a workspace there opened the host's shell, with this computer in control.
+- A workspace with a file in no commit was refused deleting without force (`remote_uncommitted`),
+  its file still there; with force its folder went and its branch stayed. The window's two
+  questions are the system's dialogs, which the test cannot press, so it asked the core as the
+  window does once they are answered; the questions themselves are in the unit tests.
+- The host's projects folder was still in its `settings.toml` after it signed in.
+
+The four earlier tests were run again on this build and passed: `desktop-client` (16 of 16, run
+4c11a662), `same-session` (21 of 21, 0ffb8986), `remote-start-and-resume` (25 of 25, d401366e) and
+`run-on` (24 of 24, fdf73af0).
+
+What the runs found: nothing in the app. The first run (312d4bf4) failed at the delete step in the
+test itself, which waited on a promise the inspector does not wait for.
+
+Not run: macOS and Windows, a second real computer, and a clone over a network with real
+credentials.
