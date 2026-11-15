@@ -156,10 +156,6 @@ export default function Connect() {
       )}
 
       {problem && <Problem>{problem}</Problem>}
-
-      {snapshot.profiles.length > 0 && (
-        <Button title="Servers on this phone" onPress={() => router.push("/servers")} />
-      )}
     </Screen>
   );
 }
