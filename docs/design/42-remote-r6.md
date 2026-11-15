@@ -6,7 +6,9 @@ passed, and so did its staging run on 2026-11-15. Slice 2, turning a project on 
 built the same day (§10); its local smoke test passed, and so did its owner run through staging,
 this computer and the box, on 2026-11-15. Slice 3, approved notes, was built on 2026-11-15 (§11);
 its local smoke test passed, and its owner run through staging is the owner's to make. Slice 4,
-workspaces seen elsewhere, was built the same day (§12); its local smoke test passed.
+workspaces seen elsewhere, was built the same day (§12); its local smoke test passed. Slice 5,
+checking a branch out here, was built the same day too (§13): all five slices are built, and the
+gate's runs through staging (§5) are the owner's to make.
 
 This is the plan for the phase after R4 and R5 ([35](35-remote-r4-r5.md)): what it has to show, what
 it starts from, the decisions taken before any code, the slices in the order they are built, and
@@ -216,7 +218,7 @@ phone's chat ([43](43-phone-chat.md)).
 | 2   | Turning a project on, and linking it (built, §10) | The local tables: the logical-id map, the outbox, the cursor. The core's sync loop in the host runtime. Projects only: **Sync** in Project settings with its preview, **Link a synced project** on another machine, **Stop syncing**, **Remove from the server**; `yardsort-host sync on`, `link`, `status`, behind the operator's guard. `ys sync status`, read-only | `sync-link.yaml`: two throwaway profiles on the stand-in, one turning a project on, the other linking it to a clone of the same repository; the hint offered first, nothing linked until chosen; stop and remove                                                        |
 | 3   | Approved notes (built, §11)                       | The outbox written in `add_memory` and `change_memory`'s transactions for a synced project's approved and revoked notes; import without echo; revisions; conflicts kept locally with both texts; the Memory view's **Conflicts** section; "from Build box", "source unavailable on this device". Agents' launches get the synced notes as their own                   | `sync-memory.yaml`: two profiles; approve on one, launch an agent on the other and find the note in its first message; both offline, edit the same note on each, reconnect, settle the conflict; revoke on one while the other edits, reconnect: revoked on both        |
 | 4   | Workspaces, seen elsewhere (built, §12)           | The outbox in the workspace methods, each in a transaction. On a linked machine, the other host's workspaces under the project, named with their host, branch and task, and never made here. A conflict shown, nothing renamed                                                                                                                                        | `sync-workspaces.yaml`: make, rename and archive on one profile, see each on the other; no worktree, branch or directory appears on the second                                                                                                                          |
-| 5   | Checking a branch out here                        | **Check out here** on another host's workspace: fetches its branch with Git and makes a workspace for it through `Workspaces::open_branch`, refusing when a local branch of that name has work the remote does not. The record of the other one is untouched                                                                                                          | `sync-checkout.yaml`: push a branch from one profile's workspace, check it out on the other; a second attempt with a diverged local branch refused                                                                                                                      |
+| 5   | Checking a branch out here (built, §13)           | **Check out here** on another host's workspace: fetches its branch with Git and makes a workspace for it through `Workspaces::open_branch`, refusing when a local branch of that name has work the remote does not. The record of the other one is untouched                                                                                                          | `sync-checkout.yaml`: push a branch from one profile's workspace, check it out on the other; a second attempt with a diverged local branch refused                                                                                                                      |
 
 Slice 1 comes first because every other slice pushes to it. Slices 3 and 4 depend on 2 and not on
 each other. Slice 5 depends on 4. The gate's three checks are slice 3's two-machine runs (converge
@@ -666,3 +668,55 @@ for the owner's approval in the app.
 
 **The owner run**, this computer and the box through staging: needs no deploy, only a build of this
 branch on both, and the owner's look at the box afterwards (§5).
+
+## 13 · Slice 5: checking a branch out here
+
+**Built on 2026-11-15.** Another computer's workspace can be made a workspace here too, of this
+computer's own, and only when the person asks.
+
+**What it adds.**
+
+- **`yardsort_core::sync::checkout`**: `prepare_branch` fetches the branch from the project's remote
+  into its remote-tracking ref and has a local branch at it; `check_out_here` finds the other
+  computer's record, prepares its branch and opens a workspace on it with `Workspaces::open_branch`,
+  as any other. `Git::branch_move` moves a branch that nothing has checked out.
+- **On the desktop**, **Check out here** on each row of **on other computers**, shown on hover and
+  focus, through a new `project_sync_check_out` command; the projects are read again and the new
+  workspace entered. A refusal is said under the row.
+- **`yardsort-host sync checkout <project> <workspace>`**, by the name `ys sync status` shows or the
+  start of its id, behind `pair`'s guard. `ys` gains nothing: a checkout is a person's act at that
+  computer, so no agent makes one there (§1, the third check of the gate).
+
+**What building it settled, beyond §3.**
+
+- **The branch comes from the remote, never the server.** The server keeps records, not commits, so
+  a branch the other computer has not pushed is refused, saying to push it from there first, with
+  nothing changed here.
+- **The remote** is the one a push would go to: `origin`, or the only one.
+- **A branch of that name here** is used as it is when at the remote's, moved up when only behind,
+  and refused with a count of its own commits when it has any: moving it would lose them. Also
+  refused: a branch checked out in a worktree, and a workspace here on it already.
+- **The new workspace is this computer's own**, synced as its own, and the other computer's record is
+  untouched: both are listed on a third computer, each as its computer's.
+
+**Its tests.** `crates/core/src/sync/checkout/tests.rs`, 4, with a bare remote, the other
+computer's clone that pushes and this computer's clone: a pushed branch checked out as a workspace,
+at the pushed commit, tracking the remote's, the other's record still listed, and a second attempt
+refused; a branch here with a commit of its own refused, left where it was, no worktree made, which
+fails without the check; a branch here that is only behind moved up; a branch never pushed refused
+with nothing made. `yardsort-host`'s control test pins `SyncCheckout` as guarded. The sidebar's
+test: one button on each row and nothing done before it is pressed, a refusal shown under the row,
+and the new workspace listed after.
+
+**Its smoke test.** `.yardsort/tests/sync-checkout.yaml`, two throwaway `yardsort-host` profiles
+on the stand-in, each with a clone of one bare repository in the run's folder: the first makes a
+workspace, commits and pushes; the second lists it, with no branch or workspace made for it; checking
+out is refused from a shell that is not a terminal, then done at one, at the first's commit and
+tracking the remote's, with the first's still listed as its; with that workspace deleted and a commit
+of the second's own on the branch, checking out again is refused and the branch is where it was.
+Passed on 2026-11-15 with its steps run by hand, all 18. It waits for the owner's approval in the
+app.
+
+**The owner run**, this computer and the box through staging, with a repository both can push to
+and fetch from: needs no deploy, only a build of this branch on both, and the owner's look at the
+box after (§5).

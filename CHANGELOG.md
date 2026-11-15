@@ -30,7 +30,10 @@ has the downloads and the full commit lists.
 - **A synced project's workspaces on your other computers are listed under it** (Remote, under
   development), folded into **on other computers**: name, computer, branch and task, as they change
   there. Nothing is made for them here, no worktree, branch or folder. `ys sync status` lists them
-  too. See [Workspaces on your other computers](docs/guide/workspaces.md#workspaces-on-your-other-computers).
+  too. **Check out here** on one fetches its branch from the project's remote and makes a workspace of
+  this computer's own on it, and never moves a branch here that has commits of its own; on a computer
+  with no screen, `yardsort-host sync checkout`. See
+  [Workspaces on your other computers](docs/guide/workspaces.md#workspaces-on-your-other-computers).
 - **On the phone, Settings is a gear at the top right** of Connect and the account screen, in place
   of the button at the foot of the screen. **Servers on this phone** moved into Settings too, at
   the top, once the phone is signed in to a server.

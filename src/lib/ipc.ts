@@ -896,6 +896,9 @@ export const ipc = {
   /** The other computers' workspaces of a project that syncs here: shown, never made here. */
   projectSyncWorkspaces: (projectId: string): Promise<SyncedWorkspace[]> =>
     unwrap(commands.projectSyncWorkspaces(projectId)),
+  /** Check another computer's workspace out here: its branch, fetched, and a workspace on it. */
+  projectSyncCheckOut: (projectId: string, synced: string): Promise<string> =>
+    unwrap(commands.projectSyncCheckOut(projectId, synced)),
   /** Sync changed something it shows: a project stopped syncing, or a pass failed or recovered. */
   onSyncChanged: (handler: () => void) => events.syncChanged.listen(() => handler()),
 

@@ -311,6 +311,7 @@ yardsort-host sync status                     # what syncs, the last pass, and w
 yardsort-host sync on my-service              # shows what it sends, and asks
 yardsort-host sync link my-service fa737444   # to one another computer syncs
 yardsort-host sync stop my-service            # unlink this computer; the others keep it
+yardsort-host sync checkout my-service fix-login  # another computer's workspace, here too
 yardsort-host sync remove my-service          # from the server, for every computer; asks first
 ```
 
@@ -322,7 +323,12 @@ does not, each by the start of its id, its name and its remote, and says which p
 the same remote; `link` takes that id or the name. Nothing is linked by itself. `--yes` skips the
 question `on` and `remove` ask.
 
-Like `pair`, `on`, `link`, `stop` and `remove` are refused from a terminal Yardsort started, from
+`checkout` takes a workspace as `ys sync status` lists it, by name or the start of its id: it
+fetches the branch from the project's remote and makes a workspace on it here, refusing a branch here
+with commits the remote's has not, which it leaves as it is. Push the branch from the other computer
+first.
+
+Like `pair`, `on`, `link`, `stop`, `checkout` and `remove` are refused from a terminal Yardsort started, from
 anything an agent runs, and from input that is not a terminal ([the guard](#only-a-person-can-pair-a-device)).
 `status` is not; nor is [`ys sync status`](cli.md#ys-sync-status), which is all `ys` offers of sync,
 and which lists your other computers' workspaces of each synced project. None of them is made here.

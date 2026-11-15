@@ -139,6 +139,11 @@ mod cli {
         Link { project: String, synced: String },
         /// Stop syncing a project here. Its records stay on the server for your other computers.
         Stop { project: String },
+        /// Check out here a workspace one of your other computers has, by the name `ys sync
+        /// status` shows: its branch, fetched from the project's remote, and a workspace on it.
+        /// A branch of that name here with commits the remote's has not is left alone, and
+        /// refused.
+        Checkout { project: String, workspace: String },
         /// Remove a project's records from the server, for every computer. Each keeps its own
         /// copy of the project.
         Remove {
@@ -346,6 +351,9 @@ mod cli {
                 done(profile, Ask::SyncLink { project, synced }).await
             }
             Sync::Stop { project } => done(profile, Ask::SyncStop { project }).await,
+            Sync::Checkout { project, workspace } => {
+                done(profile, Ask::SyncCheckout { project, workspace }).await
+            }
             Sync::Remove { project, yes } => {
                 if !yes
                     && !confirmed(

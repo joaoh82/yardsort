@@ -237,3 +237,66 @@ pub async fn status(home: &Arc<HostHome>) -> SyncStatus {
 fn short(id: &SyncId) -> String {
     id.as_str()[..8].to_owned()
 }
+
+/// Check out here a workspace another computer has: its branch, fetched, and a workspace on it.
+pub fn check_out(home: &Arc<HostHome>, named: &str, workspace: &str) -> account::Result<Reply> {
+    let project = project(home, named)?;
+    let elsewhere = home
+        .store
+        .synced_workspaces(&project.id)
+        .map_err(store_failed)?;
+    let wanted = workspace.to_lowercase();
+    let found: Vec<_> = elsewhere
+        .iter()
+        .filter(|w| {
+            w.name.to_lowercase() == wanted || (wanted.len() >= 4 && w.id.starts_with(&wanted))
+        })
+        .collect();
+    let one = match found.as_slice() {
+        [one] => *one,
+        [] => {
+            return Err(refused(format!(
+                "None of your other computers has a workspace {workspace:?} in {}. See `ys sync status`.",
+                project.name
+            )))
+        }
+        _ => {
+            return Err(refused(format!(
+                "More than one of your other computers has a workspace {workspace:?}. Use the start of its id."
+            )))
+        }
+    };
+    let env = home.env();
+    let settings = home.settings.get();
+    let git = home
+        .git()
+        .ok_or_else(|| refused("Git cannot be found here."))?;
+    let root = yardsort_core::workspaces::worktree_root(&settings.workspaces, env)
+        .map_err(|e| refused(e.message))?;
+    let workspaces = yardsort_core::workspaces::Workspaces {
+        env,
+        store: &home.store,
+        git,
+        worktree_root: &root,
+        settings: &settings.workspaces,
+    };
+    let (row, branch) = tokio::task::block_in_place(|| {
+        yardsort_core::sync::checkout::check_out_here(&workspaces, &project.id, &one.id)
+    })
+    .map_err(|e| refused(e.message))?;
+    let how = match branch {
+        yardsort_core::sync::checkout::Branch::Made => "made from the remote's",
+        yardsort_core::sync::checkout::Branch::MovedUp => "moved up to the remote's",
+        yardsort_core::sync::checkout::Branch::AsItWas => "as it was",
+    };
+    Ok(Reply::Done {
+        message: format!(
+            "{} is checked out here as {}, at {}: {} {how}. {}'s is left as it is.",
+            one.name,
+            row.name,
+            row.path,
+            row.branch.as_deref().unwrap_or("its branch"),
+            one.host
+        ),
+    })
+}

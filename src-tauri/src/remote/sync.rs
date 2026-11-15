@@ -214,3 +214,31 @@ pub async fn project_sync_workspaces(
     })
     .await
 }
+
+/// Check out here a workspace another computer has: its branch, fetched from the project's remote,
+/// and a workspace of this computer's own on it. The other computer's record is left as it is.
+/// Answers the new workspace's id.
+#[tauri::command]
+#[specta::specta]
+pub async fn project_sync_check_out(
+    app: AppHandle,
+    project_id: String,
+    synced: String,
+) -> IpcResult<String> {
+    blocking(app, move |state| {
+        let git = yardsort_core::git::Git::new(&state.env())?;
+        let root = state.worktree_root()?;
+        let settings = state.settings.get();
+        let workspaces = yardsort_core::workspaces::Workspaces {
+            env: &state.env(),
+            store: &state.store,
+            git: &git,
+            worktree_root: &root,
+            settings: &settings.workspaces,
+        };
+        let (row, _) =
+            yardsort_core::sync::checkout::check_out_here(&workspaces, &project_id, &synced)?;
+        Ok(row.id)
+    })
+    .await
+}
