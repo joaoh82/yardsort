@@ -12,9 +12,9 @@ use crate::store::{MemoryRow, RemoteHostRow};
 
 /// The server's rules for records, without the network.
 #[derive(Default)]
-struct Server {
-    records: BTreeMap<SyncId, SyncRecord>,
-    head: u64,
+pub(super) struct Server {
+    pub(super) records: BTreeMap<SyncId, SyncRecord>,
+    pub(super) head: u64,
 }
 
 impl Server {
@@ -49,6 +49,11 @@ impl Server {
                 }
             }
             (_, Some(current)) if current.deleted => return conflict(current),
+            (Action::Delete, Some(current)) if op.base == Some(current.revision) => SyncRecord {
+                body: None,
+                deleted: true,
+                ..current
+            },
             (Action::Revoke, Some(current)) => SyncRecord {
                 revoked: true,
                 ..current
@@ -86,13 +91,13 @@ impl Server {
 }
 
 /// One installation, signed in as a host.
-struct Host {
-    store: Store,
+pub(super) struct Host {
+    pub(super) store: Store,
     id: &'static str,
 }
 
 impl Host {
-    fn new(id: &'static str, name: &str) -> Self {
+    pub(super) fn new(id: &'static str, name: &str) -> Self {
         let store = Store::in_memory();
         store
             .set_remote_host(&RemoteHostRow {
@@ -108,7 +113,7 @@ impl Host {
     }
 
     /// Push everything waiting, as the loop does, then pull.
-    fn sync(&self, server: &mut Server) {
+    pub(super) fn sync(&self, server: &mut Server) {
         self.push(server);
         self.pull(server);
     }
@@ -142,7 +147,7 @@ impl Host {
 
     /// Link `project` here to the synced one, and take its snapshot, as a link and the pass after
     /// it do.
-    fn link(&self, server: &mut Server, project: &str, synced: &SyncId) {
+    pub(super) fn link(&self, server: &mut Server, project: &str, synced: &SyncId) {
         let record = server.records[synced].clone();
         self.store.link_synced_project(project, &record).unwrap();
         let records: Vec<_> = server
@@ -169,7 +174,7 @@ impl Host {
     }
 }
 
-fn project_body(name: &str) -> serde_json::Value {
+pub(super) fn project_body(name: &str) -> serde_json::Value {
     ProjectBody {
         name: name.into(),
         remote: None,
@@ -178,7 +183,7 @@ fn project_body(name: &str) -> serde_json::Value {
 }
 
 /// Here and there, each with the project, synced from here and linked there.
-fn linked(server: &mut Server) -> (Host, String, Host, String) {
+pub(super) fn linked(server: &mut Server) -> (Host, String, Host, String) {
     let here = Host::new("host-here", "Workstation");
     let there = Host::new("host-there", "Build box");
     let mine = here.store.add_project("widgets", "/w").unwrap().id;

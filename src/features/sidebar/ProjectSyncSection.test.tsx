@@ -21,7 +21,7 @@ vi.mock("@/lib/ipc", async (original) => ({
 }));
 
 const off = (remote: string | null = "github.com/acme/demo"): ProjectSyncStatus => ({
-  sync: { state: "off", preview: { name: "demo", remote, notes: 2 } },
+  sync: { state: "off", preview: { name: "demo", remote, notes: 2, workspaces: 1 } },
   syncedAt: null,
   problem: null,
 });
@@ -73,6 +73,7 @@ it("shows exactly what turning sync on sends, and that the server reads it", asy
     "demo",
     "github.com/acme/demo",
     "2 approved, each with its text and history",
+    "1, by name, branch and task; never their files",
   ]);
   expect(screen.getByText(/Never its files, path or terminals/)).toBeInTheDocument();
   expect(

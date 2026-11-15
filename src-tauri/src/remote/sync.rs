@@ -11,7 +11,8 @@ use serde::Serialize;
 use specta::Type;
 use tauri::AppHandle;
 use yardsort_core::sync::{
-    approved_notes, project_hint, project_sync, same_remote, ProjectSync, SyncPreview,
+    approved_notes, project_hint, project_sync, same_remote, synced_workspace_count, ProjectSync,
+    SyncPreview, WorkspaceTask,
 };
 
 use super::{ipc, store_failed, AppHome};
@@ -45,6 +46,22 @@ pub struct SyncOffer {
     pub matches: bool,
 }
 
+/// A workspace on another computer of the account, of a project that syncs here. Shown, never
+/// made here: nothing of it is on this disk.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedWorkspace {
+    pub id: String,
+    /// The computer it lives on, by name.
+    pub host: String,
+    pub name: String,
+    pub branch: Option<String>,
+    pub base_branch: Option<String>,
+    pub archived: bool,
+    /// The tasks it was started from.
+    pub tasks: Vec<WorkspaceTask>,
+}
+
 fn hint(state: &AppState, root: &str) -> Option<String> {
     let git = yardsort_core::git::Git::new(&state.env()).ok()?;
     project_hint(&git, Path::new(root))
@@ -58,10 +75,12 @@ fn status(state: &AppState, project_id: &str) -> IpcResult<ProjectSyncStatus> {
         .ok_or_else(|| IpcError::new("sync_refused", "There is no such project."))?;
     let remote_on = store.remote_host().map_err(store_failed)?.is_some();
     let notes = approved_notes(store, project_id).map_err(store_failed)?;
+    let workspaces = synced_workspace_count(store, project_id).map_err(store_failed)?;
     let sync = project_sync(store, project_id, remote_on, || SyncPreview {
         remote: hint(state, &project.root_path),
         name: project.name.clone(),
         notes,
+        workspaces,
     })
     .map_err(store_failed)?;
     let pass = store.sync_state().map_err(store_failed)?;
@@ -165,6 +184,33 @@ pub async fn project_sync_remove(
     blocking(app, move |state| {
         sync::remove(&AppHome::new(&handle), &project_id).map_err(ipc)?;
         status(state, &project_id)
+    })
+    .await
+}
+
+/// The other computers' workspaces of a project that syncs here.
+#[tauri::command]
+#[specta::specta]
+pub async fn project_sync_workspaces(
+    app: AppHandle,
+    project_id: String,
+) -> IpcResult<Vec<SyncedWorkspace>> {
+    blocking(app, move |state| {
+        Ok(state
+            .store
+            .synced_workspaces(&project_id)
+            .map_err(store_failed)?
+            .into_iter()
+            .map(|w| SyncedWorkspace {
+                id: w.id,
+                host: w.host,
+                name: w.name,
+                branch: w.branch,
+                base_branch: w.base_branch,
+                archived: w.archived,
+                tasks: w.tasks,
+            })
+            .collect())
     })
     .await
 }

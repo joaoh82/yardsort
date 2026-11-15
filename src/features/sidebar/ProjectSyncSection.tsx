@@ -79,7 +79,7 @@ export function ProjectSyncSection({
         <>
           <p className="text-ink-muted">
             Syncs this project with your other computers signed in to the same account: its approved
-            notes now, and its workspaces as a later update brings them. Never its files, path or
+            notes, and its workspaces, which they show and never make. Never its files, path or
             terminals.
           </p>
           <div className="rounded border border-line bg-canvas px-3 py-2">
@@ -98,6 +98,10 @@ export function ProjectSyncSection({
               <dd className="min-w-0">
                 {sync.preview.notes === 1 ? "1 approved" : `${sync.preview.notes} approved`}, each
                 with its text and history
+              </dd>
+              <dt className="text-ink-muted">Workspaces</dt>
+              <dd className="min-w-0">
+                {sync.preview.workspaces}, by name, branch and task; never their files
               </dd>
             </dl>
           </div>

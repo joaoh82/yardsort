@@ -54,6 +54,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0042_session_label.sql"),
     include_str!("../migrations/0043_sync.sql"),
     include_str!("../migrations/0044_sync_notes.sql"),
+    include_str!("../migrations/0045_sync_workspaces.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -1589,7 +1590,10 @@ impl Store {
 
     /// Record that a workspace was started from a task. Saying so twice changes nothing.
     pub fn link_task(&self, workspace_id: &str, task: &WorkspaceTaskRow) -> StoreResult<()> {
-        self.conn().execute(
+        let at = now_ms();
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let added = tx.execute(
             "INSERT OR IGNORE INTO workspace_tasks
                  (workspace_id, source, repo, key, url, title, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -1600,9 +1604,13 @@ impl Store {
                 task.key,
                 task.url,
                 task.title,
-                now_ms()
+                at
             ],
         )?;
+        if added > 0 {
+            sync::queue_workspace(&tx, workspace_id, at)?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1761,14 +1769,18 @@ impl Store {
         branch: Option<&str>,
         base_branch: Option<&str>,
     ) -> StoreResult<WorkspaceRow> {
-        let conn = self.conn();
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
         let id = new_id();
-        conn.execute(
+        let at = now_ms();
+        tx.execute(
             "INSERT INTO workspaces (id, project_id, kind, name, path, branch, base_branch, sort_order, created_at)
              VALUES (?1, ?2, 'worktree', ?3, ?4, ?5, ?6,
                      (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM workspaces WHERE project_id = ?2), ?7)",
-            params![id, project_id, name, path, branch, base_branch, now_ms()],
+            params![id, project_id, name, path, branch, base_branch, at],
         )?;
+        sync::queue_workspace(&tx, &id, at)?;
+        tx.commit()?;
         Ok(WorkspaceRow {
             id,
             project_id: project_id.to_owned(),
@@ -1813,26 +1825,46 @@ impl Store {
 
     /// Forget a worktree workspace. `local` rows cannot be removed this way.
     pub fn remove_worktree(&self, id: &str) -> StoreResult<bool> {
-        Ok(self.conn().execute(
-            "DELETE FROM workspaces WHERE id = ? AND kind = 'worktree'",
-            [id],
-        )? > 0)
+        self.change_workspace(
+            id,
+            "DELETE FROM workspaces WHERE id = ?1 AND kind = 'worktree'",
+            params![id],
+        )
+    }
+
+    /// Run one statement that changes a workspace, and queue what it means for sync, in one step.
+    fn change_workspace(
+        &self,
+        id: &str,
+        sql: &str,
+        params: impl rusqlite::Params,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let changed = tx.execute(sql, params)? > 0;
+        if changed {
+            sync::queue_workspace(&tx, id, now_ms())?;
+        }
+        tx.commit()?;
+        Ok(changed)
     }
 
     /// Give a workspace a new display name. Its folder and branch keep theirs.
     pub fn rename_workspace(&self, id: &str, name: &str) -> StoreResult<bool> {
-        Ok(self.conn().execute(
-            "UPDATE workspaces SET name = ? WHERE id = ? AND kind = 'worktree'",
-            [name, id],
-        )? > 0)
+        self.change_workspace(
+            id,
+            "UPDATE workspaces SET name = ?1 WHERE id = ?2 AND kind = 'worktree'",
+            params![name, id],
+        )
     }
 
     pub fn set_workspace_archived(&self, id: &str, archived: bool) -> StoreResult<bool> {
         let status = if archived { "archived" } else { "active" };
-        Ok(self.conn().execute(
-            "UPDATE workspaces SET status = ? WHERE id = ? AND kind = 'worktree'",
-            [status, id],
-        )? > 0)
+        self.change_workspace(
+            id,
+            "UPDATE workspaces SET status = ?1 WHERE id = ?2 AND kind = 'worktree'",
+            params![status, id],
+        )
     }
 
     /// Stop showing a worktree workspace. With `keep_history` the row stays, hidden, so its
@@ -1842,19 +1874,21 @@ impl Store {
         if !keep_history {
             return self.remove_worktree(id);
         }
-        Ok(self.conn().execute(
-            "UPDATE workspaces SET forgotten = 1 WHERE id = ? AND kind = 'worktree'",
-            [id],
-        )? > 0)
+        self.change_workspace(
+            id,
+            "UPDATE workspaces SET forgotten = 1 WHERE id = ?1 AND kind = 'worktree'",
+            params![id],
+        )
     }
 
     /// Show a forgotten workspace again, active and on whatever branch its worktree has now.
     pub fn revive_workspace(&self, id: &str, branch: Option<&str>) -> StoreResult<bool> {
-        Ok(self.conn().execute(
-            "UPDATE workspaces SET forgotten = 0, status = 'active', branch = ?
-             WHERE id = ? AND kind = 'worktree' AND forgotten = 1",
+        self.change_workspace(
+            id,
+            "UPDATE workspaces SET forgotten = 0, status = 'active', branch = ?1
+             WHERE id = ?2 AND kind = 'worktree' AND forgotten = 1",
             params![branch, id],
-        )? > 0)
+        )
     }
 
     // --- sessions -----------------------------------------------------------------------------
@@ -6681,8 +6715,9 @@ steps:
             // nullable columns to the notice outbox, 0040 an empty table of the pull
             // requests runs made, 0041 three columns with defaults to schedules and an empty
             // table of the workspaces schedules made, 0042 a column with a default to sessions,
-            // 0043 sync's three empty tables, and 0044 six nullable columns to memory entries.
-            assert_eq!(MIGRATIONS.len(), 44);
+            // 0043 sync's three empty tables, 0044 six nullable columns to memory entries, and
+            // 0045 an empty table of other hosts' workspaces.
+            assert_eq!(MIGRATIONS.len(), 45);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -6753,8 +6788,9 @@ steps:
             // nullable columns to the notice outbox, 0040 an empty table of the pull
             // requests runs made, 0041 three columns with defaults to schedules and an empty
             // table of the workspaces schedules made, 0042 a column with a default to sessions,
-            // 0043 sync's three empty tables, and 0044 six nullable columns to memory entries.
-            assert_eq!(MIGRATIONS.len(), 44);
+            // 0043 sync's three empty tables, 0044 six nullable columns to memory entries, and
+            // 0045 an empty table of other hosts' workspaces.
+            assert_eq!(MIGRATIONS.len(), 45);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs

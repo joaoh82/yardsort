@@ -7,7 +7,8 @@
 //! anywhere leaves nothing half done. Nothing taken in is queued again, so nothing echoes.
 //!
 //! **When it runs:** once Remote connects, after the person changes something, when the relay
-//! says a linked project changed, and every five minutes. A pass that fails waits, longer each
+//! says a linked project changed, within a few seconds of an op another process queued (`ys`
+//! making a workspace), and every five minutes. A pass that fails waits, longer each
 //! time, up to five minutes. It never blocks anything else: while the server is away, everything
 //! works here and the outbox waits. A host that syncs nothing makes no requests.
 //!
@@ -35,6 +36,9 @@ pub const EVERY: Duration = Duration::from_secs(5 * 60);
 /// The longest a failed pass waits before the next.
 pub const MAX_BACKOFF: Duration = Duration::from_secs(5 * 60);
 const FIRST_BACKOFF: Duration = Duration::from_secs(2);
+/// How often an idle loop looks at the outbox here, for an op another process queued. A read of
+/// the database, nothing on the network.
+const LOOK: Duration = Duration::from_secs(5);
 
 /// Where the loop stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,8 +118,10 @@ async fn run<H: Home>(home: Arc<H>, wake: Arc<Notify>, stop: Arc<Notify>, state:
             Loop::Waiting { .. }
         );
         set(&state, Loop::Syncing);
+        let passed;
         let wait = match pass(home.as_ref()).await {
             Ok(changed) => {
+                passed = true;
                 backoff = FIRST_BACKOFF;
                 set(&state, Loop::Idle);
                 // A pass that went through after one that failed clears the failure shown.
@@ -125,6 +131,7 @@ async fn run<H: Home>(home: Arc<H>, wake: Arc<Notify>, stop: Arc<Notify>, state:
                 EVERY
             }
             Err(failure) => {
+                passed = false;
                 let _ = home
                     .store()
                     .note_sync_pass(Some(&failure.message), now_ms());
@@ -141,10 +148,22 @@ async fn run<H: Home>(home: Arc<H>, wake: Arc<Notify>, stop: Arc<Notify>, state:
                 wait
             }
         };
-        tokio::select! {
-            () = tokio::time::sleep(wait) => {}
-            () = wake.notified() => {}
-            () = stop.notified() => return,
+        let until = tokio::time::Instant::now() + wait;
+        loop {
+            let left = until.saturating_duration_since(tokio::time::Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            tokio::select! {
+                () = tokio::time::sleep(left.min(LOOK)) => {}
+                () = wake.notified() => break,
+                () = stop.notified() => return,
+            }
+            // Queued by another process meanwhile, as `ys workspace new` does. Not while a failed
+            // pass waits: that waits its turn.
+            if passed && !home.store().sync_batch(1).unwrap_or_default().is_empty() {
+                break;
+            }
         }
     }
 }
