@@ -156,6 +156,43 @@ const FIXTURES: Record<string, (name: string) => void> = {
     expect(page.first?.askedBy).toBe("agent");
     expect(page.first?.whole).toBe(true);
   },
+  "request-pull-list.json": (name) => {
+    const list = pinned<Request>(request, name);
+    expect(list.op).toBe("pull.list");
+    expect(scopeOf(list.op)).toBe("workspace:read");
+  },
+  "request-pull-describe.json": (name) => {
+    const describe = pinned<Request>(request, name);
+    expect(describe.op).toBe("pull.describe");
+    expect(scopeOf(describe.op)).toBe("workspace:read");
+  },
+  "response-pulls.json": (name) => {
+    const page = result(name);
+    if (page.kind !== "pulls") throw new Error("not a page of pull requests");
+    expect(page.open).toBe(6);
+    expect(page.reading).toBe(false);
+    expect(page.pulls.map((pull) => [pull.number, pull.repo, pull.state])).toEqual([
+      [61, undefined, "open"],
+      [7, "orchard/lib", "open"],
+    ]);
+    expect(page.pulls[0]?.checks).toEqual({ passed: 4, failed: 2, running: 0 });
+    expect(page.pulls[0]?.review).toBe("changesRequested");
+    expect(page.pulls[1]?.followed).toBe("6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d");
+  },
+  "response-pull.json": (name) => {
+    const detail = result(name);
+    if (detail.kind !== "pull") throw new Error("not a pull request");
+    expect(detail.checks.map((check) => check.state)).toEqual([
+      "failed",
+      "failed",
+      "passed",
+      "passed",
+    ]);
+    expect(detail.moreChecks).toBe(2);
+    expect(detail.reviews).toEqual([{ login: "mira-k", state: "changesRequested" }]);
+    expect(detail.waitingOn).toEqual(["tomas-r"]);
+    expect(detail.pull.url).toBe("https://github.com/orchard/orchard/pull/61");
+  },
   "request-workflow-challenge.json": (name) => {
     expect(scopeOf(pinned<Request>(request, name).op)).toBe("workflow:decide");
   },

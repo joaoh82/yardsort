@@ -1,0 +1,44 @@
+{
+  "requestId": "r-41",
+  "result": {
+    "kind": "pulls",
+    "pulls": [
+      {
+        "project": "1f0e9d8c-7b6a-4c5d-8e3f-2a1b0c9d8e7f",
+        "number": 61,
+        "title": "Retry uploads with backoff instead of failing the run",
+        "url": "https://github.com/orchard/orchard/pull/61",
+        "branch": "ys/flaky-upload-test",
+        "base": "main",
+        "state": "open",
+        "draft": false,
+        "checks": { "passed": 4, "failed": 2, "running": 0 },
+        "review": "changesRequested",
+        "conflicts": true,
+        "additions": 184,
+        "deletions": 22,
+        "author": "juno-p",
+        "updatedAt": 1700000100000,
+        "workspaces": ["8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"]
+      },
+      {
+        "project": "1f0e9d8c-7b6a-4c5d-8e3f-2a1b0c9d8e7f",
+        "number": 7,
+        "followed": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+        "repo": "orchard/lib",
+        "title": "Accept knots in parse()",
+        "url": "https://github.com/orchard/lib/pull/7",
+        "branch": "knots",
+        "state": "open",
+        "draft": true,
+        "checks": { "passed": 2, "failed": 0, "running": 3 },
+        "review": "none",
+        "conflicts": false,
+        "workspaces": ["9d2e3f4a-5b6c-4d7e-8f9a-0b1c2d3e4f5a"]
+      }
+    ],
+    "next": "k1.1f0e9d8c-7b6a-4c5d-8e3f-2a1b0c9d8e7f.f.6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+    "open": 6,
+    "reading": false
+  }
+}

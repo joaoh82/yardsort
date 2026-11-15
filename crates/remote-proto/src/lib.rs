@@ -28,7 +28,8 @@
 //! upload a file for one, and since minor 6 resume an ended conversation: see [`start`]. Since
 //! minor 8 a client may read a conversation's turns and answer the permissions its agent asks
 //! for: see [`conversation`]. Since minor 10 it may see a smoke test run waiting for its person
-//! and let it go or refuse it: see [`smoke`]. A host lists what it answers in
+//! and let it go or refuse it: see [`smoke`]. Since minor 11 it may read the pull requests the
+//! host last read from its forge: see [`pull`]. A host lists what it answers in
 //! [`HostDescription::capabilities`].
 //!
 //! Sync between hosts ([`sync`]) is not part of this protocol: it is between a host and the
@@ -41,6 +42,7 @@ pub mod ids;
 pub mod model;
 pub mod notify;
 pub mod pairing;
+pub mod pull;
 pub mod relay;
 pub mod smoke;
 pub mod start;
@@ -83,7 +85,8 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// - 9: the relay's `syncChanged` notice to a host ([`relay::HostNotice::SyncChanged`]). Sync's
 ///   records are versioned apart from this ([`sync::SYNC_SCHEMA`]).
 /// - 10: `test.waiting` and `test.decide` ([`smoke`]).
-pub const PROTOCOL_MINOR: u16 = 10;
+/// - 11: `pull.list` and `pull.describe` ([`pull`]).
+pub const PROTOCOL_MINOR: u16 = 11;
 /// `workflow:read` and `workflow:decide` arrived in this minor. A host is shown
 /// those scope names when it stated this minor or a newer minor of this major.
 pub const WORKFLOW_SCOPES_MINOR: u16 = 7;
@@ -469,6 +472,12 @@ pub enum Operation {
     /// Since minor 10.
     #[serde(rename = "test.decide")]
     TestDecide(smoke::TestDecideParams),
+    /// Since minor 11.
+    #[serde(rename = "pull.list")]
+    PullList(pull::PullListParams),
+    /// Since minor 11.
+    #[serde(rename = "pull.describe")]
+    PullDescribe(pull::PullRef),
 }
 
 /// Every operation's wire name, in [`Operation`]'s order.
@@ -502,6 +511,8 @@ pub const OPERATIONS: &[&str] = &[
     "approval.answer",
     "test.waiting",
     "test.decide",
+    "pull.list",
+    "pull.describe",
 ];
 
 impl Operation {
@@ -536,6 +547,8 @@ impl Operation {
             Self::ApprovalAnswer(_) => 26,
             Self::TestWaiting(_) => 27,
             Self::TestDecide(_) => 28,
+            Self::PullList(_) => 29,
+            Self::PullDescribe(_) => 30,
         };
         OPERATIONS[index]
     }
@@ -548,7 +561,9 @@ impl Operation {
             Self::WorkspaceList(_)
             | Self::WorkspaceDescribe(_)
             | Self::SessionList(_)
-            | Self::HarnessList => Scope::WorkspaceRead,
+            | Self::HarnessList
+            | Self::PullList(_)
+            | Self::PullDescribe(_) => Scope::WorkspaceRead,
             Self::ActivityList(_) | Self::ActivitySubscribe(_) | Self::ActivityUnsubscribe(_) => {
                 Scope::ActivityRead
             }
@@ -630,6 +645,13 @@ impl Operation {
                 Some(message) => invalid(message),
                 None => Ok(()),
             },
+            Self::PullList(params) if params.limit == Some(0) => {
+                invalid("A page holds at least one item.")
+            }
+            Self::PullDescribe(params) => match params.invalid() {
+                Some(message) => invalid(message),
+                None => Ok(()),
+            },
             _ => Ok(()),
         }
     }
@@ -682,6 +704,10 @@ pub enum Reply {
     Conversation(conversation::ConversationPage),
     /// Since minor 10.
     TestsWaiting(smoke::TestWaitingPage),
+    /// Since minor 11.
+    Pulls(pull::PullPage),
+    /// Since minor 11. Boxed: with every check by name it is far larger than most replies.
+    Pull(Box<pull::PullDetail>),
     Done,
 }
 

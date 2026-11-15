@@ -4,7 +4,8 @@
 /**
  * One computer: its workspaces, by project. What was last seen shows, marked as such, until the
  * computer answers, or for as long as it cannot. A project's heading folds its workspaces away,
- * and this phone remembers which are folded (`lib/folds.ts`).
+ * and this phone remembers which are folded (`lib/folds.ts`). A workspace's row carries its pull
+ * request's badge, when the computer reads pull requests and can be reached (`lib/pulls.ts`).
  */
 
 import type {
@@ -16,7 +17,7 @@ import type {
   WorkspaceSummary,
 } from "@yardsort/remote-client";
 import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "react-native";
 
 import { messageOf } from "../lib/accounts";
@@ -24,9 +25,11 @@ import { useApp } from "../lib/context";
 import { folds } from "../lib/folds";
 import { moment } from "../lib/format";
 import type { ObservedComputer, ObservedWorkspaces } from "../lib/observed";
+import { byWorkspace, routeOf, toneWords } from "../lib/pulls";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
 import { canStart } from "./start";
 import { Body, Button, Fold, Group, Problem, Row, Screen, Waiting } from "../ui/parts";
+import { PullBadge, usePulls } from "../ui/pull";
 
 /** A workspace as this screen shows it, from the computer or from what was last seen. */
 interface Shown {
@@ -105,6 +108,9 @@ function Computer({ host }: { host: HostId }) {
     [accounts, host],
   );
   const first = useRead(channel, read, asked);
+  // Nothing of these is kept: a badge shows once the computer has said, and not before.
+  const pulls = usePulls(channel, "workspaces", asked).read;
+  const pullsOf = useMemo(() => byWorkspace(pulls?.pulls ?? []), [pulls]);
 
   const showMore = async (cursor: NonNullable<WorkspacePage["next"]>) => {
     if (!channel) return;
@@ -175,6 +181,12 @@ function Computer({ host }: { host: HostId }) {
         title="Workflows"
         onPress={() => router.push({ pathname: "/workflows", params: { host } })}
       />
+      {pulls && (pulls.open > 0 || pulls.pulls.length > 0) && (
+        <Button
+          title={pulls.open > 0 ? `Pull requests · ${pulls.open} open` : "Pull requests"}
+          onPress={() => router.push({ pathname: "/pulls", params: { host } })}
+        />
+      )}
       {projects.map((project) => {
         const here = shown?.filter((workspace) => workspace.project === project.id) ?? [];
         if (here.length === 0) return null;
@@ -193,6 +205,7 @@ function Computer({ host }: { host: HostId }) {
             <Group>
               {here.map((workspace) => {
                 const badge = workspace.running > 0 ? `${workspace.running} running` : "";
+                const [pull, ...others] = pullsOf.get(workspace.id) ?? [];
                 return (
                   <Row
                     key={workspace.id}
@@ -200,7 +213,28 @@ function Computer({ host }: { host: HostId }) {
                     {...(workspace.detail ? { detail: workspace.detail } : {})}
                     monoDetail
                     {...(badge ? { badge } : {})}
-                    label={[workspace.name, [workspace.detail, badge].filter(Boolean).join(" · ")]
+                    {...(pull
+                      ? {
+                          trailing: (
+                            <PullBadge
+                              pull={pull}
+                              more={others.length}
+                              onPress={() =>
+                                router.push({
+                                  pathname: "/pull",
+                                  params: { host, ...routeOf(pull) },
+                                })
+                              }
+                            />
+                          ),
+                        }
+                      : {})}
+                    label={[
+                      workspace.name,
+                      [workspace.detail, badge, pull ? toneWords(pull) : ""]
+                        .filter(Boolean)
+                        .join(" · "),
+                    ]
                       .filter(Boolean)
                       .join(", ")}
                     onPress={() =>

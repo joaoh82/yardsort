@@ -560,6 +560,7 @@ mod serving {
                 workflow: None,
                 conversations: None,
                 tests: None,
+                pulls: None,
             });
         }
 

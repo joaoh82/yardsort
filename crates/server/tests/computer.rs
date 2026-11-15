@@ -88,6 +88,7 @@ impl Serving for Here {
             workflow: None,
             conversations: None,
             tests: None,
+            pulls: None,
         });
     }
 }

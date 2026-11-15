@@ -182,6 +182,7 @@ impl Started {
             workflow: None,
             conversations: None,
             tests: None,
+            pulls: None,
         }
     }
 

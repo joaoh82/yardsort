@@ -1,0 +1,33 @@
+{
+  "requestId": "r-42",
+  "result": {
+    "kind": "pull",
+    "pull": {
+      "project": "1f0e9d8c-7b6a-4c5d-8e3f-2a1b0c9d8e7f",
+      "number": 61,
+      "title": "Retry uploads with backoff instead of failing the run",
+      "url": "https://github.com/orchard/orchard/pull/61",
+      "branch": "ys/flaky-upload-test",
+      "base": "main",
+      "state": "open",
+      "draft": false,
+      "checks": { "passed": 4, "failed": 2, "running": 0 },
+      "review": "changesRequested",
+      "conflicts": true,
+      "additions": 184,
+      "deletions": 22,
+      "author": "juno-p",
+      "updatedAt": 1700000100000,
+      "workspaces": ["8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"]
+    },
+    "checks": [
+      { "name": "CI / test (ubuntu)", "state": "failed" },
+      { "name": "CI / test (windows)", "state": "failed" },
+      { "name": "CI / build", "state": "passed" },
+      { "name": "docs / links", "state": "passed" }
+    ],
+    "moreChecks": 2,
+    "reviews": [{ "login": "mira-k", "state": "changesRequested" }],
+    "waitingOn": ["tomas-r"]
+  }
+}

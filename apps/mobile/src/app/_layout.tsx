@@ -133,6 +133,8 @@ export default function Layout() {
               <Stack.Screen name="workflow" options={{ title: "Workflow" }} />
               <Stack.Screen name="decision" options={{ title: "Decision" }} />
               <Stack.Screen name="workspace" options={{ title: "Workspace" }} />
+              <Stack.Screen name="pulls" options={{ title: "Pull requests" }} />
+              <Stack.Screen name="pull" options={{ title: "Pull request" }} />
               <Stack.Screen name="memory" options={{ title: "Approved memory" }} />
               <Stack.Screen name="terminal" options={{ title: "Terminal" }} />
               {/* One at a time: a link arriving while it is open comes to this one. */}
