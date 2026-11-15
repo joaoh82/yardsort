@@ -196,21 +196,31 @@ pub async fn pass(home: &impl Home) -> Result<bool> {
 
     changed |= push(home, &client, &access).await?;
 
-    for project in store.fresh_synced_projects().map_err(store_failed)? {
-        match snapshot(&client, &access, Some(&project)).await {
+    let fresh = store.fresh_synced_projects().map_err(store_failed)?;
+    for project in &fresh {
+        match snapshot(&client, &access, Some(project)).await {
             Ok((records, head)) => {
                 changed |= store
-                    .take_sync_snapshot(Some(std::slice::from_ref(&project)), &records, head)
+                    .take_sync_snapshot(
+                        Some(std::slice::from_ref(project)),
+                        &records,
+                        head,
+                        now_ms(),
+                    )
                     .map_err(store_failed)?;
             }
             // Unlinked or removed meanwhile.
             Err(error) if error.code() == Some(ErrorCode::NotFound) => {
                 changed |= store
-                    .take_sync_snapshot(Some(std::slice::from_ref(&project)), &[], 0)
+                    .take_sync_snapshot(Some(std::slice::from_ref(project)), &[], 0, now_ms())
                     .map_err(store_failed)?;
             }
             Err(error) => return Err(refused_here(error)),
         }
+    }
+    // A project just linked has this host's own notes for it to send.
+    if !fresh.is_empty() {
+        changed |= push(home, &client, &access).await?;
     }
 
     let mut after = store.sync_state().map_err(store_failed)?.cursor;
@@ -231,7 +241,7 @@ pub async fn pass(home: &impl Home) -> Result<bool> {
                     .await
                     .map_err(refused_here)?;
                 changed |= store
-                    .take_sync_snapshot(None, &records, head)
+                    .take_sync_snapshot(None, &records, head, now_ms())
                     .map_err(store_failed)?;
                 break;
             }
@@ -242,11 +252,15 @@ pub async fn pass(home: &impl Home) -> Result<bool> {
     Ok(changed)
 }
 
+/// The most pushes in one pass. An answer can queue another op, as a conflict does; a server
+/// that kept answering so would otherwise hold the pass for ever.
+const MAX_PUSHES: usize = 20;
+
 /// Push the outbox, a batch at a time, each under the server's limits.
 async fn push(home: &impl Home, client: &Client, access: &Secret) -> Result<bool> {
     let store = home.store();
     let mut changed = false;
-    loop {
+    for _ in 0..MAX_PUSHES {
         let waiting = store.sync_outbox(MAX_PUSH_OPS).map_err(store_failed)?;
         let mut ops = Vec::new();
         let mut size = 64;
@@ -268,12 +282,16 @@ async fn push(home: &impl Home, client: &Client, access: &Secret) -> Result<bool
             .await
             .map_err(refused_here)?;
         let settled = reply.results.len();
-        changed |= store.settle_sync(&reply.results).map_err(store_failed)?;
-        // A short answer, or a batch that was all there was: the rest waits for the next pass.
+        changed |= store
+            .settle_sync(&reply.results, now_ms())
+            .map_err(store_failed)?;
+        // A short answer, or a batch that was all there was and queued nothing more: the rest
+        // waits for the next pass.
         if settled < sent || !full && store.sync_outbox(1).map_err(store_failed)?.is_empty() {
             return Ok(changed);
         }
     }
+    Ok(changed)
 }
 
 /// Every page of a snapshot, and the head the first was read at.

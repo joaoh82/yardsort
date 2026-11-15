@@ -212,6 +212,13 @@ async fn one(home: &Arc<HostHome>, ask: Ask) -> account::Result<Reply> {
         Ask::SyncLink { project, synced } => crate::sync::link(home, &project, &synced).await?,
         Ask::SyncStop { project } => crate::sync::stop(home, &project).await?,
         Ask::SyncRemove { project } => crate::sync::remove(home, &project)?,
+        Ask::MemoryList { project } => crate::memory::list(home, &project)?,
+        Ask::MemoryWrite { project, text } => crate::memory::write(home, &project, &text)?,
+        Ask::MemoryDecide { entry, decision } => crate::memory::decide(home, &entry, &decision)?,
+        Ask::MemoryEdit { entry, text } => crate::memory::edit(home, &entry, &text)?,
+        Ask::MemorySettle { entry, keep, text } => {
+            crate::memory::settle(home, &entry, &keep, text)?
+        }
         Ask::Pair | Ask::Answer { .. } => Reply::Failed {
             message: "Not here.".into(),
         },

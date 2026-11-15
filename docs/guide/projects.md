@@ -157,7 +157,8 @@ Hover a project and press **⋯**, or right-click it:
   [Syncing projects](remote.md#syncing-projects).
 - **Memory…** — lessons about the project for its agents: what you write, what agents propose
   for you to approve, and whether they are given it. A count on the project's row says when
-  proposals wait. See [Memory](memory.md).
+  proposals wait. In a synced project, the notes your other computers approved are here too. See
+  [Memory](memory.md).
 - **Outcomes…** — every attempt in the project with what became of it, and each agent's
   history. See [Outcomes](outcomes.md).
 - **New workspace** — same as the **+** on the row. See [Workspaces](workspaces.md).

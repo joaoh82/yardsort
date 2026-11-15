@@ -53,6 +53,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0041_schedule_new_workspace.sql"),
     include_str!("../migrations/0042_session_label.sql"),
     include_str!("../migrations/0043_sync.sql"),
+    include_str!("../migrations/0044_sync_notes.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -277,6 +278,23 @@ pub struct MemoryRow {
     pub run_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// The host it was written or approved on, by name, when that is another host of the
+    /// account; `None` for this installation's own.
+    pub from_host: Option<String>,
+    /// Another host's text for it, waiting for the person to settle.
+    pub conflict: Option<MemoryConflict>,
+}
+
+/// Two hosts changed a synced note at once. The note's own text stands, and is what agents get,
+/// until the person keeps one of the two or writes a third. See `migrations/0044_sync_notes.sql`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryConflict {
+    /// The same on every host.
+    pub id: String,
+    pub text: String,
+    /// The host the other text is from, by name.
+    pub from: String,
+    pub at: i64,
 }
 
 /// One change to a memory entry. See `migrations/0010_project_memory.sql`.
@@ -2228,6 +2246,7 @@ impl Store {
              VALUES (?, ?, ?, ?, NULL)",
             params![id, at, action, new.author],
         )?;
+        sync::queue_note(&tx, &id, None, at)?;
         tx.commit()?;
         Ok(id)
     }
@@ -2309,7 +2328,8 @@ impl Store {
     }
 
     /// Change an entry's state and, optionally, its text, and write the history line for it.
-    /// An edit keeps the text it replaced.
+    /// An edit keeps the text it replaced. A new text, or revoking, settles any conflict the
+    /// entry has; the person saw both texts to do either.
     pub fn change_memory(
         &self,
         id: &str,
@@ -2320,25 +2340,37 @@ impl Store {
         let at = now_ms();
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let previous: Option<String> = tx
-            .query_row("SELECT text FROM memory_entries WHERE id = ?", [id], |r| {
-                r.get(0)
-            })
+        let previous: Option<(String, Option<String>)> = tx
+            .query_row(
+                "SELECT text, conflict_id FROM memory_entries WHERE id = ?",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .optional()?;
-        let Some(previous) = previous else {
+        let Some((previous, conflict)) = previous else {
             return Ok(false);
         };
+        let settles = conflict.filter(|_| text.is_some() || state == "revoked");
         tx.execute(
             "UPDATE memory_entries SET state = ?, text = COALESCE(?, text), updated_at = ?
              WHERE id = ?",
             params![state, text, at, id],
         )?;
+        if settles.is_some() {
+            tx.execute(
+                "UPDATE memory_entries SET conflict_id = NULL, conflict_text = NULL,
+                     conflict_from = NULL, conflict_at = NULL
+                 WHERE id = ?",
+                [id],
+            )?;
+        }
         let replaced = text.filter(|t| *t != previous).map(|_| previous);
         tx.execute(
             "INSERT INTO memory_history (entry_id, at, action, by, previous_text)
              VALUES (?, ?, ?, 'user', ?)",
             params![id, at, action, replaced],
         )?;
+        sync::queue_note(&tx, id, settles, at)?;
         tx.commit()?;
         Ok(true)
     }
@@ -5765,7 +5797,8 @@ fn outcome_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OutcomeRow> {
 }
 
 const MEMORY_COLUMNS: &str = "id, project_id, text, state, author, harness_id, workspace_id, \
-     workspace_name, run_id, created_at, updated_at";
+     workspace_name, run_id, created_at, updated_at, from_host, conflict_id, conflict_text, \
+     conflict_from, conflict_at";
 
 fn memory_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRow> {
     Ok(MemoryRow {
@@ -5780,6 +5813,16 @@ fn memory_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRow> {
         run_id: row.get(8)?,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
+        from_host: row.get(11)?,
+        conflict: match (row.get(12)?, row.get(13)?) {
+            (Some(id), Some(text)) => Some(MemoryConflict {
+                id,
+                text,
+                from: row.get::<_, Option<String>>(14)?.unwrap_or_default(),
+                at: row.get::<_, Option<i64>>(15)?.unwrap_or_default(),
+            }),
+            _ => None,
+        },
     })
 }
 
@@ -6638,8 +6681,8 @@ steps:
             // nullable columns to the notice outbox, 0040 an empty table of the pull
             // requests runs made, 0041 three columns with defaults to schedules and an empty
             // table of the workspaces schedules made, 0042 a column with a default to sessions,
-            // and 0043 sync's three empty tables.
-            assert_eq!(MIGRATIONS.len(), 43);
+            // 0043 sync's three empty tables, and 0044 six nullable columns to memory entries.
+            assert_eq!(MIGRATIONS.len(), 44);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -6710,8 +6753,8 @@ steps:
             // nullable columns to the notice outbox, 0040 an empty table of the pull
             // requests runs made, 0041 three columns with defaults to schedules and an empty
             // table of the workspaces schedules made, 0042 a column with a default to sessions,
-            // and 0043 sync's three empty tables.
-            assert_eq!(MIGRATIONS.len(), 43);
+            // 0043 sync's three empty tables, and 0044 six nullable columns to memory entries.
+            assert_eq!(MIGRATIONS.len(), 44);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs

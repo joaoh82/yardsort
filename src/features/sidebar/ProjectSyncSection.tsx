@@ -79,7 +79,8 @@ export function ProjectSyncSection({
         <>
           <p className="text-ink-muted">
             Syncs this project with your other computers signed in to the same account: its approved
-            notes and workspaces, as later updates bring them. Never its files, path or terminals.
+            notes now, and its workspaces as a later update brings them. Never its files, path or
+            terminals.
           </p>
           <div className="rounded border border-line bg-canvas px-3 py-2">
             <p className="text-ink-faint">Turning it on sends:</p>
@@ -92,6 +93,11 @@ export function ProjectSyncSection({
               <dt className="text-ink-muted">Remote</dt>
               <dd className="min-w-0 truncate font-mono select-text">
                 {sync.preview.remote ?? "none"}
+              </dd>
+              <dt className="text-ink-muted">Notes</dt>
+              <dd className="min-w-0">
+                {sync.preview.notes === 1 ? "1 approved" : `${sync.preview.notes} approved`}, each
+                with its text and history
               </dd>
             </dl>
           </div>

@@ -17,6 +17,8 @@ mod home;
 #[cfg(unix)]
 mod install_agent;
 #[cfg(unix)]
+mod memory;
+#[cfg(unix)]
 mod pair;
 #[cfg(unix)]
 mod profile;
@@ -101,6 +103,9 @@ mod cli {
         /// Sync projects with your other computers: what syncs, and turning it on or off.
         #[command(subcommand)]
         Sync(Sync),
+        /// A project's memory: its notes for agents, and your decisions about them.
+        #[command(subcommand)]
+        Memory(Memory),
         /// Install an agent, or bring it up to date, into ~/.local, as you.
         ///
         /// Claude Code, Cursor's CLI and Grok come from each vendor's own installer, under the
@@ -144,6 +149,40 @@ mod cli {
         },
     }
 
+    /// Every one but `list` only from a terminal on this computer that no agent runs in, so an
+    /// agent never approves its own proposal. Notes are named by the id `list` shows.
+    #[derive(Subcommand)]
+    enum Memory {
+        /// A project's notes: waiting, approved, set aside, and any two computers changed at once.
+        List { project: String },
+        /// Write a note, approved as you write it.
+        Write { project: String, text: String },
+        /// Approve a proposal an agent made, or a note you rejected.
+        Approve { note: String },
+        /// Set a proposal aside. It is kept, so the same proposal is known when it comes back.
+        Reject { note: String },
+        /// Stop giving a note to agents, here and on every computer it syncs with.
+        Revoke { note: String },
+        /// Give a revoked note to agents again.
+        Restore { note: String },
+        /// Rewrite a note.
+        Edit { note: String, text: String },
+        /// Settle a note two computers changed at once: keep the text that stands, the other
+        /// computer's, or write a third.
+        Settle {
+            note: String,
+            /// Keep the text that stands, the one agents get now.
+            #[arg(long, conflicts_with_all = ["other", "text"])]
+            standing: bool,
+            /// Keep the other computer's text.
+            #[arg(long, conflicts_with = "text")]
+            other: bool,
+            /// Write a third.
+            #[arg(long)]
+            text: Option<String>,
+        },
+    }
+
     pub fn main() -> i32 {
         let cli = Cli::parse();
         // Needs no profile, and no runtime: it runs the vendor's installer and waits.
@@ -173,6 +212,7 @@ mod cli {
                 Command::Status => status(&profile).await,
                 Command::SignOut => crate::sign_in::sign_out(profile).await,
                 Command::Sync(command) => sync(&profile, command).await,
+                Command::Memory(command) => memory(&profile, command).await,
                 Command::InstallAgent { .. } => unreachable!("handled before the profile"),
             }
         });
@@ -285,6 +325,10 @@ mod cli {
                         .unwrap_or("none (no remote, or one on this disk)")
                 );
                 println!(
+                    "  Notes:  {} approved, each with its text and history",
+                    preview.notes
+                );
+                println!(
                     "The server keeps synced records in plain text, readable by whoever runs it. \
                      Never the project's path or files."
                 );
@@ -308,6 +352,82 @@ mod cli {
                 done(profile, Ask::SyncRemove { project }).await
             }
         }
+    }
+
+    async fn memory(profile: &Profile, command: Memory) -> Result<(), String> {
+        let decide = |entry: String, decision: &str| Ask::MemoryDecide {
+            entry,
+            decision: decision.into(),
+        };
+        let ask = match command {
+            Memory::List { project } => return memory_list(profile, project).await,
+            Memory::Write { project, text } => Ask::MemoryWrite { project, text },
+            Memory::Approve { note } => decide(note, "approve"),
+            Memory::Reject { note } => decide(note, "reject"),
+            Memory::Revoke { note } => decide(note, "revoke"),
+            Memory::Restore { note } => decide(note, "restore"),
+            Memory::Edit { note, text } => Ask::MemoryEdit { entry: note, text },
+            Memory::Settle {
+                note,
+                standing,
+                other,
+                text,
+            } => Ask::MemorySettle {
+                entry: note,
+                keep: match (standing, other, &text) {
+                    (true, _, _) => "standing",
+                    (_, true, _) => "other",
+                    (_, _, Some(_)) => "text",
+                    _ => return Err("Say which: --standing, --other or --text \"…\".".into()),
+                }
+                .into(),
+                text,
+            },
+        };
+        done(profile, ask).await
+    }
+
+    async fn memory_list(profile: &Profile, project: String) -> Result<(), String> {
+        let Reply::Memory { notes } =
+            control::ask_once(profile, Ask::MemoryList { project }).await?
+        else {
+            return Err("The host answered something else.".into());
+        };
+        if notes.is_empty() {
+            println!("No notes yet. Write one with `yardsort-host memory write <project> <text>`.");
+            return Ok(());
+        }
+        let torn: Vec<_> = notes.iter().filter(|n| n.conflict.is_some()).collect();
+        if !torn.is_empty() {
+            println!("Changed on two computers at once (`yardsort-host memory settle`):");
+            for note in torn {
+                let (text, from) = note.conflict.as_ref().expect("filtered");
+                println!("  {}  stands now: {}", note.id, note.text);
+                println!("            from {from}: {text}");
+            }
+        }
+        for (state, heading) in [
+            (
+                "candidate",
+                "Waiting for you (`yardsort-host memory approve <id>`):",
+            ),
+            ("approved", "Approved:"),
+            ("rejected", "Rejected:"),
+            ("revoked", "Revoked:"),
+        ] {
+            let these: Vec<_> = notes
+                .iter()
+                .filter(|n| n.state == state && n.conflict.is_none())
+                .collect();
+            if these.is_empty() {
+                continue;
+            }
+            println!("{heading}");
+            for note in these {
+                println!("  {}  {}  (from {})", note.id, note.text, note.from);
+            }
+        }
+        Ok(())
     }
 
     async fn sync_status(profile: &Profile) -> Result<(), String> {

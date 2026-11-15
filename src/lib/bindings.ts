@@ -458,6 +458,8 @@ export const commands = {
 	memoryWrite: (projectId: string, text: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_write", { projectId, text })),
 	memoryEdit: (id: string, text: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_edit", { id, text })),
 	memoryDecide: (id: string, decision: MemoryDecision) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_decide", { id, decision })),
+	/**  Settle a note two hosts changed at once: keep one of the texts, or write a third. */
+	memorySettle: (id: string, how: MemorySettle) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_settle", { id, how })),
 	/**  Turn sharing a project's approved entries with its agents on or off. */
 	memoryShare: (projectId: string, shared: boolean) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_share", { projectId, shared })),
 	/**  Turn letting a project's agents read each other's conversations on or off. */
@@ -2057,11 +2059,26 @@ export type MemoryEntry = {
 	state: string,
 	/**  `user` or `agent`. */
 	author: string,
-	/**  Where it came from, in words: "the user", or "claude in fix-login". */
+	/**
+	 *  Where it came from, in words: "the user", or "claude in fix-login", and the host for one
+	 *  synced from another: "the user, on Build box".
+	 */
 	from: string,
+	/**  The other host it was written or approved on, for a synced note. */
+	host: string | null,
+	/**  Two hosts changed it at once: the other text, until the person settles it. */
+	conflict: MemoryEntryConflict | null,
 	createdAt: number | null,
 	updatedAt: number | null,
 	history: MemoryHistoryItem[],
+};
+
+/**  Another host's text for a note, beside the one that stands. */
+export type MemoryEntryConflict = {
+	text: string,
+	/**  The host it is from, by name. */
+	from: string,
+	at: number | null,
 };
 
 /**  One change to an entry. */
@@ -2074,6 +2091,15 @@ export type MemoryHistoryItem = {
 	/**  The text an edit replaced. */
 	previousText: string | null,
 };
+
+/**  How the person settles a conflict. */
+export type MemorySettle = 
+/**  The text that stands. */
+{ keep: "standing" } | 
+/**  The other host's. */
+{ keep: "other" } | 
+/**  A third, written now. */
+{ keep: "text"; text: string };
 
 /**  How many proposals wait in a project. */
 export type MemoryWaiting = {
@@ -3540,6 +3566,8 @@ export type SyncOffer = {
 export type SyncPreview = {
 	name: string,
 	remote: string | null,
+	/**  How many approved notes go up with it, each with its text and history. */
+	notes: number,
 };
 
 export type SystemLoad = {

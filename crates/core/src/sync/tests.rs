@@ -123,14 +123,14 @@ fn turning_sync_on_queues_the_project_and_its_answer_settles_it() {
     );
 
     // Reaching the server is a change the person sees.
-    assert!(store.settle_sync(&[applied(create, 1)]).unwrap());
+    assert!(store.settle_sync(&[applied(create, 1)], 1).unwrap());
     assert!(store.sync_outbox(100).unwrap().is_empty());
     assert_eq!(
         store.synced_project(&project.id).unwrap().unwrap().revision,
         Some(1)
     );
     // The same answer again, as after a retried push, changes nothing.
-    assert!(!store.settle_sync(&[applied(create, 1)]).unwrap());
+    assert!(!store.settle_sync(&[applied(create, 1)], 1).unwrap());
     assert_eq!(store.sync_waiting().unwrap(), 0);
 }
 
@@ -141,10 +141,13 @@ fn a_create_answered_with_a_conflict_is_there_already() {
     store.turn_on_sync(&project.id, body("widgets"), 1).unwrap();
     let create = store.sync_outbox(100).unwrap().remove(0);
     store
-        .settle_sync(&[OpResult::Conflict {
-            op: create.op.clone(),
-            current: record(&create, 1, false),
-        }])
+        .settle_sync(
+            &[OpResult::Conflict {
+                op: create.op.clone(),
+                current: record(&create, 1, false),
+            }],
+            1,
+        )
         .unwrap();
     assert!(store.sync_outbox(100).unwrap().is_empty());
     assert_eq!(
@@ -160,10 +163,13 @@ fn a_refused_op_is_held_and_shown_never_retried() {
     store.turn_on_sync(&project.id, body("widgets"), 1).unwrap();
     let create = store.sync_outbox(100).unwrap().remove(0);
     let changed = store
-        .settle_sync(&[OpResult::Refused {
-            op: create.op.clone(),
-            error: RemoteError::new(ErrorCode::InvalidRequest, "That record is too large."),
-        }])
+        .settle_sync(
+            &[OpResult::Refused {
+                op: create.op.clone(),
+                error: RemoteError::new(ErrorCode::InvalidRequest, "That record is too large."),
+            }],
+            1,
+        )
         .unwrap();
     assert!(changed);
     assert!(store.sync_outbox(100).unwrap().is_empty(), "not retried");
@@ -189,7 +195,7 @@ fn removing_from_the_server_stands_over_a_newer_revision_and_ends_syncing_here()
     store.turn_on_sync(&project.id, body("widgets"), 1).unwrap();
     assert!(store.queue_sync_removal(&project.id, 2).is_err());
     let create = store.sync_outbox(100).unwrap().remove(0);
-    store.settle_sync(&[applied(&create, 1)]).unwrap();
+    store.settle_sync(&[applied(&create, 1)], 1).unwrap();
 
     store.queue_sync_removal(&project.id, 2).unwrap();
     store.queue_sync_removal(&project.id, 3).unwrap();
@@ -206,10 +212,13 @@ fn removing_from_the_server_stands_over_a_newer_revision_and_ends_syncing_here()
     let mut newer = record(&create, 2, false);
     newer.body = Some(body("widgets renamed"));
     store
-        .settle_sync(&[OpResult::Conflict {
-            op: removal.op.clone(),
-            current: newer,
-        }])
+        .settle_sync(
+            &[OpResult::Conflict {
+                op: removal.op.clone(),
+                current: newer,
+            }],
+            1,
+        )
         .unwrap();
     let again = store.sync_outbox(100).unwrap().remove(0);
     assert_eq!(
@@ -217,7 +226,7 @@ fn removing_from_the_server_stands_over_a_newer_revision_and_ends_syncing_here()
         (removal.op.clone(), Some(2))
     );
 
-    assert!(store.settle_sync(&[applied(&again, 3)]).unwrap());
+    assert!(store.settle_sync(&[applied(&again, 3)], 1).unwrap());
     assert!(store.synced_project(&project.id).unwrap().is_none());
     assert_eq!(store.sync_waiting().unwrap(), 0);
     assert_eq!(store.projects().unwrap().len(), 1, "the project stays here");
@@ -229,7 +238,7 @@ fn a_project_removed_elsewhere_stops_syncing_here() {
     let project = store.add_project("widgets", "/w").unwrap();
     store.turn_on_sync(&project.id, body("widgets"), 1).unwrap();
     let create = store.sync_outbox(100).unwrap().remove(0);
-    store.settle_sync(&[applied(&create, 1)]).unwrap();
+    store.settle_sync(&[applied(&create, 1)], 1).unwrap();
 
     // A newer revision is only noted.
     assert!(!store
@@ -301,6 +310,7 @@ fn linking_is_once_each_way_and_a_snapshot_reads_it() {
             Some(std::slice::from_ref(&synced.id)),
             std::slice::from_ref(&synced),
             9,
+            1,
         )
         .unwrap();
     assert!(store.fresh_synced_projects().unwrap().is_empty());
@@ -311,7 +321,7 @@ fn linking_is_once_each_way_and_a_snapshot_reads_it() {
     );
 
     // A full snapshot without it: it is gone from the server.
-    assert!(store.take_sync_snapshot(None, &[], 12).unwrap());
+    assert!(store.take_sync_snapshot(None, &[], 12, 1).unwrap());
     assert!(store.synced_project(&here.id).unwrap().is_none());
     assert_eq!(store.sync_state().unwrap().cursor, 12);
 }
@@ -321,7 +331,7 @@ fn a_snapshot_keeps_a_project_still_on_its_way_up() {
     let store = Store::in_memory();
     let project = store.add_project("widgets", "/w").unwrap();
     store.turn_on_sync(&project.id, body("widgets"), 1).unwrap();
-    store.take_sync_snapshot(None, &[], 4).unwrap();
+    store.take_sync_snapshot(None, &[], 4, 1).unwrap();
     assert!(store.synced_project(&project.id).unwrap().is_some());
     assert_eq!(store.sync_waiting().unwrap(), 1);
 }

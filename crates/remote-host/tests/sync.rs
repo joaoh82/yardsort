@@ -2,7 +2,8 @@
 //! store: a stop waits for a create on its way, so nothing is left linked at the server that
 //! this host forgot; a link the server has and this host does not is offered, and is never
 //! undone by a link that failed here; a project reaching the server, and a pass going through
-//! after one failed, both tell the window.
+//! after one failed, both tell the window; and a link sends this host's own notes in the same
+//! pass.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -47,6 +48,8 @@ struct Account {
     pushed: Arc<Notify>,
     /// Pulls to fail before one goes through.
     failing_pulls: usize,
+    /// The notes pushed, by their text.
+    notes: Vec<String>,
 }
 
 type Server = Arc<Mutex<Account>>;
@@ -141,9 +144,16 @@ async fn push(State(server): State<Server>, Json(request): Json<PushRequest>) ->
         .iter()
         .map(|op| {
             assert_eq!(op.action, Action::Put, "only creates in these tests");
-            // A create links the host that made it.
-            account.records.push(record(&op.id, 1, "widgets", HOST));
-            account.linked.push(op.id.clone());
+            if op.kind == RecordKind::Note {
+                let body = op.body.as_ref().unwrap();
+                account
+                    .notes
+                    .push(body["text"].as_str().unwrap().to_owned());
+            } else {
+                // A create links the host that made it.
+                account.records.push(record(&op.id, 1, "widgets", HOST));
+                account.linked.push(op.id.clone());
+            }
             OpResult::Applied {
                 op: op.op.clone(),
                 revision: 1,
@@ -412,4 +422,24 @@ async fn reaching_the_server_and_recovering_from_a_failed_pass_both_tell_the_win
     assert_eq!(home.store.sync_state().unwrap().problem, None);
     assert_eq!(syncer.state(), sync::Loop::Idle);
     syncer.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_sends_this_hosts_own_notes_in_the_same_pass() {
+    let (home, server) = here().await;
+    let id = synced_elsewhere(&server);
+    let project = home.store.add_project("widgets", "/src/widgets").unwrap();
+    yardsort_core::memory::write(&home.store, &project.id, "The tests need TZ=UTC.").unwrap();
+    assert_eq!(
+        home.store.sync_waiting().unwrap(),
+        0,
+        "nothing syncs before the link"
+    );
+
+    sync::link(home.as_ref(), &project.id, &id).await.unwrap();
+    sync::pass(home.as_ref()).await.unwrap();
+    let account = server.lock().unwrap();
+    assert_eq!(account.asked, ["link", "push"]);
+    assert_eq!(account.notes, ["The tests need TZ=UTC."]);
+    assert_eq!(home.store.sync_waiting().unwrap(), 0);
 }

@@ -198,6 +198,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             memory::memory_write,
             memory::memory_edit,
             memory::memory_decide,
+            memory::memory_settle,
             memory::memory_share,
             memory::conversations_share,
             conversations::conversation_context,
