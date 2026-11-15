@@ -105,6 +105,58 @@ const FIXTURES: Record<string, (name: string) => void> = {
   "request-workspace-start.json": (name) => {
     expect(scopeOf(pinned<Request>(request, name).op)).toBe("terminal:control");
   },
+  "request-workspace-start-full.json": (name) => {
+    const start = pinned<Request>(request, name);
+    if (start.op !== "workspace.start") throw new Error("not a start");
+    expect(scopeOf(start.op)).toBe("terminal:control");
+    expect(start.params.name).toBe("fix-login-spacing");
+    expect(start.params.model).toBe("opus");
+    expect(start.params.effort).toBe("high");
+    expect(start.params.baseBranch).toBe("develop");
+  },
+  "request-workspace-start-branch.json": (name) => {
+    const start = pinned<Request>(request, name);
+    if (start.op !== "workspace.start") throw new Error("not a start");
+    expect(scopeOf(start.op)).toBe("terminal:control");
+    expect(start.params.existingBranch).toBe("ys/kept-earlier");
+    expect(start.params.baseBranch).toBeUndefined();
+  },
+  "request-project-branches.json": (name) => {
+    const branches = pinned<Request>(request, name);
+    expect(branches.op).toBe("project.branches");
+    expect(scopeOf(branches.op)).toBe("workspace:read");
+  },
+  "request-project-clone.json": (name) => {
+    const clone = pinned<Request>(request, name);
+    expect(clone.op).toBe("project.clone");
+    expect(scopeOf(clone.op)).toBe("terminal:control");
+  },
+  "request-shell-start.json": (name) => {
+    const shell = pinned<Request>(request, name);
+    expect(shell.op).toBe("shell.start");
+    expect(scopeOf(shell.op)).toBe("terminal:control");
+  },
+  "request-workspace-rename.json": (name) => {
+    const rename = pinned<Request>(request, name);
+    expect(rename.op).toBe("workspace.rename");
+    expect(scopeOf(rename.op)).toBe("terminal:control");
+  },
+  "request-workspace-archive.json": (name) => {
+    const archive = pinned<Request>(request, name);
+    if (archive.op !== "workspace.archive") throw new Error("not an archive");
+    expect(scopeOf(archive.op)).toBe("terminal:control");
+    // Archiving says nothing of force unless it is asked for; deleting here asks.
+    expect(archive.params.force).toBeUndefined();
+    const unforced = raw(name) as { params: Record<string, unknown> };
+    unforced.params.force = false;
+    expect(JSON.parse(JSON.stringify(decode(request, unforced)))).toEqual(raw(name));
+  },
+  "request-workspace-delete.json": (name) => {
+    const remove = pinned<Request>(request, name);
+    if (remove.op !== "workspace.delete") throw new Error("not a delete");
+    expect(scopeOf(remove.op)).toBe("terminal:control");
+    expect(remove.params.force).toBe(true);
+  },
   "request-session-resume.json": (name) => {
     const resume = pinned<Request>(request, name);
     expect(resume.op).toBe("session.resume");
@@ -145,10 +197,46 @@ const FIXTURES: Record<string, (name: string) => void> = {
     const listed = result(name);
     if (listed.kind !== "harnesses") throw new Error("not harnesses");
     expect(listed.harnesses[0]).toEqual({ id: "claude", name: "Claude Code" });
+    // A harness before minor 10 lists no models and no efforts, and reads as having none.
+    expect(listed.harnesses.every((h) => h.models === undefined && h.efforts === undefined)).toBe(
+      true,
+    );
+  },
+  "response-harnesses-choices.json": (name) => {
+    const listed = result(name);
+    if (listed.kind !== "harnesses") throw new Error("not harnesses");
+    expect(listed.harnesses[0]?.models).toEqual(["opus", "sonnet"]);
+    expect(listed.harnesses[0]?.efforts).toEqual(["low", "high"]);
+    expect(listed.harnesses[1]?.models).toBeUndefined();
+    // An empty list is one left out, as Rust writes it.
+    const json = raw(name) as { result: { harnesses: Record<string, unknown>[] } };
+    (json.result.harnesses[1] as Record<string, unknown>).efforts = [];
+    expect(JSON.parse(JSON.stringify(decode(response, json)))).toEqual(raw(name));
   },
   "response-started.json": (name) => {
     const started = result(name);
     expect(started.kind === "started" && started.harness).toBe("claude");
+  },
+  "response-started-shell.json": (name) => {
+    const started = result(name);
+    expect(started.kind === "started" && started.harness).toBe("");
+  },
+  "response-branches.json": (name) => {
+    const listed = result(name);
+    if (listed.kind !== "branches") throw new Error("not branches");
+    expect(listed.branches[0]).toBe("main");
+    expect(listed.default).toBe("main");
+    expect(listed.checkedOut).toEqual(["main", "ys/fix-login"]);
+    expect(listed.more).toBeUndefined();
+  },
+  "response-cloned.json": (name) => {
+    const cloned = result(name);
+    if (cloned.kind !== "cloned") throw new Error("not cloned");
+    expect(cloned.name).toBe("example-app");
+    expect(cloned.project as string).toBe("7a1e3c2d-4b5f-4a6b-8c9d-0e1f2a3b4c5d");
+  },
+  "response-done.json": (name) => {
+    expect(result(name)).toEqual({ kind: "done" });
   },
   "response-uploaded.json": (name) => {
     const uploaded = result(name);
@@ -200,7 +288,21 @@ const FIXTURES: Record<string, (name: string) => void> = {
     expect(newer.result.terminalsLater?.reason).toBe("unknown");
   },
   "response-workspaces.json": (name) => {
-    expect(result(name).kind).toBe("workspaces");
+    const page = result(name);
+    if (page.kind !== "workspaces") throw new Error("not workspaces");
+    expect(page.projects[0]?.remote).toBe("https://github.com/example/example-app.git");
+    // A host before minor 10 says nothing of it.
+    const json = raw(name) as { result: { projects: Record<string, unknown>[] } };
+    for (const project of json.result.projects) delete project.remote;
+    const older = decode(response, json);
+    if (!("result" in older) || older.result.kind !== "workspaces") {
+      throw new Error("not workspaces");
+    }
+    expect(older.result.projects[0]).toEqual({
+      id: "6f0d2b1c-3a4e-4f5a-9b8c-7d6e5f4a3b2c",
+      name: "example-app",
+      missing: false,
+    } as never);
   },
   "response-sessions.json": (name) => {
     expect(result(name).kind).toBe("sessions");
@@ -229,6 +331,14 @@ const FIXTURES: Record<string, (name: string) => void> = {
   "response-error-incompatible.json": (name) => {
     const answer = pinned(response, name);
     expect("error" in answer && answer.error).toEqual(incompatible());
+  },
+  "response-error-uncommitted.json": (name) => {
+    // Since minor 10: why archiving or deleting was refused, for a client to ask again.
+    const answer = pinned(response, name);
+    if (!("error" in answer)) throw new Error("not an error");
+    expect(answer.error.code).toBe("uncommitted_work");
+    expect(answer.error.retryable).toBe(false);
+    expect(retryable(answer.error.code)).toBe(false);
   },
   "response-attached.json": (name) => {
     expect(result(name).kind).toBe("attached");
@@ -377,7 +487,7 @@ const FIXTURES: Record<string, (name: string) => void> = {
 describe("the fixtures", () => {
   test("are each read here, and none is left out", () => {
     const names = readdirSync(DIR).sort();
-    expect(names.length).toBeGreaterThanOrEqual(41);
+    expect(names.length).toBeGreaterThanOrEqual(72);
     expect(names).toEqual(Object.keys(FIXTURES).sort());
   });
 
@@ -404,6 +514,7 @@ describe("what a newer peer sends", () => {
       "lease_lost",
       "invalid_request",
       "stale",
+      "uncommitted_work",
     ] as const) {
       expect(retryable(code)).toBe(false);
     }

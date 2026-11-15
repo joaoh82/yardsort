@@ -1,5 +1,7 @@
 //! Starting work from a device, and handing an agent a file: since minor 5, and resuming a
-//! conversation since minor 6.
+//! conversation since minor 6. Since minor 10 a start may also say what the window's composer
+//! says: a name for the workspace, a model and an effort for the agent, and the branch to start
+//! from or to open.
 //!
 //! A device that may type into a terminal (`terminal:control`) may also start what a terminal
 //! runs: a new workspace with an agent and its first message (`workspace.start`), another agent
@@ -35,6 +37,13 @@ pub const MAX_UPLOAD_NAME: usize = 128;
 /// The most uploads one channel has under way at once.
 pub const MAX_UPLOADS: usize = 4;
 
+/// The most models, and the most efforts, one harness lists.
+pub const MAX_CHOICES: usize = 32;
+/// Longest name a start may give a workspace, in characters: what the host's own window allows.
+pub const MAX_WORKSPACE_NAME: usize = 80;
+/// Longest branch name a request or a reply carries, in bytes.
+pub const MAX_BRANCH: usize = 255;
+
 /// An upload under way, numbered by the host within its channel.
 pub type UploadId = u32;
 
@@ -46,6 +55,14 @@ pub struct HarnessSummary {
     pub id: String,
     /// What to show. At most [`crate::MAX_TEXT`].
     pub name: String,
+    /// Models to suggest for it, as its settings list them: any other may be named too. At most
+    /// [`MAX_CHOICES`], each at most [`crate::MAX_LABEL`]. Since minor 10.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
+    /// The efforts it takes; none when it has no such thing. At most [`MAX_CHOICES`], each at
+    /// most [`crate::MAX_LABEL`]. Since minor 10.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub efforts: Vec<String>,
 }
 
 /// The reply to `harness.list`: the agents the host can start, the one it starts by default
@@ -59,6 +76,11 @@ pub struct HarnessList {
 /// `workspace.start`: a new workspace in `project` — a branch named after `prompt`, from the
 /// project's default branch, and its worktree — with an agent given `prompt` as its first
 /// message. Needs `terminal:control`.
+///
+/// Since minor 10 it may say more, each as the host's own composer would: `name` for the
+/// workspace, `model` and `effort` for the agent, and either `baseBranch`, to start the new
+/// branch from, or `existingBranch`, to open a branch as it is. A host before minor 10 does not
+/// read them, so a client sends them only to a host that answers `project.branches`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceStartParams {
@@ -68,6 +90,51 @@ pub struct WorkspaceStartParams {
     /// A harness from `harness.list`. Without one, the host's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<String>,
+    /// The workspace's folder, and its branch after the host's prefix. The host makes it a slug,
+    /// and adds a number when it is taken. At most [`MAX_WORKSPACE_NAME`] characters. Not with
+    /// `existingBranch`, which names its own. Since minor 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The model the agent is told to use, passed to the harness as its settings say. At most
+    /// [`crate::MAX_LABEL`] characters. Since minor 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// One of the harness's `efforts`. Since minor 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// The branch the new one starts from: one of `project.branches`. Without it, the project's
+    /// default. Since minor 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_branch: Option<String>,
+    /// A branch to open as it is, with no new one made: one of `project.branches` that is not
+    /// checked out. Not with `baseBranch` or `name`. Since minor 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub existing_branch: Option<String>,
+}
+
+impl WorkspaceStartParams {
+    /// A start that says only what every host reads: the project, the message and the harness.
+    pub fn plain(project: ProjectId, prompt: impl Into<String>, harness: Option<String>) -> Self {
+        Self {
+            project,
+            prompt: prompt.into(),
+            harness,
+            name: None,
+            model: None,
+            effort: None,
+            base_branch: None,
+            existing_branch: None,
+        }
+    }
+
+    /// Whether it says anything a host before minor 10 would not read.
+    pub fn says_more(&self) -> bool {
+        self.name.is_some()
+            || self.model.is_some()
+            || self.effort.is_some()
+            || self.base_branch.is_some()
+            || self.existing_branch.is_some()
+    }
 }
 
 /// `session.start`: another agent in a workspace, with a first message or none. Needs
@@ -96,14 +163,14 @@ pub struct SessionResumeParams {
     pub prompt: Option<String>,
 }
 
-/// The reply to `workspace.start`, `session.start` and `session.resume`: where the agent runs,
-/// to watch it.
+/// The reply to `workspace.start`, `session.start`, `session.resume` and `shell.start`: where
+/// the agent or the shell runs, to watch it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Started {
     pub workspace: WorkspaceId,
     pub terminal: TerminalId,
-    /// The harness started, by its id.
+    /// The harness started, by its id. Empty for a shell.
     pub harness: String,
 }
 
@@ -151,6 +218,44 @@ fn invalid(message: &str) -> Result<(), RemoteError> {
     Err(RemoteError::new(ErrorCode::InvalidRequest, message))
 }
 
+/// A branch name as a request may give one: something git could have, and nothing that could be
+/// read as an option.
+pub(crate) fn branch_valid(branch: &str) -> Result<(), RemoteError> {
+    if branch.is_empty()
+        || branch.len() > MAX_BRANCH
+        || branch.starts_with('-')
+        || branch.chars().any(|c| c.is_control() || c == ' ')
+    {
+        return invalid("That is not a branch's name.");
+    }
+    Ok(())
+}
+
+/// A workspace's name as a request may give one.
+pub(crate) fn workspace_name_valid(name: &str) -> Result<(), RemoteError> {
+    if name.trim().is_empty()
+        || name.chars().count() > MAX_WORKSPACE_NAME
+        || name.chars().any(char::is_control)
+    {
+        return invalid("A workspace name needs 1 to 80 characters.");
+    }
+    Ok(())
+}
+
+fn label_valid(label: Option<&String>, what: &str) -> Result<(), RemoteError> {
+    match label {
+        Some(l)
+            if l.trim().is_empty()
+                || l.chars().count() > crate::MAX_LABEL
+                || l.starts_with('-')
+                || l.chars().any(char::is_control) =>
+        {
+            invalid(what)
+        }
+        _ => Ok(()),
+    }
+}
+
 fn harness_valid(harness: Option<&String>) -> Result<(), RemoteError> {
     match harness {
         Some(h) if h.is_empty() || h.chars().count() > crate::MAX_LABEL => {
@@ -168,7 +273,19 @@ impl WorkspaceStartParams {
         if self.prompt.len() > MAX_PROMPT {
             return invalid("That message is longer than one request may carry.");
         }
-        harness_valid(self.harness.as_ref())
+        harness_valid(self.harness.as_ref())?;
+        label_valid(self.model.as_ref(), "That is not a model's name.")?;
+        label_valid(self.effort.as_ref(), "That is not an effort.")?;
+        if let Some(name) = &self.name {
+            workspace_name_valid(name)?;
+        }
+        for branch in self.base_branch.iter().chain(&self.existing_branch) {
+            branch_valid(branch)?;
+        }
+        if self.existing_branch.is_some() && (self.base_branch.is_some() || self.name.is_some()) {
+            return invalid("An existing branch is opened as it is: it takes no name and no base.");
+        }
+        Ok(())
     }
 }
 

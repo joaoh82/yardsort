@@ -171,11 +171,33 @@ impl Starting for HostStarting {
 
     fn workspace(
         &self,
-        project: &str,
-        prompt: &str,
-        harness: &str,
+        new: &yardsort_core::remote::start::NewWorkspace,
     ) -> IpcResult<(String, SessionInfo)> {
-        self.with(|starter| starter.workspace(project, prompt, harness))
+        self.with(|starter| starter.workspace(new))
+    }
+
+    fn shell(&self, workspace: &str) -> IpcResult<SessionInfo> {
+        self.with(|starter| starter.shell(workspace))
+    }
+
+    fn branches(&self, project: &str) -> IpcResult<remote_proto::ProjectBranches> {
+        self.with(|starter| starter.branches(project))
+    }
+
+    fn clone_project(&self, remote: &str, name: Option<&str>) -> IpcResult<(String, String)> {
+        self.with(|starter| starter.clone_project(remote, name))
+    }
+
+    fn rename(&self, workspace: &str, name: &str) -> IpcResult<()> {
+        self.with(|starter| starter.rename(workspace, name))
+    }
+
+    fn archive(&self, workspace: &str, force: bool) -> IpcResult<()> {
+        self.with(|starter| starter.archive(workspace, force))
+    }
+
+    fn delete(&self, workspace: &str, force: bool) -> IpcResult<()> {
+        self.with(|starter| starter.delete(workspace, force))
     }
 
     fn session(

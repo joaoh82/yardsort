@@ -7,23 +7,30 @@
 //! made from the project's default branch and named after the message, exactly as the window's
 //! composer and `ys workspace new` do. What a device sends to upload goes in this profile's
 //! `uploads` folder, outside every worktree, so no branch picks it up.
+//!
+//! Since the protocol's minor 10 a start may say what the composer says (a name, a model, an
+//! effort, a branch to start from or to open), and a device may look after what is here: list a
+//! project's branches, clone a repository into this host's projects folder, start a shell, and
+//! rename, archive or delete a workspace ([`remote_proto::manage`]). Each is the same call the
+//! window makes.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use pty_host::{SessionInfo, TermSize, TerminalHost};
-use remote_proto::{clip, HarnessSummary, MAX_LABEL, MAX_TEXT};
+use remote_proto::{clip, HarnessSummary, ProjectBranches, MAX_CHOICES, MAX_LABEL, MAX_TEXT};
 
 use crate::env::ShellEnv;
 use crate::error::{IpcError, IpcResult};
 use crate::git::Git;
 use crate::harness::{self, HarnessDef};
 use crate::launch::{HarnessRequest, Launch, Launcher};
+use crate::projects::Projects;
 use crate::sessions::Continue;
 use crate::settings::Settings;
 use crate::store::Store;
-use crate::workspaces::Workspaces;
+use crate::workspaces::{naming, Workspaces};
 
 /// What an agent a device started is told its terminal is, until someone opens it: as wide as
 /// one started by `ys`, which is drawn to fit once anybody watches.
@@ -35,18 +42,45 @@ pub const STARTED_SIZE: TermSize = TermSize {
 /// How long an uploaded file is kept. An agent reads it in the turn it was given in.
 pub const UPLOADS_KEPT: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
+/// A new workspace a device asked for: where, the first message, the agent, and what else the
+/// composer would say.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NewWorkspace {
+    pub project: String,
+    pub prompt: String,
+    pub harness: String,
+    /// What to call it. Made a slug, and numbered when taken; without one, named after `prompt`.
+    pub name: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// The branch the new one starts from. Without it, the project's default.
+    pub base_branch: Option<String>,
+    /// A branch to open as it is, with no new one made.
+    pub existing_branch: Option<String>,
+}
+
 /// What a device's channel asks of the host to start work and keep files. The app answers it
 /// with a [`Starter`] made from its own state, as do the tests.
 pub trait Starting: Send + Sync {
     /// The harnesses a device may start, the default first.
     fn harnesses(&self) -> Vec<HarnessSummary>;
-    /// A new workspace in `project`, with `harness` given `prompt`: its id, and the agent.
-    fn workspace(
-        &self,
-        project: &str,
-        prompt: &str,
-        harness: &str,
-    ) -> IpcResult<(String, SessionInfo)>;
+    /// A new workspace with its agent: the workspace's id, and the agent.
+    fn workspace(&self, new: &NewWorkspace) -> IpcResult<(String, SessionInfo)>;
+    /// This host's shell in `workspace`.
+    fn shell(&self, workspace: &str) -> IpcResult<SessionInfo>;
+    /// The branches a new workspace in `project` can start from or open.
+    fn branches(&self, project: &str) -> IpcResult<ProjectBranches>;
+    /// Clone the repository at `remote` into this host's projects folder and add it: the new
+    /// project's id and name.
+    fn clone_project(&self, remote: &str, name: Option<&str>) -> IpcResult<(String, String)>;
+    /// Change what `workspace` is called.
+    fn rename(&self, workspace: &str, name: &str) -> IpcResult<()>;
+    /// Put `workspace` away, keeping its branch and its record. Without `force`, uncommitted
+    /// work fails it with `worktree_dirty`.
+    fn archive(&self, workspace: &str, force: bool) -> IpcResult<()>;
+    /// Remove `workspace`, keeping its branch. Without `force`, uncommitted work fails it with
+    /// `worktree_dirty`.
+    fn delete(&self, workspace: &str, force: bool) -> IpcResult<()>;
     /// Another agent in `workspace`.
     fn session(
         &self,
@@ -88,26 +122,126 @@ impl Starter<'_> {
             .map(|h| HarnessSummary {
                 id: h.def.id,
                 name: clip(&h.def.label, MAX_TEXT),
+                models: choices(h.def.models),
+                efforts: choices(h.def.efforts),
             })
             .collect()
     }
 
-    pub fn workspace(
-        &self,
-        project: &str,
-        prompt: &str,
-        harness: &str,
-    ) -> IpcResult<(String, SessionInfo)> {
-        let row = Workspaces {
+    fn workspaces(&self) -> Workspaces<'_> {
+        Workspaces {
             env: self.env,
             store: self.store,
             git: self.git,
             worktree_root: self.worktree_root,
             settings: &self.settings.workspaces,
         }
-        .create(project, None, prompt)?;
-        let session = self.session(&row.id, harness, Some(prompt))?;
+    }
+
+    pub fn workspace(&self, new: &NewWorkspace) -> IpcResult<(String, SessionInfo)> {
+        let workspaces = self.workspaces();
+        let base = new.base_branch.as_deref();
+        if let Some(base) = base {
+            let project = self.store.project(&new.project)?.ok_or_else(|| {
+                IpcError::new("unknown_project", "That project no longer exists.")
+            })?;
+            if !self
+                .git
+                .branch_exists(Path::new(&project.root_path), base)?
+            {
+                return Err(IpcError::new(
+                    "unknown_branch",
+                    format!("There is no branch \"{base}\"."),
+                ));
+            }
+        }
+        let row = match (&new.existing_branch, &new.name) {
+            (Some(branch), _) => workspaces.open_branch(&new.project, branch)?,
+            (None, Some(name)) => match naming::slugify_name(name) {
+                Some(slug) => workspaces.create_named(&new.project, base, &slug)?,
+                // A name with nothing a folder can be called by: the message names it instead.
+                None => workspaces.create(&new.project, base, &new.prompt)?,
+            },
+            (None, None) => workspaces.create(&new.project, base, &new.prompt)?,
+        };
+        let session = self.launch(
+            &row.id,
+            &new.harness,
+            Some(&new.prompt),
+            new.model.as_deref(),
+            new.effort.as_deref(),
+        )?;
         Ok((row.id, session))
+    }
+
+    pub fn shell(&self, workspace: &str) -> IpcResult<SessionInfo> {
+        self.launcher()
+            .in_workspace(workspace, Launch::Shell, STARTED_SIZE)
+    }
+
+    pub fn branches(&self, project: &str) -> IpcResult<ProjectBranches> {
+        let row = self
+            .store
+            .project(project)?
+            .ok_or_else(|| IpcError::new("unknown_project", "That project no longer exists."))?;
+        let root = PathBuf::from(row.root_path);
+        Ok(remote_proto::manage::bounded_branches(
+            self.git.branches(&root)?,
+            self.git.default_branch(&root)?,
+            self.git
+                .worktrees(&root)?
+                .into_iter()
+                .filter(|entry| !entry.prunable)
+                .filter_map(|entry| entry.branch)
+                .collect(),
+        ))
+    }
+
+    /// The folder a device's clones go in: the setting, or `Projects` in this user's home. Made
+    /// when it is not there yet.
+    pub fn projects_dir(&self) -> IpcResult<PathBuf> {
+        let dir = projects_dir(&self.settings.remote, self.env).ok_or_else(|| {
+            IpcError::new(
+                "no_projects_dir",
+                "This computer has no folder for projects cloned from another device. Set one \
+                 in Settings → Remote.",
+            )
+        })?;
+        std::fs::create_dir_all(&dir).map_err(|error| {
+            IpcError::new("io", format!("Cannot create {}: {error}", dir.display()))
+        })?;
+        Ok(dir)
+    }
+
+    pub fn clone_project(&self, remote: &str, name: Option<&str>) -> IpcResult<(String, String)> {
+        let name = match name {
+            Some(name) => name.trim().to_owned(),
+            None => name_from_remote(remote).ok_or_else(|| {
+                IpcError::new(
+                    "invalid_repository",
+                    "That address does not say what the repository is called.",
+                )
+            })?,
+        };
+        let parent = self.projects_dir()?;
+        let added = Projects {
+            store: self.store,
+            git: self.git,
+        }
+        .clone_from(remote, &name, &parent, None)?;
+        Ok((added.project.id, added.project.name))
+    }
+
+    pub fn rename(&self, workspace: &str, name: &str) -> IpcResult<()> {
+        self.workspaces().rename(workspace, name).map(|_| ())
+    }
+
+    pub fn archive(&self, workspace: &str, force: bool) -> IpcResult<()> {
+        self.workspaces().archive(workspace, force)
+    }
+
+    pub fn delete(&self, workspace: &str, force: bool) -> IpcResult<()> {
+        self.workspaces().delete(workspace, force)
     }
 
     pub fn definitions(&self) -> Vec<HarnessDef> {
@@ -141,12 +275,28 @@ impl Starter<'_> {
         harness: &str,
         prompt: Option<&str>,
     ) -> IpcResult<SessionInfo> {
+        self.launch(workspace, harness, prompt, None, None)
+    }
+
+    fn launch(
+        &self,
+        workspace: &str,
+        harness: &str,
+        prompt: Option<&str>,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> IpcResult<SessionInfo> {
+        let said = |text: Option<&str>| {
+            text.map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(str::to_owned)
+        };
         self.launcher().in_workspace(
             workspace,
             Launch::Harness(HarnessRequest {
                 id: harness.to_owned(),
-                model: None,
-                effort: None,
+                model: said(model),
+                effort: said(effort),
                 prompt: prompt.filter(|p| !p.trim().is_empty()).map(str::to_owned),
                 handoff: false,
                 skip_memory: false,
@@ -167,6 +317,90 @@ pub fn definitions(harnesses: &[harness::HarnessOverride], env: &ShellEnv) -> Ve
         .map(|h| h.def)
         .filter(|def| env.find_program(&def.command, &cwd).is_some())
         .collect()
+}
+
+/// A harness's models or efforts as one reply lists them: those that fit, and not too many.
+fn choices(listed: Vec<String>) -> Vec<String> {
+    listed
+        .into_iter()
+        .filter(|choice| !choice.is_empty() && choice.chars().count() <= MAX_LABEL)
+        .take(MAX_CHOICES)
+        .collect()
+}
+
+/// Where a device's clones go on this host: `remote.projects_dir` in the settings, with a leading
+/// `~` read as this user's home, or else `Projects` in that home. `None` when there is no home
+/// to put it in and none was set.
+pub fn projects_dir(settings: &crate::settings::RemoteSettings, env: &ShellEnv) -> Option<PathBuf> {
+    let home = env.home_dir();
+    match settings.projects_dir.as_deref().map(str::trim) {
+        Some(set) if !set.is_empty() => match set.strip_prefix('~') {
+            Some(rest) => {
+                let rest = rest.trim_start_matches(['/', '\\']);
+                home.map(|home| {
+                    if rest.is_empty() {
+                        home
+                    } else {
+                        home.join(rest)
+                    }
+                })
+            }
+            None => Some(PathBuf::from(set)),
+        },
+        _ => home.map(|home| home.join("Projects")),
+    }
+}
+
+/// What a clone of `remote` is called when nobody says: the last part of its address, without
+/// `.git`.
+pub fn name_from_remote(remote: &str) -> Option<String> {
+    let remote = remote.trim();
+    let rest = remote.split_once("://").map_or(remote, |(_, rest)| rest);
+    // What comes after the host: `host/path`, or `user@host:path`.
+    let path = rest
+        .split_once('/')
+        .or_else(|| rest.split_once(':'))
+        .map(|(_, path)| path)?;
+    let last = path.trim_end_matches('/').rsplit(['/', ':']).next()?;
+    let name = last.strip_suffix(".git").unwrap_or(last).trim();
+    (!name.is_empty() && name != "." && name != "..").then(|| name.to_owned())
+}
+
+/// A project's fetch address as another computer may be told it: one it could clone, with any
+/// user and password of an HTTPS address removed. A local path, a `file://` or `git://` address
+/// and anything longer than a reply carries is not told.
+pub fn shareable_remote(url: &str) -> Option<String> {
+    let url = url.trim();
+    let cleaned = match url.split_once("://") {
+        Some((scheme, rest)) if scheme.eq_ignore_ascii_case("https") => {
+            let (authority, path) = rest.split_once('/')?;
+            let host = authority
+                .rsplit_once('@')
+                .map_or(authority, |(_, host)| host);
+            format!("https://{host}/{path}")
+        }
+        _ => url.to_owned(),
+    };
+    (cleaned.len() <= remote_proto::MAX_REMOTE && crate::projects::clonable(&cleaned))
+        .then_some(cleaned)
+}
+
+/// The repository an address names, for telling whether two computers' projects are the same
+/// one: its host in lower case and its path, without the scheme, the user, the port and `.git`.
+/// `https://github.com/acme/app.git` and `git@github.com:acme/app` are both `github.com/acme/app`.
+pub fn repository_key(url: &str) -> Option<String> {
+    let url = url.trim();
+    let (authority, path) = match url.split_once("://") {
+        Some((_, rest)) => rest.split_once('/')?,
+        None => url.split_once(':')?,
+    };
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = host.split_once(':').map_or(host, |(host, _)| host);
+    let path = path.trim_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    (!host.is_empty() && !path.is_empty()).then(|| format!("{}/{path}", host.to_ascii_lowercase()))
 }
 
 /// The folder a workspace's uploads go in.
@@ -243,9 +477,29 @@ pub fn start_error(error: &IpcError) -> remote_proto::RemoteError {
     match error.code.as_str() {
         // What the window says when a conversation cannot be resumed, which names a harness
         // at most.
-        "no_base_branch" | "unknown_workspace" | "cannot_continue" => {
+        "no_base_branch" | "unknown_workspace" | "cannot_continue" | "invalid_name"
+        | "not_deletable" | "not_archivable" | "invalid_repository" | "no_projects_dir" => {
             RemoteError::new(ErrorCode::InvalidRequest, error.message.clone())
         }
+        "unknown_branch" => RemoteError::new(
+            ErrorCode::InvalidRequest,
+            "That branch is not in the project on the computer.",
+        ),
+        "unknown_project" => RemoteError::not_found(),
+        "worktree_dirty" => RemoteError::new(
+            ErrorCode::UncommittedWork,
+            "This workspace has uncommitted changes, which would be lost.",
+        ),
+        "already_exists" => RemoteError::new(
+            ErrorCode::InvalidRequest,
+            "The computer's projects folder already has a folder of that name. Add it as a \
+             project there, or give the clone another name.",
+        ),
+        "clone_failed" => RemoteError::new(
+            ErrorCode::InvalidRequest,
+            "The computer could not clone that repository. Check that it can reach it with its \
+             own Git credentials.",
+        ),
         "unknown_session" => RemoteError::not_found(),
         "host_unreachable" => RemoteError::new(
             ErrorCode::Internal,

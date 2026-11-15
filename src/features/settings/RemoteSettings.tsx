@@ -14,6 +14,7 @@ import { useProjectsStore } from "@/stores/projects";
 import { useRemoteStore } from "@/stores/remote";
 import { useTerminalStore } from "@/stores/terminals";
 import { buttonClass, Field, inputClass, primaryButtonClass } from "./fields";
+import { ProjectsFolderSettings } from "./ProjectsFolderSettings";
 import { OtherComputersSettings } from "./OtherComputersSettings";
 
 /** How often the open section asks the server who is waiting. */
@@ -249,6 +250,8 @@ export function RemoteSettings() {
               </ul>
             )}
           </section>
+
+          <ProjectsFolderSettings />
         </>
       ) : (
         <form

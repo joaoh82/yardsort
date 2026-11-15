@@ -18,6 +18,8 @@ const core = vi.hoisted(() => ({
   uiStateSave: vi.fn().mockResolvedValue(undefined),
   uiStateLoad: vi.fn(),
   ptyClose: vi.fn().mockResolvedValue(undefined),
+  otherHost: vi.fn(),
+  otherHostStartShell: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -98,6 +100,7 @@ const there: OtherHostView = {
   mayType: true,
   mayStart: true,
   mayResume: true,
+  mayManage: false,
   readAt: 1,
   platform: "Linux",
   appVersion: "0.34.1",
@@ -105,6 +108,7 @@ const there: OtherHostView = {
     {
       id: "p-there",
       name: "service",
+      repository: null,
       workspaces: [
         {
           id: "w-there",
@@ -312,6 +316,36 @@ describe("keyboard navigation", () => {
     useProjectsStore.setState({ remote: null });
     fireEvent.keyDown(window, { key: "ArrowUp", ...mod });
     expect(useProjectsStore.getState().remote).toEqual({ hostId: "h-1", workspaceId: "w-there" });
+  });
+  it("opens a shell on the other computer when that one takes it from here", async () => {
+    core.otherHost.mockResolvedValue({ ...there, mayManage: true });
+    core.otherHostStartShell.mockResolvedValue({
+      workspaceId: "w-there",
+      terminal: "t-9",
+      harness: "",
+    });
+    useOtherComputersStore.setState({
+      status: others,
+      views: { "h-1": { ...there, mayManage: true } },
+    });
+    useProjectsStore.getState().selectRemote("h-1", "w-there");
+    const opened = vi.spyOn(useTerminalStore.getState(), "open");
+    render(<Host />);
+    expect(commandEnabled("newTerminal")).toBe(true);
+    runCommand("newTerminal");
+    expect(core.otherHostStartShell).toHaveBeenCalledWith("h-1", "w-there");
+    await waitFor(() =>
+      expect(useOtherComputersStore.getState().active["h-1/w-there"]).toBe("t-9"),
+    );
+    // Nothing is opened in this computer's workspace, hidden beneath it.
+    expect(opened).not.toHaveBeenCalled();
+    // A computer that is away is not asked.
+    useOtherComputersStore.setState({
+      views: {
+        "h-1": { ...there, mayManage: true, link: { kind: "offline", since: 1, why: "away" } },
+      },
+    });
+    expect(commandEnabled("newTerminal")).toBe(false);
   });
   it("acts on the workspace in view on another computer, never on the one here beneath it", () => {
     useOtherComputersStore.setState({ status: others, views: { "h-1": there } });

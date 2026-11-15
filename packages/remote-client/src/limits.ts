@@ -8,8 +8,11 @@
 
 /** The major this client speaks. */
 export const PROTOCOL_MAJOR = 1;
-/** The minor this client speaks: 9, the relay's notice to a host that a synced project changed. */
-export const PROTOCOL_MINOR = 9;
+/**
+ * The minor this client speaks: 10, a start that says a name, a model, an effort and a branch, and
+ * looking after projects and workspaces.
+ */
+export const PROTOCOL_MINOR = 10;
 
 /** The largest JSON message either side reads, in bytes. */
 export const MAX_CONTROL_FRAME = 64 * 1024;
@@ -89,3 +92,16 @@ export const MAX_COMMAND = 2_000;
 export const MAX_ASKS = 8;
 /** Longest question id, in bytes. Minor 8. */
 export const MAX_ASK_ID = 64;
+
+/** The most models, and the most efforts, one harness lists. Minor 10. */
+export const MAX_CHOICES = 32;
+/** Longest name a start or a rename may give a workspace, in characters. Minor 10. */
+export const MAX_WORKSPACE_NAME = 80;
+/** Longest branch name a request or a reply carries, in bytes. Minor 10. */
+export const MAX_BRANCH = 255;
+/** The most branches one `project.branches` reply lists. Minor 10. */
+export const MAX_BRANCHES = 100;
+/** Longest repository address a request or a reply carries, in bytes. Minor 10. */
+export const MAX_REMOTE = 512;
+/** Longest name a clone may be given, in bytes. Minor 10. */
+export const MAX_PROJECT_NAME = 100;

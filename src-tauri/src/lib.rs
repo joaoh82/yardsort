@@ -181,6 +181,14 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             computers::other_host_start_workspace,
             computers::other_host_start_session,
             computers::other_host_resume,
+            computers::other_host_branches,
+            computers::other_host_clone,
+            computers::other_host_start_shell,
+            computers::other_host_rename_workspace,
+            computers::other_host_remove_workspace,
+            computers::project_repository,
+            computers::remote_projects_dir,
+            computers::remote_set_projects_dir,
             remote_terminal::remote_terminal_open,
             remote_terminal::remote_terminal_close,
             remote_terminal::remote_terminal_take_control,
@@ -310,6 +318,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             schedules::SchedulesChanged,
             triggers::commands::TriggersChanged,
             remote::RemotePairingRequested,
+            remote::RemoteChangedProjects,
             computers::OtherComputersChanged
         ])
         // Sent as JSON inside a remote terminal's byte stream, so no command names it.

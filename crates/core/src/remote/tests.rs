@@ -1429,6 +1429,7 @@ fn the_largest_item_of_every_list_fits_in_a_frame() {
         id: ProjectId::new(&id).unwrap(),
         name: text(MAX_TEXT),
         missing: true,
+        remote: Some("r".repeat(remote_proto::MAX_REMOTE)),
     };
     let workspace = WorkspaceSummary {
         id: WorkspaceId::new(&id).unwrap(),

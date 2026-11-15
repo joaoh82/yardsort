@@ -109,6 +109,12 @@ pub const START_OPERATIONS: &[&str] = &[
     "upload.begin",
     "upload.chunk",
     "session.resume",
+    "project.branches",
+    "project.clone",
+    "shell.start",
+    "workspace.rename",
+    "workspace.archive",
+    "workspace.delete",
 ];
 
 /// Reading conversations and answering their agents' questions, answered when the facade knows
@@ -275,7 +281,13 @@ impl HostFacade<'_> {
             | Operation::SessionStart(_)
             | Operation::UploadBegin(_)
             | Operation::UploadChunk(_)
-            | Operation::SessionResume(_) => Err(RemoteError::new(
+            | Operation::SessionResume(_)
+            | Operation::ProjectBranches(_)
+            | Operation::ProjectClone(_)
+            | Operation::ShellStart(_)
+            | Operation::WorkspaceRename(_)
+            | Operation::WorkspaceArchive(_)
+            | Operation::WorkspaceDelete(_) => Err(RemoteError::new(
                 ErrorCode::Unsupported,
                 self.terminals_later.as_ref().map_or(
                     "Starting agents from here is not available on this host yet.",
@@ -351,6 +363,7 @@ impl HostFacade<'_> {
                 id: id.clone(),
                 name: clip(&project.name, MAX_TEXT),
                 missing: project.missing,
+                remote: self.shareable_remote(&project.root_path),
             });
             for workspace in project.workspaces {
                 if workspace.archived && !params.include_archived {
@@ -418,6 +431,7 @@ impl HostFacade<'_> {
                 id: local_id(&project.id)?,
                 missing: !std::path::Path::new(&project.root_path).is_dir(),
                 name: clip(&project.name, MAX_TEXT),
+                remote: self.shareable_remote(&project.root_path),
             },
         })
     }
@@ -835,6 +849,15 @@ impl HostFacade<'_> {
             },
         )?;
         Ok(MemoryPage { notes, next })
+    }
+
+    /// Where a project's repository is fetched from, as another computer may be told it: see
+    /// [`start::shareable_remote`]. Nothing for a project with no `origin`, or a folder gone.
+    fn shareable_remote(&self, root: &str) -> Option<String> {
+        let url = self
+            .git
+            .remote_url_as_set(std::path::Path::new(root), "origin")?;
+        start::shareable_remote(&url)
     }
 
     /// A project on show whose id the grant reaches. Removed projects are not on show.

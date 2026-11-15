@@ -59,7 +59,10 @@ export function Sidebar() {
     const unlisten = ipc.onSessionStarted(() => void refresh());
     // A schedule can make a workspace for its run, and that run may start no agent.
     const unlistenSchedules = ipc.onSchedulesChanged(() => void refresh());
+    // A device through Remote can rename, archive or delete a workspace here, or clone a project.
+    const unlistenRemote = ipc.onRemoteChangedProjects(() => void refresh());
     return () => {
+      void unlistenRemote.then((stop) => stop());
       window.removeEventListener("focus", onFocus);
       void unlisten.then((stop) => stop());
       void unlistenSchedules.then((stop) => stop());

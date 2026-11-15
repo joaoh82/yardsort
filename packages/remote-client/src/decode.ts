@@ -163,6 +163,25 @@ export function optional<T>(decoder: Decoder<T>): Optional<T> {
   return read;
 }
 
+/** A flag Rust leaves out when it is false: absent or `false` reads as absent. */
+export const flag: Optional<boolean> = Object.assign(
+  (value: unknown, path: string) =>
+    value === undefined ? undefined : bool(value, path) || undefined,
+  { [OPTIONAL]: true as const },
+);
+
+/** A list Rust leaves out when it is empty: absent or empty reads as absent. */
+export function unlessEmpty<T>(item: Decoder<T>, max?: number): Optional<T[]> {
+  const list = array(item, max);
+  return Object.assign(
+    (value: unknown, path: string) => {
+      const items = value === undefined ? [] : list(value, path);
+      return items.length === 0 ? undefined : items;
+    },
+    { [OPTIONAL]: true as const },
+  );
+}
+
 /** A field Rust always writes, `null` when empty. Absent reads as `null`. */
 export function nullable<T>(decoder: Decoder<T>): Decoder<T | null> {
   return (value, path) => (value === undefined || value === null ? null : decoder(value, path));

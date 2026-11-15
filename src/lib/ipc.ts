@@ -132,7 +132,12 @@ import {
   type PrFacts,
   type OtherComputers,
   type OtherHost,
+  type LocalRepository,
+  type OtherBranches,
+  type OtherCloned,
   type OtherHarness,
+  type OtherNewWorkspace,
+  type ProjectsDir,
   type OtherHostView,
   type OtherLink,
   type RemoteController,
@@ -316,7 +321,12 @@ export type {
   ProjectTasks,
   OtherComputers,
   OtherHost,
+  LocalRepository,
+  OtherBranches,
+  OtherCloned,
   OtherHarness,
+  OtherNewWorkspace,
+  ProjectsDir,
   OtherHostView,
   OtherLink,
   OtherPairing,
@@ -888,12 +898,40 @@ export const ipc = {
    * own settings. A start whose answer is lost is not tried again.
    */
   otherHostHarnesses: (hostId: string) => unwrap(commands.otherHostHarnesses(hostId)),
-  otherHostStartWorkspace: (
+  otherHostStartWorkspace: (hostId: string, request: OtherNewWorkspace) =>
+    unwrap(commands.otherHostStartWorkspace(hostId, request)),
+  /** The branches a new workspace in one of that computer's projects can start from or open. */
+  otherHostBranches: (hostId: string, projectId: string) =>
+    unwrap(commands.otherHostBranches(hostId, projectId)),
+  /**
+   * Have that computer clone the repository of one of this computer's projects into its own
+   * projects folder, with its own Git sign-in, and add it there. Only the address goes over.
+   */
+  otherHostClone: (hostId: string, projectId: string) =>
+    unwrap(commands.otherHostClone(hostId, projectId)),
+  /** That computer's shell in one of its workspaces. */
+  otherHostStartShell: (hostId: string, workspaceId: string) =>
+    unwrap(commands.otherHostStartShell(hostId, workspaceId)),
+  otherHostRenameWorkspace: (hostId: string, workspaceId: string, name: string) =>
+    done(commands.otherHostRenameWorkspace(hostId, workspaceId, name)),
+  /**
+   * Archive a workspace there, or with `remove` delete it; both keep its branch. Rejects with
+   * `remote_uncommitted` unless `force` when it has uncommitted work there.
+   */
+  otherHostRemoveWorkspace: (
     hostId: string,
-    projectId: string,
-    prompt: string,
-    harness: string | null,
-  ) => unwrap(commands.otherHostStartWorkspace(hostId, projectId, prompt, harness)),
+    workspaceId: string,
+    remove: boolean,
+    force: boolean,
+  ) => done(commands.otherHostRemoveWorkspace(hostId, workspaceId, remove, force)),
+  /** Which repository one of this computer's projects is, to offer the same one elsewhere. */
+  projectRepository: (projectId: string) => unwrap(commands.projectRepository(projectId)),
+  /** Where a repository another device has this computer clone goes. */
+  remoteProjectsDir: () => unwrap(commands.remoteProjectsDir()),
+  remoteSetProjectsDir: (dir: string | null) => unwrap(commands.remoteSetProjectsDir(dir)),
+  /** A device through Remote renamed, archived or deleted a workspace here, or cloned a project. */
+  onRemoteChangedProjects: (handler: () => void) =>
+    events.remoteChangedProjects.listen(() => handler()),
   otherHostStartSession: (
     hostId: string,
     workspaceId: string,

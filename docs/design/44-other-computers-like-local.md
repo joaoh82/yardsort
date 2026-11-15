@@ -372,3 +372,78 @@ the first, which never answers. Loading again and looking are now two steps.
 
 Not run: macOS and Windows, since the test is Linux only like the three before it, and none of it
 on a second real computer.
+
+## 10 · Slice 3: the rest of a start, clone there, and the row menu
+
+**Built on 2026-11-15**, on Linux. Protocol minor 10 (`crates/remote-proto`): nothing changes on
+the server, which carries it unread. Both ends need the release that has it; an older host keeps
+answering what it answered, and the window offers the rest only to a host that lists
+`project.branches` among what it answers (`OtherHostView.mayManage`).
+
+**The protocol.**
+
+- `workspace.start` may say `name`, `model`, `effort`, and `baseBranch` or `existingBranch`. A
+  client sends them only to a host that reads them: an older one would start something other than
+  what was chosen. An effort must be one the host lists for that agent; a branch must exist there.
+- `harness.list` gives each agent's `models` and `efforts`. A project's summary gives `remote`.
+- `project.branches`, `project.clone`, `shell.start`, `workspace.rename`, `workspace.archive` and
+  `workspace.delete` (`remote_proto::manage`). All but the first need `terminal:control`.
+- A new error, `uncommitted_work`, for archiving or deleting a workspace whose folder has work in
+  no commit: the request is sent again with `force` only after the person was asked a second time.
+
+**What the host does** (`crates/core/src/remote/start.rs`, answered in `serve/start.rs`, by the app
+and by `yardsort-host` alike): each is the call its own window makes. `Workspaces::create_named`,
+`open_branch`, `rename`, `archive`, `delete`; `Projects::clone_from`; the launcher's shell.
+
+- **A clone goes where the host says.** `remote.projects_dir` in its settings, `~/Projects` when
+  unset, made when first needed. In the window it is under Settings → Remote, **Projects cloned for
+  a device**. A request names only an address, checked as one typed into the host's own Clone
+  dialog is: HTTPS, `ssh://` or `user@host:path`, no credentials in it, nothing that reads as an
+  option. The name is the last part of the address.
+- **A grant to some projects cannot clone.** The new project would be none of those it names.
+- **A project's remote is told as it is configured**, not as this computer's own `insteadOf`
+  rewrites it, with any user and password of an HTTPS address removed, and only when another
+  computer could clone it. A folder, `file://` and `git://` are not told.
+- **Messages name no folder.** The core's own for a dirty worktree and a failed clone do, so a
+  device is given the host's wording for each instead (`start_error`).
+
+**What the window does.**
+
+- **The composer there** (`RemoteComposer`) has Name, Model, Effort and Branch for a host that
+  reads them, from that host's lists, and says so for one that does not.
+- **The same repository before the same name.** `project_repository` reads this computer's
+  project's `origin` and reduces it to host and path; `OtherProject.repository` is the same for
+  what the host told. `offeredThere` offers the remembered choice, then the same repository, then
+  the same name, and the composer says which.
+- **Clone it there** is in the project list and in the line that says the project is missing, for
+  a project here whose `origin` another computer could clone. Never chosen by itself. Start clones,
+  then starts in the clone; a start that fails after the clone is tried again in it, and does not
+  clone twice. Only the project's id goes from the window to the core, which reads the address.
+- **A shell**: the **+** after a workspace's tabs there, **New shell** in its row's menu, and the
+  new shell shortcut. It is this computer's to type into at once, as an agent started here is.
+- **Rename, archive, delete** in a workspace's row menu, for a worktree. The questions are the
+  local ones with the computer named; a refusal for uncommitted work asks the second one.
+- **A host that is the app** tells its own window to read its projects again when a device
+  changed them (`RemoteChangedProjects`).
+
+**What building it settled.**
+
+- **Start a shell is its own operation**, `shell.start`, answering as a start does with no harness,
+  and not `session.start` with a special name.
+- **The window cannot offer a clone it knows will be refused for the grant.** It does not know
+  which projects a pairing reaches. The host refuses, in words, and the composer shows them.
+- **Restoring an archived workspace is not offered from here.** The tree lists how many are
+  archived; bringing one back is done at that computer. A later slice can carry it.
+- **Closing a terminal there is not offered.** Its program ends there, or by what is typed into it.
+- **The busy clock is still not on a row there.** It needs a field in a session's summary and was
+  left out of this minor.
+- **The phone app is unchanged.** Its client reads the new messages (`packages/remote-client`),
+  and nothing in its screens uses them yet.
+
+**Its tests.** The wire and its bounds in `remote-proto` (fixtures for every new message); the host
+against real repositories, real terminals and a real clone in `crates/core/src/remote/serve/tests/
+start.rs`; a desktop reaching a host through the real relay in `crates/server/tests/computer.rs`;
+the composer, the clone, the menu and the questions in `OtherComputers.test.tsx`; the folder
+setting in `RemoteSettings.test.tsx`.
+
+**Its smoke test.** `run-on-full.yaml`. Its record is below once it is run.

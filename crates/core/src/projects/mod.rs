@@ -361,6 +361,13 @@ impl Projects<'_> {
 /// host takes an HTTPS URL, an `ssh://` URL or git's `user@host:path` form, with as many path
 /// segments as the forge wants (GitLab subgroups). Nothing else: no local path, no `file://`
 /// or `git://`, no credentials in an HTTPS URL, nothing that could be read as an option.
+/// Whether `url` is an address of a repository on another machine that [`Projects::clone_from`]
+/// would clone: an HTTPS, `ssh://` or `user@host:path` one. Not GitHub's `owner/repository`
+/// shorthand, which as a remote's address would be a folder here.
+pub fn clonable(url: &str) -> bool {
+    (url.contains("://") || url.contains(':')) && clone_url(url).is_ok()
+}
+
 fn clone_url(repository: &str) -> IpcResult<String> {
     let repository = repository.trim();
     let invalid = || {

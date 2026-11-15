@@ -160,6 +160,10 @@ pub struct OtherHostView {
     /// Whether this computer may resume that computer's ended conversations: it may type, and
     /// that computer can.
     pub may_resume: bool,
+    /// Whether a start there may say a name, a model, an effort and a branch, and this computer
+    /// may clone a project there, start a shell, and rename, archive and delete a workspace: it
+    /// may type, and that computer's Yardsort is new enough.
+    pub may_manage: bool,
     /// When it was last read; `None` until it has been.
     pub read_at: Option<f64>,
     pub platform: Option<String>,
@@ -174,6 +178,9 @@ pub struct OtherHostView {
 pub struct OtherProject {
     pub id: String,
     pub name: String,
+    /// Which repository it is, when that computer said where it fetches from: the same words
+    /// [`project_repository`] gives for one of this computer's projects of that repository.
+    pub repository: Option<String>,
     pub workspaces: Vec<OtherWorkspace>,
 }
 
@@ -225,6 +232,67 @@ pub struct OtherTask {
 pub struct OtherHarness {
     pub id: String,
     pub name: String,
+    /// Models to suggest for it; any other may be typed.
+    pub models: Vec<String>,
+    /// The efforts it takes; none when it has no such thing.
+    pub efforts: Vec<String>,
+}
+
+/// A new workspace on another computer, as its composer here says it.
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherNewWorkspace {
+    pub project_id: String,
+    pub prompt: String,
+    pub harness: Option<String>,
+    pub name: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// The branch the new one starts from. Without it, that project's default.
+    pub base_branch: Option<String>,
+    /// A branch to open as it is, with no new one made.
+    pub existing_branch: Option<String>,
+}
+
+/// The branches a new workspace in a project on another computer can start from or open.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherBranches {
+    pub branches: Vec<String>,
+    pub default: Option<String>,
+    /// Those a worktree there has out, which cannot be opened in another.
+    pub checked_out: Vec<String>,
+    /// That project has more branches than are listed.
+    pub more: bool,
+}
+
+/// A project another computer cloned and added at this one's asking.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherCloned {
+    pub project_id: String,
+    pub name: String,
+}
+
+/// Which repository one of this computer's projects is, for offering the same one elsewhere.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalRepository {
+    /// What an [`OtherProject::repository`] of the same repository says. `None` when the project
+    /// has no `origin`, or one that is a folder.
+    pub key: Option<String>,
+    /// Whether another computer could clone it: its `origin` is an address, not a folder.
+    pub clonable: bool,
+}
+
+/// Where a repository another device has this computer clone goes.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectsDir {
+    /// What the settings say, when they say.
+    pub set: Option<String>,
+    /// The folder used: the setting, or `Projects` in this user's home.
+    pub used: Option<String>,
 }
 
 /// An agent started on another computer: where it runs, to watch it.
@@ -314,6 +382,7 @@ fn view(host_id: &str, name: String, view: HostView, may_type: bool) -> OtherHos
             may_type,
             may_start: false,
             may_resume: false,
+            may_manage: false,
             read_at: None,
             platform: None,
             app_version: None,
@@ -328,6 +397,10 @@ fn view(host_id: &str, name: String, view: HostView, may_type: bool) -> OtherHos
         .map(|p| OtherProject {
             id: p.id.to_string(),
             name: p.name.clone(),
+            repository: p
+                .remote
+                .as_deref()
+                .and_then(yardsort_core::remote::start::repository_key),
             workspaces: vec![],
         })
         .collect();
@@ -395,6 +468,7 @@ fn view(host_id: &str, name: String, view: HostView, may_type: bool) -> OtherHos
             None => projects.push(OtherProject {
                 id: project,
                 name: "Project".into(),
+                repository: None,
                 workspaces: vec![entry],
             }),
         }
@@ -418,6 +492,7 @@ fn view(host_id: &str, name: String, view: HostView, may_type: bool) -> OtherHos
         name: shown.host.name.clone(),
         may_start: answers(computer::start::START),
         may_resume: answers(computer::start::RESUME),
+        may_manage: answers(computer::start::MANAGE),
         link: link(&view.link),
         may_type,
         read_at: Some(shown.read_at_ms as f64),
@@ -607,31 +682,204 @@ pub async fn other_host_harnesses(app: AppHandle, host_id: String) -> IpcResult<
         .map(|h| OtherHarness {
             id: h.id,
             name: h.name,
+            models: h.models,
+            efforts: h.efforts,
         })
         .collect())
 }
 
-/// A new workspace in one of another computer's projects, named after `prompt`, with an agent
-/// given it. That computer makes it with its own settings, as its window would.
+/// A new workspace in one of another computer's projects, with an agent given its first message.
+/// That computer makes it with its own settings, as its window would. A name, a model, an effort
+/// or a branch is sent only to a computer that reads them ([`OtherHostView::may_manage`]).
 #[tauri::command]
 #[specta::specta]
 pub async fn other_host_start_workspace(
     app: AppHandle,
     host_id: String,
-    project_id: String,
-    prompt: String,
-    harness: Option<String>,
+    request: OtherNewWorkspace,
 ) -> IpcResult<OtherStarted> {
     computer::start::workspace(
         &home(&app),
         &host_id,
-        &project_id,
-        &prompt,
-        harness.as_deref(),
+        &request.project_id,
+        &request.prompt,
+        computer::start::Said {
+            harness: request.harness,
+            name: request.name,
+            model: request.model,
+            effort: request.effort,
+            base_branch: request.base_branch,
+            existing_branch: request.existing_branch,
+        },
     )
     .await
     .map(OtherStarted::from)
     .map_err(ipc)
+}
+
+/// The branches a new workspace in one of another computer's projects can start from or open.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_branches(
+    app: AppHandle,
+    host_id: String,
+    project_id: String,
+) -> IpcResult<OtherBranches> {
+    let listed = computer::start::branches(&home(&app), &host_id, &project_id)
+        .await
+        .map_err(ipc)?;
+    Ok(OtherBranches {
+        branches: listed.branches,
+        default: listed.default,
+        checked_out: listed.checked_out,
+        more: listed.more,
+    })
+}
+
+/// Where one of this computer's projects is fetched from, as another computer may be told it:
+/// its `origin`, when that is an address and not a folder, with no credentials in it.
+fn local_remote(app: &AppHandle, project_id: &str) -> IpcResult<Option<String>> {
+    let state = app.state::<AppState>();
+    let project = state
+        .store
+        .project(project_id)?
+        .ok_or_else(|| IpcError::new("unknown_project", "That project no longer exists."))?;
+    let git = yardsort_core::git::Git::new(&state.env())?;
+    Ok(git
+        .remote_url_as_set(std::path::Path::new(&project.root_path), "origin")
+        .as_deref()
+        .and_then(yardsort_core::remote::start::shareable_remote))
+}
+
+/// Which repository one of this computer's projects is, read from its `origin`.
+#[tauri::command]
+#[specta::specta]
+pub async fn project_repository(app: AppHandle, project_id: String) -> IpcResult<LocalRepository> {
+    let remote = tauri::async_runtime::spawn_blocking(move || local_remote(&app, &project_id))
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))??;
+    Ok(LocalRepository {
+        key: remote
+            .as_deref()
+            .and_then(yardsort_core::remote::start::repository_key),
+        clonable: remote.is_some(),
+    })
+}
+
+/// Have another computer clone the repository of one of this computer's projects into its own
+/// projects folder and add it there. Only the repository's address goes over, with no
+/// credentials in it; that computer clones with its own.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_clone(
+    app: AppHandle,
+    host_id: String,
+    project_id: String,
+) -> IpcResult<OtherCloned> {
+    let reader = app.clone();
+    let remote = tauri::async_runtime::spawn_blocking(move || local_remote(&reader, &project_id))
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))??
+        .ok_or_else(|| {
+            IpcError::new(
+                "no_remote",
+                "This project has no remote another computer could clone it from. Add it on \
+                 that computer instead.",
+            )
+        })?;
+    let cloned = computer::start::clone(&home(&app), &host_id, &remote)
+        .await
+        .map_err(ipc)?;
+    Ok(OtherCloned {
+        project_id: cloned.project.to_string(),
+        name: cloned.name,
+    })
+}
+
+/// That computer's shell in one of its workspaces.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_start_shell(
+    app: AppHandle,
+    host_id: String,
+    workspace_id: String,
+) -> IpcResult<OtherStarted> {
+    computer::start::shell(&home(&app), &host_id, &workspace_id)
+        .await
+        .map(OtherStarted::from)
+        .map_err(ipc)
+}
+
+/// Change what a workspace on another computer is called. Its folder and branch keep their names.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_rename_workspace(
+    app: AppHandle,
+    host_id: String,
+    workspace_id: String,
+    name: String,
+) -> IpcResult<()> {
+    computer::start::rename(&home(&app), &host_id, &workspace_id, &name)
+        .await
+        .map_err(ipc)
+}
+
+/// Archive a workspace on another computer, or with `remove` delete it. Both keep its branch.
+/// Fails with `remote_uncommitted` unless `force` when it has uncommitted work there.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_remove_workspace(
+    app: AppHandle,
+    host_id: String,
+    workspace_id: String,
+    remove: bool,
+    force: bool,
+) -> IpcResult<()> {
+    computer::start::remove(&home(&app), &host_id, &workspace_id, remove, force)
+        .await
+        .map_err(ipc)
+}
+
+fn projects_dir(state: &AppState) -> ProjectsDir {
+    let settings = state.settings.get().remote;
+    ProjectsDir {
+        used: yardsort_core::remote::start::projects_dir(&settings, &state.env())
+            .map(|dir| dir.to_string_lossy().into_owned()),
+        set: settings.projects_dir,
+    }
+}
+
+/// Where a repository another device has this computer clone goes.
+#[tauri::command]
+#[specta::specta]
+pub async fn remote_projects_dir(app: AppHandle) -> IpcResult<ProjectsDir> {
+    Ok(projects_dir(app.state::<AppState>().inner()))
+}
+
+/// Choose where such a clone goes, or with nothing go back to `Projects` in the home folder. The
+/// folder is made when the first clone needs it, not here.
+#[tauri::command]
+#[specta::specta]
+pub async fn remote_set_projects_dir(
+    app: AppHandle,
+    dir: Option<String>,
+) -> IpcResult<ProjectsDir> {
+    let state = app.state::<AppState>();
+    let dir = dir.map(|d| d.trim().to_owned()).filter(|d| !d.is_empty());
+    if let Some(dir) = &dir {
+        let absolute = dir.starts_with('~') || std::path::Path::new(dir).is_absolute();
+        if !absolute || dir.chars().any(char::is_control) {
+            return Err(IpcError::new(
+                "invalid_folder",
+                "Give the whole path of a folder, or one that starts with ~ for your home.",
+            ));
+        }
+    }
+    state
+        .settings
+        .update(|settings| settings.remote.projects_dir = dir)
+        .map_err(|e| IpcError::new("settings", e.to_string()))?;
+    Ok(projects_dir(state.inner()))
 }
 
 /// Another agent in one of another computer's workspaces, with a first message or none.

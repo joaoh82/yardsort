@@ -1342,7 +1342,7 @@ all five slices are built.
 - [x] Slice 1: the other computers as a tree in the sidebar, a workspace there in the panel a local
       one gets, control taken at once for what is started from here. No protocol change.
 - [x] Slice 2: **Run on** in the composer, with what a start there can say today.
-- [ ] Slice 3: protocol minor 10: name, model, effort and branch for a start there, a clone there
+- [x] Slice 3: protocol minor 10: name, model, effort and branch for a start there, a clone there
       when the project is missing, a shell, rename, archive and delete.
 - [ ] Slice 4: changes and files there, read-only.
 - [ ] Slice 5: commit, push and pull requests there.

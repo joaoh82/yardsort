@@ -3,6 +3,7 @@ import {
   enterWorkspace,
   openProjectFromDisk,
 } from "@/features/sidebar/actions";
+import { startShellThere } from "@/features/remote/there";
 import type { OtherWorkspace } from "@/lib/ipc";
 import type { CommandId } from "@/lib/shortcuts";
 import { useCoordinatorStore } from "@/stores/coordinator";
@@ -77,6 +78,11 @@ export function commandEnabled(id: CommandId): boolean {
   }
   if (id === "previousTerminal" || id === "nextTerminal") {
     if (projects.remote) return tabsThere(inViewThere()?.workspace ?? NO_TABS).length > 1;
+  }
+  // In a workspace on another computer, a shell is that computer's to start, when it can.
+  if (id === "newTerminal" && projects.remote) {
+    const view = inViewThere()?.view;
+    return !!view?.mayManage && view.link.kind === "online";
   }
   if (id === "newTerminal")
     return (
@@ -169,7 +175,9 @@ export function runCommand(id: CommandId) {
       break;
     }
     case "newTerminal":
-      if (workspaceId) void terminals.open(workspaceId);
+      if (projects.remote) {
+        void startShellThere(projects.remote.hostId, projects.remote.workspaceId);
+      } else if (workspaceId) void terminals.open(workspaceId);
       break;
     case "closeTerminal": {
       if (!workspaceId) break;

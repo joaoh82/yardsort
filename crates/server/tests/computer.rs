@@ -562,9 +562,28 @@ struct Stand {
     terminals: Arc<PtyHost>,
     workspace: String,
     asked: Mutex<Vec<String>>,
+    /// The project a clone is added as.
+    cloned: String,
+    /// Whether its workspace has uncommitted work, which archiving or deleting would lose.
+    dirty: std::sync::atomic::AtomicBool,
 }
 
 impl Stand {
+    fn note(&self, asked: String) {
+        self.asked.lock().unwrap().push(asked);
+    }
+
+    fn unless_dirty(&self, force: bool) -> IpcResult<()> {
+        if self.dirty.load(std::sync::atomic::Ordering::SeqCst) && !force {
+            // As the core says it, with a folder in it that must not reach the other computer.
+            return Err(IpcError::new(
+                "worktree_dirty",
+                "/home/someone/worktrees/w has uncommitted changes.",
+            ));
+        }
+        Ok(())
+    }
+
     fn run(&self, asked: String) -> IpcResult<pty_host::SessionInfo> {
         self.asked.lock().unwrap().push(asked);
         self.terminals
@@ -578,16 +597,66 @@ impl Starting for Stand {
         vec![remote_proto::HarnessSummary {
             id: "stand-in".into(),
             name: "Stand-in".into(),
+            models: vec!["large".into()],
+            efforts: vec!["high".into()],
         }]
     }
     fn workspace(
         &self,
-        project: &str,
-        prompt: &str,
-        harness: &str,
+        new: &yardsort_core::remote::start::NewWorkspace,
     ) -> IpcResult<(String, pty_host::SessionInfo)> {
-        let info = self.run(format!("workspace {project} {harness} {prompt}"))?;
+        let said = [
+            &new.name,
+            &new.model,
+            &new.effort,
+            &new.base_branch,
+            &new.existing_branch,
+        ]
+        .map(|part| part.as_deref().unwrap_or("-"))
+        .join(" ");
+        let extra = if said == "- - - - -" {
+            String::new()
+        } else {
+            format!(" [{said}]")
+        };
+        let info = self.run(format!(
+            "workspace {} {} {}{extra}",
+            new.project, new.harness, new.prompt
+        ))?;
         Ok((self.workspace.clone(), info))
+    }
+    fn shell(&self, workspace: &str) -> IpcResult<pty_host::SessionInfo> {
+        self.run(format!("shell {workspace}"))
+    }
+    fn branches(&self, project: &str) -> IpcResult<remote_proto::ProjectBranches> {
+        self.note(format!("branches {project}"));
+        Ok(remote_proto::manage::bounded_branches(
+            vec!["main".into(), "develop".into()],
+            Some("main".into()),
+            vec!["main".into()],
+        ))
+    }
+    fn clone_project(&self, remote: &str, name: Option<&str>) -> IpcResult<(String, String)> {
+        self.note(format!("clone {remote} {name:?}"));
+        if remote.contains("private") {
+            return Err(IpcError::new(
+                "clone_failed",
+                "Could not clone /secret/path",
+            ));
+        }
+        Ok((self.cloned.clone(), "cloned".into()))
+    }
+    fn rename(&self, workspace: &str, name: &str) -> IpcResult<()> {
+        self.note(format!("rename {workspace} {name}"));
+        Ok(())
+    }
+    fn archive(&self, workspace: &str, force: bool) -> IpcResult<()> {
+        self.note(format!("archive {workspace} {force}"));
+        self.unless_dirty(force)
+    }
+    fn delete(&self, workspace: &str, force: bool) -> IpcResult<()> {
+        self.note(format!("delete {workspace} {force}"));
+        self.unless_dirty(force)
     }
     fn session(
         &self,
@@ -657,6 +726,8 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
         terminals: Arc::clone(&terminals),
         workspace: workspace.id.clone(),
         asked: Mutex::default(),
+        cloned: project.id.clone(),
+        dirty: std::sync::atomic::AtomicBool::new(false),
     });
     let here = Arc::new(Here {
         _dir: dir,
@@ -737,7 +808,10 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
         host,
         &project.id,
         "Fix the spacing",
-        Some("stand-in"),
+        start::Said {
+            harness: Some("stand-in".into()),
+            ..start::Said::default()
+        },
     )
     .await
     .unwrap();
@@ -766,6 +840,77 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
         .unwrap_err();
     assert_eq!(refused.code, "remote_refused");
     assert_eq!(stand.asked.lock().unwrap().len(), 3);
+
+    // Since minor 10: what a start says beyond its message reaches the host, each part as said.
+    let said = |effort: &str| start::Said {
+        harness: Some("stand-in".into()),
+        name: Some("tidy".into()),
+        model: Some("large".into()),
+        effort: Some(effort.into()),
+        base_branch: Some("develop".into()),
+        existing_branch: None,
+    };
+    start::workspace(&desk, host, &project.id, "Tidy it", said("high"))
+        .await
+        .unwrap();
+    // An effort that agent does not have there is refused, and nothing is made for it.
+    let odd = start::workspace(&desk, host, &project.id, "Tidy it", said("ludicrous"))
+        .await
+        .unwrap_err();
+    assert_eq!(odd.code, "remote_refused");
+    let branches = start::branches(&desk, host, &project.id).await.unwrap();
+    assert_eq!(branches.branches, ["main", "develop"]);
+    assert_eq!(branches.default.as_deref(), Some("main"));
+    assert_eq!(branches.checked_out, ["main"]);
+    let shell = start::shell(&desk, host, &workspace.id).await.unwrap();
+    assert_eq!(shell.workspace.as_str(), workspace.id);
+    assert_eq!(shell.harness, "", "a shell is no harness");
+    start::rename(&desk, host, &workspace.id, " Login spacing ")
+        .await
+        .unwrap();
+    // Uncommitted work there: archiving and deleting are refused until asked a second time, and
+    // the host's own words, which name its folder, do not come over.
+    stand.dirty.store(true, std::sync::atomic::Ordering::SeqCst);
+    for delete in [false, true] {
+        let dirty = start::remove(&desk, host, &workspace.id, delete, false)
+            .await
+            .unwrap_err();
+        assert_eq!(dirty.code, "remote_uncommitted");
+        assert!(!dirty.message.contains("/home"), "{}", dirty.message);
+        start::remove(&desk, host, &workspace.id, delete, true)
+            .await
+            .unwrap();
+    }
+    // A clone is asked for by its address, and the project it was added as comes back. One the
+    // host cannot clone says so without its folders.
+    let cloned = start::clone(&desk, host, " https://example.com/acme/app.git ")
+        .await
+        .unwrap();
+    assert_eq!(cloned.project.as_str(), project.id);
+    assert_eq!(cloned.name, "cloned");
+    let failed = start::clone(&desk, host, "https://example.com/acme/private.git")
+        .await
+        .unwrap_err();
+    assert_eq!(failed.code, "remote_refused");
+    assert!(!failed.message.contains("/secret"), "{}", failed.message);
+    assert_eq!(
+        stand.asked.lock().unwrap()[3..],
+        [
+            format!(
+                "workspace {} stand-in Tidy it [tidy large high develop -]",
+                project.id
+            ),
+            format!("branches {}", project.id),
+            format!("shell {}", workspace.id),
+            format!("rename {} Login spacing", workspace.id),
+            format!("archive {} false", workspace.id),
+            format!("archive {} true", workspace.id),
+            format!("delete {} false", workspace.id),
+            format!("delete {} true", workspace.id),
+            "clone https://example.com/acme/app.git None".to_owned(),
+            "clone https://example.com/acme/private.git None".to_owned(),
+        ]
+    );
     for terminal in here.terminals.list() {
         let _ = here.terminals.kill(&terminal.id);
     }

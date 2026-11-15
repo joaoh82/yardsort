@@ -129,7 +129,12 @@ const setField = (selector: string, value: string) =>
   page(`(() => {
     const field = document.querySelector(${JSON.stringify(selector)});
     if (!field) return false;
-    const kind = field instanceof HTMLSelectElement ? HTMLSelectElement : HTMLTextAreaElement;
+    const kind =
+      field instanceof HTMLSelectElement
+        ? HTMLSelectElement
+        : field instanceof HTMLInputElement
+          ? HTMLInputElement
+          : HTMLTextAreaElement;
     Object.getOwnPropertyDescriptor(kind.prototype, "value").set.call(field, ${JSON.stringify(value)});
     field.dispatchEvent(new Event(field instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
     return true;
@@ -565,6 +570,137 @@ switch (doing) {
     );
     if (away !== "disabled") throw new Error(`${name} is away and still offered.`);
     console.log(`saw: ${name} listed as offline, and not offered`);
+    break;
+  }
+  case "runs-on-saying": {
+    // Here the last arguments are the host's name and what its agent is to do. As runs-on, with
+    // what a host from 0.35.0 takes: a name, a model, an effort and the branch to start from,
+    // each chosen from the host's own lists.
+    const name = runDir as string;
+    const message = process.argv[5] as string;
+    await onlineThere(name);
+    await composeHere("repo");
+    await setField(`${HERE} textarea`, message);
+    await chooseThere(name);
+    const form = `form[aria-label="New workspace on ${name}"]`;
+    await until("its branches", () =>
+      page(
+        `Boolean(document.querySelector(${JSON.stringify(`${form} select[aria-label="Branch"] option[value="new:develop"]`)}))`,
+      ),
+    );
+    await until("its agents", () =>
+      page(`Boolean(document.querySelector('${form} option[value="stand-in"]'))`),
+    );
+    await setField(`${form} select[aria-label="Harness"]`, "stand-in");
+    await until("that agent's efforts", () =>
+      page(
+        `Boolean(document.querySelector(${JSON.stringify(`${form} select[aria-label="Effort"] option[value="high"]`)}))`,
+      ),
+    );
+    await setField(`${form} input[placeholder^="named by"]`, "tidy");
+    await setField(`${form} input[aria-label="Model"]`, "large");
+    await setField(`${form} select[aria-label="Effort"]`, "high");
+    await setField(`${form} select[aria-label="Branch"]`, "new:develop");
+    console.log("saw: a name, a model, an effort and a branch to choose, from its own lists");
+    await click("Start");
+    try {
+      await until("control of what it started", async () =>
+        (await textOf(`[aria-label="Control"]`)).includes("This computer has control."),
+      );
+    } catch (error) {
+      console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
+      throw error;
+    }
+    console.log(`saw: a workspace started on ${name}, saying all four`);
+    break;
+  }
+  case "clones-there":
+  case "clone-fails-there": {
+    // Here the last arguments are the host's name and this computer's project, which the host has
+    // none for. The composer offers Clone it there, never by itself; chosen, Start has the host
+    // clone the repository and makes the workspace in it. One the host cannot clone says so.
+    const name = runDir as string;
+    const project = process.argv[5] as string;
+    await composeHere(project);
+    await setField(`${HERE} textarea`, `in-the-clone-of-${project}`);
+    await chooseThere(name);
+    const form = `form[aria-label="New workspace on ${name}"]`;
+    await until("Clone it there, offered", () => page(clicked("Clone it there")));
+    await until("the clone chosen", async () =>
+      (await textOf(form)).includes("projects folder when you start"),
+    );
+    await until("its agents", () =>
+      page(`Boolean(document.querySelector('${form} option[value="stand-in"]'))`),
+    );
+    await setField(`${form} select[aria-label="Harness"]`, "stand-in");
+    await click("Start");
+    if (doing === "clone-fails-there") {
+      await until("why it could not be cloned", async () =>
+        (await textOf(`${form} [role="alert"]`)).includes("could not clone"),
+      );
+      const kept = await page(
+        `document.querySelector(${JSON.stringify(`${form} textarea`)}).value`,
+      );
+      if (kept !== `in-the-clone-of-${project}`) throw new Error("The message was not kept.");
+      console.log(`saw: ${name} could not clone ${project}, and the message is still here`);
+      break;
+    }
+    try {
+      await until("control of what it started", async () =>
+        (await textOf(`[aria-label="Control"]`)).includes("This computer has control."),
+      );
+      await until("the clone under it in the sidebar", () =>
+        page(
+          `Boolean(document.querySelector(${JSON.stringify(`${TREE} [role="treeitem"][aria-label="${name}"] [role="treeitem"][aria-label="${project}"] [role="treeitem"][aria-selected="true"]`)}))`,
+        ),
+      );
+    } catch (error) {
+      console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
+      throw error;
+    }
+    console.log(`saw: ${project} cloned on ${name}, and a workspace started in it`);
+    break;
+  }
+  case "shell-there": {
+    // Here the last arguments are the host's name and one of its workspaces. Its + opens the
+    // host's shell there as another tab, this computer's to type into at once.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    await openThere(name, workspace);
+    const view = viewThere(name, workspace);
+    const tabs = () =>
+      page(`document.querySelectorAll(${JSON.stringify(`${view} [role="tab"]`)}).length`);
+    const before = Number(await tabs());
+    await until("New shell, offered", () => page(clickedNamed("New shell")));
+    await until("another tab", async () => Number(await tabs()) > before, 60_000);
+    await until("control of the shell", async () =>
+      (await textOf(`[aria-label="Control"]`)).includes("This computer has control."),
+    );
+    console.log(`saw: a shell on ${name} in ${workspace}, with control`);
+    break;
+  }
+  case "remove-there": {
+    // Here the last arguments are the host's name, one of its workspaces, and `force` or nothing.
+    // The window's questions are the system's own dialogs, which nothing here can press, so the
+    // core is asked as the window asks it once the person has answered: without force first.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    const force = process.argv[6] === "force";
+    const asked = await page(`(async () => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const status = await invoke("other_computers");
+      const host = status.hosts.find((h) => h.name === ${JSON.stringify(name)});
+      const view = await invoke("other_host", { hostId: host.hostId });
+      const found = view.projects.flatMap((p) => p.workspaces).find((w) => w.name === ${JSON.stringify(workspace)});
+      if (!found) return "no such workspace";
+      try {
+        await invoke("other_host_remove_workspace", { hostId: host.hostId, workspaceId: found.id, remove: true, force: ${force} });
+        return "deleted";
+      } catch (error) {
+        return "refused: " + error.code;
+      }
+    })()`);
+    console.log(`saw: ${String(asked)}`);
     break;
   }
   default:

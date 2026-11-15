@@ -7,6 +7,8 @@ import {
   type OtherHostView,
   type OtherStarted,
 } from "@/lib/ipc";
+import { isIpcError } from "@/lib/ipc";
+import { native } from "@/lib/native";
 import { thereKey, type ThereTab, useOtherComputersStore } from "@/stores/otherComputers";
 import { recall, useProjectsStore } from "@/stores/projects";
 
@@ -17,12 +19,13 @@ export const PROJECT_THERE = "composer.projectThere";
 /** A project there offered for one of this computer's, and why that one. */
 export interface OfferedThere {
   projectId: string | null;
-  how: "remembered" | "same name" | null;
+  how: "remembered" | "same repository" | "same name" | null;
 }
 
 /**
  * The project on another computer to offer for one here: the one chosen for it last time, if that
- * computer still has it, or else the one of the same name. A local project and one there are
+ * computer still has it, or else the one that is the same repository, or else the one of the same
+ * name. A local project and one there are
  * separate records, so this is an offer the composer shows, never a silent pick. `local.id` is
  * `null` when only a name is known.
  */
@@ -30,7 +33,7 @@ export function offeredThere(
   view: OtherHostView | null | undefined,
   ui: Record<string, string>,
   hostId: string,
-  local: { id: string | null; name: string },
+  local: { id: string | null; name: string; repository?: string | null },
 ): OfferedThere {
   const projects = view?.projects ?? [];
   const kept = local.id
@@ -39,6 +42,11 @@ export function offeredThere(
   if (kept && projects.some((project) => project.id === kept)) {
     return { projectId: kept, how: "remembered" };
   }
+  // The same repository, when both computers said where theirs is fetched from: surer than a name.
+  const same = local.repository
+    ? projects.find((project) => project.repository === local.repository)
+    : undefined;
+  if (same) return { projectId: same.id, how: "same repository" };
   const named =
     projects.find((project) => project.name === local.name) ??
     projects.find((project) => project.name.toLowerCase() === local.name.toLowerCase());
@@ -83,6 +91,76 @@ export async function startThere(
 /** Another agent in a workspace there, waiting to be told what to do. */
 export function startAgentThere(hostId: string, workspaceId: string, harness: string | null) {
   return startThere(hostId, () => ipc.otherHostStartSession(hostId, workspaceId, harness, null));
+}
+
+/** That computer's shell in a workspace there. */
+export function startShellThere(hostId: string, workspaceId: string) {
+  return startThere(hostId, () => ipc.otherHostStartShell(hostId, workspaceId));
+}
+
+/** Rename a workspace there. Resolves to why it could not be, or `null`. */
+export async function renameThere(
+  hostId: string,
+  workspaceId: string,
+  name: string,
+): Promise<string | null> {
+  try {
+    await ipc.otherHostRenameWorkspace(hostId, workspaceId, name);
+    void useOtherComputersStore.getState().loadHost(hostId);
+    return null;
+  } catch (error) {
+    return errorMessage(error);
+  }
+}
+
+/**
+ * Archive a workspace on another computer, or with `remove` delete it: its folder goes there, its
+ * branch stays. Asked first, as for a local one, and uncommitted work there is never destroyed
+ * without a second confirmation that says so. A failure is shown where the sidebar shows them.
+ */
+export async function removeThere(
+  hostId: string,
+  hostName: string,
+  workspace: { id: string; name: string; branch: string | null },
+  remove: boolean,
+): Promise<void> {
+  const doing = remove ? "Delete" : "Archive";
+  try {
+    const agreed = await native.confirm(
+      `${doing} workspace "${workspace.name}" on ${hostName}?\n\nIts folder is removed from ${hostName}. ` +
+        (workspace.branch
+          ? `The branch "${workspace.branch}" and all its commits are kept there.`
+          : "Its commits stay in the repository there.") +
+        (remove
+          ? ""
+          : " Its conversations are kept too, and it can be restored at that computer.") +
+        " Terminals running in it are not stopped by this.",
+      { title: `${doing} workspace on ${hostName}`, okLabel: doing },
+    );
+    if (!agreed) return;
+    const ask = (force: boolean) =>
+      ipc.otherHostRemoveWorkspace(hostId, workspace.id, remove, force);
+    try {
+      await ask(false);
+    } catch (error) {
+      if (!isIpcError(error) || error.code !== "remote_uncommitted") throw error;
+      const force = await native.confirm(
+        `"${workspace.name}" has uncommitted changes or untracked files on ${hostName}.\n\n` +
+          `${remove ? "Deleting" : "Archiving"} it now destroys that work for good: it is in no commit and cannot be recovered.`,
+        { title: "Uncommitted work will be lost", okLabel: `${doing} anyway` },
+      );
+      if (!force) return;
+      await ask(true);
+    }
+    // It is gone from that computer: nothing of it stays in view here.
+    const projects = useProjectsStore.getState();
+    if (projects.remote?.hostId === hostId && projects.remote.workspaceId === workspace.id) {
+      useProjectsStore.setState({ remote: null });
+    }
+    void useOtherComputersStore.getState().loadHost(hostId);
+  } catch (error) {
+    useProjectsStore.setState({ error: errorMessage(error) });
+  }
 }
 
 /** An ended conversation there again, under its own record. */

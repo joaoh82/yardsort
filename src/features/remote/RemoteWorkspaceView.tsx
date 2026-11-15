@@ -14,7 +14,7 @@ import {
   useOtherComputersStore,
 } from "@/stores/otherComputers";
 import { ComputerBar, RemoteTerminal } from "./RemoteTerminal";
-import { resumeThere, startAgentThere, tabActivity } from "./there";
+import { resumeThere, startAgentThere, startShellThere, tabActivity } from "./there";
 
 /**
  * A workspace on another computer, in the center panel a local workspace gets: that computer and
@@ -45,6 +45,7 @@ export function RemoteWorkspaceView({
   const view = views[hostId];
   const name = view?.name || hostName || "Another computer";
   const mayStart = !!view?.mayStart && view.link.kind === "online";
+  const mayManage = !!view?.mayManage && view.link.kind === "online";
 
   useEffect(() => {
     if (mayStart) void useOtherComputersStore.getState().loadHarnesses(hostId);
@@ -83,6 +84,7 @@ export function RemoteWorkspaceView({
         tabs={tabs}
         activeId={active?.id}
         harnesses={mayStart ? harnesses : undefined}
+        shell={mayManage}
       />
       {problem && (
         <div
@@ -187,13 +189,17 @@ function Tabs({
   tabs,
   activeId,
   harnesses,
+  shell,
 }: {
   hostId: string;
   workspaceId: string;
   tabs: ThereTab[];
   activeId: string | undefined;
   harnesses: OtherHarness[] | undefined;
+  /** Whether that computer starts a shell from here. */
+  shell: boolean;
 }) {
+  const [opening, setOpening] = useState(false);
   return (
     <div className="flex h-10 shrink-0 items-stretch border-b border-line bg-surface">
       <div role="tablist" aria-label="Terminals" className="flex min-w-0 items-stretch">
@@ -224,6 +230,21 @@ function Tabs({
             </div>
           );
         })}
+        {shell && (
+          <button
+            type="button"
+            aria-label="New shell"
+            title="New shell in this workspace, on that computer"
+            disabled={opening}
+            onClick={() => {
+              setOpening(true);
+              void startShellThere(hostId, workspaceId).finally(() => setOpening(false));
+            }}
+            className="px-3 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
+          >
+            +
+          </button>
+        )}
       </div>
       {harnesses && (
         <div className="ml-auto flex items-center gap-1 pr-2">

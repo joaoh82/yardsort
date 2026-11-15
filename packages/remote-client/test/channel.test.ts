@@ -21,6 +21,7 @@ import {
   MAX_OUTPUT_CHUNK,
   MAX_UPLOAD_CHUNK,
   openChannel,
+  type ProjectId,
   Secret,
   type TerminalId,
   type WorkspaceId,
@@ -584,6 +585,102 @@ describe("uploading", () => {
     const failed = await channel.upload("w" as WorkspaceId, "a.jpg", photo).catch((e) => e);
     expect(failed).toBeInstanceOf(ClientError);
     expect((failed as ClientError).message).toContain("Out of order.");
+    channel.close();
+  });
+});
+
+describe("looking after projects and workspaces", () => {
+  const PROJECT = "p" as ProjectId;
+  const WORKSPACE = "w" as WorkspaceId;
+
+  test("each is asked under its name, and its reply read", async () => {
+    const { client, asked } = relay((request, socket) => {
+      const results: Record<string, unknown> = {
+        "project.branches": { kind: "branches", branches: ["main", "dev"], default: "main" },
+        "project.clone": { kind: "cloned", project: "p2", name: "app" },
+        "shell.start": { kind: "started", workspace: "w", terminal: "t", harness: "" },
+        "workspace.start": { kind: "started", workspace: "w2", terminal: "t2", harness: "claude" },
+        "workspace.rename": { kind: "done" },
+      };
+      answer(socket, request, results[request.op]);
+    });
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    expect(await channel.branches(PROJECT)).toEqual({ branches: ["main", "dev"], default: "main" });
+    expect(await channel.cloneProject({ remote: "https://example.com/app.git" })).toEqual({
+      project: "p2" as ProjectId,
+      name: "app",
+    });
+    expect((await channel.startShell(WORKSPACE)).harness).toBe("");
+    const started = await channel.startWorkspace({
+      project: PROJECT,
+      prompt: "Fix it",
+      model: "opus",
+      baseBranch: "dev",
+    });
+    expect(started.terminal as string).toBe("t2");
+    await channel.renameWorkspace({ workspace: WORKSPACE, name: "Login spacing" });
+    expect(asked.map(({ op, params }) => ({ op, params }))).toEqual([
+      { op: "project.branches", params: { project: "p" } },
+      { op: "project.clone", params: { remote: "https://example.com/app.git" } },
+      { op: "shell.start", params: { workspace: "w" } },
+      {
+        op: "workspace.start",
+        params: { project: "p", prompt: "Fix it", model: "opus", baseBranch: "dev" },
+      },
+      { op: "workspace.rename", params: { workspace: "w", name: "Login spacing" } },
+    ]);
+    channel.close();
+  });
+
+  test("uncommitted work is not lost until the request says force", async () => {
+    const { client, asked } = relay((request, socket) => {
+      if (request.params?.force === true) return answer(socket, request, { kind: "done" });
+      socket.send(
+        JSON.stringify({
+          requestId: request.requestId,
+          error: { code: "uncommitted_work", message: "It has changes.", retryable: false },
+        }),
+      );
+    });
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    for (const remove of [
+      (force?: boolean) =>
+        channel.archiveWorkspace({ workspace: WORKSPACE, ...(force ? { force } : {}) }),
+      (force?: boolean) =>
+        channel.deleteWorkspace({ workspace: WORKSPACE, ...(force ? { force } : {}) }),
+    ]) {
+      const refused = await remove().catch((e: unknown) => e);
+      expect((refused as ClientError).code).toBe("uncommitted_work");
+      await remove(true);
+    }
+    // A force of false says nothing, as one left out.
+    await channel.deleteWorkspace({ workspace: WORKSPACE, force: false }).catch(() => {});
+    expect(asked.map(({ op, params }) => ({ op, params }))).toEqual([
+      { op: "workspace.archive", params: { workspace: "w" } },
+      { op: "workspace.archive", params: { workspace: "w", force: true } },
+      { op: "workspace.delete", params: { workspace: "w" } },
+      { op: "workspace.delete", params: { workspace: "w", force: true } },
+      { op: "workspace.delete", params: { workspace: "w" } },
+    ]);
+    channel.close();
+  });
+
+  test("what no computer would take is refused here, and nothing is sent", async () => {
+    const { client, asked } = relay(() => {});
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    for (const refused of [
+      channel.cloneProject({ remote: "--upload-pack=x" }),
+      channel.renameWorkspace({ workspace: WORKSPACE, name: " " }),
+      channel.startWorkspace({
+        project: PROJECT,
+        prompt: "Fix it",
+        existingBranch: "kept",
+        baseBranch: "main",
+      }),
+    ]) {
+      expect(((await refused.catch((e: unknown) => e)) as ClientError).kind).toBe("invalid");
+    }
+    expect(asked).toEqual([]);
     channel.close();
   });
 });

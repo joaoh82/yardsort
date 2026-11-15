@@ -72,6 +72,15 @@ Shortcuts with **Cmd** are left to the phone, and so are Ctrl-Tab and Alt-Tab.
 A device you let type can start work here too. It is no more than it could do by typing into a terminal,
 so it needs nothing else from you.
 
+The same goes for what the desktop app on another computer can ask of this one, once you let it
+type ([Reaching another computer](#reaching-another-computer)): a shell in a workspace, a workspace
+renamed, archived or deleted, and a repository cloned and added as a project. None of them names a
+folder here. A clone goes into the folder under **Projects cloned for a device** in Settings →
+Remote, `~/Projects` unless you set another, and is fetched with this computer's own Git sign-in;
+a device let into only some of your projects cannot clone. Archiving and deleting keep the branch,
+and a workspace with uncommitted work is refused until the person at the other computer has been
+asked a second time. A device you let only watch can do none of this.
+
 - **New workspace**, on a computer's screen, asks for the project, the agent and what it should do. This
   computer makes the workspace as its [composer](workspaces.md#starting-one-the-composer) does: a branch
   named after the message, from the project's default branch, with the project's setup run, and the
@@ -235,10 +244,17 @@ each by that computer's own projects, workspaces and agents:
   will run, **This computer** until you change it; press that and pick a computer. The **+** on one
   of a computer's projects in the sidebar, or **New workspace** in that project's menu, opens the
   composer with that computer already chosen. Say what the agent should work on, pick one of that
-  computer's agents, and press Enter. That computer makes the workspace, names its branch after your
-  message and starts from its default branch. See [Run on](#run-on) below.
+  computer's agents, and press Enter. That computer makes the workspace. See [Run on](#run-on) below.
 - **Another agent:** the buttons at the end of the tab bar start one of that computer's agents in the
   workspace, waiting to be told what to do. A workspace's menu in the sidebar offers the same.
+- **A shell:** the **+** after the tabs, or **New shell** in the workspace's menu, opens that
+  computer's shell in the workspace. It is yours to type into at once, like an agent you start.
+- **Rename, archive, delete:** in the menu of a workspace there, for every workspace but the
+  project's own checkout. **Rename…** changes the name shown; the folder and the branch keep
+  theirs. **Archive…** and **Delete workspace…** ask first, remove the folder on that computer and
+  keep its branch. If the workspace has uncommitted work there, you are asked a second time before
+  it is lost, and a no leaves everything as it was. Restoring an archived workspace is done at that
+  computer.
 - **Resume:** an agent that ended there offers **Resume** over its terminal, and under **Previous
   sessions** when nothing runs in the workspace. It shows only for one that computer could resume.
 
@@ -247,8 +263,10 @@ terminal as soon as it opens, without a press. If that is refused, or the person
 back, it is **Take control** from then on. It runs on that computer, with that computer's settings,
 and is listed under it, never among your own projects. If the connection drops before that computer
 answers, the window says it may have started anyway, and nothing is tried again by itself. A computer
-that lets this one only watch offers none of these, and nor does one whose Yardsort is too old for
-them. Nothing can be started on a computer that is away, and nothing is queued for it.
+that lets this one only watch offers none of these. One whose Yardsort is older than 0.35.0 starts
+agents and resumes them, and does not offer the shell, the rename, archive and delete, or the fuller
+composer described below. Nothing can be started on a computer that is away, and nothing is queued
+for it.
 
 ### Run on
 
@@ -262,17 +280,37 @@ workspace reads _New workspace in project on **This computer**_. The last part i
 - **Pair another computer…** opens Settings → Remote.
 
 Choosing a computer keeps what you have typed and changes the rest of the composer to that
-computer's: its agents, and a line saying that it names the branch, picks the branch to start from,
-adds its project memory and runs its setup by its own settings. The model, effort, name and branch
-fields are not there yet for another computer. Choosing **This computer** brings the full composer
-back, again with what you typed.
+computer's:
+
+- **Harness**, **Model** and **Effort** list that computer's agents, the models its settings
+  suggest and the efforts each agent takes there.
+- **Branch** lists that project's branches on that computer: start a new branch from one, or open
+  one that no workspace there has out.
+- **Name** is the new workspace's folder there and its branch after that computer's prefix. Left
+  empty, that computer names it after your message.
+
+That computer adds its project memory and runs its setup by its own settings, and the triggers of
+the new workspace are set there. A computer whose Yardsort is older than 0.35.0 shows only its
+agents, and says that it names the branch and picks where to start itself. Choosing **This
+computer** brings the local composer back, again with what you typed; the model, effort and branch
+you picked for one computer do not carry to another.
 
 **Project on _computer_** says which of that computer's projects the workspace will be made in. A
-project here and one there are separate, so Yardsort offers the one with the same name and says so,
-and you can pick another. The choice is remembered on this computer once something starts, and
-offered next time for the same project here. When that computer has no project of that name, the
-composer says so and nothing starts until you choose one of its projects or add the project there
-(**Add project** in its window, or `ys project add` in its terminal).
+project here and one there are separate, so Yardsort offers one and says why: the one you chose
+last time for this project, or else the one that is the same repository (both fetched from the
+same place), or else the one with the same name. You can pick another. The choice is remembered on
+this computer once something starts.
+
+When that computer has no such project, the composer says so and offers **Clone it there**. Start
+then has that computer clone the repository into its own projects folder and add it as a project,
+and makes the workspace in it. Only the repository's address goes over, with any user name and
+password taken out; that computer clones with its own Git sign-in, so a private repository it
+cannot read fails there and the composer says so. Where it goes is that computer's setting
+(**Projects cloned for a device** in its Settings → Remote, or `projects_dir` under `[remote]` in
+a headless host's `settings.toml`), `~/Projects` by default. **Clone it there** is not offered
+when this project has no remote another computer could reach, or when that computer's Yardsort is
+older; and that computer refuses it when you are let into only some of its projects. Then add the
+project there yourself (**Add project** in its window, or `ys project add` in its terminal).
 
 The menu is offered for a plain new workspace only. A fork, a task from the Tasks view, a pull
 request's branch and a run in an existing workspace all start from something on this computer, so
@@ -281,7 +319,8 @@ they stay here.
 **The keyboard.** The next and previous workspace shortcuts go on from your own workspaces to the
 other computers', in the sidebar's order, and the next and previous tab shortcuts switch a workspace's
 tabs there. With a workspace there in view, the new workspace shortcut composes one on that computer,
-in the same project, and the new shell shortcut does nothing: a shell there is not offered yet.
+in the same project, and the new shell shortcut opens that computer's shell in it. Closing a tab
+there is not offered: its terminals are ended at that computer, or by the program in them.
 
 **This is a device of its own.** Signing in here makes a second device at the server, apart from this
 computer as a host: turning Remote on or off above leaves it signed in, and **Sign out** under Other

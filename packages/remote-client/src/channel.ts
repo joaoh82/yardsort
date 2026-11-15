@@ -51,6 +51,10 @@ import {
   type MemoryListParams,
   type MemoryPage,
   type Operation,
+  type ProjectBranches,
+  type ProjectCloned,
+  type ProjectCloneParams,
+  type ProjectId,
   type ProtocolVersion,
   type RemoteError,
   type Reply,
@@ -74,6 +78,8 @@ import {
   type WorkspaceId,
   type WorkspaceListParams,
   type WorkspacePage,
+  type WorkspaceRemoveParams,
+  type WorkspaceRenameParams,
   type WorkflowChallenge,
   type WorkflowDecideParams,
   type WorkflowDecision,
@@ -330,6 +336,9 @@ export class Channel {
   /**
    * A new workspace, named after `prompt`, with an agent given it as its first message. The reply
    * comes once the agent has started, which can take as long as the project's setup does.
+   *
+   * A name, a model, an effort and a branch are for a computer whose capabilities list
+   * `project.branches`: an earlier one does not read them. Minor 10.
    */
   async startWorkspace(params: WorkspaceStartParams): Promise<Started> {
     const { kind: _, ...started } = expect(
@@ -346,6 +355,60 @@ export class Channel {
       "started",
     );
     return started;
+  }
+
+  /** The computer's shell in a workspace. Its `harness` is empty. Minor 10. */
+  async startShell(workspace: WorkspaceId): Promise<Started> {
+    const { kind: _, ...started } = expect(
+      await this.ask({ op: "shell.start", params: { workspace } }),
+      "started",
+    );
+    return started;
+  }
+
+  // --- looking after projects and workspaces ---------------------------------------------------
+
+  /** The branches a new workspace in a project can start from or open. Minor 10. */
+  async branches(project: ProjectId): Promise<ProjectBranches> {
+    const { kind: _, ...branches } = expect(
+      await this.ask({ op: "project.branches", params: { project } }),
+      "branches",
+    );
+    return branches;
+  }
+
+  /**
+   * A repository cloned into the computer's projects folder and added as a project. The reply
+   * comes once the clone is done, which can take as long as the repository is large. Minor 10.
+   */
+  async cloneProject(params: ProjectCloneParams): Promise<ProjectCloned> {
+    const { kind: _, ...cloned } = expect(
+      await this.ask({ op: "project.clone", params }),
+      "cloned",
+    );
+    return cloned;
+  }
+
+  /** Change what a workspace is called. Minor 10. */
+  async renameWorkspace(params: WorkspaceRenameParams): Promise<void> {
+    expect(await this.ask({ op: "workspace.rename", params }), "done");
+  }
+
+  /**
+   * Put a workspace away, keeping its branch and its record. One with uncommitted work is refused
+   * as `uncommitted_work` unless `force` is set, which is for after the person was asked again.
+   * Minor 10.
+   */
+  async archiveWorkspace(params: WorkspaceRemoveParams): Promise<void> {
+    expect(await this.ask({ op: "workspace.archive", params }), "done");
+  }
+
+  /**
+   * Remove a workspace, keeping its branch. Refused as {@link Channel.archiveWorkspace} is.
+   * Minor 10.
+   */
+  async deleteWorkspace(params: WorkspaceRemoveParams): Promise<void> {
+    expect(await this.ask({ op: "workspace.delete", params }), "done");
   }
 
   /** Workflow runs this computer is driving, newest first. */

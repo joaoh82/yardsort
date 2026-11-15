@@ -178,6 +178,12 @@ impl AppStarting {
         })
     }
 
+    /// A device renamed, archived or deleted a workspace, or cloned a project: the window reads
+    /// its projects again.
+    fn changed(&self) {
+        let _ = RemoteChangedProjects {}.emit(&self.0);
+    }
+
     /// An agent was started from a device: the window shows its tab, and the workspace when
     /// it is new, as for one a workflow started.
     fn started(&self, workspace_id: &str, session: &SessionInfo) {
@@ -199,14 +205,45 @@ impl Starting for AppStarting {
 
     fn workspace(
         &self,
-        project: &str,
-        prompt: &str,
-        harness: &str,
+        new: &yardsort_core::remote::start::NewWorkspace,
     ) -> IpcResult<(String, SessionInfo)> {
-        let (workspace, session) =
-            self.with(|starter| starter.workspace(project, prompt, harness))?;
+        let (workspace, session) = self.with(|starter| starter.workspace(new))?;
         self.started(&workspace, &session);
         Ok((workspace, session))
+    }
+
+    fn shell(&self, workspace: &str) -> IpcResult<SessionInfo> {
+        let session = self.with(|starter| starter.shell(workspace))?;
+        self.started(workspace, &session);
+        Ok(session)
+    }
+
+    fn branches(&self, project: &str) -> IpcResult<remote_proto::ProjectBranches> {
+        self.with(|starter| starter.branches(project))
+    }
+
+    fn clone_project(&self, remote: &str, name: Option<&str>) -> IpcResult<(String, String)> {
+        let cloned = self.with(|starter| starter.clone_project(remote, name))?;
+        self.changed();
+        Ok(cloned)
+    }
+
+    fn rename(&self, workspace: &str, name: &str) -> IpcResult<()> {
+        self.with(|starter| starter.rename(workspace, name))?;
+        self.changed();
+        Ok(())
+    }
+
+    fn archive(&self, workspace: &str, force: bool) -> IpcResult<()> {
+        self.with(|starter| starter.archive(workspace, force))?;
+        self.changed();
+        Ok(())
+    }
+
+    fn delete(&self, workspace: &str, force: bool) -> IpcResult<()> {
+        self.with(|starter| starter.delete(workspace, force))?;
+        self.changed();
+        Ok(())
     }
 
     fn session(
@@ -243,6 +280,13 @@ impl Starting for AppStarting {
 pub fn connect(app: &AppHandle) {
     account::connect(&Arc::new(AppHome::new(app)));
 }
+
+/// A device through Remote changed this computer's projects or workspaces without starting
+/// anything: a workspace renamed, archived or deleted, or a repository cloned and added. The
+/// window reads its projects again.
+#[derive(Debug, Clone, Serialize, Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteChangedProjects {}
 
 /// A device asks to be let in: shown in the window wherever it is, until answered or lapsed.
 #[derive(Debug, Clone, Serialize, Type, tauri_specta::Event)]

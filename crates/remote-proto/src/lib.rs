@@ -27,7 +27,9 @@
 //! type into a terminal may also start an agent, in a new workspace or an existing one, and
 //! upload a file for one, and since minor 6 resume an ended conversation: see [`start`]. Since
 //! minor 8 a client may read a conversation's turns and answer the permissions its agent asks
-//! for: see [`conversation`]. A host lists what it answers in [`HostDescription::capabilities`].
+//! for: see [`conversation`]. Since minor 10 a start may say a name, a model, an effort and a
+//! branch, and a client that may type may also look after projects and workspaces: see
+//! [`manage`]. A host lists what it answers in [`HostDescription::capabilities`].
 //!
 //! Sync between hosts ([`sync`]) is not part of this protocol: it is between a host and the
 //! server, over HTTPS, with its own schema version. Only its hint to a host is a relay notice.
@@ -36,6 +38,7 @@ pub mod account;
 pub mod conversation;
 pub mod grant;
 pub mod ids;
+pub mod manage;
 pub mod model;
 pub mod notify;
 pub mod pairing;
@@ -52,11 +55,16 @@ pub use ids::{
     AccountRef, DeviceId, EventId, GrantId, HostId, IdError, LeaseId, MemoryId, ProjectId,
     RequestId, RunId, ServerId, SessionRecordId, TerminalId, WorkspaceId,
 };
+pub use manage::{
+    ProjectBranches, ProjectCloneParams, ProjectCloned, ProjectRef, ShellStartParams,
+    WorkspaceRemoveParams, WorkspaceRenameParams, MAX_BRANCHES, MAX_PROJECT_NAME, MAX_REMOTE,
+};
 pub use model::*;
 pub use start::{
     HarnessList, HarnessSummary, SessionResumeParams, SessionStartParams, Started, Upload,
-    UploadBeginParams, UploadChunkParams, UploadId, Uploaded, WorkspaceStartParams, MAX_PROMPT,
-    MAX_UPLOAD, MAX_UPLOADS, MAX_UPLOAD_CHUNK, MAX_UPLOAD_NAME,
+    UploadBeginParams, UploadChunkParams, UploadId, Uploaded, WorkspaceStartParams, MAX_BRANCH,
+    MAX_CHOICES, MAX_PROMPT, MAX_UPLOAD, MAX_UPLOADS, MAX_UPLOAD_CHUNK, MAX_UPLOAD_NAME,
+    MAX_WORKSPACE_NAME,
 };
 pub use terminal::{
     AcquireRequest, AttachRequest, AttachStart, Attached, ControlChanged, Controller,
@@ -79,7 +87,11 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// - 8: `conversation.read` and `approval.answer`.
 /// - 9: the relay's `syncChanged` notice to a host ([`relay::HostNotice::SyncChanged`]). Sync's
 ///   records are versioned apart from this ([`sync::SYNC_SCHEMA`]).
-pub const PROTOCOL_MINOR: u16 = 9;
+/// - 10: `name`, `model`, `effort`, `baseBranch` and `existingBranch` on `workspace.start`;
+///   `models` and `efforts` in `harness.list`; `remote` in a project's summary;
+///   `project.branches`, `project.clone`, `shell.start`, `workspace.rename`, `workspace.archive`
+///   and `workspace.delete`; and the `uncommitted_work` error.
+pub const PROTOCOL_MINOR: u16 = 10;
 /// `workflow:read` and `workflow:decide` arrived in this minor. A host is shown
 /// those scope names when it stated this minor or a newer minor of this major.
 pub const WORKFLOW_SCOPES_MINOR: u16 = 7;
@@ -220,6 +232,10 @@ pub enum ErrorCode {
     /// The workflow step the phone was shown has moved on. Read the run again.
     /// Not a wrong code, and not a reason to try the same challenge again.
     Stale,
+    /// The workspace has uncommitted work that archiving or deleting it would lose. Ask the
+    /// person, and send the request again with `force` if they say so. Since minor 10; an older
+    /// client reads it as unknown, and never sends the requests that get it.
+    UncommittedWork,
     /// An operation this host does not answer (yet, or at all).
     Unsupported,
     Internal,
@@ -391,11 +407,13 @@ pub struct MemoryListParams {
 /// parameters.
 ///
 /// There is deliberately no operation that edits or proposes memory, launches a
-/// program the device names, deletes or archives a workspace, or reads a file. Each of those is
-/// its own scoped increment, if it ever comes. Starting one of the host's own harnesses, and
+/// program the device names, or reads a file. Each of those is its own scoped increment, if it
+/// ever comes. Starting one of the host's own harnesses, and
 /// putting a file in the host's uploads folder, came in minor 5, and resuming one of its
 /// conversations in minor 6 ([`start`]). Deciding a workflow the desktop is running came in
 /// minor 7 ([`workflow`]): a signed-in phone, with the one-time code, and not a host token.
+/// Cloning a repository into the host's own projects folder, the host's shell in a workspace,
+/// and renaming, archiving or deleting a workspace came in minor 10 ([`manage`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", content = "params")]
 pub enum Operation {
@@ -459,6 +477,24 @@ pub enum Operation {
     /// Since minor 8.
     #[serde(rename = "approval.answer")]
     ApprovalAnswer(conversation::ApprovalAnswerParams),
+    /// Since minor 10.
+    #[serde(rename = "project.branches")]
+    ProjectBranches(ProjectRef),
+    /// Since minor 10.
+    #[serde(rename = "project.clone")]
+    ProjectClone(ProjectCloneParams),
+    /// Since minor 10.
+    #[serde(rename = "shell.start")]
+    ShellStart(ShellStartParams),
+    /// Since minor 10.
+    #[serde(rename = "workspace.rename")]
+    WorkspaceRename(WorkspaceRenameParams),
+    /// Since minor 10.
+    #[serde(rename = "workspace.archive")]
+    WorkspaceArchive(WorkspaceRemoveParams),
+    /// Since minor 10.
+    #[serde(rename = "workspace.delete")]
+    WorkspaceDelete(WorkspaceRemoveParams),
 }
 
 /// Every operation's wire name, in [`Operation`]'s order.
@@ -490,6 +526,12 @@ pub const OPERATIONS: &[&str] = &[
     "workflow.decide",
     "conversation.read",
     "approval.answer",
+    "project.branches",
+    "project.clone",
+    "shell.start",
+    "workspace.rename",
+    "workspace.archive",
+    "workspace.delete",
 ];
 
 impl Operation {
@@ -522,6 +564,12 @@ impl Operation {
             Self::WorkflowDecide(_) => 24,
             Self::ConversationRead(_) => 25,
             Self::ApprovalAnswer(_) => 26,
+            Self::ProjectBranches(_) => 27,
+            Self::ProjectClone(_) => 28,
+            Self::ShellStart(_) => 29,
+            Self::WorkspaceRename(_) => 30,
+            Self::WorkspaceArchive(_) => 31,
+            Self::WorkspaceDelete(_) => 32,
         };
         OPERATIONS[index]
     }
@@ -534,7 +582,8 @@ impl Operation {
             Self::WorkspaceList(_)
             | Self::WorkspaceDescribe(_)
             | Self::SessionList(_)
-            | Self::HarnessList => Scope::WorkspaceRead,
+            | Self::HarnessList
+            | Self::ProjectBranches(_) => Scope::WorkspaceRead,
             Self::ActivityList(_) | Self::ActivitySubscribe(_) | Self::ActivityUnsubscribe(_) => {
                 Scope::ActivityRead
             }
@@ -552,7 +601,12 @@ impl Operation {
             | Self::UploadBegin(_)
             | Self::UploadChunk(_)
             | Self::SessionResume(_)
-            | Self::ApprovalAnswer(_) => Scope::TerminalControl,
+            | Self::ApprovalAnswer(_)
+            | Self::ProjectClone(_)
+            | Self::ShellStart(_)
+            | Self::WorkspaceRename(_)
+            | Self::WorkspaceArchive(_)
+            | Self::WorkspaceDelete(_) => Scope::TerminalControl,
             Self::WorkflowRunList(_) | Self::WorkflowRunGet(_) => Scope::WorkflowRead,
             Self::WorkflowChallenge(_) | Self::WorkflowDecide(_) => Scope::WorkflowDecide,
         })
@@ -587,6 +641,8 @@ impl Operation {
             Self::UploadBegin(upload) => upload.validate(),
             Self::UploadChunk(chunk) => chunk.validate(),
             Self::SessionResume(resume) => resume.validate(),
+            Self::ProjectClone(clone) => clone.validate(),
+            Self::WorkspaceRename(rename) => rename.validate(),
             Self::WorkflowRunList(params) if params.limit == Some(0) => {
                 invalid("A page holds at least one item.")
             }
@@ -660,6 +716,10 @@ pub enum Reply {
     WorkflowDecision(workflow::WorkflowDecision),
     /// Since minor 8.
     Conversation(conversation::ConversationPage),
+    /// Since minor 10.
+    Branches(ProjectBranches),
+    /// Since minor 10.
+    Cloned(ProjectCloned),
     Done,
 }
 

@@ -3,7 +3,13 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { OtherHost, OtherHostView, OtherProject, OtherTask, OtherWorkspace } from "@/lib/ipc";
 import { treeNavigation } from "@/lib/treeNavigation";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
-import { activityThere, startAgentThere } from "@/features/remote/there";
+import {
+  activityThere,
+  removeThere,
+  renameThere,
+  startAgentThere,
+  startShellThere,
+} from "@/features/remote/there";
 import { elapsedWords } from "@/features/terminal/BusyClock";
 import { StatusDot } from "@/features/terminal/StatusDot";
 import { useLayoutStore } from "@/stores/layout";
@@ -11,6 +17,7 @@ import { tabsThere, thereKey, useOtherComputersStore } from "@/stores/otherCompu
 import { recall, useProjectsStore } from "@/stores/projects";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { pairingText } from "./otherComputersText";
+import { RenameDialog } from "./RenameDialog";
 
 /** Which computers the person opened or folded themselves, by host id. */
 const COMPUTERS = "sidebar.computers";
@@ -80,6 +87,7 @@ function ComputerNode({ host, filter }: { host: OtherHost; filter: string }) {
   // An offline computer folds by itself, until the person opens it; the one in view stays open.
   const open = paired && (selectedHere || (chosen ?? !offline));
   const mayStart = online && !!view?.mayStart;
+  const mayManage = online && !!view?.mayManage;
 
   // Its agents, for what its rows offer to start. Asked once, when it can first be asked.
   useEffect(() => {
@@ -150,6 +158,7 @@ function ComputerNode({ host, filter }: { host: OtherHost; filter: string }) {
                 hostName={host.name}
                 project={project}
                 mayStart={mayStart}
+                mayManage={mayManage}
               />
             ))
           )}
@@ -177,11 +186,13 @@ function ProjectNode({
   hostName,
   project,
   mayStart,
+  mayManage,
 }: {
   hostId: string;
   hostName: string;
   project: OtherProject;
   mayStart: boolean;
+  mayManage: boolean;
 }) {
   const key = thereKey(hostId, project.id);
   const composing = useProjectsStore(
@@ -249,8 +260,10 @@ function ProjectNode({
             <WorkspaceNode
               key={workspace.id}
               hostId={hostId}
+              hostName={hostName}
               workspace={workspace}
               mayStart={mayStart}
+              mayManage={mayManage}
             />
           ))}
           {composing && (
@@ -273,12 +286,17 @@ function ProjectNode({
 
 function WorkspaceNode({
   hostId,
+  hostName,
   workspace,
   mayStart,
+  mayManage,
 }: {
   hostId: string;
+  hostName: string;
   workspace: OtherWorkspace;
   mayStart: boolean;
+  /** That computer takes a shell, a new name, and archiving and deleting from here. */
+  mayManage: boolean;
 }) {
   const selected = useProjectsStore(
     (s) => s.remote?.hostId === hostId && s.remote.workspaceId === workspace.id,
@@ -290,11 +308,33 @@ function WorkspaceNode({
   const firstAgent = agents[0];
   const waiting = agents.some((tab) => tab.state !== "busy");
   const task = workspace.tasks[0];
-  const items: MenuItem[] = (harnesses ?? []).map((harness) => ({
-    label: `Start ${harness.name}`,
-    disabled: !mayStart || workspace.missing,
-    onSelect: () => void startAgentThere(hostId, workspace.id, harness.id),
-  }));
+  const [renaming, setRenaming] = useState(false);
+  const remove = (gone: boolean) => void removeThere(hostId, hostName, workspace, gone);
+  const items: MenuItem[] = [
+    ...(harnesses ?? []).map((harness) => ({
+      label: `Start ${harness.name}`,
+      disabled: !mayStart || workspace.missing,
+      onSelect: () => void startAgentThere(hostId, workspace.id, harness.id),
+    })),
+    // What an older Yardsort there cannot do from here is left out, not shown and failing.
+    ...(mayManage
+      ? [
+          {
+            label: "New shell",
+            disabled: workspace.missing,
+            onSelect: () => void startShellThere(hostId, workspace.id),
+          },
+        ]
+      : []),
+    // The project's own checkout is not renamed, archived or deleted, there as here.
+    ...(mayManage && workspace.kind === "worktree"
+      ? [
+          { label: "Rename…", divider: true, onSelect: () => setRenaming(true) },
+          { label: "Archive…", onSelect: () => remove(false) },
+          { label: "Delete workspace…", danger: true, onSelect: () => remove(true) },
+        ]
+      : []),
+  ];
 
   return (
     <li role="treeitem" aria-selected={selected} aria-label={workspace.name}>
@@ -344,6 +384,13 @@ function WorkspaceNode({
         {task && <TaskLink task={task} />}
       </div>
       {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
+      {renaming && (
+        <RenameDialog
+          workspace={workspace}
+          rename={(name) => renameThere(hostId, workspace.id, name)}
+          onClose={() => setRenaming(false)}
+        />
+      )}
     </li>
   );
 }

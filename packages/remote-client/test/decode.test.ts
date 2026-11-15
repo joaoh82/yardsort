@@ -15,9 +15,16 @@ import {
   event,
   FrameError,
   id,
+  MAX_BRANCH,
+  MAX_BRANCHES,
+  MAX_CHOICES,
   MAX_ID_LEN,
   MAX_INPUT_BYTES,
+  MAX_LABEL,
+  MAX_PROJECT_NAME,
+  MAX_REMOTE,
   MAX_TEXT,
+  MAX_WORKSPACE_NAME,
   normalizeCode,
   parsePairingLink,
   reply,
@@ -161,7 +168,7 @@ describe("enums", () => {
       name: "n",
       platform: "plan9",
       appVersion: "1",
-      protocol: { major: 1, minor: 9 },
+      protocol: { major: 1, minor: 10 },
       capabilities: [],
     });
     expect(host.kind === "host" && host.platform).toBe("other");
@@ -206,8 +213,123 @@ describe("requests are checked as a host checks them", () => {
     } as unknown as Request);
   });
 
+  test("what a start says since minor 10 is each within its bounds", () => {
+    const start = (more: Record<string, unknown>) =>
+      ask("workspace.start", { project: "p", prompt: "Fix it", ...more });
+    expect(start({}).op).toBe("workspace.start");
+    expect(start({ name: "fix-login" }).op).toBe("workspace.start");
+    expect(start({ name: "n".repeat(MAX_WORKSPACE_NAME) }).op).toBe("workspace.start");
+    expect(() => start({ name: "  " })).toThrow(/a name of no characters/);
+    expect(() => start({ name: "n".repeat(MAX_WORKSPACE_NAME + 1) })).toThrow(/or over 80/);
+    expect(() => start({ name: "two\nlines" })).toThrow(/a name of no characters/);
+    expect(start({ model: "opus", effort: "high" }).op).toBe("workspace.start");
+    expect(() => start({ model: "--dangerously" })).toThrow(/names no model/);
+    expect(() => start({ model: " " })).toThrow(/names no model/);
+    expect(() => start({ effort: "e".repeat(MAX_LABEL + 1) })).toThrow(/names no effort/);
+    expect(start({ baseBranch: "develop" }).op).toBe("workspace.start");
+    expect(() => start({ baseBranch: "--upload-pack=x" })).toThrow(/names no branch/);
+    expect(() => start({ baseBranch: "" })).toThrow(/names no branch/);
+    expect(() => start({ baseBranch: "a b" })).toThrow(/names no branch/);
+    // Counted as UTF-8, as the host counts it.
+    expect(start({ baseBranch: "b".repeat(MAX_BRANCH) }).op).toBe("workspace.start");
+    expect(() => start({ baseBranch: "b".repeat(MAX_BRANCH + 1) })).toThrow(/names no branch/);
+    expect(() => start({ baseBranch: "é".repeat(Math.ceil(MAX_BRANCH / 2)) })).toThrow(
+      /names no branch/,
+    );
+    expect(start({ existingBranch: "ys/kept" }).op).toBe("workspace.start");
+    expect(() => start({ existingBranch: "-x" })).toThrow(/names no branch/);
+    // An existing branch is opened as it is: it has no base, and it names itself.
+    expect(() => start({ existingBranch: "ys/kept", baseBranch: "main" })).toThrow(
+      /no name and no base/,
+    );
+    expect(() => start({ existingBranch: "ys/kept", name: "kept" })).toThrow(/no name and no base/);
+  });
+
+  test("a clone names an address and nothing that reads as an option", () => {
+    const clone = (remote: string, name?: string) => ask("project.clone", { remote, name });
+    expect(clone("https://github.com/example/app.git").op).toBe("project.clone");
+    expect(clone("git@github.com:example/app.git", "app").op).toBe("project.clone");
+    // What is around it is the host's to trim, as it trims one typed into its own window.
+    expect(clone(" https://example.com/a\n").op).toBe("project.clone");
+    for (const bad of [
+      "",
+      "   ",
+      "--upload-pack=touch /tmp/x",
+      "-u",
+      "https://example.com/a b",
+      "https://example.com/a\tb",
+      "https://example.com/a\u001bb",
+      `https://example.com/${"a".repeat(MAX_REMOTE)}`,
+    ]) {
+      expect(() => clone(bad)).toThrow(/no repository's address/);
+    }
+    for (const bad of ["", " ", "../up", "a\\b", "n".repeat(MAX_PROJECT_NAME + 1)]) {
+      expect(() => clone("https://example.com/a", bad)).toThrow(/a name none can have/);
+    }
+    expect(clone("https://example.com/a", "n".repeat(MAX_PROJECT_NAME)).op).toBe("project.clone");
+  });
+
+  test("a workspace is renamed to something, and removed by force only when it says so", () => {
+    const rename = (name: string) => ask("workspace.rename", { workspace: "w", name });
+    expect(rename("Login spacing").op).toBe("workspace.rename");
+    expect(() => rename(" ")).toThrow(/a name of no characters/);
+    expect(() => rename("n".repeat(MAX_WORKSPACE_NAME + 1))).toThrow(/or over 80/);
+    for (const op of ["workspace.archive", "workspace.delete"]) {
+      // A force of false is left out, as Rust writes it.
+      expect(ask(op, { workspace: "w", force: false })).toEqual(ask(op, { workspace: "w" }));
+      expect("force" in (ask(op, { workspace: "w" }) as { params: object }).params).toBe(false);
+      expect(ask(op, { workspace: "w", force: true })).toHaveProperty("params.force", true);
+      expect(() => ask(op, { workspace: "w", force: "yes" })).toThrow(/true or false/);
+      expect(() => ask(op, { workspace: "w", force: null })).toThrow(/true or false/);
+    }
+  });
+
   test("an operation this build does not know is refused", () => {
-    expect(() => ask("workspace.delete", {})).toThrow(/not an operation/);
+    expect(() => ask("memory.edit", {})).toThrow(/not an operation/);
+  });
+
+  test("branches, choices and a project's address are held to their limits", () => {
+    const branches = (more: Record<string, unknown>) =>
+      decode(reply, { kind: "branches", branches: ["main"], ...more });
+    expect(branches({})).toEqual({ kind: "branches", branches: ["main"] });
+    // What Rust leaves out reads as left out, however it came.
+    expect(branches({ checkedOut: [], more: false })).toEqual({
+      kind: "branches",
+      branches: ["main"],
+    });
+    expect(branches({ default: "main", checkedOut: ["main"], more: true })).toEqual({
+      kind: "branches",
+      branches: ["main"],
+      default: "main",
+      checkedOut: ["main"],
+      more: true,
+    });
+    const many = Array.from({ length: MAX_BRANCHES + 1 }, (_, n) => `b${n}`);
+    expect(branches({ branches: many.slice(1) }).kind).toBe("branches");
+    expect(() => branches({ branches: many })).toThrow(/more than 100/);
+    // A name no request could give back is not one.
+    for (const bad of ["-x", "a b", "", "b".repeat(MAX_BRANCH + 1)]) {
+      expect(() => branches({ branches: [bad] })).toThrow(/not a branch's name/);
+      expect(() => branches({ default: bad })).toThrow(/not a branch's name/);
+    }
+
+    const harness = (models: string[]) =>
+      decode(reply, { kind: "harnesses", harnesses: [{ id: "claude", name: "Claude", models }] });
+    const models = Array.from({ length: MAX_CHOICES + 1 }, (_, n) => `m${n}`);
+    expect(harness(models.slice(1)).kind).toBe("harnesses");
+    expect(() => harness(models)).toThrow(/more than 32/);
+    expect(() => harness(["m".repeat(MAX_LABEL + 1)])).toThrow(/longer than 64/);
+
+    const project = (remote: string) =>
+      decode(reply, {
+        kind: "workspaces",
+        projects: [{ id: "p", name: "n", missing: false, remote }],
+        workspaces: [],
+        next: null,
+      });
+    expect(project("r".repeat(MAX_REMOTE)).kind).toBe("workspaces");
+    expect(() => project("r".repeat(MAX_REMOTE + 1))).toThrow(/not an address/);
+    expect(() => project("https://example.com/a\u001b[2J")).toThrow(/not an address/);
   });
 
   test("a response with neither a result nor an error is refused", () => {

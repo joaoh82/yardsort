@@ -129,6 +129,12 @@ pub struct ProjectSummary {
     pub name: String,
     /// The project's folder is gone from its host (deleted, moved, an unmounted drive).
     pub missing: bool,
+    /// Where its repository is fetched from, when that is an address another computer could
+    /// clone: HTTPS, `ssh://` or `user@host:path`, with any user and password of an HTTPS address
+    /// removed. A client compares it with its own project's to offer the same repository. At
+    /// most [`crate::MAX_REMOTE`] bytes. Since minor 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

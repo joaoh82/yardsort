@@ -1,0 +1,290 @@
+id: run-on-full
+name: The composer says everything to a computer with no screen, clones a project there, and looks after its workspaces
+description: >-
+  A yardsort-host on the stand-in server with one project, repo, with a branch develop ahead of
+  its default, and a stand-in agent that says the model and the effort it was given. The real
+  window, on a profile of its own, has projects repo, notes and gone of its own, and is let type.
+  From the composer of its repo it chooses the host and says a name, a model, an effort and the
+  branch develop, each from the host's lists: the host's agent hears all of them, and the new
+  branch starts where develop is. From notes, which the host has no project for, it chooses Clone
+  it there: the host clones the repository into its own projects folder, from an address git
+  rewrites to a repository on this disk, and the workspace is made in the clone; nothing is made
+  on this computer. From gone, whose repository is not there, the clone fails, the composer says
+  so, and nothing is left behind. The + in a workspace there opens the host's shell. A workspace
+  with uncommitted work is not deleted without force, its file still there, and with force it
+  goes and its branch stays. Linux only, since the window stands in for the browser with xdg-open.
+  A window opens while it runs; nothing needs clicking.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_app
+    action: run
+    program: bun
+    args: [tauri, build, --debug, --no-bundle]
+    timeout: 20m
+  - id: build_the_host
+    action: shell
+    # The stand-in server too, and the host's bin folder in $YS_RUN_DIR/bin.
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: repositories
+    action: shell
+    # The host's repository, with develop one commit ahead; this computer's own three, two of them
+    # fetched from an address; and the repository one of those addresses is rewritten to.
+    line: >-
+      set -e; g() { git -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false
+      "$@"; }; mkdir -p "$YS_RUN_DIR/profile" "$YS_RUN_DIR/origin"; for repo in repo here/repo
+      here/notes here/gone; do mkdir -p "$YS_RUN_DIR/$repo"; g -C "$YS_RUN_DIR/$repo" init -q; g -C
+      "$YS_RUN_DIR/$repo" commit -q --allow-empty -m first; done; g -C "$YS_RUN_DIR/repo" branch
+      develop; g -C "$YS_RUN_DIR/repo" checkout -q develop; g -C "$YS_RUN_DIR/repo" commit -q
+      --allow-empty -m "only on develop"; g -C "$YS_RUN_DIR/repo" checkout -q -; for repo in notes
+      gone; do g -C "$YS_RUN_DIR/here/$repo" remote add origin
+      "https://git.example.test/acme/$repo.git"; done; g clone -q --bare "$YS_RUN_DIR/here/notes"
+      "$YS_RUN_DIR/origin/notes.git"
+  - id: a_stand_in_agent_and_a_projects_folder
+    action: shell
+    # The stand-in agent of host-restart.yaml, told its model and effort as arguments, which it
+    # says back with its first message. Clones a device asks for go in the run's own folder.
+    line: >-
+      cp .yardsort/tests/support/standin-agent.sh "$YS_RUN_DIR/" && printf '[remote]\nprojects_dir =
+      "%s"\n\n[[harness]]\nid = "stand-in"\nbuiltin = false\nlabel = "Stand-in agent"\ncommand =
+      "sh"\nbase_args = ["%s"]\nsession_args = ["start", "{session_id}"]\nmodel_args =
+      ["model={model}"]\neffort_args = ["effort={effort}"]\nprompt_args = ["{prompt}"]\nresume_args =
+      ["resume", "{session_id}"]\nfork_args = ["fork", "{session_id}", "{new_session_id}"]\nmodels =
+      ["large"]\nefforts = ["high"]\nsession_id_mode = "assigned"\n' "$YS_RUN_DIR/cloned"
+      "$YS_RUN_DIR/standin-agent.sh" > "$YS_RUN_DIR/profile/settings.toml"
+
+steps:
+  - id: the_host_signs_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", sign-in, Smoke box]
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: its_projects_folder_is_still_set
+    action: run
+    # Signing in writes the server and the name beside it, and must not take it away.
+    program: grep
+    args: [-q, projects_dir, "{{ run.dir }}/profile/settings.toml"]
+  - id: serve
+    action: shell
+    # Its git reads one address as a repository on this disk, as a real one reads its own rewrites.
+    line: >-
+      GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="url.file://$YS_RUN_DIR/origin/.insteadOf"
+      GIT_CONFIG_VALUE_0="https://git.example.test/acme/" setsid sh
+      .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log" 2>&1 <
+      /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: add_the_project
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, project, add, "{{ run.dir }}/repo"]
+    expect:
+      stdout_contains: Added repo
+
+  - id: open_the_window
+    action: shell
+    # A profile of its own: the host has the run's.
+    line: YS_APP_DIR="$YS_RUN_DIR/app" sh .yardsort/tests/support/app.sh open
+  - id: window_up
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+  - id: the_window_has_a_project_of_the_same_name
+    action: run
+    program: bun
+    args:
+      [.yardsort/tests/support/window.ts, "{{ run.port }}", add-project, "{{ run.dir }}", here/repo]
+    expect:
+      stdout_contains: added the project
+  - id: one_the_host_has_none_for
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/window.ts,
+        "{{ run.port }}",
+        add-project,
+        "{{ run.dir }}",
+        here/notes,
+      ]
+    expect:
+      stdout_contains: added the project
+  - id: and_one_whose_repository_is_not_there
+    action: run
+    program: bun
+    args:
+      [.yardsort/tests/support/window.ts, "{{ run.port }}", add-project, "{{ run.dir }}", here/gone]
+    expect:
+      stdout_contains: added the project
+  - id: the_window_loads_again
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", load-again]
+    timeout: 60s
+    expect:
+      stdout_contains: asked the window to load again
+  - id: the_window_shows_them
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", shows-projects, repo, notes, gone]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: repo and notes and gone among this computer's projects"
+  - id: the_window_signs_in_as_a_client
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", client-sign-in, "{{ run.dir }}"]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: Signed in as Smoke laptop"
+  - id: the_window_is_let_type
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair, window, "{{ run.port }}", t]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+  - id: so_is_a_phone
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+
+  - id: the_composer_says_a_name_a_model_an_effort_and_a_branch
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/window.ts,
+        "{{ run.port }}",
+        runs-on-saying,
+        Smoke box,
+        tidy-the-readme,
+      ]
+    timeout: 120s
+    expect:
+      stdout_contains: "saw: a workspace started on Smoke box, saying all four"
+  - id: the_hosts_agent_was_given_the_model
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", sees, Smoke box, "model=large"]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: model=large"
+  - id: and_the_effort_and_the_message
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", sees, Smoke box, "effort=high"]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: effort=high"
+  - id: named_as_said_and_started_from_develop
+    action: shell
+    # One branch whose name ends in the name said, at the commit develop is at and the default is not.
+    line: >-
+      cd "$YS_RUN_DIR/repo" && made="$(git for-each-ref --format='%(refname:short)' refs/heads |
+      grep -E '(^|/)tidy$')" && test "$(git rev-parse "$made")" = "$(git rev-parse develop)" && test
+      "$(git rev-parse "$made")" != "$(git rev-parse HEAD)" && echo "tidy starts at develop"
+    expect:
+      stdout_contains: tidy starts at develop
+
+  - id: a_project_the_host_lacks_is_cloned_there
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", clones-there, Smoke box, notes]
+    timeout: 180s
+    expect:
+      stdout_contains: "saw: notes cloned on Smoke box, and a workspace started in it"
+  - id: into_the_hosts_own_folder_and_nothing_here
+    action: shell
+    line: >-
+      test -d "$YS_RUN_DIR/cloned/notes/.git" && test "$(git -C "$YS_RUN_DIR/cloned/notes" worktree
+      list | wc -l)" = 2 && test "$(git -C "$YS_RUN_DIR/here/notes" worktree list | wc -l)" = 1 &&
+      echo "cloned on the host, with its worktree"
+    expect:
+      stdout_contains: cloned on the host, with its worktree
+  - id: a_clone_that_fails_says_so
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", clone-fails-there, Smoke box, gone]
+    timeout: 180s
+    expect:
+      stdout_contains: "saw: Smoke box could not clone gone, and the message is still here"
+  - id: and_leaves_nothing_behind
+    action: shell
+    line: test ! -e "$YS_RUN_DIR/cloned/gone" && echo "nothing of it on the host"
+    expect:
+      stdout_contains: nothing of it on the host
+
+  - id: a_shell_opens_on_the_host
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", shell-there, Smoke box, tidy]
+    timeout: 120s
+    expect:
+      stdout_contains: "saw: a shell on Smoke box in tidy, with control"
+  - id: uncommitted_work_in_it
+    action: shell
+    line: >-
+      path="$(git -C "$YS_RUN_DIR/repo" worktree list --porcelain | sed -n 's/^worktree //p' | grep
+      '/tidy$')" && echo "not committed" > "$path/notes.txt" && echo "$path" >
+      "$YS_RUN_DIR/tidy.path" && echo "written"
+    expect:
+      stdout_contains: written
+  - id: is_not_deleted_without_the_second_yes
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", remove-there, Smoke box, tidy]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: refused: remote_uncommitted"
+  - id: and_is_still_there
+    action: shell
+    line: grep -q "not committed" "$(cat "$YS_RUN_DIR/tidy.path")/notes.txt" && echo "its file is still there"
+    expect:
+      stdout_contains: its file is still there
+  - id: with_it_the_folder_goes
+    action: run
+    program: bun
+    args:
+      [.yardsort/tests/support/window.ts, "{{ run.port }}", remove-there, Smoke box, tidy, force]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: deleted"
+  - id: and_the_branch_stays
+    action: shell
+    line: >-
+      test ! -e "$(cat "$YS_RUN_DIR/tidy.path")" && git -C "$YS_RUN_DIR/repo" for-each-ref
+      --format='%(refname:short)' refs/heads | grep -qE '(^|/)tidy$' && echo "folder gone, branch kept"
+    expect:
+      stdout_contains: folder gone, branch kept
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      YS_APP_DIR="$YS_RUN_DIR/app" sh .yardsort/tests/support/app.sh stop-everything; kill "$(cat
+      "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

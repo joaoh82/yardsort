@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
@@ -16,6 +16,12 @@ const core = vi.hoisted(() => ({
   otherHostStartWorkspace: vi.fn(),
   otherHostStartSession: vi.fn(),
   otherHostResume: vi.fn(),
+  otherHostBranches: vi.fn(),
+  otherHostClone: vi.fn(),
+  otherHostStartShell: vi.fn(),
+  otherHostRenameWorkspace: vi.fn(),
+  otherHostRemoveWorkspace: vi.fn(),
+  projectRepository: vi.fn(),
   remoteTerminalOpen: vi.fn(),
   remoteTerminalClose: vi.fn(),
   remoteTerminalTakeControl: vi.fn(),
@@ -26,6 +32,8 @@ const core = vi.hoisted(() => ({
 }));
 const opener = vi.hoisted(() => ({ openUrl: vi.fn(async () => {}) }));
 vi.mock("@tauri-apps/plugin-opener", () => opener);
+const native = vi.hoisted(() => ({ confirm: vi.fn() }));
+vi.mock("@/lib/native", () => ({ native }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
   ipc: core,
@@ -113,6 +121,7 @@ const shown: View = {
   mayType: true,
   mayStart: false,
   mayResume: false,
+  mayManage: false,
   readAt: 1_790_000_000_000,
   platform: "Linux",
   appVersion: "0.23.0",
@@ -120,6 +129,7 @@ const shown: View = {
     {
       id: "p-1",
       name: "service",
+      repository: null,
       workspaces: [
         {
           id: "w-0",
@@ -176,14 +186,27 @@ const shown: View = {
   activity: [],
 };
 const able: View = { ...shown, mayStart: true, mayResume: true };
+/** A computer new enough to take a name, a model, an effort and a branch, and the rest. */
+const full: View = { ...able, mayManage: true };
 const away: View = {
   ...shown,
   link: { kind: "offline", since: 1_790_000_000_000, why: "It is not connected" },
 };
 const agents = [
-  { id: "claude", name: "Claude Code" },
-  { id: "codex", name: "Codex" },
+  { id: "claude", name: "Claude Code", models: ["opus", "sonnet"], efforts: ["low", "high"] },
+  { id: "codex", name: "Codex", models: [], efforts: [] },
 ];
+/** A start that says only what every computer reads. */
+const plainly = (projectId: string, prompt: string, harness: string) => ({
+  projectId,
+  prompt,
+  harness,
+  name: null,
+  model: null,
+  effort: null,
+  baseBranch: null,
+  existingBranch: null,
+});
 
 /** What that computer shows, as the window holds it once it has read it. */
 const showing = (view: View = shown, status: OtherComputers = paired) => {
@@ -195,6 +218,13 @@ const showing = (view: View = shown, status: OtherComputers = paired) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  core.otherHostBranches.mockResolvedValue({
+    branches: ["main", "develop", "ys/kept"],
+    default: "main",
+    checkedOut: ["main"],
+    more: false,
+  });
+  core.projectRepository.mockResolvedValue({ key: null, clonable: false });
   useOtherComputersStore.setState({
     status: null,
     views: {},
@@ -205,7 +235,13 @@ beforeEach(() => {
     error: null,
     startProblem: null,
   });
-  useProjectsStore.setState({ projects: [], remote: null, composingThere: null, ui: {} });
+  useProjectsStore.setState({
+    projects: [],
+    remote: null,
+    composingThere: null,
+    ui: {},
+    error: null,
+  });
 });
 
 describe("the sidebar's other computers", () => {
@@ -629,6 +665,146 @@ describe("a workspace on another computer", () => {
   });
 });
 
+describe("looking after a workspace on another computer", () => {
+  const row = (name: string) =>
+    within(screen.getByRole("treeitem", { name })).getAllByRole("button")[0]!;
+  const menu = async (name: string) => {
+    fireEvent.contextMenu(row(name));
+    return screen.findByRole("menu");
+  };
+  beforeEach(() => {
+    core.otherHostStartShell.mockResolvedValue({
+      workspaceId: "w-1",
+      terminal: "t-7",
+      harness: "",
+    });
+    core.otherHostRenameWorkspace.mockResolvedValue(undefined);
+    core.otherHostRemoveWorkspace.mockResolvedValue(undefined);
+    core.remoteTerminalOpen.mockResolvedValue(7);
+    core.remoteTerminalClose.mockResolvedValue(undefined);
+  });
+
+  it("starts a shell there from its row and from its tab bar, and offers neither on an older computer", async () => {
+    showing(full);
+    render(<OtherComputersTree />);
+    await userEvent.click(
+      within(await menu("fix-login")).getByRole("menuitem", { name: "New shell" }),
+    );
+    expect(core.otherHostStartShell).toHaveBeenCalledWith("h-1", "w-1");
+    await vi.waitFor(() =>
+      expect(useProjectsStore.getState().remote).toEqual({ hostId: "h-1", workspaceId: "w-1" }),
+    );
+    expect(useOtherComputersStore.getState().active[thereKey("h-1", "w-1")]).toBe("t-7");
+    render(<RemoteWorkspaceView hostId="h-1" workspaceId="w-1" />);
+    await userEvent.click(await screen.findByRole("button", { name: "New shell" }));
+    expect(core.otherHostStartShell).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers no shell, rename, archive or delete where that computer's Yardsort is older, nor for its own checkout", async () => {
+    showing(able);
+    const { unmount } = render(<OtherComputersTree />);
+    // Its agents are what its menu still offers, once it has said which it has.
+    await vi.waitFor(() =>
+      expect(useOtherComputersStore.getState().harnesses["h-1"]).toBeDefined(),
+    );
+    const older = await menu("fix-login");
+    expect(within(older).getByRole("menuitem", { name: "Start Codex" })).toBeEnabled();
+    for (const name of ["New shell", "Rename…", "Archive…", "Delete workspace…"]) {
+      expect(within(older).queryByRole("menuitem", { name })).toBeNull();
+    }
+    unmount();
+    showing(full);
+    render(<OtherComputersTree />);
+    const local = await menu("local");
+    expect(within(local).getByRole("menuitem", { name: "New shell" })).toBeEnabled();
+    for (const name of ["Rename…", "Archive…", "Delete workspace…"]) {
+      expect(within(local).queryByRole("menuitem", { name })).toBeNull();
+    }
+  });
+
+  it("renames a workspace there, and says why when that computer refuses", async () => {
+    core.otherHostRenameWorkspace.mockRejectedValueOnce({
+      code: "remote_refused",
+      message: "A workspace name needs 1 to 80 characters.",
+    });
+    showing(full);
+    render(<OtherComputersTree />);
+    await userEvent.click(
+      within(await menu("fix-login")).getByRole("menuitem", { name: "Rename…" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Rename workspace" });
+    const name = within(dialog).getByRole("textbox", { name: "Workspace name" });
+    await userEvent.clear(name);
+    await userEvent.type(name, "Login spacing");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Rename" }));
+    expect(core.otherHostRenameWorkspace).toHaveBeenCalledWith("h-1", "w-1", "Login spacing");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("1 to 80 characters");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Rename" }));
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("deletes a workspace there only after it is asked, and uncommitted work only after a second yes", async () => {
+    const dirty = { code: "remote_uncommitted", message: "It has uncommitted changes." };
+    showing(full);
+    useProjectsStore.setState({ remote: { hostId: "h-1", workspaceId: "w-1" } });
+    render(<OtherComputersTree />);
+    const press = async () =>
+      userEvent.click(
+        within(await menu("fix-login")).getByRole("menuitem", { name: "Delete workspace…" }),
+      );
+    // No to the first question: that computer is not asked at all.
+    native.confirm.mockResolvedValueOnce(false);
+    await press();
+    await act(async () => {});
+    expect(native.confirm.mock.calls[0]![0]).toContain(
+      'Delete workspace "fix-login" on Build box?',
+    );
+    expect(native.confirm.mock.calls[0]![0]).toContain('The branch "ys/fix-login"');
+    expect(core.otherHostRemoveWorkspace).not.toHaveBeenCalled();
+
+    // Yes, but it has uncommitted work there, and no to losing it: nothing is forced.
+    core.otherHostRemoveWorkspace.mockRejectedValueOnce(dirty);
+    native.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    await press();
+    await vi.waitFor(() => expect(native.confirm).toHaveBeenCalledTimes(3));
+    expect(native.confirm.mock.calls[2]![0]).toContain("destroys that work for good");
+    await act(async () => {});
+    expect(core.otherHostRemoveWorkspace.mock.calls).toEqual([["h-1", "w-1", true, false]]);
+    expect(useProjectsStore.getState().remote).not.toBeNull();
+
+    // Yes to both: asked again with force, and it leaves the view.
+    core.otherHostRemoveWorkspace.mockRejectedValueOnce(dirty);
+    native.confirm.mockResolvedValue(true);
+    await press();
+    await vi.waitFor(() =>
+      expect(core.otherHostRemoveWorkspace).toHaveBeenLastCalledWith("h-1", "w-1", true, true),
+    );
+    await vi.waitFor(() => expect(useProjectsStore.getState().remote).toBeNull());
+  });
+
+  it("archives one the same way, and says why when that computer refuses for another reason", async () => {
+    showing(full);
+    render(<OtherComputersTree />);
+    native.confirm.mockResolvedValue(true);
+    core.otherHostRemoveWorkspace.mockRejectedValueOnce({
+      code: "remote_offline",
+      message: "That computer cannot be reached just now.",
+    });
+    const press = async () =>
+      userEvent.click(within(await menu("fix-login")).getByRole("menuitem", { name: "Archive…" }));
+    await press();
+    await vi.waitFor(() =>
+      expect(useProjectsStore.getState().error).toBe("That computer cannot be reached just now."),
+    );
+    // One question only: a refusal that is not about uncommitted work is not asked over.
+    expect(native.confirm).toHaveBeenCalledTimes(1);
+    await press();
+    await vi.waitFor(() =>
+      expect(core.otherHostRemoveWorkspace).toHaveBeenLastCalledWith("h-1", "w-1", false, false),
+    );
+  });
+});
+
 describe("a new workspace on another computer", () => {
   const composing = (view: View = able) => {
     showing(view);
@@ -659,9 +835,7 @@ describe("a new workspace on another computer", () => {
     await userEvent.click(go);
     expect(core.otherHostStartWorkspace).toHaveBeenCalledWith(
       "h-1",
-      "p-1",
-      "Fix the spacing",
-      "codex",
+      plainly("p-1", "Fix the spacing", "codex"),
     );
     await vi.waitFor(() =>
       expect(useProjectsStore.getState().remote).toEqual({ hostId: "h-1", workspaceId: "w-9" }),
@@ -707,10 +881,18 @@ describe("a new workspace on another computer", () => {
   /** Build box with a second project, and this computer with `service` and `notes` of its own. */
   const twoThere: View = {
     ...able,
-    projects: [...able.projects, { id: "p-2", name: "service-fork", workspaces: [] }],
+    projects: [
+      ...able.projects,
+      { id: "p-2", name: "service-fork", repository: "github.com/acme/api", workspaces: [] },
+    ],
   };
-  const fromHere = (from: string, projectId: string | null, message = "") => {
-    showing(twoThere);
+  const fromHere = (
+    from: string,
+    projectId: string | null,
+    message = "",
+    view: View = twoThere,
+  ) => {
+    showing(view);
     useProjectsStore.setState({
       projects: [project("service"), project("notes")],
       composingThere: { hostId: "h-1", projectId, from, message },
@@ -755,9 +937,7 @@ describe("a new workspace on another computer", () => {
     await userEvent.click(within(form).getByRole("button", { name: "Start" }));
     expect(core.otherHostStartWorkspace).toHaveBeenCalledWith(
       "h-1",
-      "p-2",
-      "Fix the spacing",
-      "claude",
+      plainly("p-2", "Fix the spacing", "claude"),
     );
     await vi.waitFor(() => expect(kept()).toEqual({ [thereKey("h-1", "p-service")]: "p-2" }));
     // Next time, from the same project here, it is the one offered, and said to be.
@@ -820,6 +1000,127 @@ describe("a new workspace on another computer", () => {
         name: "This computer, no project called service here",
       }),
     ).toBeDisabled();
+  });
+
+  const typed = (form: HTMLElement) =>
+    within(form).getByRole("textbox", { name: "What should the agent work on?" });
+
+  it("says what the local composer says, on a computer that reads it: a name, a model, an effort and a branch", async () => {
+    core.otherHostStartWorkspace.mockResolvedValue({
+      workspaceId: "w-9",
+      terminal: "t-9",
+      harness: "claude",
+    });
+    const form = fromHere("p-service", "p-1", "Fix the spacing", { ...twoThere, mayManage: true });
+    const branch = await within(form).findByRole("combobox", { name: "Branch" });
+    expect(core.otherHostBranches).toHaveBeenCalledWith("h-1", "p-1");
+    // Its default branch to start from, and only branches nobody has out there to open.
+    expect(branch).toHaveValue("new:main");
+    expect(within(branch).getByRole("group", { name: "Open existing branch" })).toHaveTextContent(
+      /^developys\/kept$/,
+    );
+    await userEvent.type(within(form).getByRole("textbox", { name: "Name" }), "tidy spacing");
+    await userEvent.type(within(form).getByRole("combobox", { name: "Model" }), "opus");
+    await userEvent.selectOptions(within(form).getByRole("combobox", { name: "Effort" }), "high");
+    await userEvent.selectOptions(branch, "new:develop");
+    await userEvent.click(within(form).getByRole("button", { name: "Start" }));
+    expect(core.otherHostStartWorkspace).toHaveBeenCalledWith("h-1", {
+      projectId: "p-1",
+      prompt: "Fix the spacing",
+      harness: "claude",
+      name: "tidy spacing",
+      model: "opus",
+      effort: "high",
+      baseBranch: "develop",
+      existingBranch: null,
+    });
+  });
+
+  it("opens an existing branch there as it is, with no name of its own", async () => {
+    core.otherHostStartWorkspace.mockResolvedValue({
+      workspaceId: "w-9",
+      terminal: "t-9",
+      harness: "claude",
+    });
+    const form = fromHere("p-service", "p-1", "Carry on", { ...twoThere, mayManage: true });
+    const branch = await within(form).findByRole("combobox", { name: "Branch" });
+    await userEvent.type(within(form).getByRole("textbox", { name: "Name" }), "ignored");
+    await userEvent.selectOptions(branch, "open:ys/kept");
+    expect(within(form).queryByRole("textbox", { name: "Name" })).toBeNull();
+    expect(form).toHaveTextContent('Opens the existing branch "ys/kept" in a new git worktree');
+    await userEvent.click(within(form).getByRole("button", { name: "Start" }));
+    expect(core.otherHostStartWorkspace).toHaveBeenCalledWith("h-1", {
+      ...plainly("p-1", "Carry on", "claude"),
+      existingBranch: "ys/kept",
+    });
+  });
+
+  it("leaves those out for a computer whose Yardsort is older, and says so", async () => {
+    const form = fromHere("p-service", "p-1", "Fix the spacing");
+    await vi.waitFor(() =>
+      expect(within(form).getByRole("button", { name: "Start" })).toBeEnabled(),
+    );
+    for (const name of ["Model", "Effort", "Branch"]) {
+      expect(within(form).queryByRole("combobox", { name })).toBeNull();
+    }
+    expect(within(form).queryByRole("textbox", { name: "Name" })).toBeNull();
+    expect(form).toHaveTextContent("Its Yardsort is older than this one");
+    expect(core.otherHostBranches).not.toHaveBeenCalled();
+  });
+
+  it("offers the project there that is the same repository over one of the same name", async () => {
+    core.projectRepository.mockResolvedValue({ key: "github.com/acme/api", clonable: true });
+    const form = fromHere("p-service", "p-1");
+    expect(core.projectRepository).toHaveBeenCalledWith("p-service");
+    await vi.waitFor(() => expect(field(form)).toHaveValue("p-2"));
+    expect(form).toHaveTextContent("same repository as here · remembered after you start");
+    // Chosen by the person, it is theirs: nothing offered replaces it.
+    await userEvent.selectOptions(field(form), "service");
+    await act(async () => {});
+    expect(field(form)).toHaveValue("p-1");
+  });
+
+  it("has that computer clone a project it lacks, then starts in the clone and remembers it", async () => {
+    core.projectRepository.mockResolvedValue({ key: "github.com/acme/notes", clonable: true });
+    core.otherHostClone.mockRejectedValueOnce({
+      code: "remote_refused",
+      message: "The computer could not clone that repository.",
+    });
+    core.otherHostClone.mockResolvedValueOnce({ projectId: "p-new", name: "notes" });
+    core.otherHostStartWorkspace.mockResolvedValue({
+      workspaceId: "w-9",
+      terminal: "t-9",
+      harness: "claude",
+    });
+    const form = fromHere("p-notes", null, "Tidy the notes", { ...twoThere, mayManage: true });
+    // Never by itself: it is offered, and Start waits until it is chosen.
+    const offer = await within(form).findByRole("button", { name: "Clone it there" });
+    expect(within(form).getByRole("button", { name: "Start" })).toBeDisabled();
+    await userEvent.click(offer);
+    expect(field(form)).toHaveDisplayValue("clone notes there");
+    expect(form).toHaveTextContent("cloned into Build box's projects folder when you start");
+    // A clone that fails says why, and nothing is started.
+    await userEvent.click(within(form).getByRole("button", { name: "Start" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent("could not clone");
+    expect(core.otherHostStartWorkspace).not.toHaveBeenCalled();
+    expect(typed(form)).toHaveValue("Tidy the notes");
+    // Asked again on purpose, it is cloned once, by this computer's project and nothing else.
+    await userEvent.click(within(form).getByRole("button", { name: "Start" }));
+    await vi.waitFor(() => expect(core.otherHostStartWorkspace).toHaveBeenCalledTimes(1));
+    expect(core.otherHostClone).toHaveBeenLastCalledWith("h-1", "p-notes");
+    expect(core.otherHostStartWorkspace).toHaveBeenCalledWith(
+      "h-1",
+      plainly("p-new", "Tidy the notes", "claude"),
+    );
+    await vi.waitFor(() => expect(kept()).toEqual({ [thereKey("h-1", "p-notes")]: "p-new" }));
+  });
+
+  it("offers no clone where that computer cannot, or this project has nowhere to clone from", async () => {
+    core.projectRepository.mockResolvedValue({ key: "github.com/acme/notes", clonable: true });
+    const older = fromHere("p-notes", null, "Tidy the notes");
+    await act(async () => {});
+    expect(within(older).queryByRole("button", { name: "Clone it there" })).toBeNull();
+    expect(within(older).getByRole("alert")).toHaveTextContent("Add it there");
   });
 
   it("gives up on Escape", async () => {

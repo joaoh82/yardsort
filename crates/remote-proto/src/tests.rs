@@ -56,6 +56,66 @@ fn requests_match_their_fixtures() {
     let request: Request = pinned("request-workflow-challenge.json");
     assert_eq!(request.operation.scope(), Some(Scope::WorkflowDecide));
     assert!(request.operation.validate().is_ok());
+    for (name, op, scope) in [
+        (
+            "request-workspace-start-full.json",
+            "workspace.start",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-start-branch.json",
+            "workspace.start",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-project-branches.json",
+            "project.branches",
+            Scope::WorkspaceRead,
+        ),
+        (
+            "request-project-clone.json",
+            "project.clone",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-shell-start.json",
+            "shell.start",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-rename.json",
+            "workspace.rename",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-archive.json",
+            "workspace.archive",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-delete.json",
+            "workspace.delete",
+            Scope::TerminalControl,
+        ),
+    ] {
+        let request: Request = pinned(name);
+        assert_eq!(request.operation.name(), op, "{name}");
+        assert_eq!(request.operation.scope(), Some(scope), "{name}");
+        assert!(request.operation.validate().is_ok(), "{name}");
+    }
+    // Archiving says nothing of force unless it is asked for; deleting here asks.
+    let Operation::WorkspaceArchive(archive) =
+        pinned::<Request>("request-workspace-archive.json").operation
+    else {
+        panic!("not an archive");
+    };
+    assert!(!archive.force);
+    let Operation::WorkspaceDelete(delete) =
+        pinned::<Request>("request-workspace-delete.json").operation
+    else {
+        panic!("not a delete");
+    };
+    assert!(delete.force);
     let request: Request = pinned("request-conversation-read.json");
     assert_eq!(request.operation.name(), "conversation.read");
     assert_eq!(request.operation.scope(), Some(Scope::TerminalRead));
@@ -120,9 +180,35 @@ fn responses_match_their_fixtures() {
         "response-workflow-decision.json",
         "response-workflow-challenge.json",
         "response-conversation.json",
+        "response-harnesses-choices.json",
+        "response-branches.json",
+        "response-cloned.json",
+        "response-started-shell.json",
+        "response-done.json",
     ] {
         let _: Response = pinned(name);
     }
+    // Since minor 10: why archiving or deleting was refused, for a client to ask again.
+    let Outcome::Error(dirty) = pinned::<Response>("response-error-uncommitted.json").outcome
+    else {
+        panic!("not an error");
+    };
+    assert_eq!(dirty.code, ErrorCode::UncommittedWork);
+    assert!(!dirty.retryable);
+    // A harness before minor 10 lists no models and no efforts, and reads as having none.
+    let Outcome::Result(Reply::Harnesses(listed)) =
+        pinned::<Response>("response-harnesses-choices.json").outcome
+    else {
+        panic!("not harnesses");
+    };
+    assert_eq!(listed.harnesses[0].efforts, ["low", "high"]);
+    assert!(listed.harnesses[1].models.is_empty());
+    let Outcome::Result(Reply::Harnesses(older)) =
+        pinned::<Response>("response-harnesses.json").outcome
+    else {
+        panic!("not harnesses");
+    };
+    assert!(older.harnesses.iter().all(|h| h.models.is_empty()));
     // A host before minor 4 says nothing of it; one that keeps an earlier daemon says why.
     let Outcome::Result(Reply::Host(older)) = pinned::<Response>("response-host.json").outcome
     else {
@@ -325,11 +411,11 @@ fn every_operation_has_the_name_it_is_sent_under() {
         Operation::ActivitySubscribe(ActivitySubscribeParams::default()),
         Operation::ActivityUnsubscribe(ActivityUnsubscribeParams { subscription: 1 }),
         Operation::HarnessList,
-        Operation::WorkspaceStart(WorkspaceStartParams {
-            project: ProjectId::new("p").unwrap(),
-            prompt: "Fix it".into(),
-            harness: None,
-        }),
+        Operation::WorkspaceStart(WorkspaceStartParams::plain(
+            ProjectId::new("p").unwrap(),
+            "Fix it",
+            None,
+        )),
         Operation::SessionStart(SessionStartParams {
             workspace: WorkspaceId::new("w").unwrap(),
             harness: None,
@@ -382,6 +468,28 @@ fn every_operation_has_the_name_it_is_sent_under() {
             session: SessionRecordId::new("s").unwrap(),
             ask: "a".into(),
             decision: conversation::ApprovalDecision::Deny,
+        }),
+        Operation::ProjectBranches(ProjectRef {
+            project: ProjectId::new("p").unwrap(),
+        }),
+        Operation::ProjectClone(ProjectCloneParams {
+            remote: "https://example.com/a.git".into(),
+            name: None,
+        }),
+        Operation::ShellStart(ShellStartParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+        }),
+        Operation::WorkspaceRename(WorkspaceRenameParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            name: "n".into(),
+        }),
+        Operation::WorkspaceArchive(WorkspaceRemoveParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            force: false,
+        }),
+        Operation::WorkspaceDelete(WorkspaceRemoveParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            force: false,
         }),
     ];
     assert_eq!(all.len(), OPERATIONS.len());
@@ -468,7 +576,7 @@ fn a_newer_minor_with_fields_this_build_does_not_know_is_understood() {
 #[test]
 fn an_unknown_operation_is_unsupported_not_malformed() {
     let (_, error) = error_of(
-        br#"{"requestId":"r","protocol":{"major":1,"minor":3},"op":"workspace.delete","params":{}}"#,
+        br#"{"requestId":"r","protocol":{"major":1,"minor":3},"op":"memory.edit","params":{}}"#,
     );
     assert_eq!(error.code, ErrorCode::Unsupported);
 }
@@ -810,17 +918,46 @@ fn sync_ops_are_checked_on_their_own() {
 
 #[test]
 fn starting_and_uploading_are_bounded() {
-    let start = |prompt: &str| {
-        Operation::WorkspaceStart(WorkspaceStartParams {
-            project: ProjectId::new("p").unwrap(),
-            prompt: prompt.into(),
-            harness: None,
-        })
-        .validate()
-    };
+    let plain =
+        |prompt: &str| WorkspaceStartParams::plain(ProjectId::new("p").unwrap(), prompt, None);
+    let start = |prompt: &str| Operation::WorkspaceStart(plain(prompt)).validate();
     assert!(start("Fix it").is_ok());
     assert!(start("  \n").is_err());
     assert!(start(&"x".repeat(MAX_PROMPT + 1)).is_err());
+    // What a start may say since minor 10, each within its bounds.
+    assert!(!plain("Fix it").says_more());
+    let saying = |change: &dyn Fn(&mut WorkspaceStartParams)| {
+        let mut params = plain("Fix it");
+        change(&mut params);
+        assert!(params.says_more());
+        Operation::WorkspaceStart(params).validate()
+    };
+    assert!(saying(&|p| p.name = Some("fix-login".into())).is_ok());
+    assert!(saying(&|p| p.name = Some("  ".into())).is_err());
+    assert!(saying(&|p| p.name = Some("n".repeat(MAX_WORKSPACE_NAME + 1))).is_err());
+    assert!(saying(&|p| p.model = Some("opus".into())).is_ok());
+    assert!(saying(&|p| p.model = Some("--dangerously".into())).is_err());
+    assert!(saying(&|p| p.effort = Some("e".repeat(MAX_LABEL + 1))).is_err());
+    assert!(saying(&|p| p.base_branch = Some("develop".into())).is_ok());
+    assert!(saying(&|p| p.base_branch = Some("--upload-pack=x".into())).is_err());
+    assert!(saying(&|p| p.base_branch = Some("b".repeat(MAX_BRANCH + 1))).is_err());
+    assert!(saying(&|p| p.existing_branch = Some("ys/kept".into())).is_ok());
+    assert!(
+        saying(&|p| {
+            p.existing_branch = Some("ys/kept".into());
+            p.base_branch = Some("main".into());
+        })
+        .is_err(),
+        "an existing branch has no base"
+    );
+    assert!(
+        saying(&|p| {
+            p.existing_branch = Some("ys/kept".into());
+            p.name = Some("kept".into());
+        })
+        .is_err(),
+        "an existing branch names itself"
+    );
     let session = |harness: Option<&str>| {
         Operation::SessionStart(SessionStartParams {
             workspace: WorkspaceId::new("w").unwrap(),
@@ -883,4 +1020,60 @@ fn starting_and_uploading_are_bounded() {
         }),
     };
     assert!(serde_json::to_vec(&request).unwrap().len() < MAX_CONTROL_FRAME);
+}
+
+#[test]
+fn looking_after_projects_and_workspaces_is_bounded() {
+    let clone = |remote: &str, name: Option<&str>| {
+        Operation::ProjectClone(ProjectCloneParams {
+            remote: remote.into(),
+            name: name.map(str::to_owned),
+        })
+        .validate()
+    };
+    assert!(clone("https://github.com/example/app.git", None).is_ok());
+    assert!(clone("git@github.com:example/app.git", Some("app")).is_ok());
+    assert!(clone("", None).is_err());
+    assert!(clone("--upload-pack=touch /tmp/x", None).is_err());
+    assert!(clone("https://example.com/a b", None).is_err());
+    assert!(clone(
+        &format!("https://example.com/{}", "a".repeat(MAX_REMOTE)),
+        None
+    )
+    .is_err());
+    assert!(clone("https://example.com/a", Some("../up")).is_err());
+    assert!(clone(
+        "https://example.com/a",
+        Some(&"n".repeat(MAX_PROJECT_NAME + 1))
+    )
+    .is_err());
+
+    let rename = |name: &str| {
+        Operation::WorkspaceRename(WorkspaceRenameParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            name: name.into(),
+        })
+        .validate()
+    };
+    assert!(rename("Login spacing").is_ok());
+    assert!(rename(" ").is_err());
+    assert!(rename(&"n".repeat(MAX_WORKSPACE_NAME + 1)).is_err());
+
+    // A long list of long names still fits a frame: the default first, the rest counted out.
+    let long = |n: usize| format!("{}{n:03}", "b".repeat(MAX_BRANCH - 3));
+    let many: Vec<String> = (0..MAX_BRANCHES + 20).map(long).collect();
+    let listed = manage::bounded_branches(many.clone(), Some(long(150)), many);
+    assert_eq!(listed.branches.len(), MAX_BRANCHES);
+    assert_eq!(listed.branches[0], long(150));
+    assert!(listed.more);
+    assert!(listed.checked_out.len() <= MAX_BRANCHES);
+    let response = Response {
+        request_id: Some(RequestId::new("r-1").unwrap()),
+        outcome: Outcome::Result(Reply::Branches(listed)),
+    };
+    assert!(encode_response(&response).len() < MAX_CONTROL_FRAME);
+    // A name no request could give back is not offered.
+    let odd = manage::bounded_branches(vec!["main".into(), "-x".into()], None, vec![]);
+    assert_eq!(odd.branches, ["main"]);
+    assert!(odd.more);
 }

@@ -40,8 +40,32 @@ fn shell_harness() -> HarnessOverride {
     }
 }
 
+/// A harness that says what it was started with, in whatever order its arguments come: a model,
+/// an effort and the first message. It has one effort and suggests one model.
+fn telling_harness() -> HarnessOverride {
+    let strings = |all: &[&str]| Some(all.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+    HarnessOverride {
+        id: "sh-teller".into(),
+        label: Some("Telling agent".into()),
+        builtin: Some(false),
+        command: Some(if cfg!(windows) { "cmd.exe" } else { "sh" }.into()),
+        base_args: if cfg!(windows) {
+            strings(&["/C", "echo", "told"])
+        } else {
+            strings(&["-c", "echo told \"$@\"; read line", "sh"])
+        },
+        model_args: strings(&["model={model}"]),
+        effort_args: strings(&["effort={effort}"]),
+        prompt_args: strings(&["{prompt}"]),
+        models: strings(&["large"]),
+        efforts: strings(&["high"]),
+        ..Default::default()
+    }
+}
+
 /// What the app lends a channel, made of this test's own store, terminals and folders.
 struct Lent {
+    git: Git,
     store: Arc<Store>,
     host: Arc<PtyHost>,
     env: Arc<ShellEnv>,
@@ -54,7 +78,7 @@ impl Lent {
     fn with<T>(&self, f: impl FnOnce(&Starter<'_>) -> T) -> T {
         f(&Starter {
             store: &self.store,
-            git: &git(),
+            git: &self.git,
             terminals: self.host.as_ref(),
             env: &self.env,
             settings: &self.settings,
@@ -70,11 +94,31 @@ impl Starting for Lent {
     }
     fn workspace(
         &self,
-        project: &str,
-        prompt: &str,
-        harness: &str,
+        new: &crate::remote::start::NewWorkspace,
     ) -> crate::error::IpcResult<(String, SessionInfo)> {
-        self.with(|s| s.workspace(project, prompt, harness))
+        self.with(|s| s.workspace(new))
+    }
+    fn shell(&self, workspace: &str) -> crate::error::IpcResult<SessionInfo> {
+        self.with(|s| s.shell(workspace))
+    }
+    fn branches(&self, project: &str) -> crate::error::IpcResult<remote_proto::ProjectBranches> {
+        self.with(|s| s.branches(project))
+    }
+    fn clone_project(
+        &self,
+        remote: &str,
+        name: Option<&str>,
+    ) -> crate::error::IpcResult<(String, String)> {
+        self.with(|s| s.clone_project(remote, name))
+    }
+    fn rename(&self, workspace: &str, name: &str) -> crate::error::IpcResult<()> {
+        self.with(|s| s.rename(workspace, name))
+    }
+    fn archive(&self, workspace: &str, force: bool) -> crate::error::IpcResult<()> {
+        self.with(|s| s.archive(workspace, force))
+    }
+    fn delete(&self, workspace: &str, force: bool) -> crate::error::IpcResult<()> {
+        self.with(|s| s.delete(workspace, force))
     }
     fn session(
         &self,
@@ -107,13 +151,20 @@ struct Started {
 
 impl Started {
     fn new() -> Self {
-        let git = git();
+        Self::with_git(git)
+    }
+
+    /// As [`Self::new`], with the host's git made by `make`: one whose configuration a test set.
+    fn with_git(make: impl Fn() -> Git) -> Self {
+        let git = make();
         let repo = tempfile::tempdir().unwrap();
         git.init(repo.path()).unwrap();
         git.run(repo.path(), &["checkout", "-b", "trunk"]).unwrap();
         git.initial_commit(repo.path()).unwrap();
         let worktrees = tempfile::tempdir().unwrap();
         let data = tempfile::tempdir().unwrap();
+        // Where a clone a device asks for goes: never this user's own folder for them.
+        let cloned = tempfile::tempdir().unwrap();
         let store = Store::in_memory();
         let project = store
             .add_project("alpha", &repo.path().to_string_lossy())
@@ -129,13 +180,25 @@ impl Started {
                 ..Default::default()
             });
         let settings = Settings {
-            harnesses: std::iter::once(shell_harness())
+            harnesses: [shell_harness(), telling_harness()]
+                .into_iter()
                 .chain(builtins_off)
                 .collect(),
+            remote: crate::settings::RemoteSettings {
+                projects_dir: Some(
+                    cloned
+                        .path()
+                        .join("projects")
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                ..Default::default()
+            },
             ..Default::default()
         };
         Self {
             lent: Arc::new(Lent {
+                git: make(),
                 store: Arc::new(store),
                 host: Arc::new(PtyHost::new(Arc::new(|_| {}))),
                 env: Arc::new(ShellEnv {
@@ -154,21 +217,40 @@ impl Started {
             },
             project,
             elsewhere,
-            _dirs: vec![repo, worktrees, data],
+            _dirs: vec![repo, worktrees, data, cloned],
         }
     }
 
     fn approve(&self, scopes: &[Scope]) {
+        self.approve_for(
+            scopes,
+            &ProjectGrant::Only(BTreeSet::from([ProjectId::new(&self.project).unwrap()])),
+        );
+    }
+
+    fn approve_for(&self, scopes: &[Scope], projects: &ProjectGrant) {
         host::keep_approved(
             &self.lent.store,
             &GrantId::new("g-phone").unwrap(),
             &DeviceId::new(PHONE).unwrap(),
             "Phone",
             &scopes.iter().copied().collect::<BTreeSet<_>>(),
-            &ProjectGrant::Only(BTreeSet::from([ProjectId::new(&self.project).unwrap()])),
+            projects,
             1,
         )
         .unwrap();
+    }
+
+    /// The project's repository, where its branches are.
+    fn repo(&self) -> PathBuf {
+        PathBuf::from(
+            self.lent
+                .store
+                .project(&self.project)
+                .unwrap()
+                .unwrap()
+                .root_path,
+        )
     }
 
     fn context(&self, starting: bool) -> Context<'_> {
@@ -254,7 +336,11 @@ fn a_phone_with_control_starts_a_workspace_and_its_agent_as_the_window_would() {
     let listed = fx.ask(&visitor, &out, "r1", "harness.list", json!(null));
     assert_eq!(
         listed["result"]["harnesses"],
-        json!([{"id": "sh-agent", "name": "Shell agent"}])
+        json!([
+            {"id": "sh-agent", "name": "Shell agent"},
+            // Since minor 10: what its composer offers for it.
+            {"id": "sh-teller", "name": "Telling agent", "models": ["large"], "efforts": ["high"]},
+        ])
     );
 
     let reply = fx.ask(
@@ -610,4 +696,449 @@ fn an_upload_lands_whole_outside_the_worktree_or_not_at_all() {
         .map(|e| e.unwrap().path())
         .collect();
     assert_eq!(left, [path]);
+}
+
+#[test]
+fn a_start_says_a_name_a_model_an_effort_and_the_branch_to_start_from_or_to_open() {
+    let fx = Started::new();
+    fx.approve(&CONTROL);
+    let out = Recorded::new(usize::MAX);
+    let visitor = fx.visitor(&out);
+    let repo = fx.repo();
+    // A branch ahead of the default, and one to open as it is.
+    fx.git.run(&repo, &["branch", "develop"]).unwrap();
+    fx.git.run(&repo, &["branch", "kept"]).unwrap();
+    let ahead = tempfile::tempdir().unwrap();
+    let side = ahead.path().join("side");
+    fx.git
+        .run(
+            &repo,
+            &["worktree", "add", &side.to_string_lossy(), "develop"],
+        )
+        .unwrap();
+    fx.git
+        .run(&side, &["commit", "--allow-empty", "-m", "only on develop"])
+        .unwrap();
+    let develop = fx.git.run(&repo, &["rev-parse", "develop"]).unwrap();
+    fx.git
+        .run(&repo, &["worktree", "remove", &side.to_string_lossy()])
+        .unwrap();
+
+    let listed = fx.ask(
+        &visitor,
+        &out,
+        "b1",
+        "project.branches",
+        json!({"project": fx.project}),
+    );
+    assert_eq!(listed["result"]["kind"], "branches", "{listed}");
+    assert_eq!(listed["result"]["default"], "trunk");
+    assert_eq!(
+        listed["result"]["branches"],
+        json!(["trunk", "develop", "kept"])
+    );
+    assert_eq!(listed["result"]["checkedOut"], json!(["trunk"]));
+
+    let reply = fx.ask(
+        &visitor,
+        &out,
+        "s1",
+        "workspace.start",
+        json!({
+            "project": fx.project,
+            "prompt": "tidy-the-notes",
+            "harness": "sh-teller",
+            "name": "Tidy Up!",
+            "model": "large",
+            "effort": "high",
+            "baseBranch": "develop",
+        }),
+    );
+    assert_eq!(reply["result"]["kind"], "started", "{reply}");
+    let made = fx.workspaces();
+    assert_eq!(made.len(), 1);
+    // Named as said, made a slug; its branch starts where the one said does.
+    assert_eq!(made[0].name, "tidy-up");
+    assert!(made[0].branch.as_deref().unwrap().ends_with("tidy-up"));
+    assert_eq!(made[0].base_branch.as_deref(), Some("develop"));
+    assert_eq!(
+        fx.git
+            .run(Path::new(&made[0].path), &["rev-parse", "HEAD"])
+            .unwrap(),
+        develop
+    );
+    // The agent was told the model and the effort, as its settings pass them.
+    let terminal = SessionId(reply["result"]["terminal"].as_str().unwrap().to_owned());
+    wait_until_drawn(&fx.lent.host, &terminal, "model=large");
+    wait_until_drawn(&fx.lent.host, &terminal, "effort=high");
+    wait_until_drawn(&fx.lent.host, &terminal, "tidy-the-notes");
+
+    // An existing branch is opened as it is: no new branch, and the workspace named after it.
+    let before = fx.git.branches(&repo).unwrap();
+    let reply = fx.ask(
+        &visitor,
+        &out,
+        "s2",
+        "workspace.start",
+        json!({"project": fx.project, "prompt": "echo on-kept", "existingBranch": "kept"}),
+    );
+    assert_eq!(reply["result"]["kind"], "started", "{reply}");
+    assert_eq!(fx.git.branches(&repo).unwrap(), before);
+    let opened: Vec<_> = fx
+        .workspaces()
+        .into_iter()
+        .filter(|w| w.branch.as_deref() == Some("kept"))
+        .collect();
+    assert_eq!(opened.len(), 1);
+    assert_eq!(opened[0].base_branch, None);
+
+    // What cannot be: an effort that agent has not, a branch that is not there, and an existing
+    // branch with a name or a base. Nothing is made for any of them.
+    let count = fx.workspaces().len();
+    for (id, params) in [
+        (
+            "e1",
+            json!({"prompt": "x", "harness": "sh-teller", "effort": "ludicrous"}),
+        ),
+        (
+            "e2",
+            json!({"prompt": "x", "harness": "sh-agent", "effort": "high"}),
+        ),
+        ("e3", json!({"prompt": "x", "baseBranch": "not-there"})),
+        ("e4", json!({"prompt": "x", "existingBranch": "not-there"})),
+        (
+            "e5",
+            json!({"prompt": "x", "existingBranch": "develop", "name": "n"}),
+        ),
+    ] {
+        let mut params = params;
+        params["project"] = json!(fx.project);
+        let reply = fx.ask(&visitor, &out, id, "workspace.start", params);
+        assert_eq!(reply["error"]["code"], "invalid_request", "{id}: {reply}");
+        let message = reply["error"]["message"].as_str().unwrap();
+        assert!(
+            !message.contains(&*repo.to_string_lossy()),
+            "{id}: {message}"
+        );
+    }
+    assert_eq!(fx.workspaces().len(), count);
+    // Branches of a project the grant does not reach are not told.
+    let reply = fx.ask(
+        &visitor,
+        &out,
+        "b2",
+        "project.branches",
+        json!({"project": fx.elsewhere}),
+    );
+    assert_eq!(reply["error"]["code"], "not_found", "{reply}");
+}
+
+#[test]
+fn a_shell_starts_in_a_workspace_and_a_workspace_is_renamed() {
+    let fx = Started::new();
+    fx.approve(&CONTROL);
+    let out = Recorded::new(usize::MAX);
+    let visitor = fx.visitor(&out);
+    let reply = fx.ask(
+        &visitor,
+        &out,
+        "s1",
+        "workspace.start",
+        json!({"project": fx.project, "prompt": "echo first"}),
+    );
+    let workspace = reply["result"]["workspace"].as_str().unwrap().to_owned();
+
+    let shell = fx.ask(
+        &visitor,
+        &out,
+        "sh",
+        "shell.start",
+        json!({"workspace": workspace}),
+    );
+    assert_eq!(shell["result"]["kind"], "started", "{shell}");
+    assert_eq!(shell["result"]["harness"], "");
+    assert_eq!(shell["result"]["workspace"], workspace);
+    let terminal = SessionId(shell["result"]["terminal"].as_str().unwrap().to_owned());
+    let info = fx.lent.host.info(&terminal).unwrap();
+    assert_eq!(info.labels[WORKSPACE_LABEL], workspace);
+    assert!(!info.labels.contains_key(crate::launch::HARNESS_LABEL));
+
+    let renamed = fx.ask(
+        &visitor,
+        &out,
+        "rn",
+        "workspace.rename",
+        json!({"workspace": workspace, "name": "Login spacing"}),
+    );
+    assert_eq!(renamed["result"]["kind"], "done", "{renamed}");
+    let row = fx.lent.store.workspace(&workspace).unwrap().unwrap();
+    assert_eq!(row.name, "Login spacing");
+    // Its folder and its branch keep their names.
+    assert!(Path::new(&row.path).is_dir());
+    assert!(row.branch.as_deref().unwrap().contains("echo-first"));
+
+    // The project's own checkout is not one to rename, archive or delete.
+    let local = fx
+        .lent
+        .store
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.project_id == fx.project && w.kind == "local");
+    if let Some(local) = local {
+        for op in ["workspace.archive", "workspace.delete"] {
+            let reply = fx.ask(
+                &visitor,
+                &out,
+                op,
+                op,
+                json!({"workspace": local.id, "force": true}),
+            );
+            assert_eq!(reply["error"]["code"], "invalid_request", "{op}: {reply}");
+        }
+        assert!(fx.repo().is_dir());
+    }
+    // Watching only: none of it.
+    fx.approve(&[Scope::WorkspaceRead, Scope::TerminalRead]);
+    for (op, params) in [
+        ("shell.start", json!({"workspace": workspace})),
+        (
+            "workspace.rename",
+            json!({"workspace": workspace, "name": "x"}),
+        ),
+        (
+            "workspace.delete",
+            json!({"workspace": workspace, "force": true}),
+        ),
+    ] {
+        let reply = fx.ask(&visitor, &out, &format!("w-{op}"), op, params);
+        assert_eq!(reply["error"]["code"], "forbidden", "{op}: {reply}");
+    }
+    assert!(Path::new(&row.path).is_dir());
+}
+
+#[test]
+fn uncommitted_work_is_kept_until_archiving_or_deleting_is_asked_a_second_time() {
+    let fx = Started::new();
+    fx.approve(&CONTROL);
+    let out = Recorded::new(usize::MAX);
+    let visitor = fx.visitor(&out);
+    let mut made = Vec::new();
+    for (id, prompt) in [("s1", "echo to-archive"), ("s2", "echo to-delete")] {
+        let reply = fx.ask(
+            &visitor,
+            &out,
+            id,
+            "workspace.start",
+            json!({"project": fx.project, "prompt": prompt}),
+        );
+        let id = reply["result"]["workspace"].as_str().unwrap().to_owned();
+        let row = fx.lent.store.workspace(&id).unwrap().unwrap();
+        std::fs::write(Path::new(&row.path).join("notes.txt"), "not committed").unwrap();
+        made.push(row);
+    }
+    for (row, op) in made.iter().zip(["workspace.archive", "workspace.delete"]) {
+        let notes = Path::new(&row.path).join("notes.txt");
+        // Without the second yes it is refused, in words that name no folder, and nothing goes.
+        let reply = fx.ask(
+            &visitor,
+            &out,
+            &format!("no-{op}"),
+            op,
+            json!({"workspace": row.id}),
+        );
+        assert_eq!(reply["error"]["code"], "uncommitted_work", "{op}: {reply}");
+        let message = reply["error"]["message"].as_str().unwrap();
+        assert!(!message.contains(&row.path), "{message}");
+        assert_eq!(std::fs::read_to_string(&notes).unwrap(), "not committed");
+        assert!(fx.lent.store.workspace(&row.id).unwrap().is_some());
+        // With it, the folder goes and the branch stays.
+        let reply = fx.ask(
+            &visitor,
+            &out,
+            &format!("yes-{op}"),
+            op,
+            json!({"workspace": row.id, "force": true}),
+        );
+        assert_eq!(reply["result"]["kind"], "done", "{op}: {reply}");
+        assert!(!Path::new(&row.path).exists());
+        assert!(fx
+            .git
+            .branch_exists(&fx.repo(), row.branch.as_deref().unwrap())
+            .unwrap());
+    }
+    // Archived, its record is kept to restore it; deleted, it is forgotten.
+    assert!(
+        fx.lent
+            .store
+            .workspace(&made[0].id)
+            .unwrap()
+            .unwrap()
+            .archived
+    );
+    assert!(fx.lent.store.workspace(&made[1].id).unwrap().is_none());
+}
+
+#[test]
+fn a_repository_is_cloned_into_the_hosts_projects_folder_and_added_as_a_project() {
+    // A repository on this disk, reached by an address a device may give: git rewrites it.
+    let origin = tempfile::tempdir().unwrap();
+    let setup = git();
+    let source = origin.path().join("source");
+    std::fs::create_dir(&source).unwrap();
+    setup.init(&source).unwrap();
+    setup.initial_commit(&source).unwrap();
+    let bare = origin.path().join("weather.git");
+    setup
+        .run(origin.path(), &["clone", "--bare", "source", "weather.git"])
+        .unwrap();
+    assert!(bare.is_dir());
+    let base = format!(
+        "file:///{}/",
+        origin
+            .path()
+            .to_string_lossy()
+            .replace('\\', "/")
+            .trim_start_matches('/')
+    );
+    let key = format!("url.{base}.insteadOf");
+    let rewritten = move || {
+        crate::git::testing::git_with(&[
+            ("GIT_CONFIG_COUNT", "1"),
+            ("GIT_CONFIG_KEY_0", &key),
+            ("GIT_CONFIG_VALUE_0", "https://git.example.test/acme/"),
+        ])
+    };
+    let fx = Started::with_git(rewritten);
+    let out = Recorded::new(usize::MAX);
+
+    // A device let into some projects cannot add one: it could not reach what it cloned.
+    fx.approve(&CONTROL);
+    let visitor = fx.visitor(&out);
+    let clone = json!({"remote": "https://git.example.test/acme/weather.git"});
+    let reply = fx.ask(&visitor, &out, "c0", "project.clone", clone.clone());
+    assert_eq!(reply["error"]["code"], "forbidden", "{reply}");
+
+    fx.approve_for(&CONTROL, &ProjectGrant::All);
+    let reply = fx.ask(&visitor, &out, "c1", "project.clone", clone.clone());
+    assert_eq!(reply["result"]["kind"], "cloned", "{reply}");
+    assert_eq!(reply["result"]["name"], "weather");
+    let id = reply["result"]["project"].as_str().unwrap();
+    let row = fx.lent.store.project(id).unwrap().unwrap();
+    // In the folder the host's settings name, made for it, and nowhere a device said.
+    let projects = PathBuf::from(fx.lent.settings.remote.projects_dir.clone().unwrap());
+    assert_eq!(
+        crate::git::normalize(Path::new(&row.root_path)),
+        crate::git::normalize(&projects.join("weather"))
+    );
+    assert!(Path::new(&row.root_path).join(".git").exists());
+    // It is a project like any other: a workspace starts in it, and its summary says where it
+    // is fetched from, as the device asked for it.
+    let listed = fx.ask(&visitor, &out, "l1", "workspace.list", json!({}));
+    let summary = listed["result"]["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == id)
+        .unwrap_or_else(|| panic!("{listed}"));
+    assert_eq!(
+        summary["remote"],
+        "https://git.example.test/acme/weather.git"
+    );
+    let started = fx.ask(
+        &visitor,
+        &out,
+        "s1",
+        "workspace.start",
+        json!({"project": id, "prompt": "echo in-the-clone"}),
+    );
+    assert_eq!(started["result"]["kind"], "started", "{started}");
+
+    // The same again is refused, since the folder is there, and nothing of it is touched.
+    let again = fx.ask(&visitor, &out, "c2", "project.clone", clone);
+    assert_eq!(again["error"]["code"], "invalid_request", "{again}");
+    assert!(Path::new(&row.root_path).join(".git").exists());
+    // One that cannot be cloned says so without the host's folders, and leaves nothing behind.
+    let missing = fx.ask(
+        &visitor,
+        &out,
+        "c3",
+        "project.clone",
+        json!({"remote": "https://git.example.test/acme/not-there.git"}),
+    );
+    assert_eq!(missing["error"]["code"], "invalid_request", "{missing}");
+    let message = missing["error"]["message"].as_str().unwrap();
+    assert!(!message.contains(&*projects.to_string_lossy()), "{message}");
+    assert!(!projects.join("not-there").exists());
+    // What is not an address is not passed to git at all.
+    for (n, remote) in ["/etc", "file:///etc", "--upload-pack=x", "ext::sh -c x"]
+        .into_iter()
+        .enumerate()
+    {
+        let reply = fx.ask(
+            &visitor,
+            &out,
+            &format!("x{n}"),
+            "project.clone",
+            json!({"remote": remote}),
+        );
+        assert_eq!(
+            reply["error"]["code"], "invalid_request",
+            "{remote}: {reply}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_dir(&projects).unwrap().count(),
+        1,
+        "only the one clone"
+    );
+}
+
+#[test]
+fn a_remote_is_told_only_when_another_computer_could_clone_it_and_never_with_credentials() {
+    use crate::remote::start::{name_from_remote, repository_key, shareable_remote};
+    assert_eq!(
+        shareable_remote("https://user:secret@github.com/acme/app.git").as_deref(),
+        Some("https://github.com/acme/app.git")
+    );
+    assert_eq!(
+        shareable_remote("git@github.com:acme/app.git").as_deref(),
+        Some("git@github.com:acme/app.git")
+    );
+    for folder in [
+        "/srv/git/app.git",
+        "../app",
+        "file:///srv/app.git",
+        "git://host/app",
+        "acme/app",
+    ] {
+        assert_eq!(shareable_remote(folder), None, "{folder}");
+    }
+    // The same repository, however each computer reaches it.
+    for same in [
+        "https://github.com/acme/app.git",
+        "https://GitHub.com/acme/app",
+        "git@github.com:acme/app.git",
+        "ssh://git@github.com:22/acme/app.git",
+    ] {
+        assert_eq!(
+            repository_key(same).as_deref(),
+            Some("github.com/acme/app"),
+            "{same}"
+        );
+    }
+    assert_ne!(
+        repository_key("https://github.com/acme/app"),
+        repository_key("https://gitlab.com/acme/app")
+    );
+    assert_eq!(repository_key("/srv/git/app.git"), None);
+    assert_eq!(
+        name_from_remote("git@github.com:acme/app.git").as_deref(),
+        Some("app")
+    );
+    assert_eq!(
+        name_from_remote("https://example.com/group/sub/site/").as_deref(),
+        Some("site")
+    );
+    assert_eq!(name_from_remote("https://example.com/"), None);
 }

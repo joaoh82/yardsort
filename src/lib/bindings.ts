@@ -403,6 +403,12 @@ export const commands = {
 	 *  that computer can.
 	 */
 	mayResume: boolean,
+	/**
+	 *  Whether a start there may say a name, a model, an effort and a branch, and this computer
+	 *  may clone a project there, start a shell, and rename, archive and delete a workspace: it
+	 *  may type, and that computer's Yardsort is new enough.
+	 */
+	mayManage: boolean,
 	/**  When it was last read; `None` until it has been. */
 	readAt: number | null,
 	platform: string | null,
@@ -414,14 +420,41 @@ export const commands = {
 	/**  The agents another computer can start, its default first. */
 	otherHostHarnesses: (hostId: string) => typedError<OtherHarness[], IpcError>(__TAURI_INVOKE("other_host_harnesses", { hostId })),
 	/**
-	 *  A new workspace in one of another computer's projects, named after `prompt`, with an agent
-	 *  given it. That computer makes it with its own settings, as its window would.
+	 *  A new workspace in one of another computer's projects, with an agent given its first message.
+	 *  That computer makes it with its own settings, as its window would. A name, a model, an effort
+	 *  or a branch is sent only to a computer that reads them ([`OtherHostView::may_manage`]).
 	 */
-	otherHostStartWorkspace: (hostId: string, projectId: string, prompt: string, harness: string | null) => typedError<OtherStarted, IpcError>(__TAURI_INVOKE("other_host_start_workspace", { hostId, projectId, prompt, harness })),
+	otherHostStartWorkspace: (hostId: string, request: OtherNewWorkspace) => typedError<OtherStarted, IpcError>(__TAURI_INVOKE("other_host_start_workspace", { hostId, request })),
 	/**  Another agent in one of another computer's workspaces, with a first message or none. */
 	otherHostStartSession: (hostId: string, workspaceId: string, harness: string | null, prompt: string | null) => typedError<OtherStarted, IpcError>(__TAURI_INVOKE("other_host_start_session", { hostId, workspaceId, harness, prompt })),
 	/**  One of another computer's ended conversations again, with a message to go on with or none. */
 	otherHostResume: (hostId: string, sessionId: string, prompt: string | null) => typedError<OtherStarted, IpcError>(__TAURI_INVOKE("other_host_resume", { hostId, sessionId, prompt })),
+	/**  The branches a new workspace in one of another computer's projects can start from or open. */
+	otherHostBranches: (hostId: string, projectId: string) => typedError<OtherBranches, IpcError>(__TAURI_INVOKE("other_host_branches", { hostId, projectId })),
+	/**
+	 *  Have another computer clone the repository of one of this computer's projects into its own
+	 *  projects folder and add it there. Only the repository's address goes over, with no
+	 *  credentials in it; that computer clones with its own.
+	 */
+	otherHostClone: (hostId: string, projectId: string) => typedError<OtherCloned, IpcError>(__TAURI_INVOKE("other_host_clone", { hostId, projectId })),
+	/**  That computer's shell in one of its workspaces. */
+	otherHostStartShell: (hostId: string, workspaceId: string) => typedError<OtherStarted, IpcError>(__TAURI_INVOKE("other_host_start_shell", { hostId, workspaceId })),
+	/**  Change what a workspace on another computer is called. Its folder and branch keep their names. */
+	otherHostRenameWorkspace: (hostId: string, workspaceId: string, name: string) => typedError<null, IpcError>(__TAURI_INVOKE("other_host_rename_workspace", { hostId, workspaceId, name })),
+	/**
+	 *  Archive a workspace on another computer, or with `remove` delete it. Both keep its branch.
+	 *  Fails with `remote_uncommitted` unless `force` when it has uncommitted work there.
+	 */
+	otherHostRemoveWorkspace: (hostId: string, workspaceId: string, remove: boolean, force: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("other_host_remove_workspace", { hostId, workspaceId, remove, force })),
+	/**  Which repository one of this computer's projects is, read from its `origin`. */
+	projectRepository: (projectId: string) => typedError<LocalRepository, IpcError>(__TAURI_INVOKE("project_repository", { projectId })),
+	/**  Where a repository another device has this computer clone goes. */
+	remoteProjectsDir: () => typedError<ProjectsDir, IpcError>(__TAURI_INVOKE("remote_projects_dir")),
+	/**
+	 *  Choose where such a clone goes, or with nothing go back to `Projects` in the home folder. The
+	 *  folder is made when the first clone needs it, not here.
+	 */
+	remoteSetProjectsDir: (dir: string | null) => typedError<ProjectsDir, IpcError>(__TAURI_INVOKE("remote_set_projects_dir", { dir })),
 	/**
 	 *  Watch a terminal on another computer. What it shows comes on `output`; the number it returns
 	 *  asks things of it, until [`remote_terminal_close`].
@@ -818,6 +851,7 @@ export const events = {
 	otherComputersChanged: makeEvent<OtherComputersChanged>("other-computers-changed"),
 	ptyHostEvent: makeEvent<PtyHostEvent>("pty-host-event"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
+	remoteChangedProjects: makeEvent<RemoteChangedProjects>("remote-changed-projects"),
 	remotePairingRequested: makeEvent<RemotePairingRequested>("remote-pairing-requested"),
 	schedulesChanged: makeEvent<SchedulesChanged>("schedules-changed"),
 	sessionStarted: makeEvent<SessionStarted>("session-started"),
@@ -1987,6 +2021,17 @@ export type Load = {
 	processes: number,
 };
 
+/**  Which repository one of this computer's projects is, for offering the same one elsewhere. */
+export type LocalRepository = {
+	/**
+	 *  What an [`OtherProject::repository`] of the same repository says. `None` when the project
+	 *  has no `origin`, or one that is a folder.
+	 */
+	key: string | null,
+	/**  Whether another computer could clone it: its `origin` is an address, not a folder. */
+	clonable: boolean,
+};
+
 export type MachineReport = {
 	sampledAt: number | null,
 	/**  Everything below together: the app, the terminal host and every terminal. */
@@ -2151,10 +2196,26 @@ export type OtherActivity = {
 	workspace: string,
 };
 
+/**  The branches a new workspace in a project on another computer can start from or open. */
+export type OtherBranches = {
+	branches: string[],
+	default: string | null,
+	/**  Those a worktree there has out, which cannot be opened in another. */
+	checkedOut: string[],
+	/**  That project has more branches than are listed. */
+	more: boolean,
+};
+
 export type OtherClient = {
 	serverUrl: string,
 	name: string,
 	since: number | null,
+};
+
+/**  A project another computer cloned and added at this one's asking. */
+export type OtherCloned = {
+	projectId: string,
+	name: string,
 };
 
 export type OtherComputers = {
@@ -2180,6 +2241,10 @@ export type OtherComputersChanged = Record<string, never>;
 export type OtherHarness = {
 	id: string,
 	name: string,
+	/**  Models to suggest for it; any other may be typed. */
+	models: string[],
+	/**  The efforts it takes; none when it has no such thing. */
+	efforts: string[],
 };
 
 /**  A host this computer asked to reach. */
@@ -2206,6 +2271,12 @@ export type OtherHostView = {
 	 *  that computer can.
 	 */
 	mayResume: boolean,
+	/**
+	 *  Whether a start there may say a name, a model, an effort and a branch, and this computer
+	 *  may clone a project there, start a shell, and rename, archive and delete a workspace: it
+	 *  may type, and that computer's Yardsort is new enough.
+	 */
+	mayManage: boolean,
 	/**  When it was last read; `None` until it has been. */
 	readAt: number | null,
 	platform: string | null,
@@ -2216,6 +2287,20 @@ export type OtherHostView = {
 };
 
 export type OtherLink = { kind: "connecting" } | { kind: "online" } | { kind: "offline"; since: number | null; why: string };
+
+/**  A new workspace on another computer, as its composer here says it. */
+export type OtherNewWorkspace = {
+	projectId: string,
+	prompt: string,
+	harness: string | null,
+	name: string | null,
+	model: string | null,
+	effort: string | null,
+	/**  The branch the new one starts from. Without it, that project's default. */
+	baseBranch: string | null,
+	/**  A branch to open as it is, with no new one made. */
+	existingBranch: string | null,
+};
 
 export type OtherPairing = 
 /**  Waiting for the person at that computer. */
@@ -2230,6 +2315,11 @@ export type OtherPairing =
 export type OtherProject = {
 	id: string,
 	name: string,
+	/**
+	 *  Which repository it is, when that computer said where it fetches from: the same words
+	 *  [`project_repository`] gives for one of this computer's projects of that repository.
+	 */
+	repository: string | null,
 	workspaces: OtherWorkspace[],
 };
 
@@ -2511,6 +2601,14 @@ export type ProjectTasks = {
 	closed: boolean,
 };
 
+/**  Where a repository another device has this computer clone goes. */
+export type ProjectsDir = {
+	/**  What the settings say, when they say. */
+	set: string | null,
+	/**  The folder used: the setting, or `Projects` in this user's home. */
+	used: string | null,
+};
+
 export type PromptTransport = 
 /**  The prompt is an argument. Simple and reliable. */
 "argv" | 
@@ -2768,6 +2866,13 @@ control: boolean;
 workflows?: boolean; 
 /**  Only these projects; all of them when absent. */
 projects: string[] | null };
+
+/**
+ *  A device through Remote changed this computer's projects or workspaces without starting
+ *  anything: a workspace renamed, archived or deleted, or a repository cloned and added. The
+ *  window reads its projects again.
+ */
+export type RemoteChangedProjects = Record<string, never>;
 
 export type RemoteController = { kind: "nobody" } | 
 /**  The person at that computer. */

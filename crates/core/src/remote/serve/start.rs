@@ -5,13 +5,15 @@ use std::path::PathBuf;
 
 use base64::Engine;
 use remote_proto::{
-    clip, ErrorCode, Grant, HarnessList, Operation, RemoteError, Reply, Request, Response,
-    SessionResumeParams, SessionStartParams, Started, Upload, UploadBeginParams, UploadChunkParams,
-    Uploaded, WorkspaceStartParams, MAX_LABEL, MAX_TEXT, MAX_UPLOADS,
+    clip, ErrorCode, Grant, HarnessList, Operation, ProjectCloneParams, ProjectCloned,
+    ProjectGrant, ProjectRef, RemoteError, Reply, Request, Response, SessionResumeParams,
+    SessionStartParams, ShellStartParams, Started, Upload, UploadBeginParams, UploadChunkParams,
+    Uploaded, WorkspaceRemoveParams, WorkspaceRenameParams, WorkspaceStartParams, MAX_LABEL,
+    MAX_TEXT, MAX_UPLOADS,
 };
 
 use super::{internal, lock, Context, Visitor};
-use crate::remote::start::{new_upload, start_error, uploads_dir, Starting};
+use crate::remote::start::{new_upload, start_error, uploads_dir, NewWorkspace, Starting};
 use crate::remote::HostFacade;
 
 /// An upload under way: the file it is written to, and how much of it has come.
@@ -39,6 +41,12 @@ pub(super) fn is_start(operation: &Operation) -> bool {
             | Operation::UploadBegin(_)
             | Operation::UploadChunk(_)
             | Operation::SessionResume(_)
+            | Operation::ProjectBranches(_)
+            | Operation::ProjectClone(_)
+            | Operation::ShellStart(_)
+            | Operation::WorkspaceRename(_)
+            | Operation::WorkspaceArchive(_)
+            | Operation::WorkspaceDelete(_)
     )
 }
 
@@ -68,15 +76,111 @@ impl Visitor {
                 project,
                 prompt,
                 harness,
+                name,
+                model,
+                effort,
+                base_branch,
+                existing_branch,
             }) => {
                 let project = facade.reachable_project(grant, project)?;
                 let harness = chosen(starting.as_ref(), harness.as_deref())?;
-                let prompt = prompt.clone();
+                // An effort is one of the harness's own, never a word passed on to its program.
+                if let Some(effort) = effort {
+                    let offered = starting
+                        .harnesses()
+                        .into_iter()
+                        .find(|h| h.id == harness)
+                        .is_some_and(|h| h.efforts.contains(effort));
+                    if !offered {
+                        return Err(RemoteError::new(
+                            ErrorCode::InvalidRequest,
+                            "That agent has no such effort on this computer.",
+                        ));
+                    }
+                }
+                let new = NewWorkspace {
+                    project: project.id,
+                    prompt: prompt.clone(),
+                    harness: harness.clone(),
+                    name: name.clone(),
+                    model: model.clone(),
+                    effort: effort.clone(),
+                    base_branch: base_branch.clone(),
+                    existing_branch: existing_branch.clone(),
+                };
                 self.later(request, move || {
-                    let (workspace, session) = starting
-                        .workspace(&project.id, &prompt, &harness)
-                        .map_err(|e| start_error(&e))?;
+                    let (workspace, session) =
+                        starting.workspace(&new).map_err(|e| start_error(&e))?;
                     started(&workspace, &session.id.0, harness)
+                });
+                Ok(None)
+            }
+            Operation::ProjectBranches(ProjectRef { project }) => {
+                let project = facade.reachable_project(grant, project)?;
+                self.later(request, move || {
+                    starting
+                        .branches(&project.id)
+                        .map(Reply::Branches)
+                        .map_err(|e| start_error(&e))
+                });
+                Ok(None)
+            }
+            Operation::ProjectClone(ProjectCloneParams { remote, name }) => {
+                // The new project is none of those a narrower grant names, so that device
+                // could not reach what it had cloned.
+                if grant.projects != ProjectGrant::All {
+                    return Err(RemoteError::new(
+                        ErrorCode::Forbidden,
+                        "This device is let into some of this computer's projects, not all, so \
+                         it cannot add one.",
+                    ));
+                }
+                let (remote, name) = (remote.trim().to_owned(), name.clone());
+                self.later(request, move || {
+                    let (project, name) = starting
+                        .clone_project(&remote, name.as_deref())
+                        .map_err(|e| start_error(&e))?;
+                    Ok(Reply::Cloned(ProjectCloned {
+                        project: remote_proto::ProjectId::new(&project).map_err(|_| internal())?,
+                        name: clip(&name, MAX_TEXT),
+                    }))
+                });
+                Ok(None)
+            }
+            Operation::ShellStart(ShellStartParams { workspace }) => {
+                let (row, _) = facade.reachable_workspace(grant, workspace)?;
+                self.later(request, move || {
+                    let session = starting.shell(&row.id).map_err(|e| start_error(&e))?;
+                    started(&row.id, &session.id.0, String::new())
+                });
+                Ok(None)
+            }
+            Operation::WorkspaceRename(WorkspaceRenameParams { workspace, name }) => {
+                let (row, _) = facade.reachable_workspace(grant, workspace)?;
+                starting
+                    .rename(&row.id, name)
+                    .map_err(|e| start_error(&e))?;
+                Ok(Some(Reply::Done))
+            }
+            Operation::WorkspaceArchive(WorkspaceRemoveParams { workspace, force }) => {
+                let (row, _) = facade.reachable_workspace(grant, workspace)?;
+                let force = *force;
+                self.later(request, move || {
+                    starting
+                        .archive(&row.id, force)
+                        .map(|()| Reply::Done)
+                        .map_err(|e| start_error(&e))
+                });
+                Ok(None)
+            }
+            Operation::WorkspaceDelete(WorkspaceRemoveParams { workspace, force }) => {
+                let (row, _) = facade.reachable_workspace(grant, workspace)?;
+                let force = *force;
+                self.later(request, move || {
+                    starting
+                        .delete(&row.id, force)
+                        .map(|()| Reply::Done)
+                        .map_err(|e| start_error(&e))
                 });
                 Ok(None)
             }

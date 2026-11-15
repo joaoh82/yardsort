@@ -24,12 +24,13 @@ use remote_proto::{
     AcquireRequest, ActivityBatch, ActivityListParams, ActivityPage, ActivitySubscribeParams,
     ActivityUnsubscribeParams, AttachRequest, AttachStart, Attached, Controller, Cursor,
     DetachRequest, ErrorCode, Event, HarnessSummary, Hello, HelloReply, HostDescription, HostId,
-    InputRequest, Lease, LeaseRef, Operation, OutputFrame, ProgramExit, ProtocolVersion,
-    RemoteError, Reply, Request, RequestId, ResizeRequest, Response, SessionListParams,
-    SessionPage, SessionResumeParams, SessionStartParams, Started, StreamId, StreamPosition,
-    SubscriptionId, TermSize, TerminalId, WorkspaceDetail, WorkspaceId, WorkspaceListParams,
-    WorkspacePage, WorkspaceRef, WorkspaceStartParams, MAX_CLIENT_NAME, MAX_CONTROL_FRAME,
-    MAX_OUTPUT_CHUNK, PROTOCOL_MAJOR,
+    InputRequest, Lease, LeaseRef, Operation, OutputFrame, ProgramExit, ProjectBranches,
+    ProjectCloneParams, ProjectCloned, ProjectRef, ProtocolVersion, RemoteError, Reply, Request,
+    RequestId, ResizeRequest, Response, SessionListParams, SessionPage, SessionResumeParams,
+    SessionStartParams, ShellStartParams, Started, StreamId, StreamPosition, SubscriptionId,
+    TermSize, TerminalId, WorkspaceDetail, WorkspaceId, WorkspaceListParams, WorkspacePage,
+    WorkspaceRef, WorkspaceRemoveParams, WorkspaceRenameParams, WorkspaceStartParams,
+    MAX_CLIENT_NAME, MAX_CONTROL_FRAME, MAX_OUTPUT_CHUNK, PROTOCOL_MAJOR,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -278,6 +279,43 @@ impl Channel {
         started(self.ask(Operation::SessionResume(params)).await?)
     }
 
+    /// The branches a new workspace in a project can start from or open. Minor 10.
+    pub async fn branches(&self, params: ProjectRef) -> Result<ProjectBranches> {
+        match self.ask(Operation::ProjectBranches(params)).await? {
+            Reply::Branches(branches) => Ok(branches),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// A repository cloned into the host's projects folder and added as a project. The reply
+    /// comes once the clone is done, which can take as long as the repository is large. Minor 10.
+    pub async fn clone_project(&self, params: ProjectCloneParams) -> Result<ProjectCloned> {
+        match self.ask(Operation::ProjectClone(params)).await? {
+            Reply::Cloned(cloned) => Ok(cloned),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// The host's shell in a workspace. Minor 10.
+    pub async fn start_shell(&self, params: ShellStartParams) -> Result<Started> {
+        started(self.ask(Operation::ShellStart(params)).await?)
+    }
+
+    /// Change what a workspace is called. Minor 10.
+    pub async fn rename_workspace(&self, params: WorkspaceRenameParams) -> Result<()> {
+        done(self.ask(Operation::WorkspaceRename(params)).await?)
+    }
+
+    /// Put a workspace away, keeping its branch and its record. Minor 10.
+    pub async fn archive_workspace(&self, params: WorkspaceRemoveParams) -> Result<()> {
+        done(self.ask(Operation::WorkspaceArchive(params)).await?)
+    }
+
+    /// Remove a workspace, keeping its branch. Minor 10.
+    pub async fn delete_workspace(&self, params: WorkspaceRemoveParams) -> Result<()> {
+        done(self.ask(Operation::WorkspaceDelete(params)).await?)
+    }
+
     pub async fn activity(&self, params: ActivityListParams) -> Result<ActivityPage> {
         match self.ask(Operation::ActivityList(params)).await? {
             Reply::Activity(page) => Ok(page),
@@ -362,6 +400,13 @@ fn check_name(name: &str) -> Result<()> {
 fn started(reply: Reply) -> Result<Started> {
     match reply {
         Reply::Started(started) => Ok(started),
+        _ => Err(something_else()),
+    }
+}
+
+fn done(reply: Reply) -> Result<()> {
+    match reply {
+        Reply::Done => Ok(()),
         _ => Err(something_else()),
     }
 }
