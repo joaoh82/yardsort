@@ -9,7 +9,7 @@
 /** The major this client speaks. */
 export const PROTOCOL_MAJOR = 1;
 /** The minor this client speaks: 9, the relay's notice to a host that a synced project changed. */
-export const PROTOCOL_MINOR = 10;
+export const PROTOCOL_MINOR = 11;
 
 /** The largest JSON message either side reads, in bytes. */
 export const MAX_CONTROL_FRAME = 64 * 1024;
@@ -102,3 +102,12 @@ export const MAX_TEST_INPUT = 256;
 export const MAX_TEST_DEFINITION = 10_000;
 /** Longest content hash of a smoke test file, in bytes. Minor 10. */
 export const MAX_TEST_HASH = 64;
+
+/** The most checks one pull request is described with, by name. Minor 11. */
+export const MAX_PULL_CHECKS = 40;
+/** Longest name of a pull request's check, in characters. Minor 11. */
+export const MAX_CHECK_NAME = 100;
+/** The most reviewers, and the most reviews waited for, a pull request is described with. Minor 11. */
+export const MAX_REVIEWERS = 12;
+/** The most workspaces one pull request names. Minor 11. */
+export const MAX_PULL_WORKSPACES = 8;

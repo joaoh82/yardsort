@@ -48,6 +48,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 41  | [Mobile workflow controls](41-mobile-workflow-controls.md)              | Built: a signed-in phone can see a workflow run and decide it while the computer is online. The one-time code stays off the notification                                                                                                                     |
 | 42  | [Remote, R6](42-remote-r6.md)                                           | Durable sync between an account's hosts, a project at a time: approved notes and workspace records, never files or processes. Slices 1 to 4, the server's records, turning a project on and linking it, approved notes, and workspaces seen elsewhere, built |
 | 43  | [Chat on the phone](43-phone-chat.md)                                   | Built: a conversation on the phone is a column read from the agent's own record; its permissions answered through the hook; the terminal zoomed to fit                                                                                                       |
+| 45  | [Pull requests on the phone](45-phone-pull-requests.md)                 | Built, read-only: the phone is told what the computer last read with `gh`; badges on workspace rows, a card with checks and reviews, and a list over every project                                                                                           |
 
 ## Vocabulary
 

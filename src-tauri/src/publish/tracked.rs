@@ -81,6 +81,36 @@ impl TrackedRead {
     }
 }
 
+/// Each row with what was last read of it.
+fn as_read(rows: &[TrackedPullRequestRow], reads: &TrackedReads) -> Vec<TrackedPullRequest> {
+    rows.iter()
+        .enumerate()
+        .filter_map(|(index, row)| {
+            let repo = crate::tracked::repo_from_key(&row.repo)?;
+            let read = reads.get(&row.url);
+            let problem = match read {
+                Some(read) => read.problem.clone(),
+                None if index >= TRACKED_LIMIT => Some(format!(
+                    "Not read: a project's workspaces follow at most {TRACKED_LIMIT} pull \
+                     requests elsewhere, the newest tracked."
+                )),
+                None => None,
+            };
+            Some(TrackedPullRequest {
+                id: row.id.clone(),
+                workspace_id: row.workspace_id.clone(),
+                session_id: row.session_id.clone(),
+                repo,
+                number: row.number,
+                url: row.url.clone(),
+                tracked_by: row.tracked_by.clone(),
+                pull_request: read.and_then(|read| read.pull_request.clone()),
+                problem,
+            })
+        })
+        .collect()
+}
+
 impl Forge {
     /// The pull requests `rows` track, each with what `fetch` last said about it, reading the
     /// ones that are due — every one when someone `asked` (**Refresh**): a merged or closed one
@@ -145,32 +175,16 @@ impl Forge {
                 },
             );
         }
-        rows.iter()
-            .enumerate()
-            .filter_map(|(index, row)| {
-                let repo = crate::tracked::repo_from_key(&row.repo)?;
-                let read = reads.get(&row.url);
-                let problem = match read {
-                    Some(read) => read.problem.clone(),
-                    None if index >= TRACKED_LIMIT => Some(format!(
-                        "Not read: a project's workspaces follow at most {TRACKED_LIMIT} pull \
-                         requests elsewhere, the newest tracked."
-                    )),
-                    None => None,
-                };
-                Some(TrackedPullRequest {
-                    id: row.id.clone(),
-                    workspace_id: row.workspace_id.clone(),
-                    session_id: row.session_id.clone(),
-                    repo,
-                    number: row.number,
-                    url: row.url.clone(),
-                    tracked_by: row.tracked_by.clone(),
-                    pull_request: read.and_then(|read| read.pull_request.clone()),
-                    problem,
-                })
-            })
-            .collect()
+        as_read(rows, &reads)
+    }
+
+    /// The pull requests `rows` track as they were last read, reading none: for a reader that
+    /// must not wait on the network ([`super::lent`]).
+    pub fn tracked_as_read(&self, rows: &[TrackedPullRequestRow]) -> Vec<TrackedPullRequest> {
+        as_read(
+            rows,
+            &self.tracked.lock().unwrap_or_else(PoisonError::into_inner),
+        )
     }
 
     /// The pull request at `url` as last read, however long ago: what the window was shown.

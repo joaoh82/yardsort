@@ -31,6 +31,8 @@ import Pair from "../../src/app/pair";
 import Servers from "../../src/app/servers";
 import Settings from "../../src/app/settings";
 import StartWork from "../../src/app/start";
+import PullScreen from "../../src/app/pull";
+import PullsScreen from "../../src/app/pulls";
 import WorkspaceScreen from "../../src/app/workspace";
 import { Accounts, type Browser, type Env } from "../../src/lib/accounts";
 import type { PickImage } from "../../src/lib/attach";
@@ -90,6 +92,8 @@ async function start({
       settings: Settings,
       pair: Pair,
       computer: ComputerScreen,
+      pull: PullScreen,
+      pulls: PullsScreen,
       workspace: WorkspaceScreen,
       memory: MemoryScreen,
       terminal: TerminalScreen,
@@ -977,6 +981,274 @@ describe("A computer", () => {
     await fireEvent.press(await screen.findByRole("button", { name: /^Workstation, / }));
     expect(await screen.findByRole("button", { name: "demo, 1, 1 running" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^fix-login/ })).toBeNull();
+  });
+
+  describe("pull requests", () => {
+    const button = (name: string | RegExp) => screen.findByRole("button", { name });
+    /** One with a failed check, changes asked for and conflicts, from the workspace. */
+    const failing = () => ({
+      project: "project-1",
+      number: 61,
+      title: "Retry uploads with backoff",
+      url: "https://github.com/orchard/orchard/pull/61",
+      branch: "ys/fix-login",
+      base: "main",
+      state: "open",
+      draft: false,
+      checks: { passed: 4, failed: 2, running: 0 },
+      review: "changesRequested",
+      conflicts: true,
+      additions: 184,
+      deletions: 22,
+      author: "juno-p",
+      updatedAt: Date.now() - 5 * 60_000,
+      workspaces: ["workspace-1"],
+    });
+    /** A draft in another repository, which the workspace follows. */
+    const followed = () => ({
+      ...failing(),
+      number: 7,
+      followed: "follow-1",
+      repo: "orchard/lib",
+      title: "Accept knots in parse()",
+      url: "https://github.com/orchard/lib/pull/7",
+      branch: "knots",
+      draft: true,
+      checks: { passed: 2, failed: 0, running: 3 },
+      review: "none",
+      conflicts: false,
+    });
+    /** A computer that reads pull requests, with these. */
+    function reading(...pulls: Record<string, unknown>[]) {
+      const server = new FakeServer();
+      server.computer.capabilities = ["pull.list", "pull.describe"];
+      server.computer.pulls = pulls;
+      return server;
+    }
+    const asked = (server: FakeServer, op: string) =>
+      server.operations.filter((o) => o.op === op).map((o) => o.params);
+
+    test("a workspace's row carries its pull request, in words as well as colour, and how many more it has", async () => {
+      const server = reading(failing(), followed());
+      await paired(new MemoryVault(), server);
+      await open();
+      expect(await screen.findByText("#61 +1")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^fix-login/ }).props.accessibilityLabel).toBe(
+        "fix-login, ys/fix-login · 1 running · pull request #61, needs attention",
+      );
+      expect(
+        screen.getByRole("button", {
+          name: "Show pull request #61, needs attention, and 1 more",
+        }),
+      ).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Pull requests · 2 open" })).toBeTruthy();
+      // What a workspace list shows, and nothing a list of them all would add.
+      expect(asked(server, "pull.list")[0]).toMatchObject({ of: "workspaces" });
+    });
+
+    test("a merged one says so in place of its number", async () => {
+      await paired(new MemoryVault(), reading({ ...failing(), state: "merged", conflicts: false }));
+      await open();
+      expect(await screen.findByText("merged")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^fix-login/ }).props.accessibilityLabel).toMatch(
+        /pull request #61, merged$/,
+      );
+      // None is open: the way to the list is there, without a count.
+      expect(screen.getByRole("button", { name: "Pull requests" })).toBeTruthy();
+    });
+
+    test("a computer that does not tell of pull requests is not asked, and shows nothing of them", async () => {
+      const server = new FakeServer();
+      server.computer.pulls = [failing()];
+      await paired(new MemoryVault(), server);
+      const row = await open();
+      expect(row.props.accessibilityLabel).toBe("fix-login, ys/fix-login · 1 running");
+      expect(screen.queryByRole("button", { name: /^Pull requests/ })).toBeNull();
+      await fireEvent.press(row);
+      await screen.findByText("The login page times out");
+      expect(screen.queryByText("Pull request")).toBeNull();
+      expect(asked(server, "pull.list")).toEqual([]);
+      expect(asked(server, "pull.describe")).toEqual([]);
+    });
+
+    test("a computer still reading them is asked again in a few seconds, and then each minute", async () => {
+      const server = reading();
+      server.computer.pullsReading = 1;
+      await paired(new MemoryVault(), server);
+      await open();
+      await waitFor(() => expect(asked(server, "pull.list")).toHaveLength(1));
+      expect(screen.queryByRole("button", { name: /^Pull requests/ })).toBeNull();
+
+      // What it read arrives at the computer while the phone waits.
+      server.computer.pulls = [failing()];
+      await act(async () => jest.advanceTimersByTimeAsync(4_100));
+      expect(await screen.findByText("#61")).toBeTruthy();
+      expect(asked(server, "pull.list")).toHaveLength(2);
+
+      // A check finishes without anyone pressing anything.
+      server.computer.pulls = [
+        {
+          ...failing(),
+          checks: { passed: 6, failed: 0, running: 0 },
+          review: "approved",
+          conflicts: false,
+        },
+      ];
+      await act(async () => jest.advanceTimersByTimeAsync(30_000));
+      expect(asked(server, "pull.list")).toHaveLength(2);
+      await act(async () => jest.advanceTimersByTimeAsync(31_000));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /^fix-login/ }).props.accessibilityLabel).toMatch(
+          /pull request #61, open$/,
+        ),
+      );
+    });
+
+    test("a workspace shows its pull request's card, each check by name, and opens its page on the forge", async () => {
+      const server = reading(failing(), followed());
+      server.computer.pullDetails["#61"] = {
+        checks: [
+          { name: "CI / test (ubuntu)", state: "failed" },
+          { name: "CI / test (windows)", state: "failed" },
+          { name: "CI / build", state: "passed" },
+        ],
+        moreChecks: 3,
+        reviews: [{ login: "mira-k", state: "changesRequested" }],
+        waitingOn: [],
+      };
+      await paired(new MemoryVault(), server);
+      await fireEvent.press(await open());
+
+      const card = await screen.findByLabelText("Pull request #61");
+      expect(within(card).getByText("Retry uploads with backoff")).toBeTruthy();
+      expect(within(card).getByText("Open")).toBeTruthy();
+      expect(within(card).getByText("updated 5 min ago")).toBeTruthy();
+      expect(within(card).getByText("ys/fix-login → main")).toBeTruthy();
+      expect(within(card).getByLabelText("184 lines added, 22 removed")).toBeTruthy();
+      expect(within(card).getByText("4 of 6 checks passed, 2 failed")).toBeTruthy();
+      // Something failed, so its checks are open without a press: the failed ones lead.
+      expect(await within(card).findByText("CI / test (ubuntu)")).toBeTruthy();
+      expect(within(card).getAllByText("failed")).toHaveLength(2);
+      expect(within(card).getByText("and 3 more")).toBeTruthy();
+      expect(within(card).getByText("Changes requested by mira-k")).toBeTruthy();
+      expect(within(card).getByText("Conflicts with main")).toBeTruthy();
+      expect(asked(server, "pull.describe").at(-1)).toEqual({ project: "project-1", number: 61 });
+
+      await fireEvent.press(within(card).getByRole("button", { name: "Hide the checks" }));
+      expect(within(card).queryByText("CI / build")).toBeNull();
+      await fireEvent.press(within(card).getByRole("button", { name: "Show the checks" }));
+      expect(within(card).getByText("CI / build")).toBeTruthy();
+
+      const openURL = jest.spyOn(Linking, "openURL").mockResolvedValue(undefined);
+      await fireEvent.press(within(card).getByRole("button", { name: "Open on GitHub" }));
+      expect(openURL).toHaveBeenCalledWith("https://github.com/orchard/orchard/pull/61");
+      // Left as it was found: a later test counts what is opened.
+      openURL.mockClear();
+      openURL.mockRestore();
+
+      // The one it follows in another repository is listed under it, and opens as its own card.
+      expect(screen.getByText("Also opened from this workspace")).toBeTruthy();
+      const other = screen.getByRole("button", {
+        name: "Accept knots in parse(), pull request lib#7, a draft",
+      });
+      expect(within(other).getByText("orchard/lib · checks running")).toBeTruthy();
+      expect(within(other).getByText("lib#7")).toBeTruthy();
+      await fireEvent.press(other);
+      const second = await screen.findByLabelText("Pull request lib#7");
+      expect(within(second).getByText("Draft")).toBeTruthy();
+      expect(within(second).getByText("2 of 5 checks passed, 3 still running")).toBeTruthy();
+      expect(asked(server, "pull.describe").at(-1)).toEqual({
+        project: "project-1",
+        number: 7,
+        followed: "follow-1",
+      });
+      expect(await screen.findByText("Followed from")).toBeTruthy();
+    });
+
+    test("a link that is not to a web page is no link, and a card has no way out by it", async () => {
+      const server = reading({ ...failing(), url: "intent://evil#Intent;end" });
+      await paired(new MemoryVault(), server);
+      await fireEvent.press(await open());
+      const card = await screen.findByLabelText("Pull request #61");
+      expect(within(card).getByText("Conflicts with main")).toBeTruthy();
+      expect(within(card).queryByRole("button", { name: /^Open / })).toBeNull();
+    });
+
+    test("pressing a row's badge opens that pull request, with the workspace it came from", async () => {
+      const server = reading(failing());
+      await paired(new MemoryVault(), server);
+      await open();
+      await fireEvent.press(await button("Show pull request #61, needs attention"));
+      const card = await screen.findByLabelText("Pull request #61");
+      expect(within(card).getByText("Retry uploads with backoff")).toBeTruthy();
+      expect(await screen.findByText("Opened from")).toBeTruthy();
+      await fireEvent.press(await button("fix-login"));
+      expect(await screen.findByText("The login page times out")).toBeTruthy();
+    });
+
+    test("the list of them all, by state, and one opens as its card", async () => {
+      const merged = {
+        ...failing(),
+        number: 39,
+        title: "Send rate-limit headers",
+        state: "merged",
+      };
+      const server = reading(failing(), followed(), {
+        ...merged,
+        conflicts: false,
+        workspaces: [],
+      });
+      await paired(new MemoryVault(), server);
+      await open();
+      await fireEvent.press(await button("Pull requests · 2 open"));
+
+      expect(
+        (await screen.findByRole("tab", { name: "Open · 2" })).props.accessibilityState,
+      ).toEqual({ selected: true });
+      const row = await button(/^Retry uploads with backoff, pull request #61, needs attention/);
+      expect(row.props.accessibilityLabel).toBe(
+        "Retry uploads with backoff, pull request #61, needs attention, 4 of 6 checks passed, 2 failed, conflicts, in fix-login",
+      );
+      expect(within(row).getByText("4/6")).toBeTruthy();
+      expect(within(row).getByText("In fix-login")).toBeTruthy();
+      expect(within(row).getByText("5 min")).toBeTruthy();
+      // One in another repository says which, and whose project follows it.
+      const elsewhere = await button(/^Accept knots in parse\(\)/);
+      expect(within(elsewhere).getByText("demo · orchard/lib")).toBeTruthy();
+      expect(screen.queryByText("Send rate-limit headers")).toBeNull();
+      expect(asked(server, "pull.list").at(-1)).toMatchObject({ of: "open" });
+
+      await fireEvent.press(screen.getByRole("tab", { name: "Merged" }));
+      expect(await screen.findByText("Send rate-limit headers")).toBeTruthy();
+      expect(screen.queryByText("Retry uploads with backoff")).toBeNull();
+      expect(asked(server, "pull.list").at(-1)).toMatchObject({ of: "merged" });
+
+      await fireEvent.press(screen.getByRole("tab", { name: "Closed" }));
+      expect(
+        await screen.findByText("No closed pull requests among the newest the computer read."),
+      ).toBeTruthy();
+      expect(screen.queryByText("Send rate-limit headers")).toBeNull();
+
+      await fireEvent.press(screen.getByRole("tab", { name: "Open · 2" }));
+      await fireEvent.press(await button(/^Retry uploads with backoff/));
+      const card = await screen.findByLabelText("Pull request #61");
+      expect(within(card).getByText("4 of 6 checks passed, 2 failed")).toBeTruthy();
+    });
+
+    test("one the computer no longer has among those it read says so", async () => {
+      const server = reading(failing());
+      await paired(new MemoryVault(), server);
+      await open();
+      const badge = await button("Show pull request #61, needs attention");
+      server.computer.pulls = [];
+      await fireEvent.press(badge);
+      expect(
+        await screen.findByText(
+          /^The computer no longer has this pull request among those it read/,
+        ),
+      ).toBeTruthy();
+      expect(screen.queryByLabelText("Pull request #61")).toBeNull();
+    });
   });
 
   test("more than a page is asked for when wanted", async () => {

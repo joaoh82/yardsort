@@ -17,6 +17,7 @@
 
 pub mod commands;
 pub mod conflicts;
+pub mod lent;
 pub mod pull_requests;
 pub mod tasks;
 pub mod tracked;
@@ -295,6 +296,19 @@ struct OpenTier {
     found: OpenPullRequests,
 }
 
+/// What [`Forge::last_read`] answers.
+pub struct LastRead {
+    /// How long ago the newest fifty were read.
+    pub age: Duration,
+    /// How long ago every open one was read. `None` when they never were, or something has
+    /// happened since that the answer does not know about.
+    pub open_age: Option<Duration>,
+    pub found: ProjectPullRequests,
+    /// Each workspace's own, as last worked out, from whichever list that was. `None` when it
+    /// never was.
+    pub workspaces: Option<BTreeMap<String, Vec<u32>>>,
+}
+
 type Owned = BTreeMap<String, Vec<u32>>;
 type OwnedAnswer = (Instant, Vec<PullRequest>, Owned);
 
@@ -546,6 +560,31 @@ impl Forge {
                     .find(|pr| pr.number == number)
                     .cloned()
             })
+        })
+    }
+
+    /// Everything last read of a project, both tiers as one list, with how long ago: for a
+    /// reader that must not wait on the network and decides for itself what is too old, as a
+    /// device's channel does ([`lent`]). Never a fetch. `None` when nothing was read yet.
+    pub fn last_read(&self, project_id: &str) -> Option<LastRead> {
+        let (age, recent) = {
+            let cached = self.cached.lock().unwrap_or_else(PoisonError::into_inner);
+            let (at, answer) = cached.get(project_id)?;
+            (at.elapsed(), answer.clone())
+        };
+        let open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        let tier = open.get(project_id);
+        let workspaces = self
+            .owned
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(project_id)
+            .map(|(_, _, answer)| answer.clone());
+        Some(LastRead {
+            age,
+            open_age: tier.and_then(|tier| tier.at).map(|at| at.elapsed()),
+            found: compose(recent, tier.map(|tier| &tier.found)),
+            workspaces,
         })
     }
 
@@ -1183,6 +1222,66 @@ mod tests {
 
     /// The two tiers as one list: the recent tier's word on a pull request both have, and the
     /// open tier's older ones after it.
+    #[test]
+    fn what_was_last_read_is_handed_over_whole_with_its_age_and_never_asks_anyone() {
+        let forge = Forge::default();
+        assert!(forge.last_read("p1").is_none(), "nothing was read yet");
+
+        let then = Instant::now()
+            .checked_sub(Duration::from_secs(600))
+            .expect("the clock goes back ten minutes");
+        let recent = ProjectPullRequests {
+            gh: true,
+            pull_requests: vec![numbered(10, PullRequestState::Open)],
+            ..Default::default()
+        };
+        forge
+            .cached
+            .lock()
+            .unwrap()
+            .insert("p1".into(), (then, recent));
+        // Old, and still what there is: nothing here goes to `gh`, which is why there is none.
+        let last = forge.last_read("p1").expect("what was read");
+        assert!(last.age >= Duration::from_secs(600));
+        assert_eq!(last.open_age, None);
+        assert_eq!(last.workspaces, None, "nobody shared them out yet");
+        assert_eq!(
+            last.found
+                .pull_requests
+                .iter()
+                .map(|pr| pr.number)
+                .collect::<Vec<_>>(),
+            [10]
+        );
+
+        // Every open one, read since, and which workspace opened what.
+        forge.open.lock().unwrap().insert(
+            "p1".into(),
+            OpenTier {
+                at: Some(Instant::now()),
+                found: open_tier(&[10, 3]),
+            },
+        );
+        forge.owned("p1", &last.found.pull_requests, false, || {
+            BTreeMap::from([("w1".to_owned(), vec![10])])
+        });
+        let last = forge.last_read("p1").expect("what was read");
+        assert!(last.open_age.expect("the open ones were read") < Duration::from_secs(60));
+        assert_eq!(
+            last.found
+                .pull_requests
+                .iter()
+                .map(|pr| pr.number)
+                .collect::<Vec<_>>(),
+            [10, 3]
+        );
+        assert_eq!(last.workspaces.expect("shared out")["w1"], [10]);
+
+        // Something happened to the project: the open ones are kept, and known to be old.
+        forge.forget("p1");
+        assert!(forge.last_read("p1").is_none());
+    }
+
     #[test]
     fn the_open_tier_adds_what_the_newest_fifty_did_not_reach() {
         let recent = ProjectPullRequests {

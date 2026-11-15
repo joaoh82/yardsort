@@ -70,6 +70,7 @@ impl Fixture {
             workflow: false,
             conversations: None,
             tests: None,
+            pulls: None,
         }
     }
 
@@ -2299,3 +2300,5 @@ fn a_smoke_test_too_long_to_show_whole_can_only_be_refused_from_a_device() {
     );
     assert_eq!(f.store.test_run(&run).unwrap().unwrap().status, "refused");
 }
+
+mod pull;

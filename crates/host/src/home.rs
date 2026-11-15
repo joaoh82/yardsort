@@ -131,6 +131,7 @@ impl Home for HostHome {
             workflow: None,
             conversations: Some(&conversations),
             tests: None,
+            pulls: None,
         });
     }
 

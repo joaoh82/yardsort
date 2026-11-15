@@ -72,8 +72,70 @@ fn requests_match_their_fixtures() {
     assert_eq!(request.operation.name(), "test.decide");
     assert_eq!(request.operation.scope(), Some(Scope::TerminalControl));
     assert!(request.operation.validate().is_ok());
+    let request: Request = pinned("request-pull-list.json");
+    assert_eq!(request.operation.name(), "pull.list");
+    assert_eq!(request.operation.scope(), Some(Scope::WorkspaceRead));
+    assert!(request.operation.validate().is_ok());
+    let request: Request = pinned("request-pull-describe.json");
+    assert_eq!(request.operation.name(), "pull.describe");
+    assert_eq!(request.operation.scope(), Some(Scope::WorkspaceRead));
+    assert!(request.operation.validate().is_ok());
     let hello: Hello = pinned("hello.json");
     assert_eq!(negotiate(&hello), Ok(ProtocolVersion::CURRENT));
+}
+
+#[test]
+fn a_pull_request_is_named_by_its_project_and_number_or_by_the_hosts_id_for_one_followed() {
+    let describe = |number: u32, followed: Option<&str>| {
+        Operation::PullDescribe(pull::PullRef {
+            project: ProjectId::new("1f0e9d8c-7b6a-4c5d-8e3f-2a1b0c9d8e7f").unwrap(),
+            number,
+            followed: followed.map(str::to_owned),
+        })
+        .validate()
+    };
+    assert!(describe(61, None).is_ok());
+    assert!(describe(7, Some("6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d")).is_ok());
+    assert_eq!(
+        describe(0, None).unwrap_err().code,
+        ErrorCode::InvalidRequest
+    );
+    for bad in ["", "a b", "../x"] {
+        assert_eq!(
+            describe(7, Some(bad)).unwrap_err().code,
+            ErrorCode::InvalidRequest,
+            "{bad:?}"
+        );
+    }
+    let empty_page = Operation::PullList(pull::PullListParams {
+        limit: Some(0),
+        ..Default::default()
+    });
+    assert_eq!(
+        empty_page.validate().unwrap_err().code,
+        ErrorCode::InvalidRequest
+    );
+    // Which ones is `workspaces` unless said, and a word this build does not know is refused.
+    let asked: pull::PullListParams = serde_json::from_str("{}").unwrap();
+    assert_eq!(asked.of, pull::PullsOf::Workspaces);
+    assert!(serde_json::from_str::<pull::PullListParams>(r#"{"of":"mine"}"#).is_err());
+}
+
+#[test]
+fn what_a_newer_host_says_of_a_pull_request_is_read_as_something_else_not_refused() {
+    let mut json = fixture("response-pull.json");
+    json["result"]["pull"]["state"] = "queued".into();
+    json["result"]["pull"]["review"] = "blocked".into();
+    json["result"]["checks"][0]["state"] = "skipped".into();
+    json["result"]["reviews"][0]["state"] = "pending".into();
+    let response: Response = serde_json::from_value(json).unwrap();
+    let Outcome::Result(Reply::Pull(detail)) = response.outcome else {
+        panic!("a pull request");
+    };
+    assert_eq!(detail.pull.state, pull::PullState::Other);
+    assert_eq!(detail.pull.review, pull::PullReview::Other);
+    assert_eq!(detail.checks[0].state, pull::CheckState::Other);
+    assert_eq!(detail.reviews[0].state, pull::ReviewerState::Other);
 }
 
 #[test]
@@ -159,6 +221,8 @@ fn responses_match_their_fixtures() {
         "response-workflow-challenge.json",
         "response-conversation.json",
         "response-tests-waiting.json",
+        "response-pulls.json",
+        "response-pull.json",
     ] {
         let _: Response = pinned(name);
     }
@@ -430,6 +494,12 @@ fn every_operation_has_the_name_it_is_sent_under() {
             run: "r".into(),
             content_hash: "ab".into(),
             decision: smoke::TestDecision::Refuse,
+        }),
+        Operation::PullList(pull::PullListParams::default()),
+        Operation::PullDescribe(pull::PullRef {
+            project: ProjectId::new("p").unwrap(),
+            number: 1,
+            followed: None,
         }),
     ];
     assert_eq!(all.len(), OPERATIONS.len());

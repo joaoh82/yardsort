@@ -5,6 +5,13 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Pull requests on the phone.** A workspace's row on the phone carries its pull request's
+  badge, coloured as in the sidebar here: green, yellow while it waits on checks or a review, red
+  for a failed check, changes asked for or conflicts, purple for merged. The workspace's screen
+  has a card with the checks by name, the review and **Open on GitHub**, and **Pull requests** on
+  a computer's screen lists the open, merged and closed ones over every project. It is read-only,
+  and the phone asks this computer, never GitHub, so it needs `gh` signed in here and this
+  version on the computer. See [Pull requests on the phone](docs/guide/remote.md#pull-requests-on-the-phone).
 - **Sync a project with your other computers** (Remote, under development). **Sync** in Project
   settings shows what turning it on sends, the project's name and its Git remote without any
   password, and turns it on; on your other computer, **Link to a synced project…** offers it, the
