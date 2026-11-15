@@ -3,7 +3,8 @@ name: The window and a phone share one shell on a computer with no screen
 description: >-
   A yardsort-host on the stand-in server, serving a shell started with ys. The real window, on a
   profile of its own, signs in as a client and is let watch and type at the host's terminal, and so
-  is a pretend phone. The window watches the shell at the host's size, takes control and types; the
+  is a pretend phone. The window opens the host's workspace from the sidebar, watches its shell at
+  the host's size without taking control by itself, then takes control and types; the
   phone, watching only, sees it. Then the phone takes control and types, and the window says who
   took it and offers to take it back. Linux only, since the window stands in for the browser with
   xdg-open. A window opens while it runs; nothing needs clicking.

@@ -43,6 +43,24 @@ const KEYS = {
   lastParent: "projects.lastParentDir",
 } as const;
 
+/** A workspace on another computer, by that computer's ids. */
+export type RemoteSelection = { hostId: string; workspaceId: string };
+
+/** Where a new workspace on another computer is being composed. */
+export type ComposingThere = {
+  hostId: string;
+  /** The project there, by that computer's id; `null` while it has none to offer for `from`. */
+  projectId: string | null;
+  /** This computer's project the composer was opened in, when it was: what **This computer**
+   *  goes back to, and what the choice of project there is remembered for. */
+  from?: string | null;
+  /** What was typed before the computer was chosen: it comes along. */
+  message?: string;
+};
+
+/** Nothing of another computer has the center panel. */
+const NOT_THERE = { remote: null, composingThere: null } as const;
+
 /** What the composer needs of the workspace it forks. */
 export type ComposingFork = {
   workspaceId: string;
@@ -91,9 +109,11 @@ interface ProjectsState {
   schedulesOpen: boolean;
   /** The Triggers view is open in the center panel, which it takes over the same way. */
   triggersOpen: boolean;
-  /** Another computer this one reaches as a client, open read-only in the center panel, which it
-   *  takes over the same way. Its id at the server. */
-  remoteHostId: string | null;
+  /** A workspace on another computer this one reaches as a client, open in the center panel as
+   *  a local one is. The local selection is kept beneath it, and comes back when it goes. */
+  remote: RemoteSelection | null;
+  /** A new workspace being composed on another computer, in one of its projects. */
+  composingThere: ComposingThere | null;
   /** What the Triggers view was opened on: one workspace's triggers, or one agent session's.
    *  `null` shows every trigger. */
   triggersFocus: TriggersFocus | null;
@@ -165,8 +185,10 @@ interface ProjectsState {
   openWorkflow: (workflowId: string | null) => void;
   /** Show the Usage view in the center panel, or close it. */
   openUsage: (open: boolean) => void;
-  /** Show another computer's workspaces, or close that with `null`. */
-  openRemoteHost: (hostId: string | null) => void;
+  /** Open a workspace on another computer, by that computer's ids. */
+  selectRemote: (hostId: string, workspaceId: string) => void;
+  /** Compose a new workspace on another computer, in one of its projects; `null` gives up. */
+  composeThere: (target: ComposingThere | null) => void;
   /** Show the Pull requests view in the center panel, or close it. */
   openPullRequests: (open: boolean) => void;
   /** Show the Tasks view in the center panel, or close it. */
@@ -271,7 +293,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     testsOpen: false,
     schedulesOpen: false,
     triggersOpen: false,
-    remoteHostId: null,
+    ...NOT_THERE,
     triggersFocus: null,
     ui: {},
     collapsed: [],
@@ -458,7 +480,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           testsOpen: false,
           schedulesOpen: false,
           triggersOpen: false,
-          remoteHostId: null,
+          ...NOT_THERE,
         });
       }
       set({
@@ -477,7 +499,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
-        remoteHostId: null,
+        ...NOT_THERE,
       });
       save(KEYS.selected, workspaceId);
     },
@@ -498,7 +520,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
-        remoteHostId: null,
+        ...NOT_THERE,
         // Composing inside a collapsed project would hide where the workspace will appear.
         collapsed: state.collapsed.filter((id) => id !== projectId),
       }));
@@ -513,7 +535,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
-        remoteHostId: null,
+        ...NOT_THERE,
         composingProjectId: null,
         composingWorkspaceId: null,
         composingPrompt: null,
@@ -524,9 +546,31 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       });
     },
 
-    openRemoteHost(hostId) {
+    selectRemote(hostId, workspaceId) {
       set({
-        remoteHostId: hostId,
+        ...NOT_THERE,
+        remote: { hostId, workspaceId },
+        usageOpen: false,
+        pullRequestsOpen: false,
+        tasksOpen: false,
+        testsOpen: false,
+        schedulesOpen: false,
+        triggersOpen: false,
+        workflowId: null,
+        composingProjectId: null,
+        composingWorkspaceId: null,
+        composingPrompt: null,
+        composingBranch: null,
+        composingTask: null,
+        composingHarness: null,
+        composingFork: null,
+      });
+    },
+
+    composeThere(target) {
+      set({
+        ...NOT_THERE,
+        composingThere: target,
         usageOpen: false,
         pullRequestsOpen: false,
         tasksOpen: false,
@@ -552,7 +596,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
-        remoteHostId: null,
+        ...NOT_THERE,
         workflowId: null,
         composingProjectId: null,
         composingWorkspaceId: null,
@@ -571,7 +615,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
-        remoteHostId: null,
+        ...NOT_THERE,
         usageOpen: false,
         workflowId: null,
         composingProjectId: null,
@@ -590,7 +634,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
-        remoteHostId: null,
+        ...NOT_THERE,
         pullRequestsOpen: false,
         usageOpen: false,
         workflowId: null,
@@ -609,7 +653,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: open,
         schedulesOpen: false,
         triggersOpen: false,
-        remoteHostId: null,
+        ...NOT_THERE,
         tasksOpen: false,
         pullRequestsOpen: false,
         usageOpen: false,
@@ -628,7 +672,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       set({
         schedulesOpen: open,
         triggersOpen: false,
-        remoteHostId: null,
+        ...NOT_THERE,
         testsOpen: false,
         tasksOpen: false,
         pullRequestsOpen: false,
@@ -647,7 +691,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     openTriggers(open, focus) {
       set({
         triggersOpen: open,
-        remoteHostId: null,
+        ...NOT_THERE,
         triggersFocus: (open && focus) || null,
         schedulesOpen: false,
         testsOpen: false,
@@ -682,7 +726,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
-        remoteHostId: null,
+        ...NOT_THERE,
       });
       save(KEYS.selected, workspace.id);
     },
@@ -722,7 +766,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
-        remoteHostId: null,
+        ...NOT_THERE,
         collapsed: state.collapsed.filter((id) => id !== workspace.projectId),
       }));
       return true;

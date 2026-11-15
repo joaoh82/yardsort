@@ -44,6 +44,7 @@ vi.mock("@/lib/ipc", async (original) => ({
 import { useAssistStore } from "@/stores/assist";
 import { useDraftStore } from "@/stores/draft";
 import { useHarnessStore } from "@/stores/harnesses";
+import { useOtherComputersStore } from "@/stores/otherComputers";
 import { useProjectsStore } from "@/stores/projects";
 import { useTerminalStore } from "@/stores/terminals";
 import { useTriggersStore } from "@/stores/triggers";
@@ -156,7 +157,107 @@ describe("Composer", () => {
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });
     useTriggersStore.setState({ presets: [], presetsLoaded: false });
+    useOtherComputersStore.setState({ status: null, views: {} });
     namingByWords();
+  });
+
+  /** This computer reaches three others: one to start work on, one away, one that lets it watch. */
+  const reachingOthers = () => {
+    const there = (hostId: string, name: string, mayType: boolean) => ({
+      hostId,
+      name,
+      link: { kind: "online" as const },
+      mayType,
+      mayStart: mayType,
+      mayResume: mayType,
+      readAt: 1,
+      platform: "Linux",
+      appVersion: "0.35.0",
+      projects: [
+        { id: `${hostId}-app`, name: "app", workspaces: [] },
+        { id: `${hostId}-site`, name: "site", workspaces: [] },
+      ],
+      activity: [],
+    });
+    const host = (hostId: string, name: string, link: object) => ({
+      grantId: `g-${hostId}`,
+      hostId,
+      name,
+      pairing: "paired" as const,
+      link,
+    });
+    useOtherComputersStore.setState({
+      status: {
+        client: { serverUrl: "https://remote.example.com", name: "Workstation", since: 1 },
+        signingIn: false,
+        hosts: [
+          host("h-1", "Build box", { kind: "online" }),
+          host("h-2", "Mac mini", { kind: "offline", since: null, why: "It is not connected" }),
+          host("h-3", "Studio", { kind: "online" }),
+        ],
+        problem: null,
+        signedOut: false,
+        suggestedServerUrl: "",
+        suggestedName: "",
+      } as never,
+      views: {
+        "h-1": there("h-1", "Build box", true),
+        "h-3": there("h-3", "Studio", false),
+      } as never,
+    });
+  };
+
+  it("says nothing about where it runs on a computer that reaches no other", async () => {
+    await renderComposer();
+    expect(screen.getByRole("heading")).toHaveTextContent(/^New workspace in app$/);
+    expect(screen.queryByRole("button", { name: /^Run on/ })).toBeNull();
+  });
+
+  it("runs on this computer unless another is chosen, and lists one that is away or only watched without offering it", async () => {
+    reachingOthers();
+    const user = await renderComposer();
+    expect(screen.getByRole("form")).toHaveTextContent("New workspace in app on This computer");
+    await user.click(screen.getByRole("button", { name: "Run on: This computer" }));
+    const menu = screen.getByRole("menu", { name: "Run on" });
+    expect(within(menu).getByRole("menuitemradio", { name: "This computer" })).toBeChecked();
+    expect(within(menu).getByRole("menuitemradio", { name: "Build box, online" })).toBeEnabled();
+    expect(within(menu).getByRole("menuitemradio", { name: "Mac mini, offline" })).toBeDisabled();
+    expect(
+      within(menu).getByRole("menuitemradio", { name: "Studio, lets this computer watch only" }),
+    ).toBeDisabled();
+    // Escape closes the menu, and the composer is still there.
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(useProjectsStore.getState().composingProjectId).toBe("p-app");
+  });
+
+  it("goes to compose on the computer chosen, with what was typed and that computer's project of the same name", async () => {
+    reachingOthers();
+    const user = await renderComposer();
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Fix the spacing");
+    await user.click(screen.getByRole("button", { name: "Run on: This computer" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Build box, online" }));
+    expect(useProjectsStore.getState().composingThere).toEqual({
+      hostId: "h-1",
+      projectId: "h-1-app",
+      from: "p-app",
+      message: "Fix the spacing",
+    });
+    expect(useProjectsStore.getState().composingProjectId).toBeNull();
+    expect(core.workspaceCreate).not.toHaveBeenCalled();
+  });
+
+  it("offers no other computer for what starts from something of this one's", async () => {
+    reachingOthers();
+    render(<Composer project={app} runIn={app.workspaces[0]!} />);
+    await screen.findByRole("form", { name: "Run in local" });
+    expect(screen.queryByRole("button", { name: /^Run on/ })).toBeNull();
+    cleanup();
+    useProjectsStore.setState({
+      composingTask: { provider: "github", key: "#7", title: "Fix it", url: "https://x.test/7" },
+    } as never);
+    await renderComposer();
+    expect(screen.queryByRole("button", { name: /^Run on/ })).toBeNull();
   });
 
   it("starts a workspace with the message on Enter and lands in its terminal", async () => {

@@ -4,8 +4,9 @@ description: >-
   A yardsort-host on the stand-in server, signed in by pasting and serving a shell started with ys.
   The real window, on a profile of its own, signs in as a client under Settings → Remote → Other
   computers, pairs by the code the host's pair shows, and is let watch at the host's terminal. The
-  host then shows under Other computers in the sidebar, online, and opens read-only: its name across
-  the top, its workspace and its shell, nothing to press but Close, and no Changes panel. Linux only,
+  host then shows under Other computers in the sidebar, online, with its project and its workspace
+  under it. The workspace opens as one of this computer's does: the host's name across the top and
+  in the bottom line, its shell as a tab, nothing to press but its tabs, and no Changes panel. Linux only,
   since the window stands in for the browser with xdg-open. A window opens while it runs; nothing
   needs clicking.
 version: 1

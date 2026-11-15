@@ -1,0 +1,20 @@
+{
+  "requestId": "r-40",
+  "result": {
+    "kind": "changes",
+    "uncommitted": [
+      { "path": "src/login.tsx", "kind": "modified", "additions": 12, "deletions": 3 },
+      { "path": "notes.txt", "kind": "untracked" }
+    ],
+    "committed": [
+      {
+        "path": "src/auth/session.ts",
+        "oldPath": "src/session.ts",
+        "kind": "renamed",
+        "additions": 2,
+        "deletions": 2
+      }
+    ],
+    "base": "main"
+  }
+}

@@ -56,6 +56,106 @@ fn requests_match_their_fixtures() {
     let request: Request = pinned("request-workflow-challenge.json");
     assert_eq!(request.operation.scope(), Some(Scope::WorkflowDecide));
     assert!(request.operation.validate().is_ok());
+    for (name, op, scope) in [
+        (
+            "request-workspace-start-full.json",
+            "workspace.start",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-start-branch.json",
+            "workspace.start",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-project-branches.json",
+            "project.branches",
+            Scope::WorkspaceRead,
+        ),
+        (
+            "request-project-clone.json",
+            "project.clone",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-shell-start.json",
+            "shell.start",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-rename.json",
+            "workspace.rename",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-archive.json",
+            "workspace.archive",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-delete.json",
+            "workspace.delete",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-changes.json",
+            "workspace.changes",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-files.json",
+            "workspace.files",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-file-read.json",
+            "file.read",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-publish.json",
+            "workspace.publish",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-commit.json",
+            "workspace.commit",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-workspace-push.json",
+            "workspace.push",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-pull-request-open.json",
+            "pull_request.open",
+            Scope::TerminalControl,
+        ),
+        (
+            "request-pull-request-merge.json",
+            "pull_request.merge",
+            Scope::TerminalControl,
+        ),
+    ] {
+        let request: Request = pinned(name);
+        assert_eq!(request.operation.name(), op, "{name}");
+        assert_eq!(request.operation.scope(), Some(scope), "{name}");
+        assert!(request.operation.validate().is_ok(), "{name}");
+    }
+    // Archiving says nothing of force unless it is asked for; deleting here asks.
+    let Operation::WorkspaceArchive(archive) =
+        pinned::<Request>("request-workspace-archive.json").operation
+    else {
+        panic!("not an archive");
+    };
+    assert!(!archive.force);
+    let Operation::WorkspaceDelete(delete) =
+        pinned::<Request>("request-workspace-delete.json").operation
+    else {
+        panic!("not a delete");
+    };
+    assert!(delete.force);
     let request: Request = pinned("request-conversation-read.json");
     assert_eq!(request.operation.name(), "conversation.read");
     assert_eq!(request.operation.scope(), Some(Scope::TerminalRead));
@@ -223,9 +323,49 @@ fn responses_match_their_fixtures() {
         "response-tests-waiting.json",
         "response-pulls.json",
         "response-pull.json",
+        "response-harnesses-choices.json",
+        "response-branches.json",
+        "response-cloned.json",
+        "response-started-shell.json",
+        "response-done.json",
+        "response-changes.json",
+        "response-files.json",
+        "response-file.json",
+        "response-file-too-large.json",
+        "response-publish.json",
+        "response-pull-request-opened.json",
     ] {
         let _: Response = pinned(name);
     }
+    // Since minor 13: a file that is not sent says why, and carries nothing.
+    let Outcome::Result(Reply::File(large)) =
+        pinned::<Response>("response-file-too-large.json").outcome
+    else {
+        panic!("not a file");
+    };
+    assert_eq!(large.state, FileState::TooLarge);
+    assert!(large.data.is_empty() && large.done);
+    // Since minor 12: why archiving or deleting was refused, for a client to ask again.
+    let Outcome::Error(dirty) = pinned::<Response>("response-error-uncommitted.json").outcome
+    else {
+        panic!("not an error");
+    };
+    assert_eq!(dirty.code, ErrorCode::UncommittedWork);
+    assert!(!dirty.retryable);
+    // A harness before minor 12 lists no models and no efforts, and reads as having none.
+    let Outcome::Result(Reply::Harnesses(listed)) =
+        pinned::<Response>("response-harnesses-choices.json").outcome
+    else {
+        panic!("not harnesses");
+    };
+    assert_eq!(listed.harnesses[0].efforts, ["low", "high"]);
+    assert!(listed.harnesses[1].models.is_empty());
+    let Outcome::Result(Reply::Harnesses(older)) =
+        pinned::<Response>("response-harnesses.json").outcome
+    else {
+        panic!("not harnesses");
+    };
+    assert!(older.harnesses.iter().all(|h| h.models.is_empty()));
     // A host before minor 4 says nothing of it; one that keeps an earlier daemon says why.
     let Outcome::Result(Reply::Host(older)) = pinned::<Response>("response-host.json").outcome
     else {
@@ -428,11 +568,11 @@ fn every_operation_has_the_name_it_is_sent_under() {
         Operation::ActivitySubscribe(ActivitySubscribeParams::default()),
         Operation::ActivityUnsubscribe(ActivityUnsubscribeParams { subscription: 1 }),
         Operation::HarnessList,
-        Operation::WorkspaceStart(WorkspaceStartParams {
-            project: ProjectId::new("p").unwrap(),
-            prompt: "Fix it".into(),
-            harness: None,
-        }),
+        Operation::WorkspaceStart(WorkspaceStartParams::plain(
+            ProjectId::new("p").unwrap(),
+            "Fix it",
+            None,
+        )),
         Operation::SessionStart(SessionStartParams {
             workspace: WorkspaceId::new("w").unwrap(),
             harness: None,
@@ -500,6 +640,65 @@ fn every_operation_has_the_name_it_is_sent_under() {
             project: ProjectId::new("p").unwrap(),
             number: 1,
             followed: None,
+        }),
+        Operation::ProjectBranches(ProjectRef {
+            project: ProjectId::new("p").unwrap(),
+        }),
+        Operation::ProjectClone(ProjectCloneParams {
+            remote: "https://example.com/a.git".into(),
+            name: None,
+        }),
+        Operation::ShellStart(ShellStartParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+        }),
+        Operation::WorkspaceRename(WorkspaceRenameParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            name: "n".into(),
+        }),
+        Operation::WorkspaceArchive(WorkspaceRemoveParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            force: false,
+        }),
+        Operation::WorkspaceDelete(WorkspaceRemoveParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            force: false,
+        }),
+        Operation::WorkspaceChanges(WorkspaceRef {
+            workspace: WorkspaceId::new("w").unwrap(),
+        }),
+        Operation::WorkspaceFiles(WorkspaceFilesParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            dir: String::new(),
+        }),
+        Operation::FileRead(FileReadParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            path: "a".into(),
+            old_path: None,
+            of: FileOf::Working,
+            offset: 0,
+        }),
+        Operation::WorkspacePublish(publish::WorkspacePublishParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            forge: false,
+        }),
+        Operation::WorkspaceCommit(publish::WorkspaceCommitParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            message: "m".into(),
+        }),
+        Operation::WorkspacePush(WorkspaceRef {
+            workspace: WorkspaceId::new("w").unwrap(),
+        }),
+        Operation::PullRequestOpen(publish::PullRequestOpenParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            title: "t".into(),
+            body: String::new(),
+            draft: false,
+        }),
+        Operation::PullRequestMerge(publish::PullRequestMergeParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            number: 1,
+            head_oid: "abcdef0".into(),
+            method: publish::MergeMethod::Squash,
         }),
     ];
     assert_eq!(all.len(), OPERATIONS.len());
@@ -586,7 +785,7 @@ fn a_newer_minor_with_fields_this_build_does_not_know_is_understood() {
 #[test]
 fn an_unknown_operation_is_unsupported_not_malformed() {
     let (_, error) = error_of(
-        br#"{"requestId":"r","protocol":{"major":1,"minor":3},"op":"workspace.delete","params":{}}"#,
+        br#"{"requestId":"r","protocol":{"major":1,"minor":3},"op":"memory.edit","params":{}}"#,
     );
     assert_eq!(error.code, ErrorCode::Unsupported);
 }
@@ -928,17 +1127,46 @@ fn sync_ops_are_checked_on_their_own() {
 
 #[test]
 fn starting_and_uploading_are_bounded() {
-    let start = |prompt: &str| {
-        Operation::WorkspaceStart(WorkspaceStartParams {
-            project: ProjectId::new("p").unwrap(),
-            prompt: prompt.into(),
-            harness: None,
-        })
-        .validate()
-    };
+    let plain =
+        |prompt: &str| WorkspaceStartParams::plain(ProjectId::new("p").unwrap(), prompt, None);
+    let start = |prompt: &str| Operation::WorkspaceStart(plain(prompt)).validate();
     assert!(start("Fix it").is_ok());
     assert!(start("  \n").is_err());
     assert!(start(&"x".repeat(MAX_PROMPT + 1)).is_err());
+    // What a start may say since minor 12, each within its bounds.
+    assert!(!plain("Fix it").says_more());
+    let saying = |change: &dyn Fn(&mut WorkspaceStartParams)| {
+        let mut params = plain("Fix it");
+        change(&mut params);
+        assert!(params.says_more());
+        Operation::WorkspaceStart(params).validate()
+    };
+    assert!(saying(&|p| p.name = Some("fix-login".into())).is_ok());
+    assert!(saying(&|p| p.name = Some("  ".into())).is_err());
+    assert!(saying(&|p| p.name = Some("n".repeat(MAX_WORKSPACE_NAME + 1))).is_err());
+    assert!(saying(&|p| p.model = Some("opus".into())).is_ok());
+    assert!(saying(&|p| p.model = Some("--dangerously".into())).is_err());
+    assert!(saying(&|p| p.effort = Some("e".repeat(MAX_LABEL + 1))).is_err());
+    assert!(saying(&|p| p.base_branch = Some("develop".into())).is_ok());
+    assert!(saying(&|p| p.base_branch = Some("--upload-pack=x".into())).is_err());
+    assert!(saying(&|p| p.base_branch = Some("b".repeat(MAX_BRANCH + 1))).is_err());
+    assert!(saying(&|p| p.existing_branch = Some("ys/kept".into())).is_ok());
+    assert!(
+        saying(&|p| {
+            p.existing_branch = Some("ys/kept".into());
+            p.base_branch = Some("main".into());
+        })
+        .is_err(),
+        "an existing branch has no base"
+    );
+    assert!(
+        saying(&|p| {
+            p.existing_branch = Some("ys/kept".into());
+            p.name = Some("kept".into());
+        })
+        .is_err(),
+        "an existing branch names itself"
+    );
     let session = |harness: Option<&str>| {
         Operation::SessionStart(SessionStartParams {
             workspace: WorkspaceId::new("w").unwrap(),
@@ -1001,4 +1229,234 @@ fn starting_and_uploading_are_bounded() {
         }),
     };
     assert!(serde_json::to_vec(&request).unwrap().len() < MAX_CONTROL_FRAME);
+}
+
+#[test]
+fn looking_after_projects_and_workspaces_is_bounded() {
+    let clone = |remote: &str, name: Option<&str>| {
+        Operation::ProjectClone(ProjectCloneParams {
+            remote: remote.into(),
+            name: name.map(str::to_owned),
+        })
+        .validate()
+    };
+    assert!(clone("https://github.com/example/app.git", None).is_ok());
+    assert!(clone("git@github.com:example/app.git", Some("app")).is_ok());
+    assert!(clone("", None).is_err());
+    assert!(clone("--upload-pack=touch /tmp/x", None).is_err());
+    assert!(clone("https://example.com/a b", None).is_err());
+    assert!(clone(
+        &format!("https://example.com/{}", "a".repeat(MAX_REMOTE)),
+        None
+    )
+    .is_err());
+    assert!(clone("https://example.com/a", Some("../up")).is_err());
+    assert!(clone(
+        "https://example.com/a",
+        Some(&"n".repeat(MAX_PROJECT_NAME + 1))
+    )
+    .is_err());
+
+    let rename = |name: &str| {
+        Operation::WorkspaceRename(WorkspaceRenameParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            name: name.into(),
+        })
+        .validate()
+    };
+    assert!(rename("Login spacing").is_ok());
+    assert!(rename(" ").is_err());
+    assert!(rename(&"n".repeat(MAX_WORKSPACE_NAME + 1)).is_err());
+
+    // A long list of long names still fits a frame: the default first, the rest counted out.
+    let long = |n: usize| format!("{}{n:03}", "b".repeat(MAX_BRANCH - 3));
+    let many: Vec<String> = (0..MAX_BRANCHES + 20).map(long).collect();
+    let listed = manage::bounded_branches(many.clone(), Some(long(150)), many);
+    assert_eq!(listed.branches.len(), MAX_BRANCHES);
+    assert_eq!(listed.branches[0], long(150));
+    assert!(listed.more);
+    assert!(listed.checked_out.len() <= MAX_BRANCHES);
+    let response = Response {
+        request_id: Some(RequestId::new("r-1").unwrap()),
+        outcome: Outcome::Result(Reply::Branches(listed)),
+    };
+    assert!(encode_response(&response).len() < MAX_CONTROL_FRAME);
+    // A name no request could give back is not offered.
+    let odd = manage::bounded_branches(vec!["main".into(), "-x".into()], None, vec![]);
+    assert_eq!(odd.branches, ["main"]);
+    assert!(odd.more);
+}
+
+#[test]
+fn reading_changes_and_files_is_bounded_and_never_names_a_path_outside() {
+    let read = |path: &str, old: Option<&str>, offset: u64| {
+        Operation::FileRead(FileReadParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            path: path.into(),
+            old_path: old.map(str::to_owned),
+            of: FileOf::Working,
+            offset,
+        })
+        .validate()
+    };
+    assert!(read("src/login.tsx", None, 0).is_ok());
+    assert!(read(".env.example", Some("old name.txt"), MAX_FILE).is_ok());
+    for outside in [
+        "",
+        "/etc/passwd",
+        "../secrets",
+        "src/../../secrets",
+        "src//login.tsx",
+        "src/",
+        "C:\\Users\\me",
+        "C:/Users/me",
+        "\\\\server\\share",
+        "-x",
+        "a\u{0}b",
+    ] {
+        assert!(read(outside, None, 0).is_err(), "{outside:?}");
+        assert!(read("ok", Some(outside), 0).is_err(), "{outside:?}");
+    }
+    assert!(read(&"p".repeat(MAX_PATH + 1), None, 0).is_err());
+    assert!(read("a", None, MAX_FILE + 1).is_err());
+    let files = |dir: &str| {
+        Operation::WorkspaceFiles(WorkspaceFilesParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            dir: dir.into(),
+        })
+        .validate()
+    };
+    assert!(files("").is_ok(), "the root");
+    assert!(files("src/auth").is_ok());
+    assert!(files("../up").is_err());
+
+    // A long list of long paths still fits a frame, the uncommitted first, and says it was cut.
+    let file = |n: usize| ChangedFile {
+        path: format!("{}/{n}", "d".repeat(MAX_PATH - 8)),
+        old_path: None,
+        kind: ChangeKind::Modified,
+        additions: Some(u32::MAX),
+        deletions: Some(u32::MAX),
+    };
+    let listed = look::bounded_changes(
+        (0..100).map(file).collect(),
+        (100..200).map(file).collect(),
+        Some("main".into()),
+    );
+    assert!(listed.more);
+    assert!(!listed.uncommitted.is_empty());
+    assert!(listed.uncommitted.len() + listed.committed.len() < 200);
+    let response = Response {
+        request_id: Some(RequestId::new("r-1").unwrap()),
+        outcome: Outcome::Result(Reply::Changes(listed)),
+    };
+    assert!(encode_response(&response).len() < MAX_CONTROL_FRAME);
+    // A path no request could give back is left out, and counted.
+    let odd = look::bounded_changes(
+        vec![ChangedFile {
+            path: "../outside".into(),
+            old_path: None,
+            kind: ChangeKind::Added,
+            additions: None,
+            deletions: None,
+        }],
+        vec![],
+        None,
+    );
+    assert!(odd.uncommitted.is_empty() && odd.more);
+
+    let entries = (0..2000)
+        .map(|n| FileEntry {
+            name: format!("{}{n:04}", "f".repeat(200)),
+            dir: false,
+        })
+        .collect();
+    let folder = look::bounded_files(entries);
+    assert!(folder.more && !folder.entries.is_empty());
+    let response = Response {
+        request_id: Some(RequestId::new("r-1").unwrap()),
+        outcome: Outcome::Result(Reply::Files(folder)),
+    };
+    assert!(encode_response(&response).len() < MAX_CONTROL_FRAME);
+
+    // The largest piece of a file, as base64, is well within a frame.
+    let piece = FileChunk {
+        state: FileState::Text,
+        size: MAX_FILE,
+        offset: MAX_FILE,
+        data: "A".repeat(MAX_FILE_CHUNK.div_ceil(3) * 4),
+        done: false,
+    };
+    let response = Response {
+        request_id: Some(RequestId::new("r-1").unwrap()),
+        outcome: Outcome::Result(Reply::File(piece)),
+    };
+    assert!(encode_response(&response).len() < MAX_CONTROL_FRAME);
+    assert_eq!(look::not_sent(FileState::Absent, 0).data, "");
+}
+
+#[test]
+fn committing_and_pull_requests_are_bounded() {
+    use publish::*;
+    let workspace = || WorkspaceId::new("w").unwrap();
+    let commit = |message: &str| {
+        Operation::WorkspaceCommit(WorkspaceCommitParams {
+            workspace: workspace(),
+            message: message.into(),
+        })
+        .validate()
+    };
+    assert!(commit("Fix it\n\nWith a body.").is_ok());
+    assert!(commit("  \n").is_err());
+    assert!(commit("a\0b").is_err());
+    assert!(commit(&"m".repeat(MAX_COMMIT_MESSAGE + 1)).is_err());
+    let open = |title: &str, body: &str| {
+        Operation::PullRequestOpen(PullRequestOpenParams {
+            workspace: workspace(),
+            title: title.into(),
+            body: body.into(),
+            draft: false,
+        })
+        .validate()
+    };
+    assert!(open("Fix the spacing", "").is_ok());
+    assert!(open(" ", "").is_err());
+    assert!(
+        open("--web", "").is_err(),
+        "nothing that reads as an option"
+    );
+    assert!(open("two\nlines", "").is_err());
+    assert!(open(&"t".repeat(MAX_PULL_REQUEST_TITLE + 1), "").is_err());
+    assert!(open("ok", &"b".repeat(MAX_PULL_REQUEST_BODY + 1)).is_err());
+    let merge = |number: u32, oid: &str| {
+        Operation::PullRequestMerge(PullRequestMergeParams {
+            workspace: workspace(),
+            number,
+            head_oid: oid.into(),
+            method: MergeMethod::Squash,
+        })
+        .validate()
+    };
+    assert!(merge(91, "3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a").is_ok());
+    assert!(merge(0, "3f2a1b0").is_err());
+    assert!(
+        merge(91, "").is_err(),
+        "the head the person saw must be named"
+    );
+    assert!(merge(91, "HEAD").is_err());
+    assert!(merge(91, "--admin").is_err());
+    assert!(merge(91, &"a".repeat(MAX_OID + 1)).is_err());
+    // A state from a newer host reads as unknown, and a state with nothing known is small.
+    let read: PullRequest = serde_json::from_value(serde_json::json!({
+        "number": 1, "url": "u", "title": "t", "state": "queued", "checks": "skipped"
+    }))
+    .unwrap();
+    assert_eq!(
+        (read.state, read.checks),
+        (PullRequestState::Unknown, Checks::Unknown)
+    );
+    assert_eq!(
+        serde_json::to_value(PublishState::default()).unwrap(),
+        serde_json::json!({"ahead": 0, "behind": 0})
+    );
 }

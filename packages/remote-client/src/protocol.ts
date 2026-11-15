@@ -3,9 +3,9 @@
 
 /**
  * The remote protocol: what a device asks a computer through the relay, and what it answers. The
- * types follow `crates/remote-proto` (`lib.rs`, `model.rs`, `terminal.rs`, `grant.rs`, `ids.rs`),
- * which is the source; the fixtures in `crates/remote-proto/fixtures/v1/` hold both to the same
- * wire.
+ * types follow `crates/remote-proto` (`lib.rs`, `model.rs`, `terminal.rs`, `grant.rs`, `ids.rs`,
+ * `start.rs`, `manage.rs`, `look.rs`, `publish.rs`), which is the source; the fixtures in
+ * `crates/remote-proto/fixtures/v1/` hold both to the same wire.
  *
  * Every message from a computer is decoded as untrusted, though it comes from one the person
  * paired: ids are checked, and names, labels, notes, links and lists are held to the protocol's
@@ -20,9 +20,11 @@ import {
   chars,
   DecodeError,
   type Decoder,
+  flag,
   hasControl,
   i64,
   isObject,
+  nonEmpty,
   nullable,
   object,
   oneOf,
@@ -34,6 +36,7 @@ import {
   u16,
   u32,
   u64,
+  unlessEmpty,
   utf8Length,
   variant,
 } from "./decode.ts";
@@ -41,21 +44,34 @@ import {
   MAX_ARTIFACT_PREVIEW,
   MAX_ASK_ID,
   MAX_ASKS,
+  MAX_BRANCH,
+  MAX_BRANCHES,
+  MAX_CHOICES,
   MAX_CLIENT_NAME,
   MAX_COMMAND,
   MAX_CHECK_NAME,
   MAX_CODE_LEN,
+  MAX_COMMIT_MESSAGE,
   MAX_CURSOR_LEN,
+  MAX_FILE,
+  MAX_FILE_CHUNK,
   MAX_ID_LEN,
   MAX_INPUT_BYTES,
   MAX_LABEL,
   MAX_LINK,
+  MAX_LISTED_BYTES,
   MAX_NOTE,
+  MAX_OID,
   MAX_PAGE,
+  MAX_PATH,
+  MAX_PROJECT_NAME,
   MAX_PROMPT,
   MAX_PULL_CHECKS,
   MAX_PULL_WORKSPACES,
   MAX_REVIEWERS,
+  MAX_PULL_REQUEST_BODY,
+  MAX_PULL_REQUEST_TITLE,
+  MAX_REMOTE,
   MAX_SAID,
   MAX_STEP_WORDS,
   MAX_TASKS,
@@ -67,9 +83,12 @@ import {
   MAX_TEST_STEPS,
   MAX_TEXT,
   MAX_TURN_TEXT,
+  MAX_UNPUSHED,
   MAX_UPLOAD,
   MAX_UPLOAD_CHUNK,
   MAX_UPLOAD_NAME,
+  MAX_URL,
+  MAX_WORKSPACE_NAME,
   PROTOCOL_MAJOR,
   PROTOCOL_MINOR,
 } from "./limits.ts";
@@ -160,6 +179,11 @@ export const ERROR_CODES = [
   "protocol_incompatible",
   "invalid_request",
   "stale",
+  /**
+   * Archiving or deleting the workspace would lose uncommitted work. Ask the person, and send the
+   * request again with `force` if they say so. Minor 12.
+   */
+  "uncommitted_work",
   "unsupported",
   "internal",
   "unknown",
@@ -292,12 +316,27 @@ export interface ProjectSummary {
   name: string;
   /** Its folder is gone from the host. */
   missing: boolean;
+  /**
+   * Where its repository is fetched from, when that is an address another computer could clone,
+   * with no credentials in it. To tell whether two computers' projects are the same repository.
+   * At most {@link MAX_REMOTE} bytes. Minor 12.
+   */
+  remote?: string;
 }
+
+const remoteAddress: Decoder<string> = (value, path) => {
+  const address = text()(value, path);
+  if (utf8Length(address) > MAX_REMOTE || hasControl(address)) {
+    throw new DecodeError(path, "is not an address the protocol carries");
+  }
+  return address;
+};
 
 const projectSummary: Decoder<ProjectSummary> = object({
   id: id<ProjectId>(),
   name: text(MAX_TEXT),
   missing: bool,
+  remote: optional(remoteAddress),
 });
 
 export interface BranchRef {
@@ -796,13 +835,35 @@ export interface MemoryListParams {
   limit: number | null;
 }
 
-/** A new workspace, named after its first message, with an agent given it. Minor 5. */
+/**
+ * A new workspace, named after its first message, with an agent given it. Minor 5.
+ *
+ * Since minor 12 it may say what the computer's own composer says: `name`, `model`, `effort`, and
+ * either `baseBranch` or `existingBranch`. An earlier computer does not read them, so they are
+ * sent only to one whose capabilities list `project.branches`.
+ */
 export interface WorkspaceStartParams {
   project: ProjectId;
   /** Not empty, at most {@link MAX_PROMPT} bytes. */
   prompt: string;
   /** A harness from `harness.list`. Without one, the computer's default. */
   harness?: string;
+  /**
+   * The workspace's folder, and its branch after the computer's prefix. At most
+   * {@link MAX_WORKSPACE_NAME} characters. Not with `existingBranch`, which names its own.
+   */
+  name?: string;
+  /** The model the agent is told to use. At most {@link MAX_LABEL} characters. */
+  model?: string;
+  /** One of the harness's `efforts`. */
+  effort?: string;
+  /** The branch the new one starts from: one of `project.branches`. Without it, the default. */
+  baseBranch?: string;
+  /**
+   * A branch to open as it is, with no new one made: one of `project.branches` that is not
+   * checked out. Not with `baseBranch` or `name`.
+   */
+  existingBranch?: string;
 }
 
 /** Another agent in a workspace, with a first message or none. Minor 5. */
@@ -1278,6 +1339,426 @@ const pullDetailFields = {
   waitingOn: array(text(MAX_LABEL), MAX_REVIEWERS),
 };
 
+// --- looking after projects and workspaces (minor 12) -----------------------------------------
+
+/** `project.branches`: the branches a new workspace in a project can start from or open. */
+export interface ProjectBranches {
+  /** Local branches, the default first when there is one, then by name. */
+  branches: string[];
+  /** The branch a new workspace starts from when a start names none. */
+  default?: string;
+  /** Those of `branches` a worktree has out, which cannot be opened in another. Absent when none. */
+  checkedOut?: string[];
+  /** The project has more branches than are listed. Absent when it has not. */
+  more?: boolean;
+}
+
+/**
+ * `project.clone`: clone a repository into the computer's projects folder and add it as a project,
+ * with the computer's own Git credentials. Needs a grant that reaches every project.
+ */
+export interface ProjectCloneParams {
+  /** The repository's address, with no credentials in it. At most {@link MAX_REMOTE} bytes. */
+  remote: string;
+  /**
+   * What to call the folder and the project. Without one, the last part of the address. At most
+   * {@link MAX_PROJECT_NAME} bytes.
+   */
+  name?: string;
+}
+
+/** The project a clone was added as. */
+export interface ProjectCloned {
+  project: ProjectId;
+  name: string;
+}
+
+/** `workspace.rename`: its folder and its branch keep their names. Not for `local`. */
+export interface WorkspaceRenameParams {
+  workspace: WorkspaceId;
+  /** From 1 to {@link MAX_WORKSPACE_NAME} characters. */
+  name: string;
+}
+
+/**
+ * `workspace.archive` and `workspace.delete`: take a workspace's folder off the computer's disk.
+ * Archiving keeps its record and its conversations; deleting forgets it. Both keep the branch.
+ * Not for `local`.
+ */
+export interface WorkspaceRemoveParams {
+  workspace: WorkspaceId;
+  /**
+   * Go ahead although the folder has uncommitted work, which is then lost. Without it, such a
+   * workspace is refused with `uncommitted_work`: send it only after the person was asked again.
+   */
+  force?: boolean;
+}
+
+/** A branch's name in a reply: one a request could give back. */
+const branchName: Decoder<string> = (value, path) => {
+  const name = text()(value, path);
+  if (branchInvalid(name)) throw new DecodeError(path, "is not a branch's name");
+  return name;
+};
+
+const projectBranchesFields = {
+  branches: array(branchName, MAX_BRANCHES),
+  default: optional(branchName),
+  checkedOut: unlessEmpty(branchName, MAX_BRANCHES),
+  more: flag,
+};
+
+// --- reading a workspace's changes and files (minor 13) ---------------------------------------
+
+// A file is named by its path inside the workspace, with `/` between its parts, never by a path on
+// the computer. All of it needs `terminal:control`: a device that only watches reads none of it.
+
+export const CHANGE_KINDS = [
+  "added",
+  "modified",
+  "deleted",
+  "renamed",
+  /** New, and not yet known to Git. */
+  "untracked",
+  "conflicted",
+  "unknown",
+] as const;
+/** How a file changed. A kind from a newer computer reads as `unknown`. */
+export type ChangeKind = (typeof CHANGE_KINDS)[number];
+
+/** One changed file. */
+export interface ChangedFile {
+  /** Inside the workspace. At most {@link MAX_PATH} bytes. */
+  path: string;
+  /** Where a renamed file was. */
+  oldPath?: string;
+  kind: ChangeKind;
+  /** Lines added and removed. Absent for a binary or an untracked file. */
+  additions?: number;
+  deletions?: number;
+}
+
+/** `workspace.changes`: which files changed in a workspace. */
+export interface WorkspaceChanges {
+  /** Changed and not committed. */
+  uncommitted: ChangedFile[];
+  /** Committed on the workspace's branch since `base`. */
+  committed: ChangedFile[];
+  /** The branch `committed` is measured against. Absent when there is nothing to compare with. */
+  base?: string;
+  /** There are more changed files than are listed. Absent when there are not. */
+  more?: boolean;
+}
+
+/** `workspace.files`: one folder of a workspace's file tree. */
+export interface WorkspaceFilesParams {
+  workspace: WorkspaceId;
+  /** The folder, inside the workspace. Absent for its root. */
+  dir?: string;
+}
+
+/** One entry of a folder. */
+export interface FileEntry {
+  /** Its name within the folder. */
+  name: string;
+  /** It is a folder. Absent for a file. */
+  dir?: boolean;
+}
+
+/** The reply to `workspace.files`: folders first, then files, each by name. */
+export interface FileList {
+  entries: FileEntry[];
+  /** The folder holds more than is listed. Absent when it does not. */
+  more?: boolean;
+}
+
+export const FILE_SIDES = ["working", "uncommittedOld", "committedOld", "committedNew"] as const;
+/**
+ * Which contents of a file `file.read` asks for. `working`: as it is on disk now, a file of the
+ * tree and the new side of an uncommitted change. `uncommittedOld`: before an uncommitted change,
+ * as the last commit has it. `committedOld`: before the workspace's commits, as the base branch
+ * has it. `committedNew`: after them, as the last commit has it.
+ */
+export type FileOf = (typeof FILE_SIDES)[number];
+
+/** `file.read`: a piece of a file in a workspace. */
+export interface FileReadParams {
+  workspace: WorkspaceId;
+  /** Inside the workspace. At most {@link MAX_PATH} bytes. */
+  path: string;
+  /** For one side of a renamed file's change: where it was. */
+  oldPath?: string;
+  of: FileOf;
+  /** Where the piece starts: 0, then each reply's `offset` plus what it carried. */
+  offset: number;
+}
+
+export const FILE_STATES = [
+  /** Text, carried in `data`. */
+  "text",
+  /** There is no such file on that side: it was added, or deleted. */
+  "absent",
+  /** Not text. Nothing is carried. */
+  "binary",
+  /** More than {@link MAX_FILE} bytes: `size` says how many. Nothing is carried. */
+  "tooLarge",
+  /** Something the computer does not show: a folder, a link, a device. */
+  "notShown",
+  "unknown",
+] as const;
+/** What a file's contents are, as a reply can say. One from a newer computer reads as `unknown`. */
+export type FileState = (typeof FILE_STATES)[number];
+
+/** The reply to `file.read`. */
+export interface FileChunk {
+  state: FileState;
+  /**
+   * The whole file's size in bytes. It is the same in every piece of one reading: when it differs,
+   * the file changed meanwhile, and the client reads it again from the start.
+   */
+  size: number;
+  /** Where this piece starts. */
+  offset: number;
+  /**
+   * Standard base64, padded, of at most {@link MAX_FILE_CHUNK} bytes of the file. Absent unless
+   * `state` is `text`, and for a piece of no bytes. A piece may end inside a character: join the
+   * pieces before reading them as UTF-8.
+   */
+  data?: string;
+  /** Nothing comes after this piece. */
+  done: boolean;
+}
+
+/** A path in a reply: one a request could give back. */
+const insidePath: Decoder<string> = (value, path) => {
+  const inside = text()(value, path);
+  if (pathInvalid(inside)) throw new DecodeError(path, "is not a path inside the workspace");
+  return inside;
+};
+
+/** A list of files held to {@link MAX_LISTED_BYTES} of path, as a computer cuts one. */
+function listed<T>(item: Decoder<T>, bytes: (item: T) => number): Decoder<T[]> {
+  const list = array(item);
+  return (value, path) => {
+    const items = list(value, path);
+    let total = 0;
+    for (const one of items) total += bytes(one);
+    if (total > MAX_LISTED_BYTES) throw new DecodeError(path, "lists more than a reply carries");
+    return items;
+  };
+}
+
+const changedFiles = listed(
+  object({
+    path: insidePath,
+    // A computer may say an empty one, which is none.
+    oldPath: optional((value, path) => (value === "" ? "" : insidePath(value, path))),
+    kind: oneOf(CHANGE_KINDS, "unknown"),
+    additions: optional(u32),
+    deletions: optional(u32),
+  }),
+  (file) => utf8Length(file.path) + utf8Length(file.oldPath ?? ""),
+);
+
+/** A branch a computer names as it stands, held only to a branch's length. */
+const branchAsItIs: Decoder<string> = (value, path) => {
+  const branch = text()(value, path);
+  if (utf8Length(branch) > MAX_BRANCH) throw new DecodeError(path, "is not a branch's name");
+  return branch;
+};
+
+const workspaceChangesFields = {
+  uncommitted: changedFiles,
+  committed: changedFiles,
+  base: optional(branchAsItIs),
+  more: flag,
+};
+
+/** A folder's entry's name: of a length a file's can be, and nothing that redraws a screen. */
+const entryName: Decoder<string> = (value, path) => {
+  const name = text()(value, path);
+  if (name === "" || utf8Length(name) > 255 || hasControl(name)) {
+    throw new DecodeError(path, "is not a file's name");
+  }
+  return name;
+};
+
+const fileListFields = {
+  entries: listed(object({ name: entryName, dir: flag }), (entry) => utf8Length(entry.name)),
+  more: flag,
+};
+
+const fileChunkFields = {
+  state: oneOf(FILE_STATES, "unknown"),
+  size: u64,
+  offset: u64,
+  data: nonEmpty(text(Math.ceil(MAX_FILE_CHUNK / 3) * 4)),
+  done: bool,
+};
+
+// --- sending a workspace's work on (minor 14) -------------------------------------------------
+
+// What the computer's own commit box and publish bar do, asked of it by the workspace's id. It
+// commits with its own Git identity, pushes with its own credentials and asks the forge with its
+// own sign-in: no request carries a credential, a remote, a branch to push to, or a path. Each of
+// these but `workspace.publish` changes a repository, so one is sent only at its person's press.
+// All of it needs `terminal:control`.
+
+/** `workspace.publish`: where a workspace stands with its remote. */
+export interface WorkspacePublishParams {
+  workspace: WorkspaceId;
+  /**
+   * Ask the forge again about its pull request, which takes the computer a network round trip.
+   * Without it, only what Git knows is answered, and `pullRequest` is absent.
+   */
+  forge?: boolean;
+}
+
+export const CHECKS = ["none", "running", "passing", "failing", "unknown"] as const;
+/**
+ * What the forge's checks say about a pull request's head commit. One from a newer computer reads
+ * as `unknown`.
+ */
+export type Checks = (typeof CHECKS)[number];
+
+export const PULL_REQUEST_STATES = ["open", "merged", "closed", "unknown"] as const;
+/** Whether a pull request is open still. A state from a newer computer reads as `unknown`. */
+export type PullRequestState = (typeof PULL_REQUEST_STATES)[number];
+
+/** The pull request of a workspace's branch. */
+export interface PullRequest {
+  number: number;
+  /** Its page on the forge. At most {@link MAX_URL} bytes. */
+  url: string;
+  /** At most {@link MAX_PULL_REQUEST_TITLE} characters. */
+  title: string;
+  state: PullRequestState;
+  /** Absent when it is not a draft. */
+  draft?: boolean;
+  checks: Checks;
+  /** The commit at its head, to name when merging it. Absent when the forge did not say. */
+  headOid?: string;
+  /** The forge says it does not merge cleanly into its base. Absent when it does not say so. */
+  conflicting?: boolean;
+}
+
+/** The reply to `workspace.publish`, `workspace.commit` and `workspace.push`. */
+export interface PublishState {
+  /** Absent when the workspace is not on a branch: there is nothing to push or open. */
+  branch?: string;
+  /** What a pull request would merge into. */
+  base?: string;
+  /** Who commits there would be by. Absent when Git has no name and email on the computer. */
+  identity?: string;
+  /** The project has a remote to push to. Absent when it has none. */
+  remote?: boolean;
+  /** The branch has been pushed, and tracks its remote branch. Absent when it has not. */
+  pushed?: boolean;
+  /** Commits the remote does not have. */
+  ahead: number;
+  behind: number;
+  /** The subjects of those commits, newest first: at most {@link MAX_UNPUSHED}. Absent when none. */
+  unpushed?: string[];
+  /** Absent when there is none, and when the forge was not asked. */
+  pullRequest?: PullRequest;
+  /** Opening one makes sense: a branch that is not its own base, on a forge, with none open. */
+  canOpen?: boolean;
+  /** The computer has the forge's own program and can open and merge without a browser. */
+  gh?: boolean;
+  /** Why the forge gave no answer, when it was asked. */
+  problem?: string;
+}
+
+/** `workspace.commit`: commit everything changed in a workspace. */
+export interface WorkspaceCommitParams {
+  workspace: WorkspaceId;
+  /** Not empty, at most {@link MAX_COMMIT_MESSAGE} bytes. */
+  message: string;
+}
+
+/**
+ * `pull_request.open`: open a pull request for a workspace's branch, pushing it first when the
+ * remote does not have it all.
+ */
+export interface PullRequestOpenParams {
+  workspace: WorkspaceId;
+  /** Not empty, at most {@link MAX_PULL_REQUEST_TITLE} characters, on one line. */
+  title: string;
+  /** At most {@link MAX_PULL_REQUEST_BODY} bytes. */
+  body?: string;
+  draft?: boolean;
+}
+
+/** The reply to `pull_request.open`. */
+export interface PullRequestOpened {
+  /** The pull request, or the forge's own form to finish in a browser. At most {@link MAX_URL}. */
+  url: string;
+  /** The computer opened it. When false, `url` is the form, with both branches filled in. */
+  created: boolean;
+}
+
+export const MERGE_METHODS = ["squash", "merge", "rebase"] as const;
+export type MergeMethod = (typeof MERGE_METHODS)[number];
+
+/**
+ * `pull_request.merge`: merge the pull request of a workspace's branch, if it is still open, not a
+ * draft, and at the commit named.
+ */
+export interface PullRequestMergeParams {
+  workspace: WorkspaceId;
+  number: number;
+  /** The commit the person saw at its head. At most {@link MAX_OID} characters, all hexadecimal. */
+  headOid: string;
+  method: MergeMethod;
+}
+
+/** A link to the forge in a reply: within its length, and nothing that redraws a screen. */
+const forgeLink: Decoder<string> = (value, path) => {
+  const url = text()(value, path);
+  if (utf8Length(url) > MAX_URL || hasControl(url)) {
+    throw new DecodeError(path, "is not a link the protocol carries");
+  }
+  return url;
+};
+
+/** A commit's id as a request may give one: hexadecimal, of 7 to {@link MAX_OID} characters. */
+const OID = new RegExp(`^[0-9A-Fa-f]{7,${MAX_OID}}$`);
+
+/** A commit's id in a reply: one a request could give back. */
+const commitId: Decoder<string> = (value, path) => {
+  const oid = text()(value, path);
+  if (!OID.test(oid)) throw new DecodeError(path, "is not a commit's id");
+  return oid;
+};
+
+const pullRequest = object({
+  number: u32,
+  url: forgeLink,
+  title: text(MAX_PULL_REQUEST_TITLE),
+  state: oneOf(PULL_REQUEST_STATES, "unknown"),
+  draft: flag,
+  checks: oneOf(CHECKS, "unknown"),
+  headOid: optional(commitId),
+  conflicting: flag,
+});
+
+const publishStateFields = {
+  branch: optional(branchAsItIs),
+  base: optional(branchAsItIs),
+  identity: optional(text(MAX_TEXT)),
+  remote: flag,
+  pushed: flag,
+  ahead: u32,
+  behind: u32,
+  unpushed: unlessEmpty(text(MAX_TEXT), MAX_UNPUSHED),
+  pullRequest: optional(pullRequest),
+  canOpen: flag,
+  gh: flag,
+  problem: optional(text(MAX_TEXT)),
+};
+
+const pullRequestOpenedFields = { url: forgeLink, created: bool };
+
 /** Everything a client can ask a host: `op` names it, `params` carries its parameters. */
 export type Operation =
   | { op: "host.describe" }
@@ -1319,7 +1800,21 @@ export type Operation =
   | { op: "test.waiting"; params: { workspace: WorkspaceId } }
   | { op: "test.decide"; params: TestDecideParams }
   | { op: "pull.list"; params: PullListParams }
-  | { op: "pull.describe"; params: PullRef };
+  | { op: "pull.describe"; params: PullRef }
+  | { op: "project.branches"; params: { project: ProjectId } }
+  | { op: "project.clone"; params: ProjectCloneParams }
+  | { op: "shell.start"; params: { workspace: WorkspaceId } }
+  | { op: "workspace.rename"; params: WorkspaceRenameParams }
+  | { op: "workspace.archive"; params: WorkspaceRemoveParams }
+  | { op: "workspace.delete"; params: WorkspaceRemoveParams }
+  | { op: "workspace.changes"; params: { workspace: WorkspaceId } }
+  | { op: "workspace.files"; params: WorkspaceFilesParams }
+  | { op: "file.read"; params: FileReadParams }
+  | { op: "workspace.publish"; params: WorkspacePublishParams }
+  | { op: "workspace.commit"; params: WorkspaceCommitParams }
+  | { op: "workspace.push"; params: { workspace: WorkspaceId } }
+  | { op: "pull_request.open"; params: PullRequestOpenParams }
+  | { op: "pull_request.merge"; params: PullRequestMergeParams };
 
 export type OperationName = Operation["op"];
 
@@ -1356,9 +1851,24 @@ export const OPERATIONS: readonly OperationName[] = [
   "test.decide",
   "pull.list",
   "pull.describe",
+  "project.branches",
+  "project.clone",
+  "shell.start",
+  "workspace.rename",
+  "workspace.archive",
+  "workspace.delete",
+  "workspace.changes",
+  "workspace.files",
+  "file.read",
+  "workspace.publish",
+  "workspace.commit",
+  "workspace.push",
+  "pull_request.open",
+  "pull_request.merge",
 ];
 
 const leaseRefFields = { terminal: id<TerminalId>(), lease: id<LeaseId>(), generation: u64 };
+const workspaceRemoveFields = { workspace: id<WorkspaceId>(), force: flag };
 
 const params: Record<string, Decoder<unknown>> = {
   "workspace.list": object({
@@ -1406,6 +1916,11 @@ const params: Record<string, Decoder<unknown>> = {
     project: id<ProjectId>(),
     prompt: text(),
     harness: optional(text()),
+    name: optional(text()),
+    model: optional(text()),
+    effort: optional(text()),
+    baseBranch: optional(text()),
+    existingBranch: optional(text()),
   }),
   "session.start": object({
     workspace: id<WorkspaceId>(),
@@ -1461,6 +1976,36 @@ const params: Record<string, Decoder<unknown>> = {
     number: u32,
     followed: optional(text(MAX_ID_LEN)),
   }),
+  "project.branches": object({ project: id<ProjectId>() }),
+  "project.clone": object({ remote: text(), name: optional(text()) }),
+  "shell.start": object({ workspace: id<WorkspaceId>() }),
+  "workspace.rename": object({ workspace: id<WorkspaceId>(), name: text() }),
+  "workspace.archive": object(workspaceRemoveFields),
+  "workspace.delete": object(workspaceRemoveFields),
+  "workspace.changes": object({ workspace: id<WorkspaceId>() }),
+  "workspace.files": object({ workspace: id<WorkspaceId>(), dir: nonEmpty(text()) }),
+  "file.read": object({
+    workspace: id<WorkspaceId>(),
+    path: text(),
+    oldPath: optional(text()),
+    of: oneOf(FILE_SIDES),
+    offset: orElse(u64, () => 0),
+  }),
+  "workspace.publish": object({ workspace: id<WorkspaceId>(), forge: flag }),
+  "workspace.commit": object({ workspace: id<WorkspaceId>(), message: text() }),
+  "workspace.push": object({ workspace: id<WorkspaceId>() }),
+  "pull_request.open": object({
+    workspace: id<WorkspaceId>(),
+    title: text(),
+    body: nonEmpty(text()),
+    draft: flag,
+  }),
+  "pull_request.merge": object({
+    workspace: id<WorkspaceId>(),
+    number: u32,
+    headOid: text(),
+    method: oneOf(MERGE_METHODS),
+  }),
 };
 
 /** The scope a caller needs for an operation. `null` for `host.describe`, which any grant may ask. */
@@ -1471,6 +2016,7 @@ export function scopeOf(op: OperationName): Scope | null {
     op === "workspace.describe" ||
     op === "session.list" ||
     op === "harness.list" ||
+    op === "project.branches" ||
     op === "pull.list" ||
     op === "pull.describe"
   ) {
@@ -1540,9 +2086,26 @@ export function validate(operation: Operation): string | null {
         return "asks for a terminal without a row or a column";
       }
       return null;
-    case "workspace.start":
-      if (operation.params.prompt.trim() === "") return "starts a workspace with no message";
-      return promptTooLong(operation.params.prompt) ?? harnessInvalid(operation.params.harness);
+    case "workspace.start": {
+      const start = operation.params;
+      if (start.prompt.trim() === "") return "starts a workspace with no message";
+      const invalid =
+        promptTooLong(start.prompt) ??
+        harnessInvalid(start.harness) ??
+        labelInvalid(start.model, "names no model") ??
+        labelInvalid(start.effort, "names no effort") ??
+        (start.name === undefined ? null : workspaceNameInvalid(start.name)) ??
+        (start.baseBranch === undefined ? null : branchInvalid(start.baseBranch)) ??
+        (start.existingBranch === undefined ? null : branchInvalid(start.existingBranch));
+      if (invalid) return invalid;
+      if (
+        start.existingBranch !== undefined &&
+        (start.baseBranch !== undefined || start.name !== undefined)
+      ) {
+        return "opens an existing branch as it is, which takes no name and no base";
+      }
+      return null;
+    }
     case "session.start":
       return (
         (operation.params.prompt === undefined ? null : promptTooLong(operation.params.prompt)) ??
@@ -1574,6 +2137,34 @@ export function validate(operation: Operation): string | null {
       return operation.params.followed === undefined || isId(operation.params.followed)
         ? null
         : "names a followed pull request by no id of Yardsort's";
+    case "project.clone":
+      return cloneInvalid(operation.params);
+    case "workspace.rename":
+      return workspaceNameInvalid(operation.params.name);
+    case "workspace.files": {
+      const { dir } = operation.params;
+      // No folder, or an empty one, is the workspace's root.
+      return dir === undefined || dir === "" ? null : pathInvalid(dir);
+    }
+    case "file.read": {
+      const { path, oldPath, offset } = operation.params;
+      const invalid = pathInvalid(path) ?? (oldPath === undefined ? null : pathInvalid(oldPath));
+      if (invalid) return invalid;
+      return offset > MAX_FILE ? "starts past the end of any file a computer sends" : null;
+    }
+    case "workspace.commit": {
+      const { message } = operation.params;
+      if (BLANK.test(message)) return "commits with no message";
+      return utf8Length(message) > MAX_COMMIT_MESSAGE || message.includes("\0")
+        ? "carries a commit message no request may"
+        : null;
+    }
+    case "pull_request.open":
+      return openInvalid(operation.params);
+    case "pull_request.merge":
+      return operation.params.number === 0 || !OID.test(operation.params.headOid)
+        ? "names no pull request and the commit at its head"
+        : null;
     default:
       return null;
   }
@@ -1605,6 +2196,100 @@ function harnessInvalid(harness: string | undefined): string | null {
   return harness === "" || chars(harness) > MAX_LABEL ? "names no harness" : null;
 }
 
+/**
+ * White space as Rust's `char::is_whitespace` has it, which `str::trim` takes off: not quite
+ * JavaScript's, which leaves U+0085 and takes U+FEFF.
+ */
+const SPACE = "\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
+const WHITESPACE = new RegExp(`[${SPACE}]`);
+const BLANK = new RegExp(`^[${SPACE}]*$`);
+const ENDS = new RegExp(`^[${SPACE}]+|[${SPACE}]+$`, "g");
+
+/** A branch's name as a request may give one: something git could have, and no option. */
+function branchInvalid(branch: string): string | null {
+  return branch === "" ||
+    utf8Length(branch) > MAX_BRANCH ||
+    branch.startsWith("-") ||
+    branch.includes(" ") ||
+    hasControl(branch)
+    ? "names no branch"
+    : null;
+}
+
+/** A workspace's name as a request may give one. */
+function workspaceNameInvalid(name: string): string | null {
+  return BLANK.test(name) || chars(name) > MAX_WORKSPACE_NAME || hasControl(name)
+    ? "gives a workspace a name of no characters, or over 80"
+    : null;
+}
+
+/** A model or an effort: a label, and nothing that could be read as an option. */
+function labelInvalid(label: string | undefined, why: string): string | null {
+  if (label === undefined) return null;
+  return BLANK.test(label) || chars(label) > MAX_LABEL || label.startsWith("-") || hasControl(label)
+    ? why
+    : null;
+}
+
+/** Shape only. Whether it is an address the computer will clone from is the computer's to say. */
+function cloneInvalid(params: ProjectCloneParams): string | null {
+  const remote = params.remote.replace(ENDS, "");
+  if (
+    remote === "" ||
+    utf8Length(remote) > MAX_REMOTE ||
+    remote.startsWith("-") ||
+    hasControl(remote) ||
+    WHITESPACE.test(remote)
+  ) {
+    return "names no repository's address";
+  }
+  const { name } = params;
+  if (
+    name !== undefined &&
+    (BLANK.test(name) ||
+      utf8Length(name) > MAX_PROJECT_NAME ||
+      hasControl(name) ||
+      name.includes("/") ||
+      name.includes("\\"))
+  ) {
+    return "gives a project a name none can have";
+  }
+  return null;
+}
+
+/**
+ * A path as a request may give one: relative, within bounds, and never one that climbs out.
+ * Whether it stays inside the workspace on disk, links included, is the computer's to check.
+ */
+function pathInvalid(path: string): string | null {
+  return path === "" ||
+    utf8Length(path) > MAX_PATH ||
+    /^[/\\-]/.test(path) ||
+    hasControl(path) ||
+    // A drive's letter, on a computer that has drives: its second byte, as Rust reads it.
+    (path.charCodeAt(0) < 0x80 && path.charAt(1) === ":") ||
+    path.split(/[/\\]/).some((part) => part === ".." || part === "")
+    ? "names no path inside the workspace"
+    : null;
+}
+
+/** A title on one line that is no option, as the host reads it with what is around it trimmed. */
+function openInvalid(params: PullRequestOpenParams): string | null {
+  const title = params.title.replace(ENDS, "");
+  if (
+    title === "" ||
+    chars(title) > MAX_PULL_REQUEST_TITLE ||
+    title.startsWith("-") ||
+    hasControl(title)
+  ) {
+    return "gives a pull request a title that is not 1 to 256 characters on one line";
+  }
+  const body = params.body ?? "";
+  return utf8Length(body) > MAX_PULL_REQUEST_BODY || body.includes("\0")
+    ? "carries a longer description than one request may"
+    : null;
+}
+
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /** Whether a piece of an upload is padded standard base64 of 1 byte to {@link MAX_UPLOAD_CHUNK}. */
@@ -1623,6 +2308,13 @@ export interface HarnessSummary {
   /** What `workspace.start` and `session.start` name it by. */
   id: string;
   name: string;
+  /**
+   * Models to suggest for it, as the computer's settings list them: any other may be named too.
+   * Absent when it lists none, as from a computer before minor 12.
+   */
+  models?: string[];
+  /** The efforts it takes. Absent when it has no such thing. Minor 12. */
+  efforts?: string[];
 }
 
 /** `harness.list`: what the computer can start, its default first. Minor 5. */
@@ -1631,13 +2323,21 @@ export interface HarnessList {
 }
 
 const harnessListFields = {
-  harnesses: array(object({ id: text(MAX_LABEL), name: text(MAX_TEXT) })),
+  harnesses: array(
+    object({
+      id: text(MAX_LABEL),
+      name: text(MAX_TEXT),
+      models: unlessEmpty(text(MAX_LABEL), MAX_CHOICES),
+      efforts: unlessEmpty(text(MAX_LABEL), MAX_CHOICES),
+    }),
+  ),
 };
 
-/** Where an agent a device started runs, to watch it. Minor 5. */
+/** Where an agent or a shell a device started runs, to watch it. Minor 5. */
 export interface Started {
   workspace: WorkspaceId;
   terminal: TerminalId;
+  /** The harness started, by its id. Empty for a shell. */
   harness: string;
 }
 
@@ -1670,6 +2370,13 @@ export type Reply =
   | ({ kind: "testsWaiting" } & TestWaitingPage)
   | ({ kind: "pulls" } & PullPage)
   | ({ kind: "pull" } & PullDetail)
+  | ({ kind: "branches" } & ProjectBranches)
+  | ({ kind: "cloned" } & ProjectCloned)
+  | ({ kind: "changes" } & WorkspaceChanges)
+  | ({ kind: "files" } & FileList)
+  | ({ kind: "file" } & FileChunk)
+  | ({ kind: "publish" } & PublishState)
+  | ({ kind: "pullRequestOpened" } & PullRequestOpened)
   | { kind: "done" };
 
 export const reply: Decoder<Reply> = tagged<Reply>("kind", {
@@ -1701,6 +2408,13 @@ export const reply: Decoder<Reply> = tagged<Reply>("kind", {
   testsWaiting: variant("kind", "testsWaiting", testWaitingPageFields),
   pulls: variant("kind", "pulls", pullPageFields),
   pull: variant("kind", "pull", pullDetailFields),
+  branches: variant("kind", "branches", projectBranchesFields),
+  cloned: variant("kind", "cloned", { project: id<ProjectId>(), name: text(MAX_TEXT) }),
+  changes: variant("kind", "changes", workspaceChangesFields),
+  files: variant("kind", "files", fileListFields),
+  file: variant("kind", "file", fileChunkFields),
+  publish: variant("kind", "publish", publishStateFields),
+  pullRequestOpened: variant("kind", "pullRequestOpened", pullRequestOpenedFields),
   done: variant("kind", "done", {}),
 });
 

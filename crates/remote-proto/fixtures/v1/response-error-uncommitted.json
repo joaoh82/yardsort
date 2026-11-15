@@ -1,0 +1,8 @@
+{
+  "requestId": "r-37",
+  "error": {
+    "code": "uncommitted_work",
+    "message": "This workspace has uncommitted changes, which archiving it would lose.",
+    "retryable": false
+  }
+}

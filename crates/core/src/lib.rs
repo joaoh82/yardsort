@@ -20,6 +20,7 @@ pub mod daemon;
 pub mod draft;
 pub mod env;
 pub mod error;
+pub mod file_tree;
 pub mod forge;
 pub mod git;
 pub mod harness;

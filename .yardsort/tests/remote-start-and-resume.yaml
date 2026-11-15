@@ -3,9 +3,10 @@ name: The window and a phone start an agent on a computer with no screen, and re
 description: >-
   A yardsort-host on the stand-in server, with a stand-in agent that keeps its conversation on disk,
   as host-restart's does. A pretend phone let only watch is refused starting and resuming. The real
-  window, on a profile of its own, is let type, starts a new workspace there with the stand-in, and
-  watches it; a phone let type sees it. The agent ends, and the phone resumes it with a message,
-  which the agent remembers and hears. It ends again, and the window resumes it. Linux only, since
+  window, on a profile of its own, is let type, composes a new workspace on the host from its
+  project in the sidebar, with the stand-in, and has control of it at once; a phone let type sees
+  it. The phone takes control over and ends the agent, then resumes it with a message, which the
+  agent remembers and hears. It ends again, and the window resumes it from the workspace in view. Linux only, since
   the window stands in for the browser with xdg-open. A window opens while it runs; nothing needs
   clicking.
 version: 1

@@ -1,0 +1,9 @@
+{
+  "requestId": "r-33",
+  "result": {
+    "kind": "branches",
+    "branches": ["main", "develop", "ys/fix-login", "ys/kept-earlier"],
+    "default": "main",
+    "checkedOut": ["main", "ys/fix-login"]
+  }
+}

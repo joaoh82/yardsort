@@ -48,6 +48,45 @@ has the downloads and the full commit lists.
   empty room between the field and the keyboard, and the bar with the agent's name and
   **Chat | Terminal** was drawn under the status bar. Both are in their place now, in Chat and in
   a conversation's terminal.
+- **Other computers look like your own projects.** Under **Other computers** in the sidebar, each
+  computer you are paired with now has its projects and their workspaces under it, drawn as local
+  ones are, and it folds. A workspace there opens in the same panel as one of yours: the computer
+  and who has control across the top, its terminals as tabs, that computer's agents to start
+  beside them, and **Resume** for a conversation that ended. The page with the banner, **Watch**
+  and **Back** is gone. An agent you start there from this computer is yours to type into at once;
+  one that was already running still takes **Take control**. The workspace and tab shortcuts reach
+  workspaces there too. See
+  [Reaching another computer](docs/guide/remote.md#reaching-another-computer).
+- **Choose the computer in the composer.** With this computer signed in to reach others, the
+  composer's title ends in **This computer**, and pressing it lists the computers you are paired
+  with. Pick one and the workspace is made there, with what you had typed: the composer shows that
+  computer's agents and which of its projects it will use, offered by the same name and remembered
+  once you start. A computer that is offline or lets you only watch is listed and cannot be
+  chosen. See [Run on](docs/guide/remote.md#run-on).
+- **The composer for another computer has the rest of its fields.** A name, a model, an effort and
+  the branch to start from or to open, each from that computer's own lists. The project there is
+  offered as the same repository when both are fetched from the same place, before the same name.
+- **Clone it there.** When the other computer has no such project, the composer offers to have it
+  clone the repository into its own projects folder, with its own Git sign-in, and then makes the
+  workspace in it. The folder is set under **Projects cloned for a device** in Settings → Remote,
+  or `projects_dir` under `[remote]` in a headless host's `settings.toml`, and is `~/Projects`
+  unless you change it.
+- **A shell, and rename, archive and delete, on another computer.** The **+** after a workspace's
+  tabs there opens that computer's shell, and the workspace's menu renames, archives and deletes
+  it. Uncommitted work there is lost only after a second confirmation. All of this needs Yardsort
+  0.35.0 on the other computer too; an older one keeps what it had and the window does not offer
+  the rest.
+- **Changes and files of a workspace on another computer.** The right panel lists what changed
+  there and its file tree, and opens a diff or a file, read from that computer when you look.
+  Read-only: there is no commit box and no editor yet, and nothing read is kept on this computer.
+  A computer you let type into this one can read a workspace's changes and files here the same
+  way, by paths inside the workspace and nothing outside it. See
+  [Reaching another computer](docs/guide/remote.md#reaching-another-computer).
+- **Commit, push and pull requests on another computer.** Under a workspace's changes there:
+  commit them with a message, push the branch, open its pull request, and merge it after a
+  confirmation. That computer does each as itself, with its own Git identity, credentials and
+  `gh` sign-in, and only at your press. A refused push or commit is explained in a sentence
+  rather than with Git's own output, which stays on that computer.
 
 ## 0.34.1
 

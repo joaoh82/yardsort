@@ -511,6 +511,8 @@ narrower mapping of its own decided then (a project's remote URL, confirmed once
 it starts uses slice 7's `workspace.start` and `session.start`, by ids. The workspace it makes is the
 other host's, listed under that host, as slice 4 lists them. Nothing is queued for a host that is
 offline. Whether it is a milestone of its own or R6's first slice is decided when R6 is planned.
+It was proposed on 2026-11-14 as its own plan, with the other computers shown as local projects are:
+[44](44-other-computers-like-local.md).
 
 **Handover between machines, after execution targets.** A task moves by Git and by a packet the
 person reads, never by moving a process:
