@@ -274,6 +274,11 @@ the approval. A refusal in the dialog ends the run as `refused`, which `wait` re
 There is no `--approve` flag and no `ys` command that approves, for the reason `ys memory` has
 no approve: an agent can run anything `ys` offers.
 
+Since 2026-11-15 the card can also be answered from a paired phone
+([43 § a smoke test waiting](43-phone-chat.md#a-smoke-test-waiting-answered-in-chat)). That is
+not a way round this: the request comes over a device's own channel, from a device the person
+let in at the computer, with a grant that may type into its terminals.
+
 What a test can do once approved is what the user can do: it runs as the user, in the worktree,
 with the login environment. Yardsort adds no sandbox and claims none. The approval dialog is the
 sandbox, and the words in it are written to be read.

@@ -171,9 +171,13 @@ export class FakeServer {
     ] as Record<string, unknown>[],
     /** The questions its agent has open. */
     asks: [] as Record<string, unknown>[],
+    /** Smoke test runs waiting for a person, oldest first, as `test.waiting` shows the first. */
+    tests: [] as Record<string, unknown>[],
   };
   /** The questions answered, each as it came. */
   answers: { ask: string; decision: string }[] = [];
+  /** What `test.decide` was sent. */
+  decisions: { run: string; contentHash: string; decision: string }[] = [];
   /** What was uploaded, each as it came. */
   uploads: { workspace: string; name: string; size: number; bytes: number[] }[] = [];
   /** Every operation a computer was asked, in order. */
@@ -537,6 +541,20 @@ export class FakeServer {
           decision: params.decision as unknown as string,
         });
         computer.asks = computer.asks.filter((a) => a.id !== (params.ask as unknown as string));
+        return { kind: "done" };
+      case "test.waiting":
+        return {
+          kind: "testsWaiting",
+          ...(computer.tests[0] ? { first: computer.tests[0] } : {}),
+          behind: Math.max(0, computer.tests.length - 1),
+        };
+      case "test.decide":
+        this.decisions.push({
+          run: params.run as unknown as string,
+          contentHash: params.contentHash as unknown as string,
+          decision: params.decision as unknown as string,
+        });
+        computer.tests = computer.tests.filter((t) => t.run !== (params.run as unknown as string));
         return { kind: "done" };
       case "harness.list":
         return { kind: "harnesses", harnesses: computer.harnesses };

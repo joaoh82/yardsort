@@ -322,6 +322,56 @@ export function Section({
   );
 }
 
+/**
+ * A part of a screen that folds away under its heading: pressing the heading hides what is in it,
+ * and pressing it again shows it. Whether it is open is the screen's to keep.
+ */
+export function Fold({
+  title,
+  note,
+  attention,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  /** Beside the heading: how many. */
+  note?: string | number;
+  /** After the note, something inside worth opening it for. */
+  attention?: string | undefined;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  const colors = useColors();
+  const says = [title, note, attention].filter((part) => part !== undefined).join(", ");
+  return (
+    <View style={styles.fold}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={says}
+        accessibilityState={{ expanded: open }}
+        hitSlop={FOLD_SLOP}
+        onPress={onToggle}
+        style={({ pressed }) => [styles.foldLine, { opacity: pressed ? 0.6 : 1 }]}
+      >
+        <Text style={[styles.foldMark, { color: colors.faint }]}>{open ? "▾" : "▸"}</Text>
+        <Text numberOfLines={1} style={[styles.label, styles.foldTitle, { color: colors.faint }]}>
+          {title}
+        </Text>
+        {note !== undefined && <Text style={[styles.label, { color: colors.faint }]}>{note}</Text>}
+        {attention !== undefined && (
+          <Text style={[styles.label, { color: colors.accentText }]}>· {attention}</Text>
+        )}
+      </Pressable>
+      {open && children}
+    </View>
+  );
+}
+
+/** A heading is a thin line of text: this makes it as easy to press as a row. */
+const FOLD_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
+
 /** Rows that belong together, with a line between each. */
 export function Group({ children }: { children: ReactNode }) {
   const colors = useColors();
@@ -514,6 +564,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   section: { gap: 8, marginTop: 8 },
+  fold: { marginTop: 2 },
+  foldLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+  },
+  foldMark: { fontSize: 12, lineHeight: 14, width: 12 },
+  foldTitle: { flex: 1 },
   group: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, overflow: "hidden" },
   divider: { height: StyleSheet.hairlineWidth },
   row: {

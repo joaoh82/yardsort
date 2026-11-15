@@ -37,9 +37,11 @@
 //! ([`HostFacade::subscription_start`]) and what came after it ([`HostFacade::recorded_after`]),
 //! under the same rules as `activity.list`.
 //!
-//! Nothing here writes to the store either. Starting an agent, which does, is answered by the
-//! visitor with what the app lends it ([`start::Starting`]), and only to a grant that may type
-//! into a terminal: it is no more than that grant could do in a shell. There is no route to
+//! Nothing here writes to the store either, with one exception. Starting an agent, which does, is
+//! answered by the visitor with what the app lends it ([`start::Starting`]), and only to a grant
+//! that may type into a terminal: it is no more than that grant could do in a shell. The
+//! exception is the same power: letting a waiting smoke test run, or refusing it ([`smoke`]),
+//! which records the person's answer as the window's approval card does. There is no route to
 //! approve, edit or propose memory: an agent can reach a terminal, and a terminal could one day reach a remote
 //! client, so the only way to approve memory stays the desktop's Memory view.
 
@@ -64,6 +66,7 @@ use crate::store::{EventBound, EventFilter, ProjectRow, SessionRow, Store, Works
 use crate::tasks::delegate::TaskRef;
 
 pub use conversation::Conversations;
+pub use smoke::TestGate;
 
 /// The operations this host answers. Advertised in [`HostDescription::capabilities`]; anything
 /// else is `unsupported`.
@@ -115,6 +118,10 @@ pub const START_OPERATIONS: &[&str] = &[
 /// where agents keep them ([`Conversations`]).
 pub const CONVERSATION_OPERATIONS: &[&str] = &["conversation.read", "approval.answer"];
 
+/// Smoke test runs waiting for their person, answered when the host carries runs out
+/// ([`TestGate`]).
+pub const TEST_OPERATIONS: &[&str] = &["test.waiting", "test.decide"];
+
 /// Who this host is, to remote clients. Supplied by whoever builds the facade: no host identity
 /// is stored before Remote is enabled, so nothing is created for people who never use it.
 #[derive(Debug, Clone)]
@@ -148,6 +155,9 @@ pub struct HostFacade<'a> {
     /// Where agents keep their conversations and open questions. Without it, `conversation.read`
     /// and `approval.answer` are unsupported.
     pub conversations: Option<&'a Conversations>,
+    /// What is told once a device decided a waiting smoke test run. Without it — a headless
+    /// host, which queues no runs — `test.waiting` and `test.decide` are unsupported.
+    pub tests: Option<&'a dyn TestGate>,
 }
 
 /// What a device is told of terminals in a daemon from before leases, which the app keeps for the
@@ -241,6 +251,10 @@ impl HostFacade<'_> {
             Operation::ConversationRead(params) => {
                 self.conversation(grant, params).map(Reply::Conversation)
             }
+            Operation::TestWaiting(params) => {
+                self.tests_waiting(grant, params).map(Reply::TestsWaiting)
+            }
+            Operation::TestDecide(params) => self.decide_test(grant, params).map(|()| Reply::Done),
             Operation::ApprovalAnswer(params) => {
                 self.answer_ask(grant, params).map(|()| Reply::Done)
             }
@@ -316,6 +330,11 @@ impl HostFacade<'_> {
                 })
                 .chain(if self.conversations.is_some() {
                     CONVERSATION_OPERATIONS
+                } else {
+                    &[]
+                })
+                .chain(if self.tests.is_some() {
+                    TEST_OPERATIONS
                 } else {
                     &[]
                 })
@@ -1144,6 +1163,7 @@ mod activity;
 mod conversation;
 pub mod host;
 pub mod serve;
+pub mod smoke;
 pub mod start;
 #[cfg(test)]
 mod tests;

@@ -10,9 +10,11 @@ import { Accounts, messageOf } from "../lib/accounts";
 import { appearance } from "../lib/appearance";
 import { AppProvider } from "../lib/context";
 import { diagnostics } from "../lib/diagnostics";
+import { folds } from "../lib/folds";
 import {
   appearanceFile,
   appVersion,
+  foldsFile,
   nativeEnv,
   pickImage,
   secureVault,
@@ -28,6 +30,7 @@ import { Button, FONTS, Problem, Screen, useColors, useScheme } from "../ui/part
 
 appearance.start(appearanceFile);
 viewChoices.start(viewsFile);
+folds.start(foldsFile);
 
 const app = {
   accounts: new Accounts(nativeEnv, secureVault),

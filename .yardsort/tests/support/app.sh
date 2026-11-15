@@ -2,6 +2,7 @@
 # The app under test, on this run's profile, with whatever it opens in a browser fetched instead.
 #
 #   sh .yardsort/tests/support/app.sh seed | open | again | close | copies | drives-runs | stop-everything
+#   sh .yardsort/tests/support/app.sh seed-a-test | ys [args…]
 #
 # Its profile, worktrees, sign-ins and stand-in browser are in the run's folder, or in
 # $YS_APP_DIR when a test runs another program there on a profile of its own.
@@ -54,6 +55,32 @@ prompt_args = ["-c", "{prompt}"]
 session_id_mode = "assigned"
 SETTINGS
     echo "seeded $repo"
+    ;;
+  seed-a-test)
+    # A smoke test of the repository's own that nobody has approved: it prints one line.
+    mkdir -p "$YS_RUN_DIR/repo/.yardsort/tests"
+    cat > "$YS_RUN_DIR/repo/.yardsort/tests/hello.yaml" <<'TEST'
+id: hello
+name: Hello from a test
+version: 1
+steps:
+  - id: says_so
+    action: run
+    program: echo
+    args: [let-go-from-the-phone]
+    expect:
+      stdout_contains: let-go-from-the-phone
+TEST
+    echo "seeded hello.yaml"
+    ;;
+  ys)
+    # `ys` in the repository, on this run's profile, with none of a launched session's markers:
+    # whoever runs the outer test is not this profile's agent.
+    shift
+    environment
+    ys="$PWD/target/debug/ys"
+    cd "$YS_RUN_DIR/repo" || exit 1
+    exec env -u YARDSORT_RUN_ID -u YARDSORT_WORKSPACE_ID -u YARDSORT_SESSION_RECORD_ID "$ys" "$@"
     ;;
   open)
     environment

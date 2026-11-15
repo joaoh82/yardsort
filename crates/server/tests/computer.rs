@@ -87,6 +87,7 @@ impl Serving for Here {
             starting: self.starting.clone(),
             workflow: None,
             conversations: None,
+            tests: None,
         });
     }
 }

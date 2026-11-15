@@ -9,7 +9,15 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globa
 import { Secret } from "@yardsort/remote-client";
 import { router, Stack } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
-import { Alert, type AlertButton, AppState, Linking, Share } from "react-native";
+import {
+  Alert,
+  type AlertButton,
+  AppState,
+  DeviceEventEmitter,
+  Linking,
+  Share,
+  StyleSheet,
+} from "react-native";
 
 import Account from "../../src/app/account";
 import ComputerScreen from "../../src/app/computer";
@@ -28,6 +36,7 @@ import { Accounts, type Browser, type Env } from "../../src/lib/accounts";
 import type { PickImage } from "../../src/lib/attach";
 import { AppProvider } from "../../src/lib/context";
 import { Diagnostics } from "../../src/lib/diagnostics";
+import { folds } from "../../src/lib/folds";
 import { Incoming } from "../../src/lib/pairing";
 import { viewChoices } from "../../src/lib/views";
 import { MemoryVault } from "../lib/memory-vault";
@@ -119,11 +128,26 @@ const ANSWER = { timeout: 5_000 };
 
 beforeEach(() => {
   jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  // Which projects are folded is the app's, and each test's alone.
+  folds.start({ read: () => null, write: () => {} });
 });
 
 afterEach(() => {
   jest.restoreAllMocks();
 });
+
+/** What a view has been asked about where it is, for a test to answer as the system would. */
+const measured = (view: ReturnType<typeof screen.getByTestId>) => {
+  type Answer = (x: number, y: number, width: number, height: number) => void;
+  type Fiber = {
+    return: Fiber;
+    stateNode?: { measureInWindow?: jest.Mock<(answer: Answer) => void> };
+  };
+  let fiber = (view as unknown as { unstable_fiber: Fiber }).unstable_fiber;
+  while (!fiber.stateNode?.measureInWindow) fiber = fiber.return;
+  const measure = fiber.stateNode.measureInWindow;
+  return () => measure.mock.calls.map(([answer]) => answer);
+};
 
 describe("Screens", () => {
   test("start below the header, which from iOS 26 is laid over them", async () => {
@@ -908,6 +932,33 @@ describe("A computer", () => {
     expect(screen.getByText("Nothing printed for 3 min")).toBeTruthy();
   });
 
+  test("a project's heading folds its workspaces away, and says that agents run inside", async () => {
+    await paired();
+    await open();
+    const heading = screen.getByRole("button", { name: "demo, 1" });
+    expect(heading.props.accessibilityState.expanded).toBe(true);
+
+    await fireEvent.press(heading);
+    expect(screen.queryByRole("button", { name: /^fix-login/ })).toBeNull();
+    const folded = screen.getByRole("button", { name: "demo, 1, 1 running" });
+    expect(folded.props.accessibilityState.expanded).toBe(false);
+
+    await fireEvent.press(folded);
+    expect(screen.getByRole("button", { name: /^fix-login/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "demo, 1" })).toBeTruthy();
+  });
+
+  test("a folded project is still folded when the computer is opened again", async () => {
+    await paired();
+    await open();
+    await fireEvent.press(screen.getByRole("button", { name: "demo, 1" }));
+    await act(async () => router.back());
+
+    await fireEvent.press(await screen.findByRole("button", { name: /^Workstation, / }));
+    expect(await screen.findByRole("button", { name: "demo, 1, 1 running" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^fix-login/ })).toBeNull();
+  });
+
   test("more than a page is asked for when wanted", async () => {
     const server = new FakeServer();
     server.computer.moreWorkspaces = [
@@ -1136,18 +1187,6 @@ describe("A computer", () => {
         await fireEvent.changeText(screen.getByTestId("composer"), text);
       };
       const sent = () => act(async () => jest.advanceTimersByTimeAsync(500));
-      /** What a view has been asked about where it is, for a test to answer as the system would. */
-      const measured = (view: ReturnType<typeof screen.getByTestId>) => {
-        type Answer = (x: number, y: number, width: number, height: number) => void;
-        type Fiber = {
-          return: Fiber;
-          stateNode?: { measureInWindow?: jest.Mock<(answer: Answer) => void> };
-        };
-        let fiber = (view as unknown as { unstable_fiber: Fiber }).unstable_fiber;
-        while (!fiber.stateNode?.measureInWindow) fiber = fiber.return;
-        const measure = fiber.stateNode.measureInWindow;
-        return () => measure.mock.calls.map(([answer]) => answer);
-      };
 
       test("a development build times a keystroke to what comes back", async () => {
         const { server } = await inControl();
@@ -1868,8 +1907,8 @@ describe("A computer", () => {
     /** Long enough for every answer to come, and for an Enter after its text. */
     const settle = () => act(async () => jest.advanceTimersByTimeAsync(500));
 
-    async function chatting(server = new FakeServer()) {
-      server.computer.capabilities = [...READS];
+    async function chatting(server = new FakeServer(), capabilities = READS) {
+      server.computer.capabilities = [...capabilities];
       const app = await paired(new MemoryVault(), server);
       await fireEvent.press(await open());
       await fireEvent.press(
@@ -1878,6 +1917,51 @@ describe("A computer", () => {
       await screen.findByTestId("chat");
       return app;
     }
+
+    describe("where the screen starts", () => {
+      const WINDOW = 800;
+      const KEYBOARD = 300;
+      /** The screen starts this far down the window, and then a keyboard comes up. */
+      async function typingFrom(top: number) {
+        await chatting();
+        await act(async () =>
+          measured(screen.getByTestId("above-keyboard"))().at(-1)?.(0, top, 400, WINDOW - top),
+        );
+        const clear = StyleSheet.flatten(screen.getByTestId("above-keyboard").props.style)
+          .paddingTop as number;
+        await act(async () =>
+          fireEvent(screen.getByTestId("lifted"), "layout", {
+            persist: () => {},
+            nativeEvent: {
+              layout: { x: 0, y: clear, width: 400, height: WINDOW - top - clear },
+            },
+          }),
+        );
+        await act(async () => {
+          DeviceEventEmitter.emit("keyboardWillShow", {
+            duration: 0,
+            easing: "keyboard",
+            endCoordinates: {
+              screenX: 0,
+              screenY: WINDOW - KEYBOARD,
+              width: 400,
+              height: KEYBOARD,
+            },
+          });
+        });
+        const lift = StyleSheet.flatten(screen.getByTestId("lifted").props.style).paddingBottom;
+        return { clear, lift };
+      }
+
+      test("under a header laid over it, as from iOS 26: the bar goes below the header, and a keyboard lifts the field by its own height", async () => {
+        // The header in these tests is 44 points.
+        expect(await typingFrom(0)).toEqual({ clear: 44, lift: KEYBOARD });
+      });
+
+      test("below the header, as on Android and older iOS: nothing is added, and the lift is the same", async () => {
+        expect(await typingFrom(44)).toEqual({ clear: 0, lift: KEYBOARD });
+      });
+    });
 
     test("a conversation opens as Chat, what was said and written back, with no terminal", async () => {
       const { server } = await chatting();
@@ -1943,6 +2027,113 @@ describe("A computer", () => {
       await settle();
       expect(screen.getByText("Not now.")).toBeTruthy();
       expect(screen.getByText("npm test -- --run render")).toBeTruthy();
+    });
+
+    describe("a smoke test run waiting to be let go", () => {
+      /** A run the conversation's own agent asked for, of a file changed since it was approved. */
+      const WAITING = {
+        run: "run-1",
+        name: "Sign-in works",
+        askedBy: "agent",
+        session: "session-1",
+        askedAt: 1_700_000_100_000,
+        inputs: [{ name: "user", value: "ana" }],
+        steps: [
+          { id: "server", phase: "setup", words: "start `npm run dev`, and keep it running" },
+          {
+            id: "sign-in",
+            phase: "steps",
+            words: "run `node scripts/sign-in.mjs`, expecting exit 0",
+          },
+        ],
+        env: [{ name: "TEST_PASSWORD", set: true }],
+        runsAProgram: true,
+        environment: ["BASE_URL", "TEST_PASSWORD"],
+        approvedBefore: false,
+        previous: "name: Sign-in works\nsteps:\n  - run: node sign-in.mjs\n",
+        definition: "name: Sign-in works\nsteps:\n  - run: node scripts/sign-in.mjs\n",
+        contentHash: "abc123",
+        whole: true,
+      };
+
+      async function waiting(tests: Record<string, unknown>[], capable = true) {
+        const server = new FakeServer();
+        server.computer.tests = tests;
+        await chatting(server, capable ? [...READS, "test.waiting", "test.decide"] : READS);
+        return server;
+      }
+
+      test("shows what the file does, what it can read and what changed, and Run lets it go", async () => {
+        const server = await waiting([WAITING, { ...WAITING, run: "run-2" }]);
+        expect(await screen.findByText("Run “Sign-in works”?")).toBeTruthy();
+        expect(screen.getByText(/Asked by claude, with user = ana\./)).toBeTruthy();
+        expect(screen.getByText("start `npm run dev`, and keep it running")).toBeTruthy();
+        expect(screen.getByText("run `node scripts/sign-in.mjs`, expecting exit 0")).toBeTruthy();
+        expect(screen.getByText("BASE_URL, TEST_PASSWORD")).toBeTruthy();
+        expect(screen.getByText("-   - run: node sign-in.mjs")).toBeTruthy();
+        expect(screen.getByText("+   - run: node scripts/sign-in.mjs")).toBeTruthy();
+        expect(screen.getByText(/1 more run waits behind it\./)).toBeTruthy();
+        // Its own agent waits on it: the conversation needs you.
+        expect(screen.getByText("Needs you")).toBeTruthy();
+
+        await fireEvent.press(screen.getByRole("button", { name: "Run" }));
+        await settle();
+        expect(server.decisions).toEqual([
+          { run: "run-1", contentHash: "abc123", decision: "run" },
+        ]);
+        // The one behind it is next.
+        expect(screen.queryByText(/more run waits behind it/)).toBeNull();
+        expect(screen.getByText("Run “Sign-in works”?")).toBeTruthy();
+      });
+
+      test("Don’t run refuses it, and the card goes", async () => {
+        const server = await waiting([WAITING]);
+        await screen.findByText("Run “Sign-in works”?");
+        await fireEvent.press(screen.getByRole("button", { name: "Don’t run" }));
+        await settle();
+        expect(server.decisions).toEqual([
+          { run: "run-1", contentHash: "abc123", decision: "refuse" },
+        ]);
+        expect(screen.queryByText("Run “Sign-in works”?")).toBeNull();
+      });
+
+      test("one the computer could not send whole says why, and can only be refused", async () => {
+        await waiting([
+          {
+            ...WAITING,
+            previous: undefined,
+            definition: undefined,
+            whole: false,
+            whyNot: "This test is too long to show whole here. Run it at the computer.",
+          },
+        ]);
+        expect(await screen.findByText(/too long to show whole here/)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Don’t run" })).toBeTruthy();
+      });
+
+      test("an answer the computer refused leaves the card, with why", async () => {
+        const server = await waiting([WAITING]);
+        server.computer.refuses.set("test.decide", "This phone may only watch here.");
+        await screen.findByText("Run “Sign-in works”?");
+        await fireEvent.press(screen.getByRole("button", { name: "Run" }));
+        await settle();
+        expect(screen.getByText("This phone may only watch here.")).toBeTruthy();
+        expect(screen.getByText("Run “Sign-in works”?")).toBeTruthy();
+      });
+
+      test("another agent's run says so, and does not make this conversation need you", async () => {
+        await waiting([{ ...WAITING, session: "other" }]);
+        expect(await screen.findByText(/Asked by another agent/)).toBeTruthy();
+        expect(screen.queryByText("Needs you")).toBeNull();
+      });
+
+      test("a computer from before this is not asked", async () => {
+        const server = await waiting([WAITING], false);
+        await settle();
+        expect(screen.queryByText("Run “Sign-in works”?")).toBeNull();
+        expect(server.operations.map((o) => o.op)).not.toContain("test.waiting");
+      });
     });
 
     test("a message is typed into its terminal with Enter, and control given back at once", async () => {

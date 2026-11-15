@@ -8,6 +8,7 @@
 //   bun .yardsort/tests/support/phone.ts <run dir> refused <name> | ends <name>
 //   bun .yardsort/tests/support/phone.ts <run dir> resumes <name> <message> <expected>
 //   bun .yardsort/tests/support/phone.ts <run dir> registers | opens-notice <name> <pushes file>
+//   bun .yardsort/tests/support/phone.ts <run dir> lets-a-test-run <name>
 //
 // `type` takes control of the one session running on the computer, types the line and a return,
 // and waits for the expected text in what the terminal prints. `take-over` does the same while
@@ -18,6 +19,9 @@
 // `registers` gives the server a push token, as a phone allowed to notify does. `opens-notice`
 // takes the one push the stand-in recorded, reads its notice, and checks it names the terminal of
 // the one session running on the computer, and that the push itself names nothing.
+// `lets-a-test-run` reads the card of the smoke test run waiting in the project's own checkout,
+// is refused letting another file's hash run, lets the one shown run, and leaves the run's id in
+// the run's folder as `test-run`.
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -178,6 +182,46 @@ switch (doing) {
     if (!Buffer.from(photo).equals(readFileSync(path))) throw new Error("The picture changed.");
     if (path.startsWith(join(dir, "worktrees"))) throw new Error(`It is in a worktree: ${path}`);
     console.log("the picture is on the computer, whole, outside every worktree");
+    channel.close();
+    break;
+  }
+  case "lets-a-test-run": {
+    // What a phone that may type does with a smoke test waiting for its person.
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    if (!channel.host.capabilities.includes("test.waiting")) {
+      throw new Error("The computer does not say it answers test.waiting.");
+    }
+    const listed = await channel.workspaces();
+    const project = listed.projects.find((p) => p.name === "repo");
+    const workspace = listed.workspaces.find((w) => w.project === project?.id);
+    if (!workspace) throw new Error("The project's checkout is not on the phone.");
+    let waiting = await channel.testsWaiting(workspace.id);
+    for (let tries = 0; tries < 50 && !waiting.first; tries++) {
+      await Bun.sleep(200);
+      waiting = await channel.testsWaiting(workspace.id);
+    }
+    const card = waiting.first;
+    if (!card) throw new Error("No smoke test waits there.");
+    if (!card.whole) throw new Error(`The card is not whole: ${card.whyNot}`);
+    if (!card.steps.some((step) => step.words.includes("let-go-from-the-phone"))) {
+      throw new Error(`Its steps do not say what it runs: ${JSON.stringify(card.steps)}`);
+    }
+    console.log(`shown the card of "${card.name}", asked by ${card.askedBy}`);
+    const decide = (contentHash: string) =>
+      channel.decideTest({ workspace: workspace.id, run: card.run, contentHash, decision: "run" });
+    const refused = await decide("0".repeat(64)).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    if (!(refused instanceof ClientError) || refused.code !== "stale") {
+      throw new Error(`Another file's hash was not refused as stale: ${String(refused)}`);
+    }
+    console.log("another file's hash is refused");
+    await decide(card.contentHash);
+    if ((await channel.testsWaiting(workspace.id)).first) throw new Error("It still waits.");
+    writeFileSync(join(dir, "test-run"), card.run);
+    console.log("let it run");
     channel.close();
     break;
   }

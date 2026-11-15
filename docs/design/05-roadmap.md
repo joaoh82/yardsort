@@ -1327,6 +1327,20 @@ history a line at a time.
 - [ ] Run on an iPhone and on Android: Chat against a real conversation, a question answered from
       the phone, and the pinch in each WebView.
 - [ ] OpenCode's and Pi's questions, through their plugin and extension.
+- [x] Remote protocol minor 10: `test.waiting` (`terminal:read`) and `test.decide`
+      (`terminal:control`). A smoke test run waiting for its person shows in Chat as the
+      computer's approval card, and is let go or refused there (2026-11-15).
+- [x] A project folds on the phone's computer screen, remembered per computer (2026-11-15).
+- [x] Found on the iPhone on 2026-11-15, in the owner's first use of Chat there: from iOS 26 the
+      screen starts under the header, so the field stood a header's height above the keyboard and
+      the conversation's bar was under the status bar. The screen now asks where it starts
+      (43, _Found on the iPhone_). Checked on the Android emulator and by tests; not yet seen on
+      the iPhone.
+- [x] The smoke test `remote-phone-lets-a-test-run` passed on Linux (2026-11-15): the real
+      window, a pretend phone, a real run let go and carried out.
+- [ ] A smoke test let go from a real phone, and a notice when one starts waiting.
+- [ ] Pull request status on the phone: proposed in Figma on 2026-11-15 (page **Pull requests ·
+      proposal** of the phone's file), waiting for the owner's answers before it is built.
 
 _Exit:_ on a phone, a person reads an agent's whole conversation without scrolling sideways,
 answers its permission question, and sends it the next message, while the computer's terminal

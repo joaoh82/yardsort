@@ -181,6 +181,7 @@ impl Started {
             starting: starting.then(|| Arc::clone(&self.lent) as Arc<dyn Starting>),
             workflow: None,
             conversations: None,
+            tests: None,
         }
     }
 
