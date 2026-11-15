@@ -11,6 +11,8 @@ import {
 } from "@/lib/ipc";
 import { describeHistory } from "@/features/sidebar/outcomeWords";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
+import { RunOn } from "@/features/remote/RunOn";
+import { offeredThere, useRunsElsewhere } from "@/features/remote/there";
 import { ImportWorktreesDialog } from "@/features/sidebar/ImportWorktreesDialog";
 import { ConversationsDialog } from "@/features/terminal/ConversationsDialog";
 import {
@@ -27,6 +29,7 @@ import { useWorkspaceName } from "./useWorkspaceName";
 import { useDraftStore } from "@/stores/draft";
 import { assistOn, useAssistStore } from "@/stores/assist";
 import { useHarnessStore } from "@/stores/harnesses";
+import { useOtherComputersStore } from "@/stores/otherComputers";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { useTerminalStore } from "@/stores/terminals";
 
@@ -304,6 +307,23 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   // A branch lives in one worktree at a time, so only branches nobody has checked out can open.
   const openable = branches?.branches.filter((name) => !branches.checkedOut.includes(name)) ?? [];
 
+  // A plain new workspace can run on another computer instead; one that starts from something
+  // of this computer's (a workspace to run in or fork, a task, a pull request's branch) cannot.
+  const runsElsewhere = useRunsElsewhere() && !runIn && !fork && !task && !prepared;
+  /** Compose it on another computer: what was typed goes along, and the project there is the
+   *  one chosen for this project last time, or the one of the same name. */
+  const runOn = (hostId: string | null) => {
+    if (hostId === null) return;
+    const projects = useProjectsStore.getState();
+    const view = useOtherComputersStore.getState().views[hostId];
+    projects.composeThere({
+      hostId,
+      projectId: offeredThere(view, projects.ui, hostId, project).projectId,
+      from: project.id,
+      message,
+    });
+  };
+
   // Taken before anything is awaited: a second Start while the first is still spawning would
   // start a second agent on the same task.
   const starting = useRef(false);
@@ -392,29 +412,38 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           void start();
         }}
       >
-        <h1 className="mb-3 text-center text-ink-muted">
-          {runIn ? (
+        <div className="mb-3 text-center text-ink-muted">
+          <h1 className="inline">
+            {runIn ? (
+              <>
+                {handoff !== null ? "Hand off in " : "Run in "}
+                <span className="font-medium text-ink">{project.name}</span>
+                {runIn.head && (
+                  <>
+                    {" on "}
+                    <span className="font-mono text-detail text-ink">{runIn.head.label}</span>
+                  </>
+                )}
+              </>
+            ) : fork ? (
+              <>
+                Fork <span className="font-medium text-ink">{fork.name}</span> into a new workspace
+                in <span className="font-medium text-ink">{project.name}</span>
+              </>
+            ) : (
+              <>
+                New workspace in <span className="font-medium text-ink">{project.name}</span>
+                {runsElsewhere && " on"}
+              </>
+            )}
+          </h1>
+          {runsElsewhere && (
             <>
-              {handoff !== null ? "Hand off in " : "Run in "}
-              <span className="font-medium text-ink">{project.name}</span>
-              {runIn.head && (
-                <>
-                  {" on "}
-                  <span className="font-mono text-detail text-ink">{runIn.head.label}</span>
-                </>
-              )}
-            </>
-          ) : fork ? (
-            <>
-              Fork <span className="font-medium text-ink">{fork.name}</span> into a new workspace in{" "}
-              <span className="font-medium text-ink">{project.name}</span>
-            </>
-          ) : (
-            <>
-              New workspace in <span className="font-medium text-ink">{project.name}</span>
+              {" "}
+              <RunOn hostId={null} onChoose={runOn} disabled={busy} />
             </>
           )}
-        </h1>
+        </div>
         {handoff !== null && (
           <p className="mb-2 text-detail text-ink-faint">
             This is what Yardsort recorded about the workspace — and, where the project shares its

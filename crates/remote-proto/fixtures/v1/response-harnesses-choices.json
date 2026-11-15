@@ -1,0 +1,15 @@
+{
+  "requestId": "r-32",
+  "result": {
+    "kind": "harnesses",
+    "harnesses": [
+      {
+        "id": "claude",
+        "name": "Claude Code",
+        "models": ["opus", "sonnet"],
+        "efforts": ["low", "high"]
+      },
+      { "id": "opencode", "name": "OpenCode" }
+    ]
+  }
+}

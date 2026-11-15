@@ -10,7 +10,8 @@ import { TasksView } from "@/features/tasks/TasksView";
 import { TestsView } from "@/features/tests/TestsView";
 import { SchedulesView } from "@/features/schedules/SchedulesView";
 import { TriggersView } from "@/features/triggers/TriggersView";
-import { OtherHostView } from "@/features/remote/OtherHostView";
+import { RemoteComposer } from "@/features/remote/RemoteComposer";
+import { RemoteWorkspaceView } from "@/features/remote/RemoteWorkspaceView";
 import { GettingStarted } from "@/features/onboarding/GettingStarted";
 import { BenchRunner } from "@/features/terminal/BenchRunner";
 import { LatencyRunner } from "@/features/terminal/LatencyRunner";
@@ -56,7 +57,8 @@ export function WorkspacePanel() {
   const testsOpen = useProjectsStore((s) => s.testsOpen);
   const schedulesOpen = useProjectsStore((s) => s.schedulesOpen);
   const triggersOpen = useProjectsStore((s) => s.triggersOpen);
-  const remoteHostId = useProjectsStore((s) => s.remoteHostId);
+  const remote = useProjectsStore((s) => s.remote);
+  const composingThere = useProjectsStore((s) => s.composingThere);
   const runIn =
     selection && selection.workspace.id === composingWorkspaceId ? selection : undefined;
 
@@ -75,8 +77,19 @@ export function WorkspacePanel() {
   }
   return (
     <main aria-label="Workspace" className="flex h-full flex-col bg-canvas">
-      {remoteHostId ? (
-        <OtherHostView hostId={remoteHostId} />
+      {remote ? (
+        <RemoteWorkspaceView
+          key={`${remote.hostId}/${remote.workspaceId}`}
+          hostId={remote.hostId}
+          workspaceId={remote.workspaceId}
+        />
+      ) : composingThere ? (
+        <RemoteComposer
+          key={`${composingThere.hostId}/${composingThere.from ?? ""}`}
+          hostId={composingThere.hostId}
+          projectId={composingThere.projectId}
+          from={composingThere.from ?? null}
+        />
       ) : usageOpen ? (
         <UsageView />
       ) : pullRequestsOpen ? (

@@ -394,6 +394,53 @@ switch (doing) {
     channel.close();
     break;
   }
+  case "cannot-read": {
+    // A phone let only watch: the changes and the files of a workspace are not its to read.
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    const workspace = (await channel.workspaces()).workspaces.find((w) => w.name === "smoke");
+    if (!workspace) throw new Error("The workspace is not on the phone.");
+    const refusal = (attempt: Promise<unknown>) =>
+      attempt.then(
+        () => {
+          throw new Error("It was let.");
+        },
+        (error: { code?: string }) => {
+          if (error.code !== "forbidden") throw error;
+        },
+      );
+    await refusal(channel.changes(workspace.id));
+    await refusal(channel.files({ workspace: workspace.id, dir: "" }));
+    await refusal(
+      channel.readFile({ workspace: workspace.id, path: "README.md", of: "working", offset: 0 }),
+    );
+    console.log("refused: reading its changes and its files");
+    channel.close();
+    break;
+  }
+  case "cannot-publish": {
+    // A phone let only watch: nothing is committed, pushed or opened for it.
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    const workspace = (await channel.workspaces()).workspaces.find((w) => w.name === "smoke");
+    if (!workspace) throw new Error("The workspace is not on the phone.");
+    const refusal = (attempt: Promise<unknown>) =>
+      attempt.then(
+        () => {
+          throw new Error("It was let.");
+        },
+        (error: { code?: string }) => {
+          if (error.code !== "forbidden") throw error;
+        },
+      );
+    await refusal(channel.publishState({ workspace: workspace.id }));
+    await refusal(channel.commit({ workspace: workspace.id, message: "Not committed" }));
+    await refusal(channel.push(workspace.id));
+    await refusal(channel.openPullRequest({ workspace: workspace.id, title: "Not opened" }));
+    console.log("refused: committing, pushing and its pull request");
+    channel.close();
+    break;
+  }
   case "ends": {
     const phone = await session();
     const channel = await reach(phone, await theComputer(phone));
@@ -401,7 +448,9 @@ switch (doing) {
     let ended!: () => void;
     const exited = new Promise<void>((resolve) => (ended = resolve));
     const attachment = await channel.attach(terminal, { output() {}, exited: () => ended() });
-    const control = await channel.acquire(terminal, { takeOver: false });
+    // The window has control of an agent it started, so the phone takes it over, as a person
+    // with both would; with nobody in control, this is an ordinary take.
+    const control = await channel.acquire(terminal, { takeOver: true });
     // An end of input, as Ctrl-D at a terminal: a stand-in agent stops reading, and ends.
     await control.input("\x04");
     const late = setTimeout(() => {

@@ -16,6 +16,7 @@ name = "yardsort_core"
 # Deliberately no Tauri. This crate is what lets a command-line client exist at all: linking the
 # app's lib would drag in WebKitGTK, which a terminal or a CI runner has no reason to have.
 [dependencies]
+ignore = "0.4"
 pty-host = { path = "../pty-host", features = ["specta"] }
 pty-ipc = { path = "../pty-ipc" }
 remote-proto = { path = "../remote-proto" }

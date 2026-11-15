@@ -1,0 +1,194 @@
+id: run-on
+name: The composer starts a workspace on a computer with no screen, chosen in its title
+description: >-
+  A yardsort-host on the stand-in server with one project, repo, and a stand-in agent. The real
+  window, on a profile of its own, has two projects of its own, repo and notes, signs in as a
+  client and is let type at the host's terminal. From the composer of its own repo it chooses the
+  host in the title's Run on menu: what was typed comes along, the host's repo is offered as the
+  same name, and Start makes the workspace there, under the host in the sidebar and this
+  computer's to type into; a phone sees the host's agent begin with the message. From notes, the
+  composer says the host has no project of that name and Start waits. With the host stopped, it is
+  listed in the menu as offline and cannot be chosen. Linux only, since the window stands in for
+  the browser with xdg-open. A window opens while it runs; nothing needs clicking.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_app
+    action: run
+    program: bun
+    args: [tauri, build, --debug, --no-bundle]
+    timeout: 20m
+  - id: build_the_host
+    action: shell
+    # The stand-in server too, and the host's bin folder in $YS_RUN_DIR/bin.
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: repositories_and_a_stand_in_agent
+    action: shell
+    # The host's repository, and two of this computer's own: one of the same name, one the host
+    # has no namesake for. The stand-in agent of host-restart.yaml is the host's only harness.
+    line: >-
+      mkdir -p "$YS_RUN_DIR/profile" && for repo in repo here/repo here/notes; do mkdir -p
+      "$YS_RUN_DIR/$repo" && git -C "$YS_RUN_DIR/$repo" init -q && git -C "$YS_RUN_DIR/$repo" -c
+      user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false commit -q
+      --allow-empty -m first || exit 1; done && cp .yardsort/tests/support/standin-agent.sh "$YS_RUN_DIR/" &&
+      printf '[[harness]]\nid = "stand-in"\nbuiltin = false\nlabel = "Stand-in agent"\ncommand = "sh"\nbase_args = ["%s"]\nsession_args = ["start", "{session_id}"]\nprompt_args = ["{prompt}"]\nresume_args = ["resume", "{session_id}"]\nfork_args = ["fork", "{session_id}", "{new_session_id}"]\nsession_id_mode = "assigned"\n'
+      "$YS_RUN_DIR/standin-agent.sh" > "$YS_RUN_DIR/profile/settings.toml"
+
+steps:
+  - id: the_host_signs_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", sign-in, Smoke box]
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: serve
+    action: shell
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: add_the_project
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, project, add, "{{ run.dir }}/repo"]
+    expect:
+      stdout_contains: Added repo
+
+  - id: open_the_window
+    action: shell
+    # A profile of its own: the host has the run's.
+    line: YS_APP_DIR="$YS_RUN_DIR/app" sh .yardsort/tests/support/app.sh open
+  - id: window_up
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+  - id: the_window_has_a_project_of_the_same_name
+    action: run
+    program: bun
+    args:
+      [.yardsort/tests/support/window.ts, "{{ run.port }}", add-project, "{{ run.dir }}", here/repo]
+    expect:
+      stdout_contains: added the project
+  - id: and_one_the_host_has_none_for
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/window.ts,
+        "{{ run.port }}",
+        add-project,
+        "{{ run.dir }}",
+        here/notes,
+      ]
+    expect:
+      stdout_contains: added the project
+  - id: the_window_loads_again
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", load-again]
+    timeout: 60s
+    expect:
+      stdout_contains: asked the window to load again
+  - id: the_window_shows_both
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", shows-projects, repo, notes]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: repo and notes among this computer's projects"
+  - id: the_window_signs_in_as_a_client
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", client-sign-in, "{{ run.dir }}"]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: Signed in as Smoke laptop"
+  - id: the_window_is_let_type
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair, window, "{{ run.port }}", t]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+  - id: so_is_a_phone
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+
+  - id: the_composer_runs_it_on_the_host
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", runs-on, Smoke box, tidy-the-readme]
+    timeout: 120s
+    expect:
+      stdout_contains: "saw: a workspace started on Smoke box from this computer's composer"
+  - id: the_hosts_agent_hears_the_message
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/phone.ts,
+        "{{ run.dir }}",
+        sees,
+        Smoke box,
+        "begins: tidy-the-readme",
+      ]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: begins: tidy-the-readme"
+  - id: nothing_was_made_on_this_computer
+    action: shell
+    # The window's own repo has its one checkout and no worktree; the host's has the new one.
+    line: >-
+      test "$(git -C "$YS_RUN_DIR/here/repo" worktree list | wc -l)" = 1 && test "$(git -C
+      "$YS_RUN_DIR/repo" worktree list | wc -l)" = 2 && echo "one worktree, on the host"
+    expect:
+      stdout_contains: one worktree, on the host
+  - id: a_project_the_host_lacks_is_said_to_be_missing
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", missing-there, Smoke box]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: Smoke box has no project called notes, and Start waits"
+  - id: the_host_stops
+    action: shell
+    line: kill "$(cat "$YS_RUN_DIR/serve.pid")"
+  - id: an_offline_host_is_listed_and_not_offered
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", not-offered-away, Smoke box]
+    timeout: 150s
+    expect:
+      stdout_contains: "saw: Smoke box listed as offline, and not offered"
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      YS_APP_DIR="$YS_RUN_DIR/app" sh .yardsort/tests/support/app.sh stop-everything; kill "$(cat
+      "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

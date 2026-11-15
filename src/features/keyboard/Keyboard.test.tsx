@@ -2,12 +2,15 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_BINDINGS } from "@/lib/shortcuts";
+import type { OtherComputers, OtherHostView } from "@/lib/ipc";
 import { useLayoutStore } from "@/stores/layout";
+import { useOtherComputersStore } from "@/stores/otherComputers";
 import { usePreferencesStore } from "@/stores/preferences";
 import { useProjectsStore } from "@/stores/projects";
 import { useTerminalStore } from "@/stores/terminals";
 import { project, worktree } from "@/test/fixtures";
 import { CommandPalette } from "./CommandPalette";
+import { commandEnabled, runCommand } from "./commands";
 import { useAppShortcuts } from "./useAppShortcuts";
 import { KeyboardSettings } from "@/features/settings/KeyboardSettings";
 
@@ -15,6 +18,8 @@ const core = vi.hoisted(() => ({
   uiStateSave: vi.fn().mockResolvedValue(undefined),
   uiStateLoad: vi.fn(),
   ptyClose: vi.fn().mockResolvedValue(undefined),
+  otherHost: vi.fn(),
+  otherHostStartShell: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -62,9 +67,88 @@ beforeEach(() => {
     usageOpen: false,
     pullRequestsOpen: false,
     tasksOpen: false,
+    remote: null,
+    composingThere: null,
   });
   useTerminalStore.setState({ tabs: [], active: {} });
+  useOtherComputersStore.setState({ status: null, views: {}, active: {} });
 });
+
+/** Another computer this one is let into, with one workspace that has an agent and a shell. */
+const others: OtherComputers = {
+  client: { serverUrl: "https://remote.example.com", name: "Workstation", since: 1 },
+  signingIn: false,
+  hosts: [
+    {
+      grantId: "g-1",
+      hostId: "h-1",
+      name: "Build box",
+      pairing: "paired",
+      link: { kind: "online" },
+    },
+    { grantId: "g-2", hostId: "h-2", name: "Not let in", pairing: "waiting", link: null },
+  ],
+  problem: null,
+  signedOut: false,
+  suggestedServerUrl: null,
+  suggestedName: null,
+};
+const there: OtherHostView = {
+  hostId: "h-1",
+  name: "Build box",
+  link: { kind: "online" },
+  mayType: true,
+  mayStart: true,
+  mayResume: true,
+  mayManage: false,
+  mayLook: false,
+  mayPublish: false,
+  readAt: 1,
+  platform: "Linux",
+  appVersion: "0.34.1",
+  projects: [
+    {
+      id: "p-there",
+      name: "service",
+      repository: null,
+      workspaces: [
+        {
+          id: "w-there",
+          name: "fix-login",
+          kind: "worktree",
+          branch: "ys/fix-login",
+          archived: false,
+          missing: false,
+          tasks: [],
+          sessions: [
+            {
+              id: "s-1",
+              title: "Fix the login",
+              harness: "claude",
+              state: "busy",
+              startedAt: 1,
+              terminal: "t-1",
+              resumable: false,
+            },
+          ],
+          terminals: [{ id: "t-2", program: "bash", purpose: "shell", state: "quiet" }],
+        },
+        {
+          id: "w-put-away",
+          name: "old",
+          kind: "worktree",
+          branch: null,
+          archived: true,
+          missing: false,
+          tasks: [],
+          sessions: [],
+          terminals: [],
+        },
+      ],
+    },
+  ],
+  activity: [],
+};
 
 describe("keyboard navigation", () => {
   it("opens and searches the palette from the keyboard and returns focus on Escape", async () => {
@@ -222,6 +306,73 @@ describe("keyboard navigation", () => {
     expect(enter).toHaveBeenLastCalledWith("w-demo-one", true);
     fireEvent.keyDown(window, { key: "ArrowUp", ...mod });
     expect(enter).toHaveBeenLastCalledWith("w-demo-one", true);
+  });
+  it("goes on from this computer's workspaces to another computer's, and wraps back", () => {
+    useOtherComputersStore.setState({ status: others, views: { "h-1": there } });
+    render(<Host />);
+    fireEvent.keyDown(window, { key: "ArrowDown", ...mod });
+    // The one put away there is passed over, as one here is.
+    expect(useProjectsStore.getState().remote).toEqual({ hostId: "h-1", workspaceId: "w-there" });
+    fireEvent.keyDown(window, { key: "ArrowDown", ...mod });
+    expect(enter).toHaveBeenLastCalledWith("w-demo", false);
+    useProjectsStore.setState({ remote: null });
+    fireEvent.keyDown(window, { key: "ArrowUp", ...mod });
+    expect(useProjectsStore.getState().remote).toEqual({ hostId: "h-1", workspaceId: "w-there" });
+  });
+  it("opens a shell on the other computer when that one takes it from here", async () => {
+    core.otherHost.mockResolvedValue({ ...there, mayManage: true });
+    core.otherHostStartShell.mockResolvedValue({
+      workspaceId: "w-there",
+      terminal: "t-9",
+      harness: "",
+    });
+    useOtherComputersStore.setState({
+      status: others,
+      views: { "h-1": { ...there, mayManage: true } },
+    });
+    useProjectsStore.getState().selectRemote("h-1", "w-there");
+    const opened = vi.spyOn(useTerminalStore.getState(), "open");
+    render(<Host />);
+    expect(commandEnabled("newTerminal")).toBe(true);
+    runCommand("newTerminal");
+    expect(core.otherHostStartShell).toHaveBeenCalledWith("h-1", "w-there");
+    await waitFor(() =>
+      expect(useOtherComputersStore.getState().active["h-1/w-there"]).toBe("t-9"),
+    );
+    // Nothing is opened in this computer's workspace, hidden beneath it.
+    expect(opened).not.toHaveBeenCalled();
+    // A computer that is away is not asked.
+    useOtherComputersStore.setState({
+      views: {
+        "h-1": { ...there, mayManage: true, link: { kind: "offline", since: 1, why: "away" } },
+      },
+    });
+    expect(commandEnabled("newTerminal")).toBe(false);
+  });
+  it("acts on the workspace in view on another computer, never on the one here beneath it", () => {
+    useOtherComputersStore.setState({ status: others, views: { "h-1": there } });
+    useProjectsStore.getState().selectRemote("h-1", "w-there");
+    render(<Host />);
+    // Its tabs are that computer's terminals.
+    fireEvent.keyDown(window, { key: "ArrowRight", ...mod });
+    expect(useOtherComputersStore.getState().active["h-1/w-there"]).toBe("t-2");
+    // No shell is opened in this computer's workspace, and nothing of it is closed.
+    expect(commandEnabled("newTerminal")).toBe(false);
+    expect(commandEnabled("closeTerminal")).toBe(false);
+    // A new workspace is made where the one in view is.
+    runCommand("newWorkspace");
+    expect(useProjectsStore.getState().composingThere).toEqual({
+      hostId: "h-1",
+      projectId: "p-there",
+    });
+  });
+  it("offers no new workspace on a computer that lets this one only watch", () => {
+    useOtherComputersStore.setState({
+      status: others,
+      views: { "h-1": { ...there, mayStart: false } },
+    });
+    useProjectsStore.getState().selectRemote("h-1", "w-there");
+    expect(commandEnabled("newWorkspace")).toBe(false);
   });
   it("switches terminal tabs without closing them", () => {
     useTerminalStore.setState({

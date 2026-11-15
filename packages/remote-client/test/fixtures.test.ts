@@ -18,6 +18,7 @@ import {
   encodeFrame,
   event,
   FrameError,
+  fromBase64,
   grantDecision,
   grantPage,
   hello,
@@ -104,6 +105,138 @@ const FIXTURES: Record<string, (name: string) => void> = {
   },
   "request-workspace-start.json": (name) => {
     expect(scopeOf(pinned<Request>(request, name).op)).toBe("terminal:control");
+  },
+  "request-workspace-start-full.json": (name) => {
+    const start = pinned<Request>(request, name);
+    if (start.op !== "workspace.start") throw new Error("not a start");
+    expect(scopeOf(start.op)).toBe("terminal:control");
+    expect(start.params.name).toBe("fix-login-spacing");
+    expect(start.params.model).toBe("opus");
+    expect(start.params.effort).toBe("high");
+    expect(start.params.baseBranch).toBe("develop");
+  },
+  "request-workspace-start-branch.json": (name) => {
+    const start = pinned<Request>(request, name);
+    if (start.op !== "workspace.start") throw new Error("not a start");
+    expect(scopeOf(start.op)).toBe("terminal:control");
+    expect(start.params.existingBranch).toBe("ys/kept-earlier");
+    expect(start.params.baseBranch).toBeUndefined();
+  },
+  "request-project-branches.json": (name) => {
+    const branches = pinned<Request>(request, name);
+    expect(branches.op).toBe("project.branches");
+    expect(scopeOf(branches.op)).toBe("workspace:read");
+  },
+  "request-project-clone.json": (name) => {
+    const clone = pinned<Request>(request, name);
+    expect(clone.op).toBe("project.clone");
+    expect(scopeOf(clone.op)).toBe("terminal:control");
+  },
+  "request-shell-start.json": (name) => {
+    const shell = pinned<Request>(request, name);
+    expect(shell.op).toBe("shell.start");
+    expect(scopeOf(shell.op)).toBe("terminal:control");
+  },
+  "request-workspace-rename.json": (name) => {
+    const rename = pinned<Request>(request, name);
+    expect(rename.op).toBe("workspace.rename");
+    expect(scopeOf(rename.op)).toBe("terminal:control");
+  },
+  "request-workspace-archive.json": (name) => {
+    const archive = pinned<Request>(request, name);
+    if (archive.op !== "workspace.archive") throw new Error("not an archive");
+    expect(scopeOf(archive.op)).toBe("terminal:control");
+    // Archiving says nothing of force unless it is asked for; deleting here asks.
+    expect(archive.params.force).toBeUndefined();
+    const unforced = raw(name) as { params: Record<string, unknown> };
+    unforced.params.force = false;
+    expect(JSON.parse(JSON.stringify(decode(request, unforced)))).toEqual(raw(name));
+  },
+  "request-workspace-delete.json": (name) => {
+    const remove = pinned<Request>(request, name);
+    if (remove.op !== "workspace.delete") throw new Error("not a delete");
+    expect(scopeOf(remove.op)).toBe("terminal:control");
+    expect(remove.params.force).toBe(true);
+  },
+  "request-workspace-changes.json": (name) => {
+    const changes = pinned<Request>(request, name);
+    expect(changes.op).toBe("workspace.changes");
+    expect(scopeOf(changes.op)).toBe("terminal:control");
+  },
+  "request-workspace-files.json": (name) => {
+    const files = pinned<Request>(request, name);
+    if (files.op !== "workspace.files") throw new Error("not files");
+    expect(scopeOf(files.op)).toBe("terminal:control");
+    expect(files.params.dir).toBe("src/auth");
+    // The root is an empty folder, which is one left out, as Rust writes it.
+    const root = raw(name) as { params: Record<string, unknown> };
+    root.params.dir = "";
+    const written = JSON.parse(JSON.stringify(decode(request, root))) as { params: object };
+    expect(written.params).toEqual({ workspace: files.params.workspace });
+  },
+  "request-file-read.json": (name) => {
+    const read = pinned<Request>(request, name);
+    if (read.op !== "file.read") throw new Error("not a read");
+    expect(scopeOf(read.op)).toBe("terminal:control");
+    expect(read.params.of).toBe("committedOld");
+    expect(read.params.oldPath).toBe("src/session.ts");
+    // A read that says nothing of where it starts is from the start, and is written so.
+    const first = raw(name) as { params: Record<string, unknown> };
+    delete first.params.offset;
+    expect(JSON.parse(JSON.stringify(decode(request, first)))).toEqual(raw(name));
+  },
+  "request-workspace-publish.json": (name) => {
+    const publish = pinned<Request>(request, name);
+    if (publish.op !== "workspace.publish") throw new Error("not a publish");
+    expect(scopeOf(publish.op)).toBe("terminal:control");
+    expect(publish.params.forge).toBe(true);
+    // Not asking the forge is saying nothing of it, as Rust writes it.
+    const quiet = raw(name) as { params: Record<string, unknown> };
+    quiet.params.forge = false;
+    const written = JSON.parse(JSON.stringify(decode(request, quiet))) as { params: object };
+    expect(written.params).toEqual({ workspace: publish.params.workspace });
+  },
+  "request-workspace-commit.json": (name) => {
+    const commit = pinned<Request>(request, name);
+    if (commit.op !== "workspace.commit") throw new Error("not a commit");
+    expect(scopeOf(commit.op)).toBe("terminal:control");
+    expect(commit.params.message).toBe("Fix the login page's spacing");
+  },
+  "request-workspace-push.json": (name) => {
+    const push = pinned<Request>(request, name);
+    if (push.op !== "workspace.push") throw new Error("not a push");
+    expect(scopeOf(push.op)).toBe("terminal:control");
+    // A workspace and nothing else: no remote, and no branch to push to.
+    expect(push.params).toEqual({ workspace: "0b6c1f0e-8f8e-4a57-9a43-5c1d2a0e9f11" } as never);
+  },
+  "request-pull-request-open.json": (name) => {
+    const open = pinned<Request>(request, name);
+    if (open.op !== "pull_request.open") throw new Error("not an open");
+    expect(scopeOf(open.op)).toBe("terminal:control");
+    expect(open.params.title).toBe("Fix the login page's spacing");
+    expect(open.params.body).toBe("Small screens lost the gap under the heading.");
+    expect(open.params.draft).toBe(true);
+    // No description, and not a draft, are each left out, as Rust writes them.
+    const plain = raw(name) as { params: Record<string, unknown> };
+    plain.params.body = "";
+    plain.params.draft = false;
+    const written = JSON.parse(JSON.stringify(decode(request, plain))) as { params: object };
+    expect(written.params).toEqual({
+      workspace: open.params.workspace,
+      title: open.params.title,
+    });
+  },
+  "request-pull-request-merge.json": (name) => {
+    const merge = pinned<Request>(request, name);
+    if (merge.op !== "pull_request.merge") throw new Error("not a merge");
+    expect(scopeOf(merge.op)).toBe("terminal:control");
+    expect(merge.params.number).toBe(91);
+    expect(merge.params.headOid).toBe("3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a");
+    expect(merge.params.method).toBe("squash");
+    // A way of merging this build does not know is not guessed at.
+    const other = raw(name) as { params: Record<string, unknown> };
+    other.params.method = "fastForward";
+    expect(() => decode(request, other)).toThrow(/not one this build knows/);
   },
   "request-session-resume.json": (name) => {
     const resume = pinned<Request>(request, name);
@@ -200,10 +333,138 @@ const FIXTURES: Record<string, (name: string) => void> = {
     const listed = result(name);
     if (listed.kind !== "harnesses") throw new Error("not harnesses");
     expect(listed.harnesses[0]).toEqual({ id: "claude", name: "Claude Code" });
+    // A harness before minor 12 lists no models and no efforts, and reads as having none.
+    expect(listed.harnesses.every((h) => h.models === undefined && h.efforts === undefined)).toBe(
+      true,
+    );
+  },
+  "response-harnesses-choices.json": (name) => {
+    const listed = result(name);
+    if (listed.kind !== "harnesses") throw new Error("not harnesses");
+    expect(listed.harnesses[0]?.models).toEqual(["opus", "sonnet"]);
+    expect(listed.harnesses[0]?.efforts).toEqual(["low", "high"]);
+    expect(listed.harnesses[1]?.models).toBeUndefined();
+    // An empty list is one left out, as Rust writes it.
+    const json = raw(name) as { result: { harnesses: Record<string, unknown>[] } };
+    (json.result.harnesses[1] as Record<string, unknown>).efforts = [];
+    expect(JSON.parse(JSON.stringify(decode(response, json)))).toEqual(raw(name));
   },
   "response-started.json": (name) => {
     const started = result(name);
     expect(started.kind === "started" && started.harness).toBe("claude");
+  },
+  "response-started-shell.json": (name) => {
+    const started = result(name);
+    expect(started.kind === "started" && started.harness).toBe("");
+  },
+  "response-branches.json": (name) => {
+    const listed = result(name);
+    if (listed.kind !== "branches") throw new Error("not branches");
+    expect(listed.branches[0]).toBe("main");
+    expect(listed.default).toBe("main");
+    expect(listed.checkedOut).toEqual(["main", "ys/fix-login"]);
+    expect(listed.more).toBeUndefined();
+  },
+  "response-cloned.json": (name) => {
+    const cloned = result(name);
+    if (cloned.kind !== "cloned") throw new Error("not cloned");
+    expect(cloned.name).toBe("example-app");
+    expect(cloned.project as string).toBe("7a1e3c2d-4b5f-4a6b-8c9d-0e1f2a3b4c5d");
+  },
+  "response-changes.json": (name) => {
+    const changes = result(name);
+    if (changes.kind !== "changes") throw new Error("not changes");
+    expect(changes.uncommitted.map((file) => file.kind)).toEqual(["modified", "untracked"]);
+    expect(changes.uncommitted[0]).toMatchObject({ additions: 12, deletions: 3 });
+    // An untracked file's lines are not counted.
+    expect(changes.uncommitted[1]).toEqual({ path: "notes.txt", kind: "untracked" });
+    expect(changes.committed[0]?.oldPath).toBe("src/session.ts");
+    expect(changes.base).toBe("main");
+    expect(changes.more).toBeUndefined();
+    // A newer computer's kind reads as unknown, not as a failure.
+    const json = raw(name) as { result: { uncommitted: { kind: string }[] } };
+    (json.result.uncommitted[0] as { kind: string }).kind = "typeChanged";
+    const newer = decode(response, json);
+    if (!("result" in newer) || newer.result.kind !== "changes") throw new Error("not changes");
+    expect(newer.result.uncommitted[0]?.kind).toBe("unknown");
+  },
+  "response-files.json": (name) => {
+    const list = result(name);
+    if (list.kind !== "files") throw new Error("not files");
+    expect(list.entries).toEqual([{ name: "providers", dir: true }, { name: "session.ts" }]);
+    expect(list.more).toBeUndefined();
+    // A file, and a list that is whole, say so by saying nothing, as Rust writes them.
+    const json = raw(name) as { result: { entries: Record<string, unknown>[]; more?: boolean } };
+    (json.result.entries[1] as Record<string, unknown>).dir = false;
+    json.result.more = false;
+    expect(JSON.parse(JSON.stringify(decode(response, json)))).toEqual(raw(name));
+  },
+  "response-file.json": (name) => {
+    const file = result(name);
+    if (file.kind !== "file") throw new Error("not a file");
+    expect(file.state).toBe("text");
+    expect(file.offset).toBe(0);
+    expect(file.done).toBe(true);
+    expect(file.size).toBe(20);
+    const bytes = fromBase64(file.data ?? "");
+    expect(new TextDecoder().decode(bytes ?? undefined)).toBe("export const a = 1;\n");
+  },
+  "response-file-too-large.json": (name) => {
+    // A file that is not sent says why, and carries nothing.
+    const large = result(name);
+    if (large.kind !== "file") throw new Error("not a file");
+    expect(large.state).toBe("tooLarge");
+    expect(large.size).toBe(5 * 1024 * 1024);
+    expect(large.data).toBeUndefined();
+    expect(large.done).toBe(true);
+    // A newer computer's state reads as unknown, not as a failure.
+    const json = raw(name) as { result: { state: string } };
+    json.result.state = "encrypted";
+    const newer = decode(response, json);
+    if (!("result" in newer) || newer.result.kind !== "file") throw new Error("not a file");
+    expect(newer.result.state).toBe("unknown");
+  },
+  "response-publish.json": (name) => {
+    const state = result(name);
+    if (state.kind !== "publish") throw new Error("not a publish state");
+    expect(state.branch).toBe("ys/fix-login");
+    expect(state.base).toBe("main");
+    expect([state.remote, state.pushed, state.gh]).toEqual([true, true, true]);
+    expect([state.ahead, state.behind]).toEqual([1, 0]);
+    expect(state.unpushed).toEqual(["Fix the login page's spacing"]);
+    expect(state.pullRequest).toEqual({
+      number: 91,
+      url: "https://github.com/example/example-app/pull/91",
+      title: "Fix the login page's spacing",
+      state: "open",
+      checks: "passing",
+      headOid: "3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a",
+    });
+    // One is open already, so opening another is not offered, which is said by saying nothing.
+    expect(state.canOpen).toBeUndefined();
+    expect(state.problem).toBeUndefined();
+    // What is false or empty is left out, as Rust writes it.
+    const json = raw(name) as { result: Record<string, unknown> };
+    json.result.canOpen = false;
+    (json.result.pullRequest as Record<string, unknown>).draft = false;
+    (json.result.pullRequest as Record<string, unknown>).conflicting = false;
+    expect(JSON.parse(JSON.stringify(decode(response, json)))).toEqual(raw(name));
+    // A newer computer's state, or its checks, reads as unknown, not as a failure.
+    (json.result.pullRequest as Record<string, unknown>).state = "queued";
+    (json.result.pullRequest as Record<string, unknown>).checks = "skipped";
+    const newer = decode(response, json);
+    if (!("result" in newer) || newer.result.kind !== "publish") throw new Error("not a state");
+    expect(newer.result.pullRequest?.state).toBe("unknown");
+    expect(newer.result.pullRequest?.checks).toBe("unknown");
+  },
+  "response-pull-request-opened.json": (name) => {
+    const opened = result(name);
+    if (opened.kind !== "pullRequestOpened") throw new Error("not an opened pull request");
+    expect(opened.url).toBe("https://github.com/example/example-app/pull/91");
+    expect(opened.created).toBe(true);
+  },
+  "response-done.json": (name) => {
+    expect(result(name)).toEqual({ kind: "done" });
   },
   "response-uploaded.json": (name) => {
     const uploaded = result(name);
@@ -255,7 +516,21 @@ const FIXTURES: Record<string, (name: string) => void> = {
     expect(newer.result.terminalsLater?.reason).toBe("unknown");
   },
   "response-workspaces.json": (name) => {
-    expect(result(name).kind).toBe("workspaces");
+    const page = result(name);
+    if (page.kind !== "workspaces") throw new Error("not workspaces");
+    expect(page.projects[0]?.remote).toBe("https://github.com/example/example-app.git");
+    // A host before minor 12 says nothing of it.
+    const json = raw(name) as { result: { projects: Record<string, unknown>[] } };
+    for (const project of json.result.projects) delete project.remote;
+    const older = decode(response, json);
+    if (!("result" in older) || older.result.kind !== "workspaces") {
+      throw new Error("not workspaces");
+    }
+    expect(older.result.projects[0]).toEqual({
+      id: "6f0d2b1c-3a4e-4f5a-9b8c-7d6e5f4a3b2c",
+      name: "example-app",
+      missing: false,
+    } as never);
   },
   "response-sessions.json": (name) => {
     expect(result(name).kind).toBe("sessions");
@@ -284,6 +559,14 @@ const FIXTURES: Record<string, (name: string) => void> = {
   "response-error-incompatible.json": (name) => {
     const answer = pinned(response, name);
     expect("error" in answer && answer.error).toEqual(incompatible());
+  },
+  "response-error-uncommitted.json": (name) => {
+    // Since minor 12: why archiving or deleting was refused, for a client to ask again.
+    const answer = pinned(response, name);
+    if (!("error" in answer)) throw new Error("not an error");
+    expect(answer.error.code).toBe("uncommitted_work");
+    expect(answer.error.retryable).toBe(false);
+    expect(retryable(answer.error.code)).toBe(false);
   },
   "response-attached.json": (name) => {
     expect(result(name).kind).toBe("attached");
@@ -432,7 +715,7 @@ const FIXTURES: Record<string, (name: string) => void> = {
 describe("the fixtures", () => {
   test("are each read here, and none is left out", () => {
     const names = readdirSync(DIR).sort();
-    expect(names.length).toBeGreaterThanOrEqual(41);
+    expect(names.length).toBeGreaterThanOrEqual(86);
     expect(names).toEqual(Object.keys(FIXTURES).sort());
   });
 
@@ -459,6 +742,7 @@ describe("what a newer peer sends", () => {
       "lease_lost",
       "invalid_request",
       "stale",
+      "uncommitted_work",
     ] as const) {
       expect(retryable(code)).toBe(false);
     }

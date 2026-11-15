@@ -18,9 +18,14 @@ import {
   type ControlLoss,
   encodeFrame,
   type HostId,
+  MAX_COMMIT_MESSAGE,
+  MAX_FILE,
+  MAX_FILE_CHUNK,
   MAX_OUTPUT_CHUNK,
+  MAX_PULL_REQUEST_BODY,
   MAX_UPLOAD_CHUNK,
   openChannel,
+  type ProjectId,
   Secret,
   type TerminalId,
   type WorkspaceId,
@@ -584,6 +589,502 @@ describe("uploading", () => {
     const failed = await channel.upload("w" as WorkspaceId, "a.jpg", photo).catch((e) => e);
     expect(failed).toBeInstanceOf(ClientError);
     expect((failed as ClientError).message).toContain("Out of order.");
+    channel.close();
+  });
+});
+
+describe("looking after projects and workspaces", () => {
+  const PROJECT = "p" as ProjectId;
+  const WORKSPACE = "w" as WorkspaceId;
+
+  test("each is asked under its name, and its reply read", async () => {
+    const { client, asked } = relay((request, socket) => {
+      const results: Record<string, unknown> = {
+        "project.branches": { kind: "branches", branches: ["main", "dev"], default: "main" },
+        "project.clone": { kind: "cloned", project: "p2", name: "app" },
+        "shell.start": { kind: "started", workspace: "w", terminal: "t", harness: "" },
+        "workspace.start": { kind: "started", workspace: "w2", terminal: "t2", harness: "claude" },
+        "workspace.rename": { kind: "done" },
+      };
+      answer(socket, request, results[request.op]);
+    });
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    expect(await channel.branches(PROJECT)).toEqual({ branches: ["main", "dev"], default: "main" });
+    expect(await channel.cloneProject({ remote: "https://example.com/app.git" })).toEqual({
+      project: "p2" as ProjectId,
+      name: "app",
+    });
+    expect((await channel.startShell(WORKSPACE)).harness).toBe("");
+    const started = await channel.startWorkspace({
+      project: PROJECT,
+      prompt: "Fix it",
+      model: "opus",
+      baseBranch: "dev",
+    });
+    expect(started.terminal as string).toBe("t2");
+    await channel.renameWorkspace({ workspace: WORKSPACE, name: "Login spacing" });
+    expect(asked.map(({ op, params }) => ({ op, params }))).toEqual([
+      { op: "project.branches", params: { project: "p" } },
+      { op: "project.clone", params: { remote: "https://example.com/app.git" } },
+      { op: "shell.start", params: { workspace: "w" } },
+      {
+        op: "workspace.start",
+        params: { project: "p", prompt: "Fix it", model: "opus", baseBranch: "dev" },
+      },
+      { op: "workspace.rename", params: { workspace: "w", name: "Login spacing" } },
+    ]);
+    channel.close();
+  });
+
+  test("uncommitted work is not lost until the request says force", async () => {
+    const { client, asked } = relay((request, socket) => {
+      if (request.params?.force === true) return answer(socket, request, { kind: "done" });
+      socket.send(
+        JSON.stringify({
+          requestId: request.requestId,
+          error: { code: "uncommitted_work", message: "It has changes.", retryable: false },
+        }),
+      );
+    });
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    for (const remove of [
+      (force?: boolean) =>
+        channel.archiveWorkspace({ workspace: WORKSPACE, ...(force ? { force } : {}) }),
+      (force?: boolean) =>
+        channel.deleteWorkspace({ workspace: WORKSPACE, ...(force ? { force } : {}) }),
+    ]) {
+      const refused = await remove().catch((e: unknown) => e);
+      expect((refused as ClientError).code).toBe("uncommitted_work");
+      await remove(true);
+    }
+    // A force of false says nothing, as one left out.
+    await channel.deleteWorkspace({ workspace: WORKSPACE, force: false }).catch(() => {});
+    expect(asked.map(({ op, params }) => ({ op, params }))).toEqual([
+      { op: "workspace.archive", params: { workspace: "w" } },
+      { op: "workspace.archive", params: { workspace: "w", force: true } },
+      { op: "workspace.delete", params: { workspace: "w" } },
+      { op: "workspace.delete", params: { workspace: "w", force: true } },
+      { op: "workspace.delete", params: { workspace: "w" } },
+    ]);
+    channel.close();
+  });
+
+  test("what no computer would take is refused here, and nothing is sent", async () => {
+    const { client, asked } = relay(() => {});
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    for (const refused of [
+      channel.cloneProject({ remote: "--upload-pack=x" }),
+      channel.renameWorkspace({ workspace: WORKSPACE, name: " " }),
+      channel.startWorkspace({
+        project: PROJECT,
+        prompt: "Fix it",
+        existingBranch: "kept",
+        baseBranch: "main",
+      }),
+    ]) {
+      expect(((await refused.catch((e: unknown) => e)) as ClientError).kind).toBe("invalid");
+    }
+    expect(asked).toEqual([]);
+    channel.close();
+  });
+});
+
+describe("reading a workspace's changes and files", () => {
+  const WORKSPACE = "w" as WorkspaceId;
+  const FILE = { workspace: WORKSPACE, path: "src/a.txt", of: "working" } as const;
+
+  /**
+   * A computer that sends a file a piece at a time, as a host does: `file` says what the file
+   * holds when the read numbered `nth` arrives.
+   */
+  function serving(file: (nth: number) => Uint8Array): Host {
+    let nth = 0;
+    return (request, socket) => {
+      const bytes = file(++nth);
+      const offset = request.params?.offset as number;
+      const end = Math.min(bytes.length, offset + MAX_FILE_CHUNK);
+      answer(socket, request, {
+        kind: "file",
+        state: "text",
+        size: bytes.length,
+        offset,
+        data: Buffer.from(bytes.subarray(offset, end)).toString("base64"),
+        done: end === bytes.length,
+      });
+    };
+  }
+
+  const offsets = (asked: Request[]) => asked.map((r) => r.params?.offset);
+
+  test("each is asked under its name, and its reply read", async () => {
+    const { client, asked } = relay((request, socket) => {
+      const results: Record<string, unknown> = {
+        "workspace.changes": {
+          kind: "changes",
+          uncommitted: [{ path: "src/a.txt", kind: "modified", additions: 2, deletions: 1 }],
+          committed: [{ path: "b.txt", oldPath: "a.txt", kind: "renamed" }],
+          base: "main",
+        },
+        "workspace.files": {
+          kind: "files",
+          entries: [{ name: "src", dir: true }, { name: "b.txt" }],
+          more: true,
+        },
+        "file.read": {
+          kind: "file",
+          state: "text",
+          size: 5,
+          offset: request.params?.offset,
+          data: "aGVsbG8=",
+          done: true,
+        },
+      };
+      answer(socket, request, results[request.op]);
+    });
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    expect(await channel.changes(WORKSPACE)).toEqual({
+      uncommitted: [{ path: "src/a.txt", kind: "modified", additions: 2, deletions: 1 }],
+      committed: [{ path: "b.txt", oldPath: "a.txt", kind: "renamed" }],
+      base: "main",
+    });
+    expect(await channel.files({ workspace: WORKSPACE })).toEqual({
+      entries: [{ name: "src", dir: true }, { name: "b.txt" }],
+      more: true,
+    });
+    await channel.files({ workspace: WORKSPACE, dir: "src/auth" });
+    // One piece, as it came: from the start unless the request says where.
+    expect(await channel.readFile(FILE)).toEqual({
+      state: "text",
+      size: 5,
+      offset: 0,
+      data: "aGVsbG8=",
+      done: true,
+    });
+    await channel.readFile({ ...FILE, of: "committedOld", oldPath: "src/b.txt", offset: 4 });
+    expect(asked.map(({ op, params }) => ({ op, params }))).toEqual([
+      { op: "workspace.changes", params: { workspace: "w" } },
+      { op: "workspace.files", params: { workspace: "w" } },
+      { op: "workspace.files", params: { workspace: "w", dir: "src/auth" } },
+      { op: "file.read", params: { workspace: "w", path: "src/a.txt", of: "working", offset: 0 } },
+      {
+        op: "file.read",
+        params: {
+          workspace: "w",
+          path: "src/a.txt",
+          oldPath: "src/b.txt",
+          of: "committedOld",
+          offset: 4,
+        },
+      },
+    ]);
+    channel.close();
+  });
+
+  test("a whole file is put together from its pieces, a character cut between two included", async () => {
+    // One byte, then characters of two: every piece but the last ends inside one.
+    const text = `a${"é".repeat(MAX_FILE_CHUNK + 100)}`;
+    const file = new TextEncoder().encode(text);
+    expect(file.length).toBeGreaterThan(MAX_FILE_CHUNK * 2);
+    expect((file[MAX_FILE_CHUNK] as number) & 0xc0).toBe(0x80);
+    const { client, asked } = relay(serving(() => file));
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const whole = await channel.wholeFile(FILE);
+    expect(whole.state).toBe("text");
+    expect(whole.size).toBe(file.length);
+    expect(whole.bytes).toEqual(file);
+    expect(new TextDecoder("utf-8", { fatal: true }).decode(whole.bytes)).toBe(text);
+    expect(offsets(asked)).toEqual([0, MAX_FILE_CHUNK, MAX_FILE_CHUNK * 2]);
+    expect(asked.every((r) => r.op === "file.read" && r.params?.path === "src/a.txt")).toBe(true);
+    channel.close();
+
+    // A file of no bytes is one piece of none, and one of exactly a piece is one piece too.
+    for (const length of [0, MAX_FILE_CHUNK]) {
+      const exact = relay(serving(() => new Uint8Array(length).fill(0x61)));
+      const second = await openChannel(exact.client, access, HOST, { client: "test/1" });
+      const read = await second.wholeFile(FILE);
+      expect([read.state, read.size, read.bytes.length]).toEqual(["text", length, length]);
+      expect(offsets(exact.asked)).toEqual([0]);
+      second.close();
+    }
+  });
+
+  test("a file that changes while it is read is read again from the start", async () => {
+    const before = new Uint8Array(MAX_FILE_CHUNK * 2 + 10).fill(0x62);
+    const after = new Uint8Array(MAX_FILE_CHUNK + 10).fill(0x61);
+    // Written to between the first piece and the second.
+    const { client, asked } = relay(serving((nth) => (nth === 1 ? before : after)));
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const whole = await channel.wholeFile(FILE);
+    expect(whole.size).toBe(after.length);
+    expect(whole.bytes).toEqual(after);
+    expect(offsets(asked)).toEqual([0, MAX_FILE_CHUNK, 0, MAX_FILE_CHUNK]);
+    channel.close();
+
+    // One that never holds still is given up on, after a few readings.
+    const restless = relay(serving((nth) => new Uint8Array(MAX_FILE_CHUNK * 2 + nth)));
+    const second = await openChannel(restless.client, access, HOST, { client: "test/1" });
+    const failed = await second.wholeFile(FILE).catch((e: unknown) => e);
+    expect((failed as ClientError).kind).toBe("unexpected");
+    expect((failed as ClientError).message).toContain("kept changing");
+    expect(offsets(restless.asked)).toEqual([
+      0,
+      MAX_FILE_CHUNK,
+      0,
+      MAX_FILE_CHUNK,
+      0,
+      MAX_FILE_CHUNK,
+    ]);
+    second.close();
+  });
+
+  test("a piece that does not fit is refused", async () => {
+    const piece = (more: Record<string, unknown>) => ({
+      kind: "file",
+      state: "text",
+      size: 6,
+      offset: 0,
+      data: "aGVsbG8=",
+      done: false,
+      ...more,
+    });
+    const full = Buffer.alloc(MAX_FILE_CHUNK).toString("base64");
+    for (const [misfit, why] of [
+      // It starts somewhere other than where the last one ended.
+      [piece({ offset: 3 }), "does not fit"],
+      // It carries more than the file is said to hold.
+      [piece({ size: 4 }), "does not fit"],
+      // It carries nothing, and is not the last.
+      [piece({ data: "" }), "does not fit"],
+      [piece({ data: undefined }), "does not fit"],
+      // A file larger than any a computer sends.
+      [piece({ size: MAX_FILE + 1 }), "does not fit"],
+      [piece({ data: "aGVsbG8" }), "not base64"],
+      [piece({ data: "aGVs*G8=" }), "not base64"],
+      // More than one piece carries does not read at all.
+      [piece({ size: MAX_FILE, data: `${full}AAAA` }), "not understood"],
+    ] as const) {
+      const { client, asked } = relay((request, socket) => answer(socket, request, misfit));
+      const channel = await openChannel(client, access, HOST, { client: "test/1" });
+      const refused = await channel.wholeFile(FILE).catch((e: unknown) => e);
+      expect(refused).toBeInstanceOf(ClientError);
+      expect((refused as ClientError).kind).toBe("unexpected");
+      expect((refused as ClientError).message).toContain(why);
+      // Nothing more is asked for once a piece is refused.
+      expect(asked).toHaveLength(1);
+      channel.close();
+    }
+
+    // The second piece going back over the first is no better than the first not fitting.
+    const { client, asked } = relay((request, socket) =>
+      answer(socket, request, piece({ size: 12, offset: 0 })),
+    );
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const refused = await channel.wholeFile(FILE).catch((e: unknown) => e);
+    expect((refused as ClientError).message).toContain("does not fit");
+    expect(offsets(asked)).toEqual([0, 5]);
+    channel.close();
+  });
+
+  test("a file that is not text comes with its state and no bytes", async () => {
+    for (const [state, size, read] of [
+      ["absent", 0, "absent"],
+      ["binary", 0, "binary"],
+      ["tooLarge", 5 * 1024 * 1024, "tooLarge"],
+      ["notShown", 0, "notShown"],
+      // A state from a newer computer is not text either.
+      ["encrypted", 12, "unknown"],
+    ] as const) {
+      const { client, asked } = relay((request, socket) =>
+        answer(socket, request, { kind: "file", state, size, offset: 0, done: true }),
+      );
+      const channel = await openChannel(client, access, HOST, { client: "test/1" });
+      expect(await channel.wholeFile(FILE)).toEqual({ state: read, size, bytes: new Uint8Array() });
+      expect(asked).toHaveLength(1);
+      channel.close();
+    }
+  });
+
+  test("what no computer would take is refused here, and nothing is sent", async () => {
+    const { client, asked } = relay(() => {});
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    for (const refused of [
+      channel.files({ workspace: WORKSPACE, dir: "../up" }),
+      channel.readFile({ ...FILE, path: "/etc/passwd" }),
+      channel.readFile({ ...FILE, oldPath: "C:\\Users\\me" }),
+      channel.readFile({ ...FILE, offset: MAX_FILE + 1 }),
+      channel.wholeFile({ ...FILE, path: "src/../../secrets" }),
+    ]) {
+      expect(((await refused.catch((e: unknown) => e)) as ClientError).kind).toBe("invalid");
+    }
+    expect(asked).toEqual([]);
+    channel.close();
+  });
+});
+
+describe("sending a workspace's work on", () => {
+  const WORKSPACE = "w" as WorkspaceId;
+  const HEAD = "3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a";
+  const PULL_REQUEST = {
+    number: 91,
+    url: "https://example.com/app/pull/91",
+    title: "Fix it",
+    state: "open",
+    checks: "passing",
+    headOid: HEAD,
+  };
+
+  test("each is asked under its name, and its reply read", async () => {
+    const { client, asked } = relay((request, socket) => {
+      const standing = { branch: "ys/fix", base: "main", remote: true, behind: 0 };
+      const results: Record<string, unknown> = {
+        "workspace.publish": request.params?.forge
+          ? { kind: "publish", ...standing, pushed: true, ahead: 0, pullRequest: PULL_REQUEST }
+          : { kind: "publish", ...standing, ahead: 0, canOpen: false, gh: false, unpushed: [] },
+        "workspace.commit": { kind: "publish", ...standing, ahead: 1, unpushed: ["Fix it"] },
+        "workspace.push": { kind: "publish", ...standing, pushed: true, ahead: 0, canOpen: true },
+        "pull_request.open": {
+          kind: "pullRequestOpened",
+          url: PULL_REQUEST.url,
+          created: request.params?.draft !== true,
+        },
+        "pull_request.merge": { kind: "done" },
+      };
+      answer(socket, request, results[request.op]);
+    });
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    // What is false or empty comes as left out, as the computer writes it.
+    expect(await channel.publishState({ workspace: WORKSPACE })).toEqual({
+      branch: "ys/fix",
+      base: "main",
+      remote: true,
+      ahead: 0,
+      behind: 0,
+    });
+    expect(await channel.commit({ workspace: WORKSPACE, message: "Fix it" })).toEqual({
+      branch: "ys/fix",
+      base: "main",
+      remote: true,
+      ahead: 1,
+      behind: 0,
+      unpushed: ["Fix it"],
+    });
+    const pushed = await channel.push(WORKSPACE);
+    expect([pushed.pushed, pushed.ahead, pushed.canOpen]).toEqual([true, 0, true]);
+    expect(await channel.openPullRequest({ workspace: WORKSPACE, title: "Fix it" })).toEqual({
+      url: PULL_REQUEST.url,
+      created: true,
+    });
+    const form = await channel.openPullRequest({
+      workspace: WORKSPACE,
+      title: "Fix it",
+      body: "Why.",
+      draft: true,
+    });
+    expect(form.created).toBe(false);
+    const withForge = await channel.publishState({ workspace: WORKSPACE, forge: true });
+    expect(withForge.pullRequest).toEqual(PULL_REQUEST as never);
+    // The head merged is the one the reply showed.
+    expect(
+      await channel.mergePullRequest({
+        workspace: WORKSPACE,
+        number: withForge.pullRequest?.number ?? 0,
+        headOid: withForge.pullRequest?.headOid ?? "",
+        method: "squash",
+      }),
+    ).toBeUndefined();
+    // Not asking the forge, no description and not a draft each say nothing, as ones left out.
+    await channel.publishState({ workspace: WORKSPACE, forge: false });
+    await channel.openPullRequest({
+      workspace: WORKSPACE,
+      title: "Fix it",
+      body: "",
+      draft: false,
+    });
+    expect(asked.map(({ op, params }) => ({ op, params }))).toEqual([
+      { op: "workspace.publish", params: { workspace: "w" } },
+      { op: "workspace.commit", params: { workspace: "w", message: "Fix it" } },
+      { op: "workspace.push", params: { workspace: "w" } },
+      { op: "pull_request.open", params: { workspace: "w", title: "Fix it" } },
+      {
+        op: "pull_request.open",
+        params: { workspace: "w", title: "Fix it", body: "Why.", draft: true },
+      },
+      { op: "workspace.publish", params: { workspace: "w", forge: true } },
+      {
+        op: "pull_request.merge",
+        params: { workspace: "w", number: 91, headOid: HEAD, method: "squash" },
+      },
+      { op: "workspace.publish", params: { workspace: "w" } },
+      { op: "pull_request.open", params: { workspace: "w", title: "Fix it" } },
+    ]);
+    channel.close();
+  });
+
+  test("a refusal there is passed on with its words, and nothing is sent again", async () => {
+    const { client, asked } = relay((request, socket) =>
+      socket.send(
+        JSON.stringify({
+          requestId: request.requestId,
+          error: {
+            code: "invalid_request",
+            message: "The pull request changed or is no longer ready to merge.",
+            retryable: false,
+          },
+        }),
+      ),
+    );
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const refused = await channel
+      .mergePullRequest({ workspace: WORKSPACE, number: 91, headOid: HEAD, method: "merge" })
+      .catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(ClientError);
+    expect((refused as ClientError).code).toBe("invalid_request");
+    expect((refused as ClientError).message).toContain("no longer ready to merge");
+    expect(asked.map((r) => r.op)).toEqual(["pull_request.merge"]);
+    channel.close();
+  });
+
+  test("a reply of another kind is not taken for the one asked for", async () => {
+    const { client } = relay((request, socket) => answer(socket, request, { kind: "done" }));
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    for (const misfit of [
+      channel.publishState({ workspace: WORKSPACE }),
+      channel.commit({ workspace: WORKSPACE, message: "Fix it" }),
+      channel.push(WORKSPACE),
+      channel.openPullRequest({ workspace: WORKSPACE, title: "Fix it" }),
+    ]) {
+      expect(((await misfit.catch((e: unknown) => e)) as ClientError).kind).toBe("unexpected");
+    }
+    channel.close();
+  });
+
+  test("what no computer would take is refused here, and nothing is sent", async () => {
+    const { client, asked } = relay(() => {});
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const merge = (number: number, headOid: string) =>
+      channel.mergePullRequest({ workspace: WORKSPACE, number, headOid, method: "squash" });
+    for (const refused of [
+      channel.commit({ workspace: WORKSPACE, message: " \n" }),
+      channel.commit({ workspace: WORKSPACE, message: "a\u0000b" }),
+      channel.commit({ workspace: WORKSPACE, message: "m".repeat(MAX_COMMIT_MESSAGE + 1) }),
+      channel.openPullRequest({ workspace: WORKSPACE, title: "" }),
+      channel.openPullRequest({ workspace: WORKSPACE, title: "--web" }),
+      channel.openPullRequest({ workspace: WORKSPACE, title: "two\nlines" }),
+      channel.openPullRequest({
+        workspace: WORKSPACE,
+        title: "ok",
+        body: "b".repeat(MAX_PULL_REQUEST_BODY + 1),
+      }),
+      merge(0, HEAD),
+      merge(91, ""),
+      merge(91, "HEAD"),
+      merge(91, "--admin"),
+      channel.push("../w" as WorkspaceId),
+      channel.publishState({ workspace: "a b" as WorkspaceId }),
+    ]) {
+      expect(((await refused.catch((e: unknown) => e)) as ClientError).kind).toBe("invalid");
+    }
+    expect(asked).toEqual([]);
     channel.close();
   });
 });

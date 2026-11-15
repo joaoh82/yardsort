@@ -107,6 +107,10 @@ pub struct RemoteSettings {
     /// that server, this computer is that host still, not a second one beside it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub left_host: Option<LeftHost>,
+    /// Where a repository cloned at another device's asking goes. A leading `~` is this user's
+    /// home. Without one, `~/Projects`. See [`crate::remote::start::projects_dir`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub projects_dir: Option<String>,
 }
 
 /// A host still on a server's books after this computer stopped being it.
@@ -641,6 +645,7 @@ mod tests {
                     host_id: "h".into(),
                     device_id: "d".into(),
                 }),
+                projects_dir: None,
             }
         })
         .unwrap();

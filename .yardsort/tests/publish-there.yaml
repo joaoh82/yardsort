@@ -1,0 +1,289 @@
+id: publish-there
+name: The window commits, pushes and opens a pull request on a computer with no screen
+description: >-
+  A yardsort-host on the stand-in server with one project, whose remote is an address under a name reserved for
+  tests that the host's git reads as a repository on this disk, and a stand-in for gh that notes what it is
+  asked. A shell runs in a workspace of it, and a file is changed there. The real window, on a
+  profile of its own, is let type. Under the workspace's changes it commits them with a message:
+  the commit is on the host, by the host's own Git identity. It pushes: the remote has the
+  branch. With a rule on the remote that refuses pushes, a second commit is not pushed, and the
+  window says why in a sentence with no folder in it. With the rule gone it opens a pull request
+  with a title: the host pushes first, its gh is asked to create it, and its line shows in the
+  window. A merge at another commit than the one at its head is refused and gh is not asked; at
+  that commit, gh is asked to merge exactly it. A pretend phone let only watch is refused a
+  commit. Linux only, since the window stands in for the browser with xdg-open. A window opens
+  while it runs; nothing needs clicking.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_app
+    action: run
+    program: bun
+    args: [tauri, build, --debug, --no-bundle]
+    timeout: 20m
+  - id: build_the_host
+    action: shell
+    # The stand-in server too, and the host's bin folder in $YS_RUN_DIR/bin.
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: a_repository_with_a_remote
+    action: shell
+    # The host's repository, its default branch already on a bare remote, and that remote named
+    # by a forge's address, which the host's git is told to read as the bare one.
+    line: >-
+      set -e; g() { git -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false
+      "$@"; }; mkdir -p "$YS_RUN_DIR/repo" "$YS_RUN_DIR/profile" "$YS_RUN_DIR/origin"
+      "$YS_RUN_DIR/ghbin"; g -C "$YS_RUN_DIR/repo" init -q; printf 'first\n' >
+      "$YS_RUN_DIR/repo/README.md"; g -C "$YS_RUN_DIR/repo" add .; g -C "$YS_RUN_DIR/repo" commit -q
+      -m first; g init -q --bare "$YS_RUN_DIR/origin/repo.git"; g -C "$YS_RUN_DIR/repo" push -q
+      "$YS_RUN_DIR/origin/repo.git" HEAD; g -C "$YS_RUN_DIR/repo" remote add origin
+      https://git.example.test/acme/repo.git; cp .yardsort/tests/support/headless-settings.toml
+      "$YS_RUN_DIR/profile/settings.toml"; cp .yardsort/tests/support/standin-gh.sh
+      "$YS_RUN_DIR/ghbin/gh"; chmod +x "$YS_RUN_DIR/ghbin/gh"; printf '#!/bin/sh\nfor last; do :;
+      done\nexec /bin/sh -c "$last"\n' > "$YS_RUN_DIR/plain-shell"; chmod +x
+      "$YS_RUN_DIR/plain-shell"
+
+steps:
+  - id: the_host_signs_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", sign-in, Smoke box]
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: serve
+    action: shell
+    # The host as itself: a Git identity of its own, a stand-in gh first on its PATH, and one
+    # forge address read as the repository on this disk. The host reads its environment from the
+    # shell named in SHELL, whose startup files would put this user's own programs first: here
+    # that shell is one that reads none, so the stand-in is the gh it finds. The forge's address
+    # is under a name reserved for tests, which no program could reach if it tried.
+    line: >-
+      GIT_AUTHOR_NAME="Host Box" GIT_AUTHOR_EMAIL=host@example.invalid GIT_COMMITTER_NAME="Host Box"
+      GIT_COMMITTER_EMAIL=host@example.invalid GIT_CONFIG_COUNT=1
+      GIT_CONFIG_KEY_0="url.file://$YS_RUN_DIR/origin/.insteadOf"
+      GIT_CONFIG_VALUE_0="https://git.example.test/acme/" STANDIN_GH_DIR="$YS_RUN_DIR"
+      SHELL="$YS_RUN_DIR/plain-shell" PATH="$YS_RUN_DIR/ghbin:$PATH" setsid sh .yardsort/tests/support/headless.sh yardsort-host serve
+      > "$YS_RUN_DIR/serve.log" 2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: add_the_project
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, project, add, "{{ run.dir }}/repo"]
+    expect:
+      stdout_contains: Added repo
+  - id: start_a_shell
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, workspace, new, repo, smoke, --harness, sh]
+    expect:
+      stdout_contains: agent  sh
+  - id: work_is_done_in_it
+    action: shell
+    line: >-
+      path="$(git -C "$YS_RUN_DIR/repo" worktree list --porcelain | sed -n 's/^worktree //p' | grep
+      '/smoke$')" && echo "$path" > "$YS_RUN_DIR/smoke.path" && printf 'first\nsecond\n' >
+      "$path/README.md" && printf 'a note\n' > "$path/notes.txt" && echo written
+    expect:
+      stdout_contains: written
+
+  - id: open_the_window
+    action: shell
+    # A profile of its own: the host has the run's.
+    line: YS_APP_DIR="$YS_RUN_DIR/app" sh .yardsort/tests/support/app.sh open
+  - id: window_up
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+  - id: the_window_signs_in_as_a_client
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", client-sign-in, "{{ run.dir }}"]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: Signed in as Smoke laptop"
+  - id: the_window_is_let_type
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair, window, "{{ run.port }}", t]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+  - id: a_phone_let_only_watch
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair, watching]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+
+  - id: the_window_commits_there
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/window.ts,
+        "{{ run.port }}",
+        commits-there,
+        Smoke box,
+        smoke,
+        Add a second line,
+      ]
+    timeout: 150s
+    expect:
+      stdout_contains: "saw: committed on Smoke box, with a commit to push"
+  - id: the_gh_the_host_asks_is_the_stand_in
+    action: shell
+    # Asked about the pull request when the window's bar opened. Had the host found this user's
+    # own gh instead, the run stops here, before anything is asked to be created.
+    line: grep -q "^pr list" "$YS_RUN_DIR/gh.log" && echo "the stand-in was asked"
+    expect:
+      stdout_contains: the stand-in was asked
+  - id: by_the_hosts_own_identity_with_nothing_left_over
+    action: shell
+    line: >-
+      path="$(cat "$YS_RUN_DIR/smoke.path")" && test "$(git -C "$path" log -1 --format='%an <%ae>
+      %s')" = "Host Box <host@example.invalid> Add a second line" && test -z "$(git -C "$path" status
+      --porcelain)" && echo "committed by the host"
+    expect:
+      stdout_contains: committed by the host
+  - id: the_window_pushes
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", pushes-there, Smoke box]
+    timeout: 120s
+    expect:
+      stdout_contains: "saw: pushed from Smoke box, nothing left to push"
+  - id: and_the_remote_has_the_branch
+    action: shell
+    line: >-
+      path="$(cat "$YS_RUN_DIR/smoke.path")" && branch="$(git -C "$path" branch --show-current)" &&
+      test "$(git -C "$YS_RUN_DIR/origin/repo.git" rev-parse "refs/heads/$branch")" = "$(git -C
+      "$path" rev-parse HEAD)" && echo "on the remote"
+    expect:
+      stdout_contains: on the remote
+
+  - id: the_remote_refuses_pushes
+    action: shell
+    line: >-
+      printf '#!/bin/sh\necho "no pushes to this one" >&2\nexit 1\n' >
+      "$YS_RUN_DIR/origin/repo.git/hooks/pre-receive" && chmod +x
+      "$YS_RUN_DIR/origin/repo.git/hooks/pre-receive" && printf 'more\n' >> "$(cat
+      "$YS_RUN_DIR/smoke.path")/notes.txt" && echo ready
+    expect:
+      stdout_contains: ready
+  - id: a_second_commit
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/window.ts,
+        "{{ run.port }}",
+        commits-there,
+        Smoke box,
+        smoke,
+        Say more in the notes,
+      ]
+    timeout: 150s
+    expect:
+      stdout_contains: "saw: committed on Smoke box, with a commit to push"
+  - id: is_not_pushed_and_the_window_says_why
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", pushes-there, Smoke box, refused]
+    timeout: 120s
+    expect:
+      stdout_contains: "saw: the push refused, said in a sentence with no folder in it"
+  - id: nothing_reached_the_remote
+    action: shell
+    line: >-
+      path="$(cat "$YS_RUN_DIR/smoke.path")" && branch="$(git -C "$path" branch --show-current)" &&
+      test "$(git -C "$YS_RUN_DIR/origin/repo.git" rev-parse "refs/heads/$branch")" = "$(git -C
+      "$path" rev-parse HEAD~1)" && rm "$YS_RUN_DIR/origin/repo.git/hooks/pre-receive" && echo "the
+      remote is where it was"
+    expect:
+      stdout_contains: the remote is where it was
+
+  - id: the_window_opens_a_pull_request
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/window.ts,
+        "{{ run.port }}",
+        opens-pull-request-there,
+        Smoke box,
+        Add a second line,
+      ]
+    timeout: 150s
+    expect:
+      stdout_contains: "saw: #7 Add a second line"
+  - id: the_host_pushed_first_and_asked_its_gh
+    action: shell
+    line: >-
+      path="$(cat "$YS_RUN_DIR/smoke.path")" && branch="$(git -C "$path" branch --show-current)" &&
+      test "$(git -C "$YS_RUN_DIR/origin/repo.git" rev-parse "refs/heads/$branch")" = "$(git -C
+      "$path" rev-parse HEAD)" && grep -q "pr create --base .* --title Add a second line"
+      "$YS_RUN_DIR/gh.log" && echo "pushed, then created"
+    expect:
+      stdout_contains: pushed, then created
+  - id: a_merge_at_another_commit_is_refused
+    action: run
+    program: bun
+    args:
+      [.yardsort/tests/support/window.ts, "{{ run.port }}", merges-there, Smoke box, smoke, stale]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: refused: The pull request changed or is no longer ready to merge"
+  - id: and_gh_was_not_asked_to_merge
+    action: shell
+    line: '! grep -q ''pr merge'' "$YS_RUN_DIR/gh.log" && echo ''nothing merged'''
+    expect:
+      stdout_contains: nothing merged
+  - id: a_merge_at_its_head_goes_to_gh
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", merges-there, Smoke box, smoke]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: merged #7 at"
+  - id: for_exactly_that_commit
+    action: shell
+    line: >-
+      grep -q "pr merge 7 --squash --match-head-commit $(git -C "$(cat "$YS_RUN_DIR/smoke.path")"
+      rev-parse HEAD)" "$YS_RUN_DIR/gh.log" && echo "merged at the head it was shown"
+    expect:
+      stdout_contains: merged at the head it was shown
+  - id: a_device_that_only_watches_commits_nothing
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", cannot-publish, Smoke box]
+    timeout: 60s
+    expect:
+      stdout_contains: "refused: committing, pushing and its pull request"
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      YS_APP_DIR="$YS_RUN_DIR/app" sh .yardsort/tests/support/app.sh stop-everything; kill "$(cat
+      "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

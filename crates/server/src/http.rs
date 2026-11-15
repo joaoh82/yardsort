@@ -1018,6 +1018,7 @@ fn status(code: ErrorCode) -> StatusCode {
         ErrorCode::ControlConflict
         | ErrorCode::LeaseLost
         | ErrorCode::SessionEnded
+        | ErrorCode::UncommittedWork
         | ErrorCode::Stale => StatusCode::CONFLICT,
         ErrorCode::ResnapshotRequired | ErrorCode::CursorExpired => StatusCode::GONE,
         ErrorCode::Internal | ErrorCode::Unknown => StatusCode::INTERNAL_SERVER_ERROR,

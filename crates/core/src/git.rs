@@ -290,6 +290,16 @@ impl Git {
             .cloned())
     }
 
+    /// A remote's address as the repository's configuration has it, before any `insteadOf`
+    /// rewriting of this computer's: what another computer should be told, since its own
+    /// rewriting is its own. `None` when there is no such remote.
+    pub fn remote_url_as_set(&self, root: &Path, remote: &str) -> Option<String> {
+        self.run(root, &["config", "--get", &format!("remote.{remote}.url")])
+            .ok()
+            .map(|url| url.trim().to_owned())
+            .filter(|url| !url.is_empty())
+    }
+
     /// Where a remote points. `None` if there is no such remote.
     pub fn remote_url(&self, root: &Path, remote: &str) -> GitResult<Option<String>> {
         match self.run(root, &["remote", "get-url", remote]) {
@@ -663,7 +673,16 @@ pub mod testing {
 
     /// A `Git` that ignores the developer's own configuration, with a fixed identity.
     pub fn git() -> Git {
+        git_with(&[])
+    }
+
+    /// [`git`], with `extra` in its environment too: `GIT_CONFIG_COUNT` and friends, for a test
+    /// that needs one setting, such as an address rewritten to a repository on this disk.
+    pub fn git_with(extra: &[(&str, &str)]) -> Git {
         let mut vars: std::collections::BTreeMap<String, String> = std::env::vars().collect();
+        for (key, value) in extra {
+            vars.insert((*key).into(), (*value).into());
+        }
         for (key, value) in [
             (
                 "GIT_CONFIG_GLOBAL",
