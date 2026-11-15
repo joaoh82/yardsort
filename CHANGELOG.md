@@ -25,8 +25,12 @@ has the downloads and the full commit lists.
   computers that edit one note apart both keep their text: one stands, the other waits under the
   Memory view's new **Conflicts** section on both, until you keep one or write another, once for
   all. On a computer with no screen, `yardsort-host memory` lists, writes, approves, revokes and
-  settles notes, at a terminal of your own. Workspaces sync next. See
+  settles notes, at a terminal of your own. See
   [On your other computers](docs/guide/memory.md#on-your-other-computers).
+- **A synced project's workspaces on your other computers are listed under it** (Remote, under
+  development), folded into **on other computers**: name, computer, branch and task, as they change
+  there. Nothing is made for them here, no worktree, branch or folder. `ys sync status` lists them
+  too. See [Workspaces on your other computers](docs/guide/workspaces.md#workspaces-on-your-other-computers).
 - **On the phone, Settings is a gear at the top right** of Connect and the account screen, in place
   of the button at the foot of the screen. **Servers on this phone** moved into Settings too, at
   the top, once the phone is signed in to a server.

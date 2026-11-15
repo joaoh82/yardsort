@@ -1096,7 +1096,11 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       notes, was built on 2026-11-15 (42 §11): the outbox in the memory methods' transactions,
       conflicts kept on the server and shown on every host until settled once, the Memory view's
       **Conflicts** section and `yardsort-host memory` behind the guard; its local smoke test,
-      `sync-memory.yaml`, passed, and its owner run, the gate's, is the owner's to make.
+      `sync-memory.yaml`, passed, and its owner run, the gate's, is the owner's to make. Slice 4,
+      workspaces seen elsewhere, was built the same day (42 §12): the outbox in the workspace
+      methods, written only by the host a workspace lives on, and **on other computers** under
+      each project, with nothing made for them; its local smoke test, `sync-workspaces.yaml`,
+      passed.
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is

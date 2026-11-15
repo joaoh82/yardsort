@@ -358,6 +358,8 @@ export const commands = {
 	projectSyncStop: (projectId: string) => typedError<ProjectSyncStatus, IpcError>(__TAURI_INVOKE("project_sync_stop", { projectId })),
 	/**  Remove a project's records from the server, for every host. Each keeps its own copy. */
 	projectSyncRemove: (projectId: string) => typedError<ProjectSyncStatus, IpcError>(__TAURI_INVOKE("project_sync_remove", { projectId })),
+	/**  The other computers' workspaces of a project that syncs here. */
+	projectSyncWorkspaces: (projectId: string) => typedError<SyncedWorkspace[], IpcError>(__TAURI_INVOKE("project_sync_workspaces", { projectId })),
 	/**
 	 *  Turn Remote on with the server at `server_url`, as `name`: sign in through the browser, then
 	 *  register this computer as a host. Waits for the browser, for up to ten minutes, unless
@@ -3568,6 +3570,24 @@ export type SyncPreview = {
 	remote: string | null,
 	/**  How many approved notes go up with it, each with its text and history. */
 	notes: number,
+	/**  How many of its workspaces go up with it, by name, branch and task. */
+	workspaces: number,
+};
+
+/**
+ *  A workspace on another computer of the account, of a project that syncs here. Shown, never
+ *  made here: nothing of it is on this disk.
+ */
+export type SyncedWorkspace = {
+	id: string,
+	/**  The computer it lives on, by name. */
+	host: string,
+	name: string,
+	branch: string | null,
+	baseBranch: string | null,
+	archived: boolean,
+	/**  The tasks it was started from. */
+	tasks: WorkspaceTask[],
 };
 
 export type SystemLoad = {
@@ -4477,6 +4497,14 @@ export type WorkspaceSettingsDto = {
 	/**  `None` uses `default_worktree_root`. */
 	worktreeRoot: string | null,
 	branchPrefix: string,
+};
+
+export type WorkspaceTask = {
+	source: string,
+	repo: string,
+	key: string,
+	url: string,
+	title: string,
 };
 
 /**

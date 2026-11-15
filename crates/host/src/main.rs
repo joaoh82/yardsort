@@ -330,6 +330,10 @@ mod cli {
                     preview.notes
                 );
                 println!(
+                    "  Workspaces: {}, by name, branch and task; never their files",
+                    preview.workspaces
+                );
+                println!(
                     "The server keeps synced records in plain text, readable by whoever runs it. \
                      Never the project's path or files."
                 );

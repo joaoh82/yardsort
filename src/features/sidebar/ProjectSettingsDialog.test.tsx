@@ -107,7 +107,7 @@ it("a removed variable is gone when saved", async () => {
 it("Escape in the link dialog closes only it, and Linking saves nothing else", async () => {
   const user = userEvent.setup();
   core.projectSyncGet.mockResolvedValue({
-    sync: { state: "off", preview: { name: "demo", remote: null, notes: 0 } },
+    sync: { state: "off", preview: { name: "demo", remote: null, notes: 0, workspaces: 0 } },
     syncedAt: null,
     problem: null,
   });

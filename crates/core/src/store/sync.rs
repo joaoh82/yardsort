@@ -15,7 +15,7 @@ use remote_proto::sync::{
 use rusqlite::{params, OptionalExtension, Transaction};
 
 use super::{memory_from_row, new_id, MemoryRow, Store, StoreError, StoreResult, MEMORY_COLUMNS};
-use crate::sync::{NoteBody, NoteConflict, NoteHistory};
+use crate::sync::{NoteBody, NoteConflict, NoteHistory, WorkspaceBody, WorkspaceTask};
 
 /// A local record this installation syncs, and its logical id.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +39,20 @@ pub struct RefusedOp {
     pub kind: RecordKind,
     pub project: SyncId,
     pub why: String,
+}
+
+/// A workspace of another host, as its record says it. Nothing of it is on this disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncedWorkspaceRow {
+    /// Its logical id.
+    pub id: String,
+    /// The host it lives on, by name.
+    pub host: String,
+    pub name: String,
+    pub branch: Option<String>,
+    pub base_branch: Option<String>,
+    pub archived: bool,
+    pub tasks: Vec<WorkspaceTask>,
 }
 
 /// How far this host has pulled, and how its last pass went.
@@ -149,12 +163,16 @@ fn queue(tx: &Transaction<'_>, op: &SyncOp, now: i64) -> StoreResult<()> {
 fn forget_project(tx: &Transaction<'_>, project: &str) -> StoreResult<()> {
     tx.execute("DELETE FROM sync_ids WHERE project = ?", [project])?;
     tx.execute("DELETE FROM sync_outbox WHERE project = ?", [project])?;
+    tx.execute("DELETE FROM synced_workspaces WHERE project = ?", [project])?;
     Ok(())
 }
 
 /// Clear every sync table: Remote is off, or on as another host.
 pub(super) fn forget_sync(tx: &Transaction<'_>) -> rusqlite::Result<()> {
-    tx.execute_batch("DELETE FROM sync_ids; DELETE FROM sync_outbox; DELETE FROM sync_state;")
+    tx.execute_batch(
+        "DELETE FROM sync_ids; DELETE FROM sync_outbox; DELETE FROM sync_state;
+         DELETE FROM synced_workspaces;",
+    )
 }
 
 impl Store {
@@ -225,6 +243,7 @@ impl Store {
         };
         queue(&tx, &op, now)?;
         queue_unsynced_notes(&tx, project_id, now)?;
+        queue_unsynced_workspaces(&tx, project_id, now)?;
         tx.commit()?;
         Ok(SyncIdRow {
             kind: RecordKind::Project,
@@ -419,10 +438,10 @@ impl Store {
             else {
                 continue;
             };
-            changed |= if queued.kind == RecordKind::Note {
-                settle_note(&tx, &queued, result, now)?
-            } else {
-                settle_one(&tx, &queued, result)?
+            changed |= match queued.kind {
+                RecordKind::Note => settle_note(&tx, &queued, result, now)?,
+                RecordKind::Workspace => settle_workspace(&tx, &queued, result, now)?,
+                _ => settle_one(&tx, &queued, result)?,
             };
         }
         tx.commit()?;
@@ -492,6 +511,18 @@ impl Store {
                 forget_project(&tx, project)?;
                 changed = true;
             } else {
+                // Another host's workspace the snapshot does not have is gone, its tombstone
+                // pruned while this host was away.
+                let kept: Vec<&str> = records
+                    .iter()
+                    .filter(|r| r.kind == RecordKind::Workspace && r.project.as_str() == project)
+                    .map(|r| r.id.as_str())
+                    .collect();
+                changed |= tx.execute(
+                    "DELETE FROM synced_workspaces
+                     WHERE project = ? AND sync_id NOT IN (SELECT value FROM json_each(?))",
+                    params![project, serde_json::to_string(&kept).expect("ids are JSON")],
+                )? > 0;
                 let linked: Option<(String, bool)> = tx
                     .query_row(
                         "SELECT local_id, fresh FROM sync_ids WHERE kind = 'project' AND sync_id = ?",
@@ -507,6 +538,7 @@ impl Store {
                 // taken as the same note above.
                 if let Some((local, true)) = linked {
                     queue_unsynced_notes(&tx, &local, now)?;
+                    queue_unsynced_workspaces(&tx, &local, now)?;
                 }
             }
         }
@@ -517,6 +549,27 @@ impl Store {
         Ok(changed)
     }
 
+    /// Queue what an earlier version left unsent for the projects that sync here: approved notes
+    /// from before notes synced, workspaces from before workspaces did. Each pass asks; a record
+    /// already queued or sent is not queued again, so a pass after the first queues nothing. A
+    /// project just linked waits for its snapshot, which queues its own.
+    pub fn backfill_sync(&self, now: i64) -> StoreResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let projects: Vec<String> = {
+            let mut statement =
+                tx.prepare("SELECT local_id FROM sync_ids WHERE kind = 'project' AND fresh = 0")?;
+            let rows = statement.query_map([], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        for project in projects {
+            queue_unsynced_notes(&tx, &project, now)?;
+            queue_unsynced_workspaces(&tx, &project, now)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// The projects linked here and not yet read from a snapshot.
     pub fn fresh_synced_projects(&self) -> StoreResult<Vec<SyncId>> {
         let conn = self.conn();
@@ -524,6 +577,31 @@ impl Store {
             "SELECT sync_id FROM sync_ids WHERE kind = 'project' AND fresh = 1 ORDER BY sync_id",
         )?;
         let rows = statement.query_map([], |r| sync_id(r.get(0)?))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// The other hosts' workspaces of a local project that syncs here, by host then name.
+    pub fn synced_workspaces(&self, project_id: &str) -> StoreResult<Vec<SyncedWorkspaceRow>> {
+        let conn = self.conn();
+        let mut statement = conn.prepare(
+            "SELECT w.sync_id, w.host, w.name, w.branch, w.base_branch, w.archived, w.tasks
+             FROM synced_workspaces w
+             JOIN sync_ids p ON p.kind = 'project' AND p.sync_id = w.project
+             WHERE p.local_id = ?
+             ORDER BY w.host, w.name, w.sync_id",
+        )?;
+        let rows = statement.query_map([project_id], |r| {
+            let tasks: String = r.get(6)?;
+            Ok(SyncedWorkspaceRow {
+                id: r.get(0)?,
+                host: r.get(1)?,
+                name: r.get(2)?,
+                branch: r.get(3)?,
+                base_branch: r.get(4)?,
+                archived: r.get(5)?,
+                tasks: serde_json::from_str(&tasks).unwrap_or_default(),
+            })
+        })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -634,13 +712,13 @@ fn settle_one(tx: &Transaction<'_>, op: &SyncOp, result: &OpResult) -> StoreResu
     }
 }
 
-/// One record from the server. Workspaces are taken in by their own slice.
+/// One record from the server.
 fn take_one(tx: &Transaction<'_>, record: &SyncRecord) -> StoreResult<bool> {
-    if record.kind == RecordKind::Note {
-        return take_note(tx, record);
-    }
-    if record.kind != RecordKind::Project {
-        return Ok(false);
+    match record.kind {
+        RecordKind::Note => return take_note(tx, record),
+        RecordKind::Workspace => return take_workspace(tx, record),
+        RecordKind::Project => {}
+        RecordKind::Unknown => return Ok(false),
     }
     let known: bool = tx.query_row(
         "SELECT EXISTS (SELECT 1 FROM sync_ids WHERE kind = 'project' AND sync_id = ?)",
@@ -1210,4 +1288,332 @@ fn note_conflict(
         queue_put(tx, &row, base, body, now)?;
     }
     Ok(true)
+}
+
+// --- workspaces -------------------------------------------------------------------------------
+
+fn workspace_row(tx: &Transaction<'_>, workspace_id: &str) -> StoreResult<Option<SyncIdRow>> {
+    Ok(tx
+        .query_row(
+            &format!("SELECT {ID_COLUMNS} FROM sync_ids WHERE kind = 'workspace' AND local_id = ?"),
+            [workspace_id],
+            id_row,
+        )
+        .optional()?)
+}
+
+/// A local workspace as its record says it, or `None` when it is not one that syncs: gone,
+/// forgotten, the project's own checkout, or Remote off.
+fn workspace_body(tx: &Transaction<'_>, workspace_id: &str) -> StoreResult<Option<WorkspaceBody>> {
+    let Some((origin, host)) = this_host(tx)? else {
+        return Ok(None);
+    };
+    let Some((name, branch, base_branch, archived)) = tx
+        .query_row(
+            "SELECT name, branch, base_branch, status = 'archived' FROM workspaces
+             WHERE id = ? AND kind = 'worktree' AND forgotten = 0",
+            [workspace_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    let mut statement = tx.prepare(
+        "SELECT source, repo, key, url, title FROM workspace_tasks WHERE workspace_id = ?
+         ORDER BY created_at, rowid",
+    )?;
+    let tasks = statement
+        .query_map([workspace_id], |r| {
+            Ok(WorkspaceTask {
+                source: r.get(0)?,
+                repo: r.get(1)?,
+                key: r.get(2)?,
+                url: r.get(3)?,
+                title: r.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(Some(WorkspaceBody {
+        name,
+        branch,
+        base_branch,
+        archived,
+        tasks,
+        origin,
+        host,
+    }))
+}
+
+fn queue_workspace_op(
+    tx: &Transaction<'_>,
+    row: &SyncIdRow,
+    action: Action,
+    base: Option<Revision>,
+    body: Option<WorkspaceBody>,
+    now: i64,
+) -> StoreResult<()> {
+    let op = SyncOp {
+        op: OpId::new(new_id()).expect("a v4 uuid"),
+        action,
+        kind: RecordKind::Workspace,
+        id: row.sync_id.clone(),
+        project: row.project.clone(),
+        base,
+        schema: body.is_some().then_some(SYNC_SCHEMA),
+        body: body.map(|b| b.to_value()),
+    };
+    queue(tx, &op, now)
+}
+
+/// Whether a delete of the record waits to go up.
+fn deleting(tx: &Transaction<'_>, id: &SyncId) -> StoreResult<bool> {
+    Ok(tx.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sync_outbox
+                        WHERE sync_id = ? AND action = 'delete' AND refused IS NULL)",
+        [id.as_str()],
+        |r| r.get(0),
+    )?)
+}
+
+/// Queue what a workspace's change means for the server, in the change's own transaction. Only
+/// this host's worktree workspaces of a project that syncs here go up, and only this host writes
+/// them. One that is gone or forgotten is deleted there; one that never reached the server is
+/// only forgotten here.
+pub(super) fn queue_workspace(
+    tx: &Transaction<'_>,
+    workspace_id: &str,
+    now: i64,
+) -> StoreResult<()> {
+    let row = workspace_row(tx, workspace_id)?;
+    let body = workspace_body(tx, workspace_id)?;
+    match (row, body) {
+        (Some(row), None) => {
+            if deleting(tx, &row.sync_id)? {
+                return Ok(());
+            }
+            match next_base(tx, &row)? {
+                Some(base) => queue_workspace_op(tx, &row, Action::Delete, Some(base), None, now),
+                // Never reached the server: nothing there to delete.
+                None => {
+                    tx.execute(
+                        "DELETE FROM sync_ids WHERE kind = 'workspace' AND local_id = ?",
+                        [workspace_id],
+                    )?;
+                    Ok(())
+                }
+            }
+        }
+        (row, Some(body)) => {
+            let project_id: String = tx.query_row(
+                "SELECT project_id FROM workspaces WHERE id = ?",
+                [workspace_id],
+                |r| r.get(0),
+            )?;
+            let Some(project) = tx
+                .query_row(
+                    "SELECT sync_id FROM sync_ids WHERE kind = 'project' AND local_id = ?",
+                    [&project_id],
+                    |r| sync_id(r.get(0)?),
+                )
+                .optional()?
+            else {
+                return Ok(());
+            };
+            // Brought back while its delete waits to go up: that record goes, and this is a new one.
+            let row = match row {
+                Some(row) if !deleting(tx, &row.sync_id)? => Some(row),
+                Some(_) => {
+                    tx.execute(
+                        "DELETE FROM sync_ids WHERE kind = 'workspace' AND local_id = ?",
+                        [workspace_id],
+                    )?;
+                    None
+                }
+                None => None,
+            };
+            let row = match row {
+                Some(row) => row,
+                None => {
+                    let id = SyncId::new(new_id()).expect("a v4 uuid");
+                    tx.execute(
+                        "INSERT INTO sync_ids (kind, local_id, sync_id, project)
+                         VALUES ('workspace', ?, ?, ?)",
+                        params![workspace_id, id.as_str(), project.as_str()],
+                    )?;
+                    SyncIdRow {
+                        kind: RecordKind::Workspace,
+                        local_id: workspace_id.to_owned(),
+                        sync_id: id,
+                        project,
+                        revision: None,
+                        fresh: false,
+                    }
+                }
+            };
+            let base = next_base(tx, &row)?;
+            queue_workspace_op(tx, &row, Action::Put, base, Some(body), now)
+        }
+        (None, None) => Ok(()),
+    }
+}
+
+/// Queue a project's worktree workspaces that do not sync yet: when it is turned on, and once it
+/// is linked and its snapshot is in.
+fn queue_unsynced_workspaces(tx: &Transaction<'_>, project_id: &str, now: i64) -> StoreResult<()> {
+    let ids: Vec<String> = {
+        let mut statement = tx.prepare(
+            "SELECT id FROM workspaces w
+             WHERE project_id = ? AND kind = 'worktree' AND forgotten = 0
+               AND NOT EXISTS (SELECT 1 FROM sync_ids WHERE kind = 'workspace' AND local_id = w.id)
+             ORDER BY sort_order, rowid",
+        )?;
+        let rows = statement.query_map([project_id], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    for id in ids {
+        queue_workspace(tx, &id, now)?;
+    }
+    Ok(())
+}
+
+/// The server's answer to one of this host's ops on a workspace. The host it lives on is the only
+/// one that writes it, so a conflict is never another host's edit: it is a record that went on
+/// without this host hearing, an answer lost, or a project removed. What it says here stands.
+fn settle_workspace(
+    tx: &Transaction<'_>,
+    op: &SyncOp,
+    result: &OpResult,
+    now: i64,
+) -> StoreResult<bool> {
+    let forget = |tx: &Transaction<'_>| -> StoreResult<()> {
+        tx.execute(
+            "DELETE FROM sync_outbox WHERE sync_id = ? AND refused IS NULL",
+            [op.id.as_str()],
+        )?;
+        tx.execute(
+            "DELETE FROM sync_ids WHERE kind = 'workspace' AND sync_id = ?",
+            [op.id.as_str()],
+        )?;
+        Ok(())
+    };
+    match result {
+        OpResult::Applied { .. } if op.action == Action::Delete => {
+            forget(tx)?;
+            Ok(false)
+        }
+        OpResult::Applied { revision, .. } => {
+            set_revision(tx, &op.id, *revision)?;
+            tx.execute("DELETE FROM sync_outbox WHERE op = ?", [op.op.as_str()])?;
+            Ok(false)
+        }
+        OpResult::Conflict { current, .. } if current.deleted => {
+            forget(tx)?;
+            Ok(false)
+        }
+        OpResult::Conflict { current, .. } => {
+            tx.execute(
+                "DELETE FROM sync_outbox WHERE sync_id = ? AND refused IS NULL",
+                [op.id.as_str()],
+            )?;
+            tx.execute(
+                "UPDATE sync_ids SET revision = ? WHERE kind = 'workspace' AND sync_id = ?",
+                params![current.revision as i64, op.id.as_str()],
+            )?;
+            let local: Option<String> = tx
+                .query_row(
+                    "SELECT local_id FROM sync_ids WHERE kind = 'workspace' AND sync_id = ?",
+                    [op.id.as_str()],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            match local {
+                Some(local) => queue_workspace(tx, &local, now)?,
+                // A record of this host's it no longer knows: deleted against what is there.
+                None => queue_stray_delete(tx, current, now)?,
+            }
+            Ok(false)
+        }
+        OpResult::Refused { .. } | OpResult::Unknown => settle_one(tx, op, result),
+    }
+}
+
+/// Delete a workspace record of this host's that no local workspace is linked to any more, as
+/// after Remote was turned off and on, or a project linked again: the workspaces here go up anew.
+fn queue_stray_delete(tx: &Transaction<'_>, record: &SyncRecord, now: i64) -> StoreResult<()> {
+    if pending(tx, &record.id)? > 0 {
+        return Ok(());
+    }
+    let row = SyncIdRow {
+        kind: RecordKind::Workspace,
+        local_id: String::new(),
+        sync_id: record.id.clone(),
+        project: record.project.clone(),
+        revision: Some(record.revision),
+        fresh: false,
+    };
+    queue_workspace_op(tx, &row, Action::Delete, Some(record.revision), None, now)
+}
+
+/// A workspace from the server: another host's is shown here, and nothing is made for it; one of
+/// this host's own only tells its revision.
+fn take_workspace(tx: &Transaction<'_>, record: &SyncRecord) -> StoreResult<bool> {
+    let linked: bool = tx.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sync_ids WHERE kind = 'project' AND sync_id = ?)",
+        [record.project.as_str()],
+        |r| r.get(0),
+    )?;
+    if !linked {
+        return Ok(false);
+    }
+    let mine: bool = tx.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sync_ids WHERE kind = 'workspace' AND sync_id = ?)",
+        [record.id.as_str()],
+        |r| r.get(0),
+    )?;
+    if mine {
+        if pending(tx, &record.id)? == 0 && !record.deleted {
+            set_revision(tx, &record.id, record.revision)?;
+        }
+        return Ok(false);
+    }
+    if record.deleted {
+        return Ok(tx.execute(
+            "DELETE FROM synced_workspaces WHERE sync_id = ?",
+            [record.id.as_str()],
+        )? > 0);
+    }
+    // A schema from a newer version: left as it is.
+    let Some(body) = WorkspaceBody::of(record) else {
+        return Ok(false);
+    };
+    if this_host(tx)?.is_some_and(|(id, _)| id == body.origin) {
+        queue_stray_delete(tx, record, record.changed_at)?;
+        return Ok(false);
+    }
+    let tasks = serde_json::to_string(&body.tasks).expect("tasks are JSON");
+    Ok(tx.execute(
+        "INSERT INTO synced_workspaces (sync_id, project, host_id, host, name, branch, base_branch,
+                                        archived, tasks, revision, changed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(sync_id) DO UPDATE SET
+             host_id = excluded.host_id, host = excluded.host, name = excluded.name,
+             branch = excluded.branch, base_branch = excluded.base_branch,
+             archived = excluded.archived, tasks = excluded.tasks, revision = excluded.revision,
+             changed_at = excluded.changed_at
+         WHERE excluded.revision > synced_workspaces.revision",
+        params![
+            record.id.as_str(),
+            record.project.as_str(),
+            body.origin,
+            body.host,
+            body.name,
+            body.branch,
+            body.base_branch,
+            body.archived,
+            tasks,
+            record.revision as i64,
+            record.changed_at
+        ],
+    )? > 0)
 }
