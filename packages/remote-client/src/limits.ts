@@ -8,8 +8,8 @@
 
 /** The major this client speaks. */
 export const PROTOCOL_MAJOR = 1;
-/** The minor this client speaks: 12, committing, pushing, and opening and merging a pull request. */
-export const PROTOCOL_MINOR = 12;
+/** The minor this client speaks: 14, committing, pushing, and opening and merging a pull request. */
+export const PROTOCOL_MINOR = 14;
 
 /** The largest JSON message either side reads, in bytes. */
 export const MAX_CONTROL_FRAME = 64 * 1024;
@@ -90,40 +90,62 @@ export const MAX_ASKS = 8;
 /** Longest question id, in bytes. Minor 8. */
 export const MAX_ASK_ID = 64;
 
-/** The most models, and the most efforts, one harness lists. Minor 10. */
+/** The most steps a waiting smoke test's card lists. Minor 10. */
+export const MAX_TEST_STEPS = 60;
+/** Longest sentence for one step of a smoke test, in characters. Minor 10. */
+export const MAX_STEP_WORDS = 400;
+/** The most environment names, and the most inputs, a smoke test's card lists. Minor 10. */
+export const MAX_TEST_NAMES = 40;
+/** Longest input value of a smoke test's run, in characters. Minor 10. */
+export const MAX_TEST_INPUT = 256;
+/** Longest smoke test file a card carries, in characters. Minor 10. */
+export const MAX_TEST_DEFINITION = 10_000;
+/** Longest content hash of a smoke test file, in bytes. Minor 10. */
+export const MAX_TEST_HASH = 64;
+
+/** The most checks one pull request is described with, by name. Minor 11. */
+export const MAX_PULL_CHECKS = 40;
+/** Longest name of a pull request's check, in characters. Minor 11. */
+export const MAX_CHECK_NAME = 100;
+/** The most reviewers, and the most reviews waited for, a pull request is described with. Minor 11. */
+export const MAX_REVIEWERS = 12;
+/** The most workspaces one pull request names. Minor 11. */
+export const MAX_PULL_WORKSPACES = 8;
+
+/** The most models, and the most efforts, one harness lists. Minor 12. */
 export const MAX_CHOICES = 32;
-/** Longest name a start or a rename may give a workspace, in characters. Minor 10. */
+/** Longest name a start or a rename may give a workspace, in characters. Minor 12. */
 export const MAX_WORKSPACE_NAME = 80;
-/** Longest branch name a request or a reply carries, in bytes. Minor 10. */
+/** Longest branch name a request or a reply carries, in bytes. Minor 12. */
 export const MAX_BRANCH = 255;
-/** The most branches one `project.branches` reply lists. Minor 10. */
+/** The most branches one `project.branches` reply lists. Minor 12. */
 export const MAX_BRANCHES = 100;
-/** Longest repository address a request or a reply carries, in bytes. Minor 10. */
+/** Longest repository address a request or a reply carries, in bytes. Minor 12. */
 export const MAX_REMOTE = 512;
-/** Longest name a clone may be given, in bytes. Minor 10. */
+/** Longest name a clone may be given, in bytes. Minor 12. */
 export const MAX_PROJECT_NAME = 100;
 
-/** Longest path inside a workspace a request or a reply carries, in bytes. Minor 11. */
+/** Longest path inside a workspace a request or a reply carries, in bytes. Minor 13. */
 export const MAX_PATH = 1024;
-/** The largest file a computer sends, in bytes: what its own window shows. Minor 11. */
+/** The largest file a computer sends, in bytes: what its own window shows. Minor 13. */
 export const MAX_FILE = 1024 * 1024;
-/** The most one `file.read` reply carries, in bytes before base64. Minor 11. */
+/** The most one `file.read` reply carries, in bytes before base64. Minor 13. */
 export const MAX_FILE_CHUNK = 32 * 1024;
 /**
  * How much of a list of paths one reply carries, in bytes of path. A list cut short says so with
- * `more`. Minor 11.
+ * `more`. Minor 13.
  */
 export const MAX_LISTED_BYTES = 40 * 1024;
 
-/** Longest commit message a request carries, in bytes. Minor 12. */
+/** Longest commit message a request carries, in bytes. Minor 14. */
 export const MAX_COMMIT_MESSAGE = 16 * 1024;
-/** Longest pull request title, in characters. Minor 12. */
+/** Longest pull request title, in characters. Minor 14. */
 export const MAX_PULL_REQUEST_TITLE = 256;
-/** Longest pull request body a request carries, in bytes. Minor 12. */
+/** Longest pull request body a request carries, in bytes. Minor 14. */
 export const MAX_PULL_REQUEST_BODY = 32 * 1024;
-/** The most unpushed commits a reply names. Minor 12. */
+/** The most unpushed commits a reply names. Minor 14. */
 export const MAX_UNPUSHED = 20;
-/** Longest commit id a request or a reply carries, in characters. Minor 12. */
+/** Longest commit id a request or a reply carries, in characters. Minor 14. */
 export const MAX_OID = 64;
-/** Longest link in a reply about a pull request, in bytes. Minor 12. */
+/** Longest link in a reply about a pull request, in bytes. Minor 14. */
 export const MAX_URL = 1024;

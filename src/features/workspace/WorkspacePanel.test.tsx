@@ -28,6 +28,13 @@ const core = vi.hoisted(() => ({
   // The composer offers the ready-made triggers for a new workspace.
   triggerPresets: vi.fn(async () => []),
   testListInProject: vi.fn(async () => []),
+  // Project settings asks how the project stands for sync.
+  projectSyncGet: vi.fn(async () => ({
+    sync: { state: "remoteOff" },
+    syncedAt: null,
+    problem: null,
+  })),
+  onSyncChanged: vi.fn(async () => () => {}),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),

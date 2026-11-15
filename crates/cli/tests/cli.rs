@@ -6062,3 +6062,52 @@ fn a_session_is_resumed_by_the_start_of_its_id_and_never_without_a_daemon() {
     let row = store.session("5a1e-first").unwrap().unwrap();
     assert!(!row.running, "nothing was started");
 }
+
+#[test]
+fn sync_status_is_read_from_the_records_and_nothing_else_is_offered() {
+    let fx = Fixture::new();
+    let off = fx.ys(&["sync", "status"]).ok();
+    assert!(off.contains("Remote is off here"), "{off}");
+
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    store
+        .set_remote_host(&yardsort_core::store::RemoteHostRow {
+            server_url: "https://remote.example".into(),
+            server_id: "server".into(),
+            host_id: "host".into(),
+            device_id: "device".into(),
+            name: "Workstation".into(),
+            enabled_at: 1,
+        })
+        .unwrap();
+    let none = fx.ys(&["sync", "status"]).ok();
+    assert!(none.contains("No project syncs here"), "{none}");
+
+    let project = store.projects().unwrap().remove(0);
+    let body = yardsort_core::sync::ProjectBody {
+        name: project.name.clone(),
+        remote: None,
+    };
+    store.turn_on_sync(&project.id, body.to_value(), 1).unwrap();
+    store
+        .note_sync_pass(Some("The server cannot be reached."), 2)
+        .unwrap();
+    drop(store);
+    let shown = fx.ys(&["sync", "status"]).ok();
+    assert!(
+        shown.contains(&fx.project_name) && shown.contains("waiting"),
+        "{shown}"
+    );
+    assert!(shown.contains("The server cannot be reached."), "{shown}");
+    assert!(shown.contains("Waiting to go up: 1"), "{shown}");
+    let json: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["sync", "status", "--json"]).ok()).unwrap();
+    assert_eq!(json["projects"][0]["state"], "waiting");
+
+    // An agent in a Yardsort terminal can run anything `ys` offers, so it offers nothing that
+    // changes sync.
+    for verb in ["on", "link", "stop", "remove", "off"] {
+        let refused = fx.ys(&["sync", verb, &fx.project_name]);
+        assert_ne!(refused.code, Some(0), "`ys sync {verb}` must not exist");
+    }
+}

@@ -87,6 +87,8 @@ impl Serving for Here {
             starting: self.starting.clone(),
             workflow: None,
             conversations: None,
+            tests: None,
+            pulls: None,
         });
     }
 }
@@ -943,7 +945,7 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
     assert_eq!(refused.code, "remote_refused");
     assert_eq!(stand.asked.lock().unwrap().len(), 3);
 
-    // Since minor 10: what a start says beyond its message reaches the host, each part as said.
+    // Since minor 12: what a start says beyond its message reaches the host, each part as said.
     let said = |effort: &str| start::Said {
         harness: Some("stand-in".into()),
         name: Some("tidy".into()),
@@ -1013,7 +1015,7 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
             "clone https://example.com/acme/private.git None".to_owned(),
         ]
     );
-    // Since minor 11: what changed there, its tree, and a file put together from its pieces.
+    // Since minor 13: what changed there, its tree, and a file put together from its pieces.
     use remote_host::computer::look;
     let changed = look::changes(&desk, host, &workspace.id).await.unwrap();
     assert_eq!(changed.uncommitted[0].path, "src/big.txt");
@@ -1059,7 +1061,7 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
     assert!(read("../up.txt", remote_proto::FileOf::Working)
         .await
         .is_err());
-    // Since minor 12: commit, push and the pull request, each done by the host as itself.
+    // Since minor 14: commit, push and the pull request, each done by the host as itself.
     use remote_host::computer::publish;
     let asked_before = stand.asked.lock().unwrap().len();
     let stands = publish::state(&desk, host, &workspace.id, true)

@@ -29,7 +29,7 @@ pub const START: &str = "workspace.start";
 pub const RESUME: &str = "session.resume";
 /// What the host answers that reads a start's name, model, effort and branch, lists a project's
 /// branches, clones, starts a shell, and renames, archives and deletes a workspace: one from
-/// before minor 10 does none of them.
+/// before minor 12 does none of them.
 pub const MANAGE: &str = "project.branches";
 
 /// What a new workspace on another computer may say beyond its project and its first message.

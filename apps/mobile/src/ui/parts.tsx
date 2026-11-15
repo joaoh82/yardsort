@@ -41,8 +41,11 @@ const LIGHT = {
   accentText: "#8a5c00",
   accentTint: "#fbf0d6",
   online: "#1f7a45",
+  onlineTint: "#e3f3e8",
   danger: "#b3261e",
   dangerTint: "#fbe9e7",
+  merged: "#6b46c1",
+  mergedTint: "#ece6fb",
   claude: "#c2603f",
   codex: "#2f74c0",
 };
@@ -61,8 +64,11 @@ const DARK: typeof LIGHT = {
   accentText: "#f5b83d",
   accentTint: "#2a2413",
   online: "#4fbf7a",
+  onlineTint: "#14271c",
   danger: "#f28b82",
   dangerTint: "#2b1716",
+  merged: "#b79cf2",
+  mergedTint: "#241d36",
   claude: "#cf6a48",
   codex: "#4a8ad0",
 };
@@ -93,17 +99,30 @@ export const FONTS = {
 const ICONS = {
   check: "M5 12.5l4.5 4.5L19 7.5",
   chevron: "M9 6l6 6-6 6",
+  cross: "M6.5 6.5l11 11M17.5 6.5l-11 11",
+  warning: "M12 4l9.5 16h-19L12 4zM12 10.5v4.5M12 17.6v.4",
   computer: "M4 5h16v11H4zM9 20h6M12 16v4",
   phone: "M8 3h8a1 1 0 011 1v16a1 1 0 01-1 1H8a1 1 0 01-1-1V4a1 1 0 011-1zM11 18h2",
   note: "M7 4h7l4 4v12H7zM14 4v4h4M10 13h5M10 16h5",
   server: "M5 5h14v6H5zM5 13h14v6H5zM8 8h.01M8 16h.01",
+  settings:
+    "M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2zM15 12a3 3 0 11-6 0 3 3 0 016 0z",
   terminal: "M5 7l5 5-5 5M12 18h7",
 };
 
-export function Icon({ name, color }: { name: keyof typeof ICONS; color?: string }) {
+export function Icon({
+  name,
+  color,
+  size = 24,
+}: {
+  name: keyof typeof ICONS;
+  color?: string;
+  /** Its side, in points. Smaller beside a line of small text. */
+  size?: number;
+}) {
   const colors = useColors();
   return (
-    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
         d={ICONS[name]}
         stroke={color ?? colors.muted}
@@ -322,6 +341,56 @@ export function Section({
   );
 }
 
+/**
+ * A part of a screen that folds away under its heading: pressing the heading hides what is in it,
+ * and pressing it again shows it. Whether it is open is the screen's to keep.
+ */
+export function Fold({
+  title,
+  note,
+  attention,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  /** Beside the heading: how many. */
+  note?: string | number;
+  /** After the note, something inside worth opening it for. */
+  attention?: string | undefined;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  const colors = useColors();
+  const says = [title, note, attention].filter((part) => part !== undefined).join(", ");
+  return (
+    <View style={styles.fold}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={says}
+        accessibilityState={{ expanded: open }}
+        hitSlop={FOLD_SLOP}
+        onPress={onToggle}
+        style={({ pressed }) => [styles.foldLine, { opacity: pressed ? 0.6 : 1 }]}
+      >
+        <Text style={[styles.foldMark, { color: colors.faint }]}>{open ? "▾" : "▸"}</Text>
+        <Text numberOfLines={1} style={[styles.label, styles.foldTitle, { color: colors.faint }]}>
+          {title}
+        </Text>
+        {note !== undefined && <Text style={[styles.label, { color: colors.faint }]}>{note}</Text>}
+        {attention !== undefined && (
+          <Text style={[styles.label, { color: colors.accentText }]}>· {attention}</Text>
+        )}
+      </Pressable>
+      {open && children}
+    </View>
+  );
+}
+
+/** A heading is a thin line of text: this makes it as easy to press as a row. */
+const FOLD_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
+
 /** Rows that belong together, with a line between each. */
 export function Group({ children }: { children: ReactNode }) {
   const colors = useColors();
@@ -349,6 +418,7 @@ export function Row({
   leading,
   tag,
   badge,
+  trailing,
   label,
   selected,
   checked,
@@ -369,6 +439,8 @@ export function Row({
   tag?: string;
   /** Something at the end that is happening now. */
   badge?: string;
+  /** At the end, under the badge when there is one: something of the row's own to press. */
+  trailing?: ReactNode;
   /** What a screen reader says, when not the title and detail. */
   label?: string;
   selected?: boolean;
@@ -394,9 +466,14 @@ export function Row({
           </Text>
         ) : null}
       </View>
-      {badge ? (
-        <View style={[styles.badge, { backgroundColor: colors.accentTint }]}>
-          <Text style={[styles.monoSmall, { color: colors.accentText }]}>{badge}</Text>
+      {badge || trailing ? (
+        <View style={styles.rowEnd}>
+          {badge ? (
+            <View style={[styles.badge, { backgroundColor: colors.accentTint }]}>
+              <Text style={[styles.monoSmall, { color: colors.accentText }]}>{badge}</Text>
+            </View>
+          ) : null}
+          {trailing}
         </View>
       ) : null}
       {tag ? (
@@ -514,6 +591,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   section: { gap: 8, marginTop: 8 },
+  fold: { marginTop: 2 },
+  foldLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+  },
+  foldMark: { fontSize: 12, lineHeight: 14, width: 12 },
+  foldTitle: { flex: 1 },
   group: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, overflow: "hidden" },
   divider: { height: StyleSheet.hairlineWidth },
   row: {
@@ -526,6 +613,7 @@ const styles = StyleSheet.create({
     paddingRight: 12,
   },
   rowText: { flex: 1, gap: 4 },
+  rowEnd: { alignItems: "flex-end", gap: 6 },
   rowTitle: { fontFamily: FONTS.semibold, fontSize: 16, lineHeight: 21 },
   rowPlain: { fontFamily: FONTS.medium, fontSize: 15, lineHeight: 21 },
   badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },

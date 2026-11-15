@@ -105,6 +105,12 @@ pub struct Context<'a> {
     /// Where agents keep their conversations and open questions. Without it, conversations are
     /// not read and questions not answered.
     pub conversations: Option<&'a super::Conversations>,
+    /// What is told once a device decided a waiting smoke test run. Without it those operations
+    /// are not answered. A headless host leaves this empty: it queues no runs.
+    pub tests: Option<Arc<dyn super::TestGate>>,
+    /// What the host last read of its projects' pull requests. Without it those operations are
+    /// not answered. A headless host leaves this empty: it reads none.
+    pub pulls: Option<Arc<dyn super::PullRequests>>,
 }
 
 impl Context<'_> {
@@ -121,6 +127,8 @@ impl Context<'_> {
             terminals_later: (!self.interactive).then(super::earlier_daemon),
             workflow: self.workflow.is_some(),
             conversations: self.conversations,
+            tests: self.tests.as_deref(),
+            pulls: self.pulls.as_deref(),
         }
     }
 }

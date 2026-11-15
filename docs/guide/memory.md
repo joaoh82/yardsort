@@ -29,6 +29,9 @@ a project's row when agents have proposed something. The view has three lists:
 - **Rejected and revoked** — kept, with their history, so a proposal you turned down is
   recognised when an agent makes it again. **Approve** or **Restore** brings one back.
 
+In a project that [syncs](#on-your-other-computers), a fourth list, **Conflicts**, comes first
+when there is something in it.
+
 Type in the box at the top and press **Add** to write an entry yourself. What you write is
 approved as you write it. An entry is one short paragraph, at most 500 characters; line breaks
 are folded into spaces, because each entry is quoted to an agent as one list item.
@@ -88,7 +91,39 @@ not queued again. Yardsort knows which agent proposed it from the launch environ
 agent. At most 50 proposals wait in a project at once; past that, `propose` refuses and says why.
 
 There is no `ys memory approve`, on purpose. An agent can run anything `ys` offers, so approving,
-editing, rejecting and revoking happen only in the app, by you.
+editing, rejecting and revoking happen only in the app, by you, or on a computer with no screen
+with [`yardsort-host memory`](headless-host.md#memory-there), at a terminal of your own.
+
+## On your other computers
+
+In a project you [sync](remote.md#syncing-projects) between computers, the notes you approve on
+one reach the others, **approved**, since it was you who approved them, and their agents get them
+like their own. A note from another computer says which, as in _from the user, on Build box_, in
+the view and in the citation an agent reads: `(memory ab12cd34, from the user, on Build box)`. It
+names that computer's workspace when an agent proposed it there, but its workspace and run stay on
+that computer. Each note carries its history: who wrote, approved, edited or revoked it, and the
+text each edit replaced. What it sends is in **Project settings → Sync** before you turn it on, and
+the server keeps it in plain text, readable by whoever runs it.
+
+- **Only approved and revoked notes sync.** A proposal waits on the computer whose agent made it,
+  until you approve it there; a note you rejected stays there too.
+- **Turning sync on** sends the project's approved notes. **Linking** a project on another computer
+  sends its own approved notes too, after taking in the ones already synced; a note there with the
+  same text, whatever its case, is taken as the same note rather than kept twice.
+- **Revoking one** revokes it on every computer, and that wins over an edit another computer made
+  meanwhile: a revoked note never comes back from an older copy. The edit is kept in its history.
+  **Restore** is yours to do, on any of them.
+- **Two computers that edit the same note apart**, offline say, both keep their text. Once both
+  have synced, the text that reached the server first stands, and is what agents get; the other
+  waits beside it, under **Conflicts**, on both computers, saying which computer it is from. Press
+  **Keep this one**, **Keep Build box's** or **Write another**, or **Revoke** it. Whatever you
+  choose goes to every computer; if you settle it on two computers at once, the first to reach the
+  server stands, and the second yields to it. A third edit while one waits replaces the one
+  waiting, which is kept in the history.
+
+Notes sync while Yardsort runs with Remote on, right after you change one, and when another
+computer did. **Stop syncing** keeps every note here as it is. The switches stay each computer's
+own: whether a project's agents get its memory, and whether they share conversations.
 
 ## With Assist
 
@@ -102,4 +137,5 @@ else. Jev never writes or approves an entry; the marks are there to help you dec
 
 In Yardsort's local database, per project, with every change to every entry: who proposed or
 wrote it, who approved, edited, rejected or revoked it, and the text an edit replaced. Removing a
-project from Yardsort without keeping its history removes its memory too.
+project from Yardsort without keeping its history removes its memory too. A synced project's
+approved and revoked notes are also on the server, until you remove the project from it.

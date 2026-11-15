@@ -1,0 +1,96 @@
+id: remote-phone-sees-pull-requests
+name: A phone is told of the computer's pull requests
+description: >-
+  Turns Remote on in the real window against the stand-in server and pairs a pretend phone. The
+  project is on a branch with a pull request, and a stand-in `gh` answers for it from a file, so
+  no forge is asked and nobody's sign-in is used. The phone asks for the computer's pull
+  requests: the first answer says the computer is reading them, and the next has the checkout's
+  own, with its checks, review and conflicts as `gh` said them, each check by name with the
+  failed one first, and one the computer never read refused as not found. Then it checks that
+  `gh` was asked for the list, and only that. Linux only, since it stands in for the browser with
+  xdg-open. A window opens while it runs; nothing needs clicking.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_app
+    action: run
+    program: bun
+    args: [tauri, build, --debug, --no-bundle]
+    timeout: 20m
+  - id: build_stand_in
+    action: run
+    program: cargo
+    args: [build, -q, -p, yardsort-server, --example, stand-in]
+    timeout: 15m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: seed
+    action: shell
+    line: sh .yardsort/tests/support/app.sh seed
+  - id: seed_a_pull_request
+    action: shell
+    line: sh .yardsort/tests/support/app.sh seed-a-pull-request
+  - id: open_app
+    action: shell
+    line: sh .yardsort/tests/support/app.sh open
+  - id: window_up
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+
+steps:
+  - id: add_the_project
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", add-project, "{{ run.dir }}"]
+    timeout: 60s
+  - id: turn_on
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", turn-on, "{{ run.dir }}"]
+    timeout: 90s
+  - id: show_a_code
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", pairing-code, "{{ run.dir }}"]
+  - id: phone_asks
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", ask]
+  - id: let_it_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", let-it-in]
+  - id: phone_sees_pull_requests
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", sees-pull-requests, Smoke computer]
+    timeout: 90s
+    expect:
+      stdout_contains: saw the pull requests
+  - id: gh_was_asked_for_the_list
+    action: shell
+    line: grep -c "^pr list " "$YS_RUN_DIR/gh/asked"
+    expect:
+      exit: 0
+  - id: and_for_nothing_that_changes_one
+    action: shell
+    line: '! grep -E ''^pr (merge|close|reopen|ready|edit|comment|create)'' "$YS_RUN_DIR/gh/asked"'
+    expect:
+      exit: 0
+
+teardown:
+  - id: close_everything
+    action: shell
+    line: sh .yardsort/tests/support/app.sh stop-everything

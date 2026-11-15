@@ -10,9 +10,11 @@ import { Accounts, messageOf } from "../lib/accounts";
 import { appearance } from "../lib/appearance";
 import { AppProvider } from "../lib/context";
 import { diagnostics } from "../lib/diagnostics";
+import { folds } from "../lib/folds";
 import {
   appearanceFile,
   appVersion,
+  foldsFile,
   nativeEnv,
   pickImage,
   secureVault,
@@ -28,6 +30,7 @@ import { Button, FONTS, Problem, Screen, useColors, useScheme } from "../ui/part
 
 appearance.start(appearanceFile);
 viewChoices.start(viewsFile);
+folds.start(foldsFile);
 
 const app = {
   accounts: new Accounts(nativeEnv, secureVault),
@@ -130,6 +133,8 @@ export default function Layout() {
               <Stack.Screen name="workflow" options={{ title: "Workflow" }} />
               <Stack.Screen name="decision" options={{ title: "Decision" }} />
               <Stack.Screen name="workspace" options={{ title: "Workspace" }} />
+              <Stack.Screen name="pulls" options={{ title: "Pull requests" }} />
+              <Stack.Screen name="pull" options={{ title: "Pull request" }} />
               <Stack.Screen name="memory" options={{ title: "Approved memory" }} />
               <Stack.Screen name="terminal" options={{ title: "Terminal" }} />
               {/* One at a time: a link arriving while it is open comes to this one. */}

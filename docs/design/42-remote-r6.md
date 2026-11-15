@@ -2,7 +2,10 @@
 
 **Status:** planned on 2026-11-13. The owner took the defaults for the four questions in §3 the same
 day. Slice 1, the server's records, was built on 2026-11-14 (§9); its tests and its local smoke test
-passed, and its staging run waits for the owner's go-ahead to deploy.
+passed, and so did its staging run on 2026-11-15. Slice 2, turning a project on and linking it, was
+built the same day (§10); its local smoke test passed, and so did its owner run through staging,
+this computer and the box, on 2026-11-15. Slice 3, approved notes, was built on 2026-11-15 (§11);
+its local smoke test passed, and its owner run through staging is the owner's to make.
 
 This is the plan for the phase after R4 and R5 ([35](35-remote-r4-r5.md)): what it has to show, what
 it starts from, the decisions taken before any code, the slices in the order they are built, and
@@ -206,13 +209,13 @@ phone's chat ([43](43-phone-chat.md)).
 
 ## 4 · Slices
 
-| #   | Slice                                | What it adds                                                                                                                                                                                                                                                                                                                                                          | Its smoke test                                                                                                                                                                                                                                                          |
-| --- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | The server's records (built, §9)     | `remote_proto::sync`: logical ids, op ids, revisions, cursors, ops and their answers, with fixtures. The server's tables, `Records` methods on both stores, the three routes, the pruner, the relay hint (minor 9). No client                                                                                                                                         | The server's own: two accounts, duplicate push, stale base, revoke over a stale edit, a tombstone refusing a create, cursor past the floor answered with "take a snapshot", a body over the limit, a phone's token refused. Run on PostgreSQL in CI and on the stand-in |
-| 2   | Turning a project on, and linking it | The local tables: the logical-id map, the outbox, the cursor. The core's sync loop in the host runtime. Projects only: **Sync** in Project settings with its preview, **Link a synced project** on another machine, **Stop syncing**, **Remove from the server**; `yardsort-host sync on`, `link`, `status`, behind the operator's guard. `ys sync status`, read-only | `sync-link.yaml`: two throwaway profiles on the stand-in, one turning a project on, the other linking it to a clone of the same repository; the hint offered first, nothing linked until chosen; stop and remove                                                        |
-| 3   | Approved notes                       | The outbox written in `add_memory` and `change_memory`'s transactions for a synced project's approved and revoked notes; import without echo; revisions; conflicts kept locally with both texts; the Memory view's **Conflicts** section; "from Build box", "source unavailable on this device". Agents' launches get the synced notes as their own                   | `sync-memory.yaml`: two profiles; approve on one, launch an agent on the other and find the note in its first message; both offline, edit the same note on each, reconnect, settle the conflict; revoke on one while the other edits, reconnect: revoked on both        |
-| 4   | Workspaces, seen elsewhere           | The outbox in the workspace methods, each in a transaction. On a linked machine, the other host's workspaces under the project, named with their host, branch and task, and never made here. A conflict shown, nothing renamed                                                                                                                                        | `sync-workspaces.yaml`: make, rename and archive on one profile, see each on the other; no worktree, branch or directory appears on the second                                                                                                                          |
-| 5   | Checking a branch out here           | **Check out here** on another host's workspace: fetches its branch with Git and makes a workspace for it through `Workspaces::open_branch`, refusing when a local branch of that name has work the remote does not. The record of the other one is untouched                                                                                                          | `sync-checkout.yaml`: push a branch from one profile's workspace, check it out on the other; a second attempt with a diverged local branch refused                                                                                                                      |
+| #   | Slice                                             | What it adds                                                                                                                                                                                                                                                                                                                                                          | Its smoke test                                                                                                                                                                                                                                                          |
+| --- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | The server's records (built, §9)                  | `remote_proto::sync`: logical ids, op ids, revisions, cursors, ops and their answers, with fixtures. The server's tables, `Records` methods on both stores, the three routes, the pruner, the relay hint (minor 9). No client                                                                                                                                         | The server's own: two accounts, duplicate push, stale base, revoke over a stale edit, a tombstone refusing a create, cursor past the floor answered with "take a snapshot", a body over the limit, a phone's token refused. Run on PostgreSQL in CI and on the stand-in |
+| 2   | Turning a project on, and linking it (built, §10) | The local tables: the logical-id map, the outbox, the cursor. The core's sync loop in the host runtime. Projects only: **Sync** in Project settings with its preview, **Link a synced project** on another machine, **Stop syncing**, **Remove from the server**; `yardsort-host sync on`, `link`, `status`, behind the operator's guard. `ys sync status`, read-only | `sync-link.yaml`: two throwaway profiles on the stand-in, one turning a project on, the other linking it to a clone of the same repository; the hint offered first, nothing linked until chosen; stop and remove                                                        |
+| 3   | Approved notes (built, §11)                       | The outbox written in `add_memory` and `change_memory`'s transactions for a synced project's approved and revoked notes; import without echo; revisions; conflicts kept locally with both texts; the Memory view's **Conflicts** section; "from Build box", "source unavailable on this device". Agents' launches get the synced notes as their own                   | `sync-memory.yaml`: two profiles; approve on one, launch an agent on the other and find the note in its first message; both offline, edit the same note on each, reconnect, settle the conflict; revoke on one while the other edits, reconnect: revoked on both        |
+| 4   | Workspaces, seen elsewhere                        | The outbox in the workspace methods, each in a transaction. On a linked machine, the other host's workspaces under the project, named with their host, branch and task, and never made here. A conflict shown, nothing renamed                                                                                                                                        | `sync-workspaces.yaml`: make, rename and archive on one profile, see each on the other; no worktree, branch or directory appears on the second                                                                                                                          |
+| 5   | Checking a branch out here                        | **Check out here** on another host's workspace: fetches its branch with Git and makes a workspace for it through `Workspaces::open_branch`, refusing when a local branch of that name has work the remote does not. The record of the other one is untouched                                                                                                          | `sync-checkout.yaml`: push a branch from one profile's workspace, check it out on the other; a second attempt with a diverged local branch refused                                                                                                                      |
 
 Slice 1 comes first because every other slice pushes to it. Slices 3 and 4 depend on 2 and not on
 each other. Slice 5 depends on 4. The gate's three checks are slice 3's two-machine runs (converge
@@ -369,3 +372,215 @@ cargo run -p yardsort-server --example sync -- two-hosts https://remote-staging.
 It signs three devices in, in the browser, and ends by removing the project from the server and
 both hosts from the account. `other-account` with the same `--keep` checks a second account, if
 there is one to sign in as.
+
+**Run on staging on 2026-11-15**, after the owner's go-ahead to deploy `main` at `1749f4b` (the
+workflow's run 43698600795): `two-hosts` passed all 17 checks and removed what it made. The browser
+was signed in to staging already, so the three sign-ins went through without a person. Not run:
+`other-account`, for want of a second account.
+
+## 10 · Slice 2: turning a project on, and linking it
+
+**Built on 2026-11-14.** Projects sync, and only projects: the name and the remote hint. Notes and
+workspaces are slices 3 and 4.
+
+**What it adds.**
+
+- **The local tables** (core migration 43): `sync_ids`, a record's logical id beside its local id,
+  with its project's, the server's revision as last heard (none until the server has it) and
+  whether it was just linked; `sync_outbox`, the ops waiting to go up, a refused one held with the
+  server's reason; and `sync_state`, the cursor, when a pass last went through, and why the last
+  one did not.
+- **The rules**, in `yardsort_core::sync` and the store's `sync` methods, shared by the app,
+  `yardsort-host` and `ys`: turning on writes the id and the create in one transaction; linking
+  writes the id of a project the server already has; settling each answer, taking pulled records
+  and snapshots in one transaction with no outbox written; and the project's state as every
+  surface shows it (`ProjectSync`: Remote off, off with its preview, or on: reached, being
+  removed, refused).
+- **The loop**, `remote_host::sync::Syncer`, started with the host's link and stopped with it, so
+  the app and `yardsort-host` run the same one. A pass unlinks projects removed from Yardsort here,
+  pushes the outbox in batches of 100 ops and 256 KiB, takes a snapshot of each project just
+  linked, then pulls after the cursor. It runs at start, after each act here, on the relay's
+  `syncChanged`, and every five minutes, and does nothing on the network while nothing syncs. A
+  failed pass waits 2 seconds, doubling to five minutes, each with a tenth's jitter.
+- **The desktop**: **Sync** in Project settings, with the preview before anything goes up, and
+  **Link to a synced project…**, the account's synced projects this host is not linked to, the
+  ones whose hint matches first, none chosen. Its six commands answer the project's state, and a
+  `SyncChanged` event says when a pass changed something.
+- **`yardsort-host sync`**: `status`, `on` (shows the preview, asks), `link`, `stop` and `remove`
+  (asks). All but `status` and the preview `on` asks for are behind `pair`'s guard.
+- **`ys sync status`**, read-only. The test that covers it also checks that `ys sync` offers
+  nothing else.
+
+**What building it settled, beyond §3.**
+
+- **The hint** is the fetch address of `origin`, or of the only remote, with any user and password
+  removed. A remote on this disk, by path or `file://`, a Windows drive included, sends none: its
+  path is nobody else's. Two hints match when their host and path do, whatever the scheme, port,
+  case or `.git`, so a clone over SSH matches one over HTTPS.
+- **A project's body** is `{name, remote}` at schema 1. A project's name elsewhere renames nothing
+  here; it is what linking shows.
+- **Answers settle in one place.** Applied sets the revision; a project's delete applied forgets it
+  here. A conflict on a create (the server had it already) takes the server's revision and drops the
+  op. A conflict on a delete moves its base to the current revision and tries again; one whose
+  current record is deleted forgets the project. Refused holds the op with the reason, shown on the project, and never
+  sends it again; ops after it still go up.
+- **Pulled and snapshot records** set revisions; a project deleted on the server, by this host or
+  another, is forgotten here and the local project kept. A snapshot that no longer has a project
+  forgets it too, unless its create has not reached the server yet. A cursor answered
+  `cursorExpired` takes a full snapshot, and the cursor moves to its head.
+- **Remote off, or another server, clears every sync table.** The logical ids belong to that
+  account on that server; turning on or linking again starts over, and what is on the server stays
+  for the other hosts.
+- **Removing a project from Yardsort** stops it syncing here at the next pass, which unlinks it at
+  the server; its records stay for the others.
+- **One act at a time.** A pass, a link and a stop take turns, so a stop never forgets a project
+  whose create is on its way: it waits, the create settles, and the stop unlinks what the server
+  now has. Turning on and removing only queue, and need no turn.
+- **Linking** calls the server first and writes the id after. If the write fails, it unlinks
+  again, but only a link this call made: one the server had already is left. A synced project
+  another project here is linked to is refused before the server is asked.
+- **A link the server has and this host does not**, after a link whose answer was lost or a
+  Remote turned off while away, is offered for linking like any other; the person still picks the
+  project.
+- **The window is told** when a pass changed what it shows: a project reaching the server, one
+  forgotten or refused, and a pass going through after one that failed.
+- **Removing from the server** needs the server to have the project first: until its create has
+  gone up, it is refused with a reason saying so.
+
+**Its tests.** `crates/core/src/sync/tests.rs`, 11: hints and matching, drive letters included;
+turning on and settling; a conflict on a create; a refused op held and not sent again; removal
+rebased after a conflict, and ending; removal by another host; linking once, either way, and the
+snapshot after; a snapshot keeping an unsent create; Remote off and a server move clearing
+everything; and a pass's state. `crates/remote-host/tests/sync.rs`, 4, against a stand-in server on a
+real socket: a stop held behind a create on its way and nothing left linked, a lost link offered and
+not undone by a link that failed here, a second clone refused with the first kept, and reaching
+the server and recovering from a failed pass both telling the window. `yardsort-host`'s control
+test pins which asks are guarded. The
+app's `ProjectSyncSection` and `LinkSyncedProjectDialog` tests, 16, and one in Project settings:
+the preview shown before turning on, nothing chosen until the person picks, the same-remote mark,
+Remove asking first and its "Keep it" respected, Escape closing only the link dialog.
+
+**Its smoke test.** `.yardsort/tests/sync-link.yaml`, two throwaway `yardsort-host` profiles on the
+stand-in. The one turns a project on, refused first from input that is not a terminal and then
+answered "no", with nothing sent either time; the preview shows the remote without the password the
+test's `origin` has, and the password shows nowhere. The other is offered it, matched to a clone
+whose `origin` is the SSH address, links nothing by itself, and links it when told. It stops there,
+while the first keeps syncing; then the first removes it from the server, it is offered nowhere,
+and both keep their projects. Passed on 2026-11-14 with its steps run by hand, all 26 steps; like
+`sync-server.yaml`, it waits for the owner's approval in the app before `ys test run` runs it.
+
+**The owner run**, on staging on 2026-11-15, the same deploy as slice 1's: a throwaway
+`yardsort-host` profile on this computer and one on the box, each built from `main` (the box's
+in a folder of its own, beside its running 0.29 host, which was left alone), signed in through the
+browser here, the box's over a forwarded port. The same steps as `sync-link.yaml`: refused from
+input that is not a terminal, a "no" sending nothing, the preview without the password, the box
+offered the project matched to its SSH clone and linking nothing until told, then linked, stopped
+and offered again, while this computer kept syncing; then removed from the server here, offered
+nowhere, and both kept their projects. All passed, and neither host's log had the password. Both
+hosts were signed out afterwards, which removes them from the account.
+
+## 11 · Slice 3: approved notes
+
+**Built on 2026-11-15.** A synced project's approved and revoked notes sync; candidates and
+rejected notes never do.
+
+**What it adds.**
+
+- **Core migration 44**: a note's host of origin, by id and name, and a conflict waiting for the
+  person, its id, the other text, the host it is from and when. Nothing for candidates.
+- **The outbox in the memory methods' transactions.** `add_memory` and `change_memory` call
+  `store::sync::queue_note`, which queues a put for an approved note (a create the first time) or a
+  revoke for a revoked one, only in a project that syncs here. Turning a project on queues its
+  approved notes; linking one queues this host's own once the snapshot is in. A test reads
+  `store.rs` and fails when a method that writes `memory_entries` is not on its list of three
+  (`add_memory` and `change_memory` queue; `propose_memory` makes candidates).
+- **A note's body**, `{text, author, harness, workspace, origin, from, createdAt, history,
+conflict, settles}` at schema 1: the local workspace and run never go. Revoked is the record's
+  flag. The oldest history lines are dropped when it would not fit in 16 KiB.
+- **Taking notes in**, with nothing queued back. One this host has not got becomes an approved or
+  revoked note here, with its history, or is taken as the same note as one here with the same text,
+  any case, that does not sync yet. One with an op of this host's still out is left until the
+  answer comes.
+- **The Memory view's Conflicts section**, before the others: the text that stands, which agents
+  get, and the other host's, with **Keep this one**, **Keep _host_'s**, **Write another** and
+  **Revoke**, through a new `memory_settle` command. The view reads again on `SyncChanged`. A note
+  from elsewhere is cited "from the user, on Build box", in the view and in an agent's first
+  message.
+- **`yardsort-host memory`**: `list`, `write`, `approve`, `reject`, `revoke`, `restore`, `edit`
+  and `settle`, through the running host, which wakes its loop. All of them are behind `pair`'s
+  guard, `list` too, since it shows every state whether the project shares its memory or not: on a
+  computer with no screen too, no agent approves its own proposal or reads more than `ys memory`
+  gives it. `ys` gains nothing.
+- **The preview** of turning sync on counts the approved notes that go with it, in the window and
+  in `yardsort-host sync on`.
+
+**What building it settled, beyond §3.**
+
+- **Each op is made against the revision the server will have** once the ops ahead of it apply:
+  the last heard, and one more for each still out. So an edit made while a create is on its way
+  goes up against revision 1.
+- **A conflict drops every op still out for the note** and queues one made from the note as it
+  is now, against the revision as it is there: those ops were made against a revision that is gone.
+- **The conflict is on the server, not only here.** The host whose edit lost takes the text that
+  stands and pushes it again with its own text as the note's conflict, with an id. So both hosts
+  show the same conflict, and the gate's "shown on both" holds without either being online at
+  the same moment. Agents get the text that stands.
+- **Settled once.** A settle says which conflict it settles. One that meets a newer revision where
+  that conflict is no longer open yields to the settle that got there first; one where it is still
+  open goes up again. A new text or a revoke settles a conflict too, since the person saw both
+  texts to make either.
+- **A revoke there wins** over an edit here: the note is revoked here, and this host's text is
+  kept in its history. A revoke here over an edit there goes up again against the current revision.
+  A revoke carries no body, so the host taking one in adds its "revoked" history line.
+- **A third text while a conflict is open** replaces the one waiting, which is kept in the history.
+  The history table's actions are fixed by migration 10, so such lines are "edited" ones with the
+  replaced text.
+- **"Source unavailable on this device"** has nowhere to go: the Memory view links no run, here or
+  elsewhere. A note from another host names that host instead.
+- **A pass pushes again** after a project's first snapshot, so a link sends this host's notes at
+  once, and pushes at most 20 times, since an answer can queue another op.
+
+**What its review settled** (#262):
+
+- **One op per record in a push.** An op's base is the revision the op before it makes, so it goes
+  only once that one is answered (`sync_batch`). Sent together, a second offline edit applied
+  against a revision another host had made, a revoke's, and restored the note when the first was
+  answered with a conflict.
+- **A conflict this host published can itself meet a newer text.** Its own text is then the one it
+  set beside the other, not the note's text here, so that is what goes beside the newer one; the
+  text that stood here before is kept in the history.
+- **`memory list` is behind the guard too.** It shows candidates and rejected notes, and a project's
+  notes whether it shares them with its agents or not, which `ys memory` does not.
+
+**Its tests.** `crates/core/src/sync/note_tests.rs`, 6, two stores through a stand-in that keeps
+the server's rules: a note arriving approved and cited, its history with it, nothing echoed, a
+candidate and a rejected note staying, a candidate approved later going; two edits apart, the same
+conflict on both, agents getting the standing text, and two settles at once settled once; a revoke
+winning over an edit made meanwhile, the edit in the history, the revoke recorded there, and a
+restore going everywhere; linking taking the same text as one note and sending the rest; a
+project that does not sync sending nothing; and the list of methods that write notes. Three more
+from the review: two offline edits never undoing a revoke made meanwhile, nor meeting each other
+rather than the other host's edit, and a published conflict that meets a newer text keeping this
+host's; the first two fail without one op per record, the third without its fix. Each of the
+settle-once, revoke-wins and same-text rules was checked to fail its test without it.
+`crates/remote-host/tests/sync.rs` gains a link sending this host's notes in the same pass, which
+fails without the second push. `yardsort-host`'s control test pins every memory ask as guarded. The Memory view's tests, 2 more: both texts shown apart from Approved, each settle
+sent as chosen, Revoke, and the view reading again when another computer settles it.
+
+**Its smoke test.** `.yardsort/tests/sync-memory.yaml`, two throwaway `yardsort-host` profiles on the
+stand-in, each through a cable (`support/cable.ts`, a TCP proxy that unplugging kills): a note
+written on one, refused first from input that is not a terminal, arrives approved on the other,
+"from the user, on here", and is in the first message of an agent started there
+(`support/record-harness.toml` keeps it); that agent's proposal stays there, with nothing waiting
+to go up, and a shell that is not a terminal cannot approve it. Both unplugged, each edits the
+note, each has one op waiting; plugged back in, the same text stands on both with the other beside
+it; settled on the second with `--other`, both end with that text and no conflict. Then the first
+revokes while the second, unplugged, edits: plugged back in, revoked on both, and nothing left to
+go up. Passed on 2026-11-15 with its steps run by hand, all 24, and again after its review, all 25 with the step it added, and no note's text was in the
+stand-in's log or either host's. Like the others, it waits for the owner's approval in the app
+before `ys test run` runs it.
+
+**The owner run**, this computer and the box through staging. It needs no deploy, since the server
+reads nothing in a record, but a build of this branch on both, and a way to take each offline from
+staging while its host runs: on the box, a firewall rule, as root; here, the app with the network
+off. That is the gate's run (§5), and the owner's to make.

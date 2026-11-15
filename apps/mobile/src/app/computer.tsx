@@ -3,7 +3,9 @@
 
 /**
  * One computer: its workspaces, by project. What was last seen shows, marked as such, until the
- * computer answers, or for as long as it cannot.
+ * computer answers, or for as long as it cannot. A project's heading folds its workspaces away,
+ * and this phone remembers which are folded (`lib/folds.ts`). A workspace's row carries its pull
+ * request's badge, when the computer reads pull requests and can be reached (`lib/pulls.ts`).
  */
 
 import type {
@@ -15,16 +17,19 @@ import type {
   WorkspaceSummary,
 } from "@yardsort/remote-client";
 import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "react-native";
 
 import { messageOf } from "../lib/accounts";
 import { useApp } from "../lib/context";
+import { folds } from "../lib/folds";
 import { moment } from "../lib/format";
 import type { ObservedComputer, ObservedWorkspaces } from "../lib/observed";
+import { byWorkspace, routeOf, toneWords } from "../lib/pulls";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
 import { canStart } from "./start";
-import { Body, Button, Group, Problem, Row, Screen, Section, Waiting } from "../ui/parts";
+import { Body, Button, Fold, Group, Problem, Row, Screen, Waiting } from "../ui/parts";
+import { PullBadge, usePulls } from "../ui/pull";
 
 /** A workspace as this screen shows it, from the computer or from what was last seen. */
 interface Shown {
@@ -32,7 +37,8 @@ interface Shown {
   project: ProjectId;
   name: string;
   detail: string;
-  running?: string | undefined;
+  /** How many of its conversations are running, when the computer said. */
+  running: number;
 }
 
 export default function ComputerScreen() {
@@ -55,6 +61,12 @@ function Computer({ host }: { host: HostId }) {
   const [more, setMore] = useState<WorkspacePage | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [unpairing, setUnpairing] = useState(false);
+  // Which projects are folded is the phone's to remember: this only draws again after a press.
+  const [, setFolded] = useState(0);
+  const fold = (project: ProjectId) => {
+    folds.toggle(host, project);
+    setFolded((n) => n + 1);
+  };
 
   const unpair = async () => {
     setUnpairing(true);
@@ -96,6 +108,9 @@ function Computer({ host }: { host: HostId }) {
     [accounts, host],
   );
   const first = useRead(channel, read, asked);
+  // Nothing of these is kept: a badge shows once the computer has said, and not before.
+  const pulls = usePulls(channel, "workspaces", asked).read;
+  const pullsOf = useMemo(() => byWorkspace(pulls?.pulls ?? []), [pulls]);
 
   const showMore = async (cursor: NonNullable<WorkspacePage["next"]>) => {
     if (!channel) return;
@@ -137,6 +152,7 @@ function Computer({ host }: { host: HostId }) {
           project: workspace.project,
           name: workspace.name,
           detail: workspace.missing ? "Its folder is gone" : (workspace.branch ?? ""),
+          running: 0,
         }))
       : null;
   const projects = page?.projects ?? seen?.projects ?? [];
@@ -165,35 +181,73 @@ function Computer({ host }: { host: HostId }) {
         title="Workflows"
         onPress={() => router.push({ pathname: "/workflows", params: { host } })}
       />
+      {pulls && (pulls.open > 0 || pulls.pulls.length > 0) && (
+        <Button
+          title={pulls.open > 0 ? `Pull requests · ${pulls.open} open` : "Pull requests"}
+          onPress={() => router.push({ pathname: "/pulls", params: { host } })}
+        />
+      )}
       {projects.map((project) => {
         const here = shown?.filter((workspace) => workspace.project === project.id) ?? [];
         if (here.length === 0) return null;
+        const open = !folds.has(host, project.id);
+        // What a folded project would otherwise hide: that agents are at work inside it.
+        const running = here.reduce((sum, workspace) => sum + workspace.running, 0);
         return (
-          <Section key={project.id} title={project.name} note={here.length}>
+          <Fold
+            key={project.id}
+            title={project.name}
+            note={here.length}
+            attention={!open && running > 0 ? `${running} running` : undefined}
+            open={open}
+            onToggle={() => fold(project.id)}
+          >
             <Group>
-              {here.map((workspace) => (
-                <Row
-                  key={workspace.id}
-                  title={workspace.name}
-                  {...(workspace.detail ? { detail: workspace.detail } : {})}
-                  monoDetail
-                  {...(workspace.running ? { badge: workspace.running } : {})}
-                  label={[
-                    workspace.name,
-                    [workspace.detail, workspace.running].filter(Boolean).join(" · "),
-                  ]
-                    .filter(Boolean)
-                    .join(", ")}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/workspace",
-                      params: { host, workspace: workspace.id },
-                    })
-                  }
-                />
-              ))}
+              {here.map((workspace) => {
+                const badge = workspace.running > 0 ? `${workspace.running} running` : "";
+                const [pull, ...others] = pullsOf.get(workspace.id) ?? [];
+                return (
+                  <Row
+                    key={workspace.id}
+                    title={workspace.name}
+                    {...(workspace.detail ? { detail: workspace.detail } : {})}
+                    monoDetail
+                    {...(badge ? { badge } : {})}
+                    {...(pull
+                      ? {
+                          trailing: (
+                            <PullBadge
+                              pull={pull}
+                              more={others.length}
+                              onPress={() =>
+                                router.push({
+                                  pathname: "/pull",
+                                  params: { host, ...routeOf(pull) },
+                                })
+                              }
+                            />
+                          ),
+                        }
+                      : {})}
+                    label={[
+                      workspace.name,
+                      [workspace.detail, badge, pull ? toneWords(pull) : ""]
+                        .filter(Boolean)
+                        .join(" · "),
+                    ]
+                      .filter(Boolean)
+                      .join(", ")}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/workspace",
+                        params: { host, workspace: workspace.id },
+                      })
+                    }
+                  />
+                );
+              })}
             </Group>
-          </Section>
+          </Fold>
         );
       })}
       {page?.next && (
@@ -240,6 +294,6 @@ function shownFromComputer(workspace: WorkspaceSummary): Shown {
     project: workspace.project,
     name: workspace.name,
     detail: (workspace.missing ? "Its folder is gone" : on) ?? "",
-    running: running > 0 ? `${running} running` : undefined,
+    running,
   };
 }

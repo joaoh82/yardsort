@@ -338,6 +338,8 @@ impl Started {
             starting: starting.then(|| Arc::clone(&self.lent) as Arc<dyn Starting>),
             workflow: None,
             conversations: None,
+            tests: None,
+            pulls: None,
         }
     }
 
@@ -413,7 +415,7 @@ fn a_phone_with_control_starts_a_workspace_and_its_agent_as_the_window_would() {
         listed["result"]["harnesses"],
         json!([
             {"id": "sh-agent", "name": "Shell agent"},
-            // Since minor 10: what its composer offers for it.
+            // Since minor 12: what its composer offers for it.
             {"id": "sh-teller", "name": "Telling agent", "models": ["large"], "efforts": ["high"]},
         ])
     );

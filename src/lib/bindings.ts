@@ -344,6 +344,20 @@ export const commands = {
 	 */
 	workspaceHandoff: (workspaceId: string) => typedError<HandoffPacket, IpcError>(__TAURI_INVOKE("workspace_handoff", { workspaceId })),
 	remoteStatus: () => typedError<RemoteStatus, IpcError>(__TAURI_INVOKE("remote_status")),
+	projectSyncGet: (projectId: string) => typedError<ProjectSyncStatus, IpcError>(__TAURI_INVOKE("project_sync_get", { projectId })),
+	/**  Turn sync on for a project: its name and remote hint go up on the next pass. */
+	projectSyncOn: (projectId: string) => typedError<ProjectSyncStatus, IpcError>(__TAURI_INVOKE("project_sync_on", { projectId })),
+	/**
+	 *  The synced projects another computer of the account has, that this one could link
+	 *  `project_id` to. Those whose remote is this project's come first.
+	 */
+	projectSyncOffers: (projectId: string) => typedError<SyncOffer[], IpcError>(__TAURI_INVOKE("project_sync_offers", { projectId })),
+	/**  Link a project here to the synced one the person chose. */
+	projectSyncLink: (projectId: string, synced: string) => typedError<ProjectSyncStatus, IpcError>(__TAURI_INVOKE("project_sync_link", { projectId, synced })),
+	/**  Stop syncing a project here. Its records stay on the server for the account's other hosts. */
+	projectSyncStop: (projectId: string) => typedError<ProjectSyncStatus, IpcError>(__TAURI_INVOKE("project_sync_stop", { projectId })),
+	/**  Remove a project's records from the server, for every host. Each keeps its own copy. */
+	projectSyncRemove: (projectId: string) => typedError<ProjectSyncStatus, IpcError>(__TAURI_INVOKE("project_sync_remove", { projectId })),
 	/**
 	 *  Turn Remote on with the server at `server_url`, as `name`: sign in through the browser, then
 	 *  register this computer as a host. Waits for the browser, for up to ten minutes, unless
@@ -523,6 +537,8 @@ export const commands = {
 	memoryWrite: (projectId: string, text: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_write", { projectId, text })),
 	memoryEdit: (id: string, text: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_edit", { id, text })),
 	memoryDecide: (id: string, decision: MemoryDecision) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_decide", { id, decision })),
+	/**  Settle a note two hosts changed at once: keep one of the texts, or write a third. */
+	memorySettle: (id: string, how: MemorySettle) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_settle", { id, how })),
 	/**  Turn sharing a project's approved entries with its agents on or off. */
 	memoryShare: (projectId: string, shared: boolean) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_share", { projectId, shared })),
 	/**  Turn letting a project's agents read each other's conversations on or off. */
@@ -901,6 +917,7 @@ export const events = {
 	remotePairingRequested: makeEvent<RemotePairingRequested>("remote-pairing-requested"),
 	schedulesChanged: makeEvent<SchedulesChanged>("schedules-changed"),
 	sessionStarted: makeEvent<SessionStarted>("session-started"),
+	syncChanged: makeEvent<SyncChanged>("sync-changed"),
 	testResultSent: makeEvent<TestResultSent>("test-result-sent"),
 	testRunOutput: makeEvent<TestRunOutput>("test-run-output"),
 	testRunsChanged: makeEvent<TestRunsChanged>("test-runs-changed"),
@@ -2133,11 +2150,26 @@ export type MemoryEntry = {
 	state: string,
 	/**  `user` or `agent`. */
 	author: string,
-	/**  Where it came from, in words: "the user", or "claude in fix-login". */
+	/**
+	 *  Where it came from, in words: "the user", or "claude in fix-login", and the host for one
+	 *  synced from another: "the user, on Build box".
+	 */
 	from: string,
+	/**  The other host it was written or approved on, for a synced note. */
+	host: string | null,
+	/**  Two hosts changed it at once: the other text, until the person settles it. */
+	conflict: MemoryEntryConflict | null,
 	createdAt: number | null,
 	updatedAt: number | null,
 	history: MemoryHistoryItem[],
+};
+
+/**  Another host's text for a note, beside the one that stands. */
+export type MemoryEntryConflict = {
+	text: string,
+	/**  The host it is from, by name. */
+	from: string,
+	at: number | null,
 };
 
 /**  One change to an entry. */
@@ -2150,6 +2182,15 @@ export type MemoryHistoryItem = {
 	/**  The text an edit replaced. */
 	previousText: string | null,
 };
+
+/**  How the person settles a conflict. */
+export type MemorySettle = 
+/**  The text that stands. */
+{ keep: "standing" } | 
+/**  The other host's. */
+{ keep: "other" } | 
+/**  A third, written now. */
+{ keep: "text"; text: string };
 
 /**  How many proposals wait in a project. */
 export type MemoryWaiting = {
@@ -2684,6 +2725,30 @@ export type ProjectPullRequests = {
 	 *  [`tracked`]. Each says which workspace it is shown with.
 	 */
 	tracked: TrackedPullRequest[],
+};
+
+/**  How a project stands for sync on this installation. */
+export type ProjectSync = 
+/**  Remote is off here, so nothing syncs. */
+{ state: "remoteOff" } | 
+/**  It does not sync. Turning it on sends what `preview` shows. */
+{ state: "off"; preview: SyncPreview } | 
+/**  It syncs, or is on its way to. */
+{ state: "on"; 
+/**  The server has its record. */
+reached: boolean; 
+/**  Being removed from the server. */
+removing: boolean; 
+/**  Why the server refused something of it, when it did. */
+refused: string | null };
+
+/**  How a project stands for sync, and how the last pass went. */
+export type ProjectSyncStatus = {
+	sync: ProjectSync,
+	/**  When a pass last went through, in milliseconds. */
+	syncedAt: number | null,
+	/**  Why the last pass did not. */
+	problem: string | null,
 };
 
 /**  What a project's source says about its tasks. */
@@ -3719,6 +3784,26 @@ export type Suggestion = {
 	effortByHarness: { [key in string]: string },
 };
 
+/**  Something sync shows changed: refresh what shows it. */
+export type SyncChanged = Record<string, never>;
+
+/**  A project another computer syncs, offered for linking. */
+export type SyncOffer = {
+	id: string,
+	name: string,
+	remote: string | null,
+	/**  Its remote is this project's. */
+	matches: boolean,
+};
+
+/**  What turning sync on for a project sends. */
+export type SyncPreview = {
+	name: string,
+	remote: string | null,
+	/**  How many approved notes go up with it, each with its text and history. */
+	notes: number,
+};
+
 export type SystemLoad = {
 	totalMemory: number | null,
 	usedMemory: number | null,
@@ -3942,7 +4027,7 @@ export type TestReview = {
 	/**  The file as it was when it was last approved, when that is not this file. */
 	previous: string | null,
 	/**
-	 *  The hash of the file these words are of: what [`test_run_start`] must still see to run
+	 *  The hash of the file these words are of: what the app's `test_run_start` must still see to run
 	 *  without the approval card, so a later edit is never approved unseen.
 	 */
 	contentHash: string,

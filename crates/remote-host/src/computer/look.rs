@@ -19,7 +19,7 @@ use super::start::{no_such, open, refused};
 use super::ComputerHome;
 use crate::account::Failure;
 
-/// What the host answers that can be read this way: one from before minor 11 cannot.
+/// What the host answers that can be read this way: one from before minor 13 cannot.
 pub const LOOK: &str = "file.read";
 
 /// What changed in `workspace` on `host`.

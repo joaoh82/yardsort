@@ -1,4 +1,4 @@
-//! Sending a workspace's work on from a device: since minor 12.
+//! Sending a workspace's work on from a device: since minor 14.
 //!
 //! What the window's commit box and publish bar do for a local workspace, asked of a host by the
 //! workspace's id: where it stands with its remote (`workspace.publish`), commit everything

@@ -5,7 +5,8 @@
  * A conversation as a phone reads it (43): one column at the phone's width, scrolled up and down
  * only. What the person typed, the agent's steps folded to a line, and what it wrote back, read on
  * the computer from the agent's own record. Questions the agent asks for a permission are answered
- * here. A message is typed into the conversation's terminal, as at the computer.
+ * here, and so is a smoke test run of the workspace waiting to be let go (`test-card.tsx`). A
+ * message is typed into the conversation's terminal, as at the computer.
  */
 
 import {
@@ -48,9 +49,11 @@ import { useApp } from "../lib/context";
 import { stamp } from "../lib/format";
 import { lineCount } from "../lib/markdown";
 import { type Said, say } from "../lib/say";
+import { askedByWords, WaitingTests } from "../lib/tests";
 import { inFront } from "./live";
 import { Markdown } from "./markdown";
 import { Button, FONTS, Problem, useColors, Waiting } from "./parts";
+import { TestCard } from "./test-card";
 
 /** Past this many lines a reply or a message is folded behind "Show all". */
 const FOLD_LINES = 24;
@@ -61,6 +64,8 @@ const WHILE_WORKING_MS = 4_000;
 const AFTER_EVENT_MS = [400, 2_500];
 /** How often to ask whether the conversation's terminal ended or went quiet. */
 const SEEN_EVERY_MS = 5_000;
+/** How often to ask whether a smoke test run waits: one can be asked for while nothing is said. */
+const TESTS_EVERY_MS = 5_000;
 /** Near enough the bottom to stay there as more comes. */
 const AT_BOTTOM_PX = 48;
 
@@ -127,10 +132,18 @@ export function ChatView({
       clearInterval(every);
     };
   }, [channel, target.workspace, target.session]);
-  const current = useMemo(
-    () => settled(stateOf(events, chat.asks, chat.answersAsks), seen, now),
-    [events, chat.asks, chat.answersAsks, seen, now],
-  );
+  // Smoke test runs of the workspace waiting to be let go, whoever asked for them.
+  const tests = useMemo(() => new WaitingTests(target.workspace), [target.workspace]);
+  const waiting = useSyncExternalStore(tests.subscribe, tests.getSnapshot);
+  // An agent waiting on its own test run looks like one working, or gone quiet: it needs you.
+  const asked =
+    waiting.first !== null && waiting.first.session === target.session ? waiting.first : null;
+  const current = useMemo(() => {
+    const state = settled(stateOf(events, chat.asks, chat.answersAsks), seen, now);
+    return asked && state.kind !== "ended"
+      ? ({ kind: "needsYou", since: asked.askedAt } as const)
+      : state;
+  }, [events, chat.asks, chat.answersAsks, seen, now, asked]);
   const steps = useMemo(() => stepsOf(events, chat.turns), [events, chat.turns]);
 
   useEffect(() => state(current), [current, state]);
@@ -146,9 +159,21 @@ export function ChatView({
   const newest = events.at(-1)?.id;
   useEffect(() => {
     if (!channel || newest === undefined) return;
-    const timers = AFTER_EVENT_MS.map((ms) => setTimeout(() => void feed.read(channel), ms));
+    const timers = AFTER_EVENT_MS.map((ms) =>
+      setTimeout(() => {
+        void feed.read(channel);
+        void tests.read(channel);
+      }, ms),
+    );
     return () => timers.forEach(clearTimeout);
-  }, [channel, feed, newest]);
+  }, [channel, feed, tests, newest]);
+
+  useEffect(() => {
+    if (!channel) return;
+    void tests.read(channel);
+    const every = setInterval(() => void tests.read(channel), TESTS_EVERY_MS);
+    return () => clearInterval(every);
+  }, [channel, tests]);
 
   const working = current.kind === "working" || current.kind === "needsYou";
   useEffect(() => {
@@ -317,7 +342,22 @@ export function ChatView({
             showTerminal={showTerminal}
           />
         ))}
-        {current.kind === "needsYou" && chat.asks.length === 0 && (
+        {waiting.first && (
+          <TestCard
+            key={waiting.first.run}
+            test={waiting.first}
+            behind={waiting.behind}
+            askedBy={askedByWords(waiting.first, target.session, target.harness)}
+            problem={waiting.problem}
+            decide={
+              channel
+                ? (decision) =>
+                    tests.decide(channel, waiting.first as NonNullable<typeof asked>, decision)
+                : undefined
+            }
+          />
+        )}
+        {current.kind === "needsYou" && chat.asks.length === 0 && !asked && (
           <View
             style={[styles.ask, { backgroundColor: colors.accentTint, borderColor: colors.accent }]}
           >

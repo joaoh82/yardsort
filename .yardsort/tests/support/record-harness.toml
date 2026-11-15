@@ -1,0 +1,10 @@
+# sync-memory.yaml's agent: a shell that keeps its first message in its workspace, as
+# first-message.txt, for the test to read, then waits.
+
+[[harness]]
+id = "record"
+builtin = false
+label = "Records its first message"
+command = "sh"
+prompt_args = ["-c", "printf '%s' \"$1\" > first-message.txt; exec sleep 600", "record", "{prompt}"]
+session_id_mode = "assigned"

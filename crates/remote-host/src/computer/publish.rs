@@ -22,7 +22,7 @@ use super::ComputerHome;
 use crate::account::Failure;
 
 /// What the host answers that can commit, push and open a pull request: one from before minor
-/// 12 cannot.
+/// 14 cannot.
 pub const PUBLISH: &str = "workspace.publish";
 
 /// Why something that changes a repository there was not answered. When the link dropped

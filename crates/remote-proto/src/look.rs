@@ -1,4 +1,4 @@
-//! Reading a workspace's changes and files from a device: since minor 11.
+//! Reading a workspace's changes and files from a device: since minor 13.
 //!
 //! What the window's right panel shows for a local workspace, asked of a host by the workspace's
 //! id: which files changed (`workspace.changes`), one folder of its file tree (`workspace.files`),

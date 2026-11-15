@@ -1,6 +1,6 @@
 {
   "requestId": "r-34",
-  "protocol": { "major": 1, "minor": 10 },
+  "protocol": { "major": 1, "minor": 12 },
   "op": "project.clone",
   "params": { "remote": "https://github.com/example/example-app.git" }
 }

@@ -33,7 +33,7 @@ import {
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { AppState, KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from "react-native";
+import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { messageOf } from "../lib/accounts";
@@ -45,6 +45,7 @@ import type { Reach } from "../lib/presence";
 import { Timings, timingWords } from "../lib/timing";
 import { type View as Shown, viewChoices } from "../lib/views";
 import { type Sight, PageFeed, TerminalWatch } from "../lib/watch";
+import { AboveKeyboard } from "../ui/above-keyboard";
 import { ChatView, useClock } from "../ui/chat";
 import { Composer } from "../ui/composer";
 import {
@@ -263,21 +264,16 @@ function ChatScreen({
   children: React.ReactNode;
 }) {
   const colors = useColors();
-  const headerHeight = useHeaderHeight();
   return (
     <SafeAreaView
       edges={["bottom", "left", "right"]}
       style={[styles.fill, { backgroundColor: colors.background }]}
     >
       <Stack.Screen options={{ title }} />
-      <KeyboardAvoidingView
-        behavior="padding"
-        keyboardVerticalOffset={headerHeight}
-        style={styles.fill}
-      >
+      <AboveKeyboard clear>
         {bar}
         {children}
-      </KeyboardAvoidingView>
+      </AboveKeyboard>
     </SafeAreaView>
   );
 }
@@ -509,11 +505,8 @@ function Watching({
       style={[styles.fill, { backgroundColor: colors.surface }]}
     >
       {title}
-      <KeyboardAvoidingView
-        behavior="padding"
-        keyboardVerticalOffset={room?.top ?? 0}
-        style={styles.fill}
-      >
+      {/* A bar is kept clear of the header. The terminal alone makes its own room under one. */}
+      <AboveKeyboard clear={bar !== undefined}>
         {bar}
         <TerminalView
           feed={feed}
@@ -596,7 +589,7 @@ function Watching({
             <Button title="Hand back" kind="quiet" onPress={() => control.release()} />
           )}
         </View>
-      </KeyboardAvoidingView>
+      </AboveKeyboard>
     </SafeAreaView>
   );
 }

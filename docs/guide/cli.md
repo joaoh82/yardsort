@@ -406,8 +406,29 @@ ys memory propose "The tests need TZ=UTC."
 Run inside a workspace, it is about that workspace's project; elsewhere, name it with
 `--project <project>`. `list` and `search` answer in a project that shares its memory with its agents — which it does unless you turned the switch in the Memory view off — and say so otherwise; `propose` works either way. `propose` adds a proposal for you to review in the Memory view and says
 so; when an agent Yardsort started runs it, the proposal records which agent and which
-workspace. There is no command to approve, edit, reject or revoke: those are yours, in the app,
-because an agent can run anything `ys` offers. `--json` works as everywhere.
+workspace. There is no command to approve, edit, reject or revoke: those are yours, in the app or
+with [`yardsort-host memory`](headless-host.md#memory-there) at a terminal of your own, because an
+agent can run anything `ys` offers. A note synced from another computer is listed with the rest,
+cited with that computer's name. `--json` works as everywhere.
+
+### `ys sync status`
+
+Which projects [sync](remote.md#syncing-projects) with your other computers, and how the last pass
+went:
+
+```
+NAME      SYNC
+widgets   syncing
+gadgets   waiting
+Last synced: 2m ago
+```
+
+A project's state is `syncing`, `waiting` (to reach the server), `removing` (from the server) or
+`refused`, with the server's reason. A problem with the last pass, and how many changes wait to go
+up, are shown when there are any. With Remote off it says so. It reads the records only, and that
+is all `ys` offers of sync: turning a project on, linking, stopping and removing are yours, in the
+app's Project settings or with [`yardsort-host sync`](headless-host.md#syncing-projects) at a
+terminal of your own, because an agent can run anything `ys` offers.
 
 ### `ys task`
 

@@ -1,0 +1,229 @@
+id: sync-memory
+name: An approved note reaches the other computer's agents, and two edits apart are settled once
+description: >-
+  Two computers with no screen, each a yardsort-host profile of its own, signed in to the stand-in
+  as the same account, each through a cable it can be unplugged from. A project syncs on the first
+  and is linked on the second. A note written on the first arrives approved on the second, saying
+  where it is from, and is in the first message of an agent started there; an agent's proposal
+  there stays there, and no shell that is not a terminal approves it, or even lists it. Then both are unplugged,
+  each edits the note, and both are plugged back in: the same text stands on both, with the other
+  beside it as a conflict on both, until one of them settles it, once, for both. Last, the first
+  revokes the note while the second, unplugged, edits it: once plugged back in, it is revoked on
+  both. Linux only.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build
+    action: shell
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: two_computers_and_a_repository_on_each
+    action: shell
+    # The second has a clone of the first's repository. Both run the agent that keeps its first
+    # message.
+    line: >-
+      for at in here there; do mkdir -p "$YS_RUN_DIR/$at" && cat .yardsort/tests/support/headless-settings.toml
+      .yardsort/tests/support/record-harness.toml > "$YS_RUN_DIR/$at/settings.toml"; done && git init -q
+      "$YS_RUN_DIR/widgets" && git -C "$YS_RUN_DIR/widgets" -c user.name=Smoke -c user.email=smoke@example.invalid
+      -c commit.gpgsign=false commit -q --allow-empty -m first && git clone -q "$YS_RUN_DIR/widgets"
+      "$YS_RUN_DIR/widgets-copy"
+  - id: a_cable_for_each
+    action: shell
+    line: >-
+      for at in here there; do setsid bun .yardsort/tests/support/cable.ts "$YS_RUN_DIR" $at > /dev/null 2>&1
+      < /dev/null & echo $! > "$YS_RUN_DIR/$at.cable.pid"; done
+  - id: cables_ready
+    action: wait_for
+    program: sh
+    args: [-c, 'test -s "$YS_RUN_DIR/here.cable" && test -s "$YS_RUN_DIR/there.cable"']
+    timeout: 30s
+
+steps:
+  - id: sign_in_both
+    action: shell
+    line: >-
+      for at in here there; do YS_PROFILE="$YS_RUN_DIR/$at" YS_SERVER="$(cat "$YS_RUN_DIR/$at.cable")" bun
+      .yardsort/tests/support/host.ts "$YS_RUN_DIR" sign-in "$at" || exit 1; done
+    expect:
+      stdout_contains: Signed in as there
+  - id: serve_both
+    action: shell
+    line: >-
+      for at in here there; do YS_PROFILE="$YS_RUN_DIR/$at" setsid sh .yardsort/tests/support/headless.sh
+      yardsort-host serve > "$YS_RUN_DIR/$at.log" 2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/$at.pid"; done
+  - id: both_linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        for at in here there; do YS_PROFILE="$YS_RUN_DIR/$at" sh .yardsort/tests/support/headless.sh
+        yardsort-host status | grep -q "Link: connected" || exit 1; done
+    timeout: 60s
+  - id: the_project_syncs_on_both
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh ys project add "$YS_RUN_DIR/widgets"
+      && YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh ys project add
+      "$YS_RUN_DIR/widgets-copy" && printf 'y\n' | YS_PROFILE="$YS_RUN_DIR/here" script -qefc "sh
+      .yardsort/tests/support/headless.sh yardsort-host sync on widgets" /dev/null > /dev/null && for i in $(seq
+      60); do YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh ys sync status | grep -Eq
+      "widgets +syncing" && break; sleep 1; done && YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh
+      .yardsort/tests/support/headless.sh yardsort-host sync link widgets-copy widgets" /dev/null < /dev/null
+    expect:
+      stdout_contains: widgets-copy is linked to the synced widgets
+  - id: not_written_from_a_shell_that_is_not_a_terminal
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh yardsort-host memory write widgets
+      "Never this one." < /dev/null
+    expect:
+      exit: nonzero
+  - id: write_a_note_on_the_first
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/here" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory
+      write widgets 'The tests need TZ=UTC.'" /dev/null < /dev/null
+    expect:
+      stdout_contains: Written and approved
+  - id: not_listed_to_a_shell_that_is_not_a_terminal
+    action: shell
+    # Every state, shared or not: more than `ys memory` gives an agent.
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets <
+      /dev/null
+    expect:
+      exit: nonzero
+  - id: it_arrives_approved_on_the_second_saying_where_from
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy" /dev/null < /dev/null | tr -d '\r' | grep -A1 "^Approved:" | grep -q "The tests need TZ=UTC.  (from the user, on here)"
+    timeout: 60s
+  - id: an_agent_there_starts
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh ys workspace new widgets-copy "Look
+      at the notes" --harness record
+    expect:
+      stdout_contains: agent  record
+  - id: with_the_note_in_its_first_message
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        f=$(find "$YS_RUN_DIR/there-worktrees" -name first-message.txt | head -1) && grep -q "The tests need
+        TZ=UTC. (memory [0-9a-f]*, from the user, on here)" "$f"
+    timeout: 60s
+  - id: its_proposal_stays_there_unapproved
+    action: shell
+    # Proposed from the agent's own workspace, as an agent does; nothing goes up for it, and a
+    # shell that is not a terminal cannot approve it.
+    line: >-
+      dir=$(dirname "$(find "$YS_RUN_DIR/there-worktrees" -name first-message.txt | head -1)") && top=$PWD && (cd
+      "$dir" && YS_PROFILE="$YS_RUN_DIR/there" sh "$top/.yardsort/tests/support/headless.sh" ys memory propose
+      "Agents propose; people approve.") > /dev/null && id=$(YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy" /dev/null < /dev/null | tr -d '\r' | awk '/Agents propose/ {print
+      $1; exit}') && ! YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh yardsort-host memory
+      approve "$id" < /dev/null 2> /dev/null && YS_PROFILE="$YS_RUN_DIR/there" sh
+      .yardsort/tests/support/headless.sh yardsort-host sync status | grep -c "Waiting to go up" || true
+    expect:
+      stdout_contains: "0"
+  - id: unplug_both_and_edit_on_each
+    action: shell
+    line: >-
+      for at in here there; do kill "$(cat "$YS_RUN_DIR/$at.cable.pid")"; done && sleep 2 && for at in here
+      there; do project=widgets; [ $at = there ] && project=widgets-copy; id=$(YS_PROFILE="$YS_RUN_DIR/$at" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list $project" /dev/null < /dev/null | tr -d '\r' | awk '/TZ=UTC/ {print $1; exit}');
+      text="The tests need TZ=UTC and LANG=C."; [ $at = there ] && text="Run the tests with TZ=UTC.";
+      YS_PROFILE="$YS_RUN_DIR/$at" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory edit
+      $id '$text'" /dev/null < /dev/null || exit 1; done && for at in here there; do YS_PROFILE="$YS_RUN_DIR/$at"
+      sh .yardsort/tests/support/headless.sh ys sync status | grep -q "Waiting to go up: 1" || exit 1; done &&
+      echo both waiting
+    expect:
+      stdout_contains: both waiting
+  - id: plug_both_back_in
+    action: shell
+    line: >-
+      for at in here there; do port=$(sed -E 's#.*:([0-9]+)/#\1#' "$YS_RUN_DIR/$at.cable"); setsid bun
+      .yardsort/tests/support/cable.ts "$YS_RUN_DIR" $at $port > /dev/null 2>&1 < /dev/null & echo $! >
+      "$YS_RUN_DIR/$at.cable.pid"; done
+  - id: one_text_stands_on_both_with_the_other_beside_it
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        a=$(YS_PROFILE="$YS_RUN_DIR/here" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets" /dev/null < /dev/null | tr -d '\r' | grep -A2 "two computers at once") && b=$(YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy" /dev/null < /dev/null | tr -d '\r' | grep -A2 "two computers at
+        once") && [ "$(echo "$a" | grep -o 'stands now: .*')" = "$(echo "$b" | grep -o 'stands now: .*')" ]
+    timeout: 120s
+  - id: settle_it_on_the_second
+    action: shell
+    line: >-
+      list=$(YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy" /dev/null < /dev/null | tr -d '\r') && id=$(echo "$list" | awk '/stands now:/ {print $1; exit}') && echo "$list" | sed -nE
+      's/^ +from [^:]+: (.*)$/\1/p' > "$YS_RUN_DIR/kept" && YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh
+      .yardsort/tests/support/headless.sh yardsort-host memory settle $id --other" /dev/null < /dev/null
+    expect:
+      stdout_contains: Settled
+  - id: settled_once_on_both
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        kept=$(cat "$YS_RUN_DIR/kept") && for at in here there; do project=widgets; [ $at = there ] &&
+        project=widgets-copy; list=$(YS_PROFILE="$YS_RUN_DIR/$at" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list $project" /dev/null < /dev/null | tr -d '\r'); echo "$list" | grep -q "two computers at once" && exit 1; echo
+        "$list" | grep -A1 "^Approved:" | grep -qF "$kept" || exit 1; done
+    timeout: 60s
+  - id: revoke_on_the_first_while_the_second_edits_unplugged
+    action: shell
+    line: >-
+      kill "$(cat "$YS_RUN_DIR/there.cable.pid")" && sleep 2 && id=$(YS_PROFILE="$YS_RUN_DIR/here" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets" /dev/null < /dev/null | tr -d '\r' | awk '/TZ=UTC/ {print $1; exit}') &&
+      YS_PROFILE="$YS_RUN_DIR/here" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory
+      revoke $id" /dev/null < /dev/null > /dev/null && other=$(YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list widgets-copy" /dev/null < /dev/null | tr -d '\r' | awk '/TZ=UTC/ {print $1;
+      exit}') && YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh
+      yardsort-host memory edit $other 'Deploy the tests with TZ=UTC.'" /dev/null < /dev/null > /dev/null && port=$(sed
+      -E 's#.*:([0-9]+)/#\1#' "$YS_RUN_DIR/there.cable") && (setsid bun .yardsort/tests/support/cable.ts
+      "$YS_RUN_DIR" there $port > /dev/null 2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/there.cable.pid") && echo
+      plugged back in
+    expect:
+      stdout_contains: plugged back in
+  - id: revoked_on_both
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        for at in here there; do project=widgets; [ $at = there ] && project=widgets-copy;
+        YS_PROFILE="$YS_RUN_DIR/$at" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host memory list $project" /dev/null < /dev/null | tr -d '\r' |
+        grep -A1 "^Revoked:" | grep -q "TZ=UTC" || exit 1; done
+    timeout: 120s
+  - id: nothing_left_to_go_up
+    action: shell
+    line: >-
+      for at in here there; do YS_PROFILE="$YS_RUN_DIR/$at" sh .yardsort/tests/support/headless.sh ys sync status;
+      done | grep -c "Waiting to go up" || true
+    expect:
+      stdout_contains: "0"
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      for at in here there; do kill "$(cat "$YS_RUN_DIR/$at.pid" 2>/dev/null)" 2>/dev/null; kill "$(cat
+      "$YS_RUN_DIR/$at.cable.pid" 2>/dev/null)" 2>/dev/null; done; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

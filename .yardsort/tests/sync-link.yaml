@@ -1,0 +1,202 @@
+id: sync-link
+name: A project synced on one computer is linked on another, only as chosen
+description: >-
+  Two computers with no screen, each a yardsort-host profile of its own, signed in to the stand-in
+  server as the same account. The first turns sync on for a project whose remote carries a
+  password: the preview shows the remote without it, and the server is sent nothing until the
+  operator says yes. Asked from a shell that is not a terminal, turning sync on is refused. The
+  second has a clone of the same repository and an unrelated project: it is offered the synced
+  project, matched to the clone by its remote, and links nothing until told which. Then it stops
+  syncing it, which leaves it syncing on the first, and the first removes it from the server, after
+  which neither syncs it and both keep their projects. `ys sync status` only reads. Linux only.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build
+    action: shell
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: two_computers_and_three_repositories
+    action: shell
+    # The remote is never fetched: it is only what the hint is made from. The clone and the
+    # unrelated repository are on the second computer.
+    line: >-
+      for at in here there; do mkdir -p "$YS_RUN_DIR/$at" && cp .yardsort/tests/support/headless-settings.toml
+      "$YS_RUN_DIR/$at/settings.toml"; done && git init -q "$YS_RUN_DIR/widgets" && git -C "$YS_RUN_DIR/widgets"
+      -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m
+      first && git -C "$YS_RUN_DIR/widgets" remote add origin https://ana:hunter2@github.com/acme/widgets.git &&
+      git clone -q "$YS_RUN_DIR/widgets" "$YS_RUN_DIR/widgets-copy" && git -C "$YS_RUN_DIR/widgets-copy" remote
+      set-url origin git@github.com:acme/widgets.git && git init -q "$YS_RUN_DIR/gadgets" && git -C
+      "$YS_RUN_DIR/gadgets" remote add origin https://github.com/acme/gadgets.git
+
+steps:
+  - id: sign_in_here
+    action: shell
+    line: YS_PROFILE="$YS_RUN_DIR/here" bun .yardsort/tests/support/host.ts "$YS_RUN_DIR" sign-in Here
+    expect:
+      stdout_contains: Signed in as Here
+  - id: sign_in_there
+    action: shell
+    line: YS_PROFILE="$YS_RUN_DIR/there" bun .yardsort/tests/support/host.ts "$YS_RUN_DIR" sign-in There
+    expect:
+      stdout_contains: Signed in as There
+  - id: serve_both
+    action: shell
+    line: >-
+      for at in here there; do YS_PROFILE="$YS_RUN_DIR/$at" setsid sh .yardsort/tests/support/headless.sh
+      yardsort-host serve > "$YS_RUN_DIR/$at.log" 2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/$at.pid"; done
+  - id: both_linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        for at in here there; do YS_PROFILE="$YS_RUN_DIR/$at" sh .yardsort/tests/support/headless.sh
+        yardsort-host status | grep -q "Link: connected" || exit 1; done
+    timeout: 60s
+  - id: add_the_projects
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh ys project add "$YS_RUN_DIR/widgets"
+      && for repo in widgets-copy gadgets; do YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh
+      ys project add "$YS_RUN_DIR/$repo" || exit 1; done
+  - id: nothing_syncs_yet
+    action: shell
+    line: YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh ys sync status
+    expect:
+      stdout_contains: No project syncs here
+  - id: not_from_a_shell_that_is_not_a_terminal
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh yardsort-host sync on widgets --yes
+      < /dev/null
+    expect:
+      exit: nonzero
+  - id: a_no_sends_nothing
+    action: shell
+    # A terminal of the operator's own: `script` gives the command one.
+    line: >-
+      printf 'n\n' | YS_PROFILE="$YS_RUN_DIR/here" script -qefc "sh .yardsort/tests/support/headless.sh
+      yardsort-host sync on widgets" /dev/null; YS_PROFILE="$YS_RUN_DIR/here" sh
+      .yardsort/tests/support/headless.sh ys sync status
+    expect:
+      stdout_contains: No project syncs here
+  - id: turn_sync_on_after_the_preview
+    action: shell
+    line: >-
+      printf 'y\n' | YS_PROFILE="$YS_RUN_DIR/here" script -qefc "sh .yardsort/tests/support/headless.sh
+      yardsort-host sync on widgets" /dev/null
+    expect:
+      stdout_contains: "Remote: https://github.com/acme/widgets.git"
+  - id: the_password_never_showed
+    action: shell
+    line: >-
+      ! grep -rq hunter2 "$YS_RUN_DIR/here.log" "$YS_RUN_DIR/stand-in.json" && echo
+      "${STEP_OUTPUT:-}" | grep -vq hunter2 && echo clean
+    env:
+      STEP_OUTPUT: "{{ steps.turn_sync_on_after_the_preview.stdout }}"
+    expect:
+      stdout_contains: clean
+  - id: it_reaches_the_server
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh ys sync status | grep -Eq
+        "widgets +syncing"
+    timeout: 60s
+  - id: offered_on_the_other_with_its_match
+    action: shell
+    line: YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh yardsort-host sync status
+    expect:
+      stdout_matches: "widgets  https://github.com/acme/widgets.git  \\(matches widgets-copy here\\)"
+  - id: but_nothing_linked_by_itself
+    action: shell
+    line: YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh ys sync status
+    expect:
+      stdout_contains: No project syncs here
+  - id: link_the_clone
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host sync
+      link widgets-copy widgets" /dev/null < /dev/null
+    expect:
+      stdout_contains: widgets-copy is linked to the synced widgets
+  - id: linked_there
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh ys sync status | grep -Eq
+        "widgets-copy +syncing"
+    timeout: 60s
+  - id: stop_there
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/there" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host sync
+      stop widgets-copy" /dev/null < /dev/null && YS_PROFILE="$YS_RUN_DIR/there" sh
+      .yardsort/tests/support/headless.sh yardsort-host sync status
+    expect:
+      stdout_matches: "no longer syncs here(.|\\n)*widgets  https://github.com/acme/widgets.git"
+  - id: still_syncing_here
+    action: shell
+    line: YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh ys sync status
+    expect:
+      stdout_matches: "widgets +syncing"
+  - id: remove_from_the_server
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/here" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host sync
+      remove widgets --yes" /dev/null < /dev/null
+    expect:
+      stdout_contains: being removed from the server
+  - id: gone_here
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh ys sync status | grep -q "No
+        project syncs here"
+    timeout: 60s
+  - id: offered_nowhere
+    action: shell
+    line: YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh yardsort-host sync status
+    expect:
+      stdout_contains: "Syncing: nothing"
+  - id: not_even_offered
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh yardsort-host sync status | grep -c
+      acme/widgets || true
+    expect:
+      stdout_contains: "0"
+  - id: both_keep_their_projects
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/here" sh .yardsort/tests/support/headless.sh ys project list &&
+      YS_PROFILE="$YS_RUN_DIR/there" sh .yardsort/tests/support/headless.sh ys project list
+    expect:
+      stdout_matches: "widgets (.|\\n)*widgets-copy"
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      for at in here there; do kill "$(cat "$YS_RUN_DIR/$at.pid" 2>/dev/null)" 2>/dev/null; done; pkill -HUP -f
+      "yardsort-daemon .*$YS_RUN_DIR"; pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

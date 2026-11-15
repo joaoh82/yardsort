@@ -8,6 +8,8 @@
 //   bun .yardsort/tests/support/phone.ts <run dir> refused <name> | ends <name>
 //   bun .yardsort/tests/support/phone.ts <run dir> resumes <name> <message> <expected>
 //   bun .yardsort/tests/support/phone.ts <run dir> registers | opens-notice <name> <pushes file>
+//   bun .yardsort/tests/support/phone.ts <run dir> lets-a-test-run <name>
+//   bun .yardsort/tests/support/phone.ts <run dir> sees-pull-requests <name>
 //
 // `type` takes control of the one session running on the computer, types the line and a return,
 // and waits for the expected text in what the terminal prints. `take-over` does the same while
@@ -18,6 +20,11 @@
 // `registers` gives the server a push token, as a phone allowed to notify does. `opens-notice`
 // takes the one push the stand-in recorded, reads its notice, and checks it names the terminal of
 // the one session running on the computer, and that the push itself names nothing.
+// `lets-a-test-run` reads the card of the smoke test run waiting in the project's own checkout,
+// is refused letting another file's hash run, lets the one shown run, and leaves the run's id in
+// the run's folder as `test-run`. `sees-pull-requests` asks the computer for its pull requests
+// until it has read them, and checks the one from the project's checkout: its badge's facts, its
+// checks by name with the failed one first, and that one it never read is not found.
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -178,6 +185,136 @@ switch (doing) {
     if (!Buffer.from(photo).equals(readFileSync(path))) throw new Error("The picture changed.");
     if (path.startsWith(join(dir, "worktrees"))) throw new Error(`It is in a worktree: ${path}`);
     console.log("the picture is on the computer, whole, outside every worktree");
+    channel.close();
+    break;
+  }
+  case "lets-a-test-run": {
+    // What a phone that may type does with a smoke test waiting for its person.
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    if (!channel.host.capabilities.includes("test.waiting")) {
+      throw new Error("The computer does not say it answers test.waiting.");
+    }
+    const listed = await channel.workspaces();
+    const project = listed.projects.find((p) => p.name === "repo");
+    const workspace = listed.workspaces.find((w) => w.project === project?.id);
+    if (!workspace) throw new Error("The project's checkout is not on the phone.");
+    let waiting = await channel.testsWaiting(workspace.id);
+    for (let tries = 0; tries < 50 && !waiting.first; tries++) {
+      await Bun.sleep(200);
+      waiting = await channel.testsWaiting(workspace.id);
+    }
+    const card = waiting.first;
+    if (!card) throw new Error("No smoke test waits there.");
+    if (!card.whole) throw new Error(`The card is not whole: ${card.whyNot}`);
+    if (!card.steps.some((step) => step.words.includes("let-go-from-the-phone"))) {
+      throw new Error(`Its steps do not say what it runs: ${JSON.stringify(card.steps)}`);
+    }
+    console.log(`shown the card of "${card.name}", asked by ${card.askedBy}`);
+    const decide = (contentHash: string) =>
+      channel.decideTest({ workspace: workspace.id, run: card.run, contentHash, decision: "run" });
+    const refused = await decide("0".repeat(64)).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    if (!(refused instanceof ClientError) || refused.code !== "stale") {
+      throw new Error(`Another file's hash was not refused as stale: ${String(refused)}`);
+    }
+    console.log("another file's hash is refused");
+    await decide(card.contentHash);
+    if ((await channel.testsWaiting(workspace.id)).first) throw new Error("It still waits.");
+    writeFileSync(join(dir, "test-run"), card.run);
+    console.log("let it run");
+    channel.close();
+    break;
+  }
+  case "sees-pull-requests": {
+    // What a phone that reads workspaces is told of the computer's pull requests.
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    if (!channel.host.capabilities.includes("pull.list")) {
+      throw new Error("The computer does not say it answers pull.list.");
+    }
+    const listed = await channel.workspaces();
+    const project = listed.projects.find((p) => p.name === "repo");
+    const workspace = listed.workspaces.find((w) => w.project === project?.id);
+    if (!project || !workspace) throw new Error("The project's checkout is not on the phone.");
+
+    // The computer never makes a phone wait for gh: the first answer says it is reading.
+    let page = await channel.pulls();
+    const first = page;
+    for (let tries = 0; tries < 100 && (page.reading || page.pulls.length === 0); tries++) {
+      await Bun.sleep(200);
+      page = await channel.pulls();
+    }
+    if (first.pulls.length === 0 && !first.reading) {
+      throw new Error("With nothing read yet, the computer did not say it was reading.");
+    }
+    const mine = page.pulls.filter((pull) => pull.workspaces.includes(workspace.id));
+    if (mine.length !== 1) {
+      throw new Error(`The checkout has ${mine.length} pull requests: ${JSON.stringify(page)}`);
+    }
+    const pull = mine[0];
+    const facts = {
+      number: pull.number,
+      title: pull.title,
+      state: pull.state,
+      branch: pull.branch,
+      base: pull.base,
+      checks: pull.checks,
+      review: pull.review,
+      conflicts: pull.conflicts,
+      url: pull.url,
+    };
+    const wanted = {
+      number: 12,
+      title: "Add an option",
+      state: "open",
+      branch: "ys/add-option",
+      base: "trunk",
+      checks: { passed: 1, failed: 1, running: 0 },
+      review: "changesRequested",
+      conflicts: true,
+      url: "https://github.com/orchard/demo/pull/12",
+    };
+    if (JSON.stringify(facts) !== JSON.stringify(wanted)) {
+      throw new Error(`Not what gh said: ${JSON.stringify(facts)}`);
+    }
+    // One nobody's workspace opened is not on a workspace list, and is among the open ones.
+    if (page.pulls.some((other) => other.number === 9)) {
+      throw new Error("A pull request no workspace opened is on the workspace list.");
+    }
+    if (page.open !== 2) throw new Error(`${page.open} open, not 2.`);
+    console.log(`the checkout's pull request #${pull.number}, and ${page.open} open`);
+
+    let open = await channel.pulls({ of: "open" });
+    for (let tries = 0; tries < 50 && open.reading; tries++) {
+      await Bun.sleep(200);
+      open = await channel.pulls({ of: "open" });
+    }
+    const numbers = open.pulls.map((other) => other.number);
+    if (JSON.stringify(numbers) !== "[12,9]") {
+      throw new Error(`The open ones, most recently changed first: ${JSON.stringify(numbers)}`);
+    }
+
+    const detail = await channel.pull({ project: project.id, number: 12 });
+    const checks = detail.checks.map((check) => `${check.name}: ${check.state}`);
+    if (JSON.stringify(checks) !== JSON.stringify(["CI / test: failed", "CI / build: passed"])) {
+      throw new Error(`Its checks, the failed one first: ${JSON.stringify(checks)}`);
+    }
+    if (JSON.stringify(detail.reviews) !== '[{"login":"mira-k","state":"changesRequested"}]') {
+      throw new Error(`Its reviewers: ${JSON.stringify(detail.reviews)}`);
+    }
+    console.log(`its checks by name: ${checks.join(", ")}`);
+
+    const unread = await channel.pull({ project: project.id, number: 999 }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    if (!(unread instanceof ClientError) || unread.code !== "not_found") {
+      throw new Error(`One it never read was not refused as not found: ${String(unread)}`);
+    }
+    console.log("saw the pull requests");
     channel.close();
     break;
   }

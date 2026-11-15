@@ -8,7 +8,7 @@
 //! composer and `ys workspace new` do. What a device sends to upload goes in this profile's
 //! `uploads` folder, outside every worktree, so no branch picks it up.
 //!
-//! Since the protocol's minor 10 a start may say what the composer says (a name, a model, an
+//! Since the protocol's minor 12 a start may say what the composer says (a name, a model, an
 //! effort, a branch to start from or to open), and a device may look after what is here: list a
 //! project's branches, clone a repository into this host's projects folder, start a shell, and
 //! rename, archive or delete a workspace ([`remote_proto::manage`]). Each is the same call the

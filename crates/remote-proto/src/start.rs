@@ -1,5 +1,5 @@
 //! Starting work from a device, and handing an agent a file: since minor 5, and resuming a
-//! conversation since minor 6. Since minor 10 a start may also say what the window's composer
+//! conversation since minor 6. Since minor 12 a start may also say what the window's composer
 //! says: a name for the workspace, a model and an effort for the agent, and the branch to start
 //! from or to open.
 //!
@@ -56,11 +56,11 @@ pub struct HarnessSummary {
     /// What to show. At most [`crate::MAX_TEXT`].
     pub name: String,
     /// Models to suggest for it, as its settings list them: any other may be named too. At most
-    /// [`MAX_CHOICES`], each at most [`crate::MAX_LABEL`]. Since minor 10.
+    /// [`MAX_CHOICES`], each at most [`crate::MAX_LABEL`]. Since minor 12.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub models: Vec<String>,
     /// The efforts it takes; none when it has no such thing. At most [`MAX_CHOICES`], each at
-    /// most [`crate::MAX_LABEL`]. Since minor 10.
+    /// most [`crate::MAX_LABEL`]. Since minor 12.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub efforts: Vec<String>,
 }
@@ -77,9 +77,9 @@ pub struct HarnessList {
 /// project's default branch, and its worktree — with an agent given `prompt` as its first
 /// message. Needs `terminal:control`.
 ///
-/// Since minor 10 it may say more, each as the host's own composer would: `name` for the
+/// Since minor 12 it may say more, each as the host's own composer would: `name` for the
 /// workspace, `model` and `effort` for the agent, and either `baseBranch`, to start the new
-/// branch from, or `existingBranch`, to open a branch as it is. A host before minor 10 does not
+/// branch from, or `existingBranch`, to open a branch as it is. A host before minor 12 does not
 /// read them, so a client sends them only to a host that answers `project.branches`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -92,22 +92,22 @@ pub struct WorkspaceStartParams {
     pub harness: Option<String>,
     /// The workspace's folder, and its branch after the host's prefix. The host makes it a slug,
     /// and adds a number when it is taken. At most [`MAX_WORKSPACE_NAME`] characters. Not with
-    /// `existingBranch`, which names its own. Since minor 10.
+    /// `existingBranch`, which names its own. Since minor 12.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// The model the agent is told to use, passed to the harness as its settings say. At most
-    /// [`crate::MAX_LABEL`] characters. Since minor 10.
+    /// [`crate::MAX_LABEL`] characters. Since minor 12.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// One of the harness's `efforts`. Since minor 10.
+    /// One of the harness's `efforts`. Since minor 12.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     /// The branch the new one starts from: one of `project.branches`. Without it, the project's
-    /// default. Since minor 10.
+    /// default. Since minor 12.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_branch: Option<String>,
     /// A branch to open as it is, with no new one made: one of `project.branches` that is not
-    /// checked out. Not with `baseBranch` or `name`. Since minor 10.
+    /// checked out. Not with `baseBranch` or `name`. Since minor 12.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub existing_branch: Option<String>,
 }
@@ -127,7 +127,7 @@ impl WorkspaceStartParams {
         }
     }
 
-    /// Whether it says anything a host before minor 10 would not read.
+    /// Whether it says anything a host before minor 12 would not read.
     pub fn says_more(&self) -> bool {
         self.name.is_some()
             || self.model.is_some()

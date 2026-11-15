@@ -162,8 +162,99 @@ from this change, an answer file written as `approval.answer` writes it:
 - **No, or Esc, at the terminal:** Claude Code ended the hook, and its question's file was left
   untouched from then on, so the next read closed it.
 
+## A smoke test waiting, answered in Chat
+
+Asked for by the owner on 2026-11-15, after the first days of real use: an agent ran
+`ys test run`, the run waited for its approval card ([32](32-smoke-tests.md#trust)), and the
+person was looking at the conversation on a phone, with no way to let it go. The frame is **S1**
+on the page **Pull requests · proposal** of the phone's design file (node 36:317).
+
+**Protocol minor 10** ([`remote_proto::smoke`](../../crates/remote-proto/src/smoke.rs)):
+
+- **`test.waiting { workspace }`** needs `terminal:read`. It gives the workspace's oldest waiting
+  run as the card shows it, and how many wait behind it: who asked and the conversation that did,
+  the inputs, every step in words, the names of the test environment the file templates and, when
+  a step runs a program, every name in it, and both versions of the file when it changed since it
+  was approved. What it says is a file of the repository in words, with every variable left as
+  written, so it is what a terminal in the workspace would show. No value of the test environment
+  is in it, and a test pins that.
+- **`test.decide { workspace, run, contentHash, decision }`** needs `terminal:control`: letting a
+  run go is running programs as the computer's user, which is what typing into a terminal does,
+  and what starting an agent from the phone already rests on. `run` approves the file at that
+  hash for the project and queues the run, as the window's **Run** does; `refuse` ends it as
+  refused and records nothing. A run that waits no more is `not_found`; a hash that is not the
+  run's is `stale`.
+
+**The gate is still a person seeing the file.** The card is built on the computer by the same
+code the window's card uses (`smoke::runs::review`, moved into the core for this), once for the
+reading and again for the deciding. One that does not fit a message whole — more than 60 steps, a
+step's sentence past 400 characters, a changed file past 10,000 characters, or a file that does
+not check out — is sent marked not `whole`, the phone offers only **Don't run**, and the computer
+refuses a `run` for it whatever the phone sends.
+
+**No agent can reach it.** There is still no `ys` command that approves. These operations are
+answered only on a device's channel, for a device the person paired at the computer; the grant
+they need is the one that already lets that device type any command into a terminal there.
+Unlike a workflow's decision ([41](41-mobile-workflow-controls.md)) there is no one-time code and
+no limit to phones: a workflow's gate is a sign-off an agent must not forge on a computer where
+it can run `ys`, while this gate is passed by anything that may type, by design.
+
+**Where it runs.** The desktop app answers, and tells its window and its runner at once, so the
+card there goes and the run starts. A computer with no screen queues no runs and does not say it
+answers these.
+
+**On the phone.** Chat asks what waits every five seconds and when the conversation's activity
+says something happened, and shows the card under the turns, in every conversation of the
+workspace, since the run belongs to the workspace and not to one agent. The card says who asked:
+this conversation's agent by its name, another agent, a workflow, or the person at the computer.
+A run this conversation's agent asked for makes the header say **Needs you**: its agent is
+waiting in `ys test wait`, which otherwise reads as working, then idle. What changed is drawn on
+the phone from the two versions, as the changed lines and two lines either side.
+
+## Projects that fold
+
+Also asked for on 2026-11-15: on a computer's screen, a project's heading folds its workspaces
+away (frame **F1**, node 33:164). A folded heading keeps the count and says how many agents are
+running inside, so folding never hides that work is going on. Which projects are folded is kept
+on the phone, by the computer's and the project's ids, in `folds.json` beside the views; the
+newest 200 are kept.
+
+## Found on the iPhone: where the screen starts
+
+The owner's first use of Chat on an iPhone, 2026-11-15, with a screenshot: with the keyboard up,
+the field sat a header's height above it with empty room between, and the bar with the agent's
+name and **Chat | Terminal** was drawn under the status bar.
+
+Both had one cause. The screen took its place from the header's height, as if it always started
+below the header. That holds on Android and on iOS before 26. From iOS 26 the header is glass
+laid over the screen, which starts at the top of the window (31, where it was first met for
+screens that scroll). A keyboard's place is given on the window, so the lift was too large by the
+header's height, and a bar that is no scroll view got no room made for it.
+
+`AboveKeyboard` (`apps/mobile/src/ui/above-keyboard.tsx`) now asks the system where the screen
+starts. It lifts by that, and when the header covers the top it starts its content below the
+header. Chat uses it, and so does the terminal, where a conversation's bar had the same fault
+and the field stood a bar's height above the keyboard. A terminal that is no conversation's has
+no bar, and still makes its own room under the header.
+
+Two screen tests answer for the system, once as iOS 26 and once as Android, and the first fails
+with the old offset. On the Android emulator the bar sits directly under the header and the field
+directly on the keyboard, as before. No iPhone was at hand: the iOS 26 case rests on the
+screenshot, the arithmetic and the tests until the next build is on the phone.
+
 ## What is left
+
+- **See the fix above on the iPhone**: the bar below the header, and no room between the field
+  and the keyboard, in Chat and in a conversation's terminal.
 
 - **Run it on a phone**: Chat against a real Claude Code conversation, a question answered from
   the phone, the pinch on iOS and Android's WebViews. A headless browser does not pinch.
 - OpenCode's and Pi's questions, through their own plugin and extension.
+- **A smoke test answered from a real phone.** `.yardsort/tests/remote-phone-lets-a-test-run.yaml`
+  passed on 2026-11-15 on Linux, 17 of 17 steps: the real window with Remote on against the
+  stand-in server, a pretend phone that may type, and a real run. The phone read the card, was
+  refused when it named another file's hash, let the run go, and the app carried it out. What
+  that does not show: a real phone doing it, and the window's own card leaving on the phone's
+  answer, which the test does not look at.
+- A notice to the phone when a smoke test starts waiting. Today the card shows when Chat is open.
+- A manual step's **Pass** and **Fail** from the phone.

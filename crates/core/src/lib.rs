@@ -43,6 +43,7 @@ pub mod sessions;
 pub mod settings;
 pub mod smoke;
 pub mod store;
+pub mod sync;
 pub mod tasks;
 pub mod template;
 pub mod tracked;

@@ -179,7 +179,7 @@ describe("enums", () => {
       name: "n",
       platform: "plan9",
       appVersion: "1",
-      protocol: { major: 1, minor: 10 },
+      protocol: { major: 1, minor: 12 },
       capabilities: [],
     });
     expect(host.kind === "host" && host.platform).toBe("other");
@@ -224,7 +224,7 @@ describe("requests are checked as a host checks them", () => {
     } as unknown as Request);
   });
 
-  test("what a start says since minor 10 is each within its bounds", () => {
+  test("what a start says since minor 12 is each within its bounds", () => {
     const start = (more: Record<string, unknown>) =>
       ask("workspace.start", { project: "p", prompt: "Fix it", ...more });
     expect(start({}).op).toBe("workspace.start");

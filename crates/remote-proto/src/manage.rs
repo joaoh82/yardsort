@@ -1,4 +1,4 @@
-//! Looking after projects and workspaces from a device: since minor 10.
+//! Looking after projects and workspaces from a device: since minor 12.
 //!
 //! What the window's composer and a workspace's menu do, asked of a host by ids: which branches a
 //! project has (`project.branches`), a repository cloned into the host's own projects folder and

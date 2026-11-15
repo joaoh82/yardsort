@@ -15,6 +15,7 @@ import { registerGrantedPush } from "../lib/push-token";
 import { useApp, useSnapshot } from "../lib/context";
 import { issuerHost } from "../lib/format";
 import { Body, Button, Card, Field, Mono, Problem, Screen, Title } from "../ui/parts";
+import { SettingsCorner } from "../ui/settings-corner";
 
 export default function Connect() {
   const { accounts, browser, deviceName: suggested, incoming } = useApp();
@@ -69,6 +70,7 @@ export default function Connect() {
 
   return (
     <Screen>
+      <SettingsCorner />
       {snapshot.notice && (
         <Card label="Notice">
           <Body>{snapshot.notice}</Body>
@@ -154,11 +156,6 @@ export default function Connect() {
       )}
 
       {problem && <Problem>{problem}</Problem>}
-
-      {snapshot.profiles.length > 0 && (
-        <Button title="Servers on this phone" onPress={() => router.push("/servers")} />
-      )}
-      <Button title="Settings" kind="quiet" onPress={() => router.push("/settings")} />
     </Screen>
   );
 }

@@ -69,6 +69,8 @@ impl Fixture {
             terminals_later: None,
             workflow: false,
             conversations: None,
+            tests: None,
+            pulls: None,
         }
     }
 
@@ -1924,3 +1926,380 @@ fn a_question_the_agent_asked_is_listed_and_answered_once_by_a_grant_that_may_ty
         ErrorCode::NotFound
     );
 }
+
+/// What the alpha worktree's smoke test file says, in its second version.
+const SMOKE_TEST: &str = "\
+id: sign-in
+name: Sign-in works
+version: 1
+inputs:
+  - id: user
+    kind: text
+    label: Who signs in
+    default: ana
+steps:
+  - id: sign-in
+    action: run
+    program: node
+    args: [scripts/sign-in.mjs, \"{{ inputs.user }}\", \"{{ env.TEST_PASSWORD }}\"]
+";
+
+struct Decided(std::sync::atomic::AtomicUsize);
+
+impl super::TestGate for Decided {
+    fn decided(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl Decided {
+    fn times(&self) -> usize {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// Write `text` as the alpha worktree's smoke test and ask for a run of it, as an agent does
+/// with `ys test run`. The run waits: nobody has approved the file.
+fn waiting_test(f: &Fixture, text: &str) -> String {
+    waiting_test_called(f, "sign-in", text)
+}
+
+/// The same for a test by another id, in a file of its own: one test runs once at a time.
+fn waiting_test_called(f: &Fixture, id: &str, text: &str) -> String {
+    let worktree = f.store.workspace(&f.alpha.worktree).unwrap().unwrap();
+    let tests = Path::new(&worktree.path).join(".yardsort/tests");
+    std::fs::create_dir_all(&tests).unwrap();
+    let text = text.replace("id: sign-in\nname", &format!("id: {id}\nname"));
+    std::fs::write(tests.join(format!("{id}.yaml")), text).unwrap();
+    let queued = crate::smoke::runs::queue(
+        &f.store,
+        &crate::smoke::runs::Request {
+            test_id: id,
+            workspace_id: &f.alpha.worktree,
+            inputs: &std::collections::BTreeMap::new(),
+            requested_by: "cli",
+            session_record_id: None,
+            unattended: false,
+        },
+    )
+    .unwrap();
+    assert!(queued.awaiting_approval);
+    queued.id
+}
+
+fn tests_waiting(facade: &HostFacade<'_>, grant: &Grant, workspace: &str) -> Response {
+    ask(
+        facade,
+        grant,
+        Operation::TestWaiting(remote_proto::smoke::TestWaitingParams {
+            workspace: WorkspaceId::new(workspace.to_owned()).unwrap(),
+        }),
+    )
+}
+
+fn decide_test(
+    facade: &HostFacade<'_>,
+    grant: &Grant,
+    workspace: &str,
+    run: &str,
+    hash: &str,
+    decision: remote_proto::smoke::TestDecision,
+) -> Response {
+    ask(
+        facade,
+        grant,
+        Operation::TestDecide(remote_proto::smoke::TestDecideParams {
+            workspace: WorkspaceId::new(workspace.to_owned()).unwrap(),
+            run: run.to_owned(),
+            content_hash: hash.to_owned(),
+            decision,
+        }),
+    )
+}
+
+#[test]
+fn a_waiting_smoke_test_is_shown_as_its_card_and_let_go_only_by_a_grant_that_may_type() {
+    use remote_proto::smoke::{TestAskedBy, TestDecision};
+    let f = Fixture::new();
+    f.store
+        .set_project_test_env(&f.alpha.id, &[("TEST_PASSWORD".into(), "hunter2".into())])
+        .unwrap();
+    let run = waiting_test(&f, SMOKE_TEST);
+    let gate = Decided(std::sync::atomic::AtomicUsize::new(0));
+
+    // A host that carries no runs out neither says it answers these nor answers them.
+    let without = f.facade(None);
+    assert!(!without
+        .describe()
+        .capabilities
+        .contains(&"test.waiting".to_owned()));
+    assert_eq!(
+        refusal(tests_waiting(&without, &everything(), &f.alpha.worktree)).code,
+        ErrorCode::Unsupported
+    );
+
+    let facade = HostFacade {
+        tests: Some(&gate),
+        ..f.facade(None)
+    };
+    let capabilities = facade.describe().capabilities;
+    assert!(capabilities.contains(&"test.waiting".to_owned()));
+    assert!(capabilities.contains(&"test.decide".to_owned()));
+
+    let Reply::TestsWaiting(page) = reply(tests_waiting(&facade, &everything(), &f.alpha.worktree))
+    else {
+        panic!("not a page of tests");
+    };
+    assert_eq!(page.behind, 0);
+    let card = page.first.unwrap();
+    assert_eq!(card.run, run);
+    assert_eq!(card.name, "Sign-in works");
+    assert_eq!(card.asked_by, TestAskedBy::Agent);
+    assert!(card.whole, "{:?}", card.why_not);
+    assert_eq!(card.steps.len(), 1);
+    assert_eq!(card.steps[0].id, "sign-in");
+    assert_eq!(card.steps[0].phase, "steps");
+    // The command as written: a variable stays a variable, and no value of the environment goes.
+    assert!(card.steps[0].words.contains("scripts/sign-in.mjs"));
+    assert!(card.steps[0].words.contains("{{ env.TEST_PASSWORD }}"));
+    assert_eq!(card.inputs.len(), 1);
+    assert_eq!(
+        (card.inputs[0].name.as_str(), card.inputs[0].value.as_str()),
+        ("user", "ana")
+    );
+    assert_eq!(card.env.len(), 1);
+    assert!(card.env[0].set);
+    assert!(card.runs_a_program);
+    assert_eq!(card.environment, ["TEST_PASSWORD"]);
+    assert!(card.previous.is_none() && card.definition.is_none());
+    let sent = serde_json::to_string(&card).unwrap();
+    assert!(!sent.contains("hunter2"));
+    assert!(!sent.contains(&f.private()));
+
+    // Watching reads the card; it does not decide.
+    let watcher = grant(&[Scope::TerminalRead], ProjectGrant::All);
+    assert!(matches!(
+        reply(tests_waiting(&facade, &watcher, &f.alpha.worktree)),
+        Reply::TestsWaiting(_)
+    ));
+    let hash = card.content_hash.clone();
+    assert_eq!(
+        refusal(decide_test(
+            &facade,
+            &watcher,
+            &f.alpha.worktree,
+            &run,
+            &hash,
+            TestDecision::Run
+        ))
+        .code,
+        ErrorCode::Forbidden
+    );
+    // Without watching, nothing of it is read.
+    let lister = grant(&[Scope::WorkspaceRead], ProjectGrant::All);
+    assert_eq!(
+        refusal(tests_waiting(&facade, &lister, &f.alpha.worktree)).code,
+        ErrorCode::Forbidden
+    );
+    // Another project's grant, another workspace, another file: each looks like nothing, or stale.
+    let elsewhere = grant(
+        &[Scope::TerminalRead, Scope::TerminalControl],
+        ProjectGrant::Only([ProjectId::new(f.beta.id.clone()).unwrap()].into()),
+    );
+    assert_eq!(
+        refusal(tests_waiting(&facade, &elsewhere, &f.alpha.worktree)).code,
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        refusal(decide_test(
+            &facade,
+            &everything(),
+            &f.beta.worktree,
+            &run,
+            &hash,
+            TestDecision::Run
+        ))
+        .code,
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        refusal(decide_test(
+            &facade,
+            &everything(),
+            &f.alpha.worktree,
+            &run,
+            &"0".repeat(64),
+            TestDecision::Run
+        ))
+        .code,
+        ErrorCode::Stale
+    );
+    assert_eq!(gate.times(), 0);
+    assert_eq!(
+        f.store.test_run(&run).unwrap().unwrap().status,
+        "awaiting_approval"
+    );
+
+    // The answer: the file is approved for the project, the run queued, and the host told.
+    assert_eq!(
+        reply(decide_test(
+            &facade,
+            &everything(),
+            &f.alpha.worktree,
+            &run,
+            &hash,
+            TestDecision::Run
+        )),
+        Reply::Done
+    );
+    assert_eq!(f.store.test_run(&run).unwrap().unwrap().status, "queued");
+    assert!(f
+        .store
+        .test_approved(&f.alpha.id, "sign-in", &hash)
+        .unwrap());
+    assert_eq!(gate.times(), 1);
+    // It waits no more: nothing to show, and a second answer is told so.
+    let Reply::TestsWaiting(after) =
+        reply(tests_waiting(&facade, &everything(), &f.alpha.worktree))
+    else {
+        panic!("not a page of tests");
+    };
+    assert!(after.first.is_none());
+    assert_eq!(
+        refusal(decide_test(
+            &facade,
+            &everything(),
+            &f.alpha.worktree,
+            &run,
+            &hash,
+            TestDecision::Refuse
+        ))
+        .code,
+        ErrorCode::NotFound
+    );
+    assert_eq!(gate.times(), 1);
+}
+
+#[test]
+fn a_changed_smoke_test_shows_what_changed_and_a_refusal_records_nothing_against_it() {
+    use remote_proto::smoke::TestDecision;
+    let f = Fixture::new();
+    f.store
+        .set_project_test_env(&f.alpha.id, &[("TEST_PASSWORD".into(), "hunter2".into())])
+        .unwrap();
+    let gate = Decided(std::sync::atomic::AtomicUsize::new(0));
+    let facade = HostFacade {
+        tests: Some(&gate),
+        ..f.facade(None)
+    };
+    let before = SMOKE_TEST.replace("Sign-in works", "Sign-in");
+    let first = waiting_test(&f, &before);
+    assert!(f.store.approve_test_run(&first).unwrap());
+    f.store.cancel_test_run(&first, "Not needed.").unwrap();
+
+    // The file changes and a run of it is asked for, then one of another test.
+    let second = waiting_test(&f, SMOKE_TEST);
+    let third = waiting_test_called(&f, "sign-out", SMOKE_TEST);
+    let Reply::TestsWaiting(page) = reply(tests_waiting(&facade, &everything(), &f.alpha.worktree))
+    else {
+        panic!("not a page of tests");
+    };
+    assert_eq!(page.behind, 1);
+    let card = page.first.unwrap();
+    // Oldest first, with both versions of the file to tell apart.
+    assert_eq!(card.run, second);
+    assert!(card.whole);
+    assert_eq!(card.previous.as_deref(), Some(before.as_str()));
+    assert_eq!(card.definition.as_deref(), Some(SMOKE_TEST));
+
+    assert_eq!(
+        reply(decide_test(
+            &facade,
+            &everything(),
+            &f.alpha.worktree,
+            &second,
+            &card.content_hash,
+            TestDecision::Refuse
+        )),
+        Reply::Done
+    );
+    assert_eq!(
+        f.store.test_run(&second).unwrap().unwrap().status,
+        "refused"
+    );
+    assert!(!f
+        .store
+        .test_approved(&f.alpha.id, "sign-in", &card.content_hash)
+        .unwrap());
+    assert_eq!(gate.times(), 1);
+    // The one behind it is next, and still waits.
+    let Reply::TestsWaiting(next) = reply(tests_waiting(&facade, &everything(), &f.alpha.worktree))
+    else {
+        panic!("not a page of tests");
+    };
+    assert_eq!(next.first.unwrap().run, third);
+    assert_eq!(next.behind, 0);
+}
+
+#[test]
+fn a_smoke_test_too_long_to_show_whole_can_only_be_refused_from_a_device() {
+    use remote_proto::smoke::TestDecision;
+    let f = Fixture::new();
+    f.store
+        .set_project_test_env(&f.alpha.id, &[("TEST_PASSWORD".into(), "hunter2".into())])
+        .unwrap();
+    let gate = Decided(std::sync::atomic::AtomicUsize::new(0));
+    let facade = HostFacade {
+        tests: Some(&gate),
+        ..f.facade(None)
+    };
+    // More steps than a card lists, each a long command.
+    let mut long = String::from(SMOKE_TEST);
+    for n in 0..(remote_proto::smoke::MAX_STEPS + 20) {
+        long.push_str(&format!(
+            "  - id: step-{n}\n    action: run\n    program: node\n    args: [\"{}\"]\n",
+            "x".repeat(900)
+        ));
+    }
+    let run = waiting_test(&f, &long);
+    let Reply::TestsWaiting(page) = reply(tests_waiting(&facade, &everything(), &f.alpha.worktree))
+    else {
+        panic!("not a page of tests");
+    };
+    let card = page.first.unwrap();
+    assert!(!card.whole);
+    assert!(card.why_not.as_deref().unwrap().contains("too long"));
+    assert!(card.steps.len() <= remote_proto::smoke::MAX_STEPS);
+
+    assert_eq!(
+        refusal(decide_test(
+            &facade,
+            &everything(),
+            &f.alpha.worktree,
+            &run,
+            &card.content_hash,
+            TestDecision::Run
+        ))
+        .code,
+        ErrorCode::InvalidRequest
+    );
+    assert_eq!(
+        f.store.test_run(&run).unwrap().unwrap().status,
+        "awaiting_approval"
+    );
+    assert_eq!(gate.times(), 0);
+    assert_eq!(
+        reply(decide_test(
+            &facade,
+            &everything(),
+            &f.alpha.worktree,
+            &run,
+            &card.content_hash,
+            TestDecision::Refuse
+        )),
+        Reply::Done
+    );
+    assert_eq!(f.store.test_run(&run).unwrap().unwrap().status, "refused");
+}
+
+mod pull;

@@ -78,6 +78,12 @@ import {
   type SessionPage,
   type SessionResumeParams,
   type SessionStartParams,
+  type PullDetail,
+  type PullListParams,
+  type PullPage,
+  type PullRef,
+  type TestDecideParams,
+  type TestWaitingPage,
   type Started,
   type StreamId,
   type StreamPosition,
@@ -364,7 +370,7 @@ export class Channel {
    * comes once the agent has started, which can take as long as the project's setup does.
    *
    * A name, a model, an effort and a branch are for a computer whose capabilities list
-   * `project.branches`: an earlier one does not read them. Minor 10.
+   * `project.branches`: an earlier one does not read them. Minor 12.
    */
   async startWorkspace(params: WorkspaceStartParams): Promise<Started> {
     const { kind: _, ...started } = expect(
@@ -383,7 +389,7 @@ export class Channel {
     return started;
   }
 
-  /** The computer's shell in a workspace. Its `harness` is empty. Minor 10. */
+  /** The computer's shell in a workspace. Its `harness` is empty. Minor 12. */
   async startShell(workspace: WorkspaceId): Promise<Started> {
     const { kind: _, ...started } = expect(
       await this.ask({ op: "shell.start", params: { workspace } }),
@@ -394,7 +400,7 @@ export class Channel {
 
   // --- looking after projects and workspaces ---------------------------------------------------
 
-  /** The branches a new workspace in a project can start from or open. Minor 10. */
+  /** The branches a new workspace in a project can start from or open. Minor 12. */
   async branches(project: ProjectId): Promise<ProjectBranches> {
     const { kind: _, ...branches } = expect(
       await this.ask({ op: "project.branches", params: { project } }),
@@ -405,7 +411,7 @@ export class Channel {
 
   /**
    * A repository cloned into the computer's projects folder and added as a project. The reply
-   * comes once the clone is done, which can take as long as the repository is large. Minor 10.
+   * comes once the clone is done, which can take as long as the repository is large. Minor 12.
    */
   async cloneProject(params: ProjectCloneParams): Promise<ProjectCloned> {
     const { kind: _, ...cloned } = expect(
@@ -415,7 +421,7 @@ export class Channel {
     return cloned;
   }
 
-  /** Change what a workspace is called. Minor 10. */
+  /** Change what a workspace is called. Minor 12. */
   async renameWorkspace(params: WorkspaceRenameParams): Promise<void> {
     expect(await this.ask({ op: "workspace.rename", params }), "done");
   }
@@ -423,7 +429,7 @@ export class Channel {
   /**
    * Put a workspace away, keeping its branch and its record. One with uncommitted work is refused
    * as `uncommitted_work` unless `force` is set, which is for after the person was asked again.
-   * Minor 10.
+   * Minor 12.
    */
   async archiveWorkspace(params: WorkspaceRemoveParams): Promise<void> {
     expect(await this.ask({ op: "workspace.archive", params }), "done");
@@ -431,7 +437,7 @@ export class Channel {
 
   /**
    * Remove a workspace, keeping its branch. Refused as {@link Channel.archiveWorkspace} is.
-   * Minor 10.
+   * Minor 12.
    */
   async deleteWorkspace(params: WorkspaceRemoveParams): Promise<void> {
     expect(await this.ask({ op: "workspace.delete", params }), "done");
@@ -441,7 +447,7 @@ export class Channel {
 
   /**
    * Which files changed in a workspace: those not committed, and those committed on its branch.
-   * Minor 11.
+   * Minor 13.
    */
   async changes(workspace: WorkspaceId): Promise<WorkspaceChanges> {
     const { kind: _, ...changes } = expect(
@@ -453,7 +459,7 @@ export class Channel {
 
   /**
    * One folder of a workspace's file tree, folders first: its root when no `dir` is given.
-   * Minor 11.
+   * Minor 13.
    */
   async files(params: WorkspaceFilesParams): Promise<FileList> {
     const { kind: _, ...list } = expect(await this.ask({ op: "workspace.files", params }), "files");
@@ -462,7 +468,7 @@ export class Channel {
 
   /**
    * One piece of a file in a workspace, from `offset`, or from its start: on disk, or on one side
-   * of a change. {@link Channel.wholeFile} reads all of them. Minor 11.
+   * of a change. {@link Channel.wholeFile} reads all of them. Minor 13.
    */
   async readFile(params: FileRead & { offset?: number }): Promise<FileChunk> {
     const { kind: _, ...chunk } = expect(
@@ -475,7 +481,7 @@ export class Channel {
   /**
    * A whole file in a workspace, read piece by piece and put together. A file that changes while
    * it is read is read again from the start, a few times at most. One that is not text comes with
-   * its state and no bytes. Minor 11.
+   * its state and no bytes. Minor 13.
    */
   async wholeFile(params: FileRead): Promise<WholeFile> {
     for (let reading = 0; reading < 3; reading++) {
@@ -538,7 +544,7 @@ export class Channel {
   /**
    * Where a workspace stands with its remote: its branch, what is not pushed, and whether a pull
    * request can be opened. With `forge`, the computer asks the forge about its pull request too,
-   * which takes it a network round trip; without, `pullRequest` is absent. Minor 12.
+   * which takes it a network round trip; without, `pullRequest` is absent. Minor 14.
    */
   async publishState(params: WorkspacePublishParams): Promise<PublishState> {
     const { kind: _, ...state } = expect(
@@ -550,7 +556,7 @@ export class Channel {
 
   /**
    * Commit everything changed in a workspace. The reply is where it stands afterwards, as Git
-   * knows it: the forge is not asked. Minor 12.
+   * knows it: the forge is not asked. Minor 14.
    */
   async commit(params: WorkspaceCommitParams): Promise<PublishState> {
     const { kind: _, ...state } = expect(
@@ -562,7 +568,7 @@ export class Channel {
 
   /**
    * Push a workspace's branch to its project's remote. The reply is where it stands afterwards,
-   * as Git knows it: the forge is not asked. Minor 12.
+   * as Git knows it: the forge is not asked. Minor 14.
    */
   async push(workspace: WorkspaceId): Promise<PublishState> {
     const { kind: _, ...state } = expect(
@@ -575,7 +581,7 @@ export class Channel {
   /**
    * Open a pull request for a workspace's branch, which the computer pushes first when the remote
    * does not have it all. When `created` is false the computer could not open it, and `url` is the
-   * forge's own form to finish in a browser. Minor 12.
+   * forge's own form to finish in a browser. Minor 14.
    */
   async openPullRequest(params: PullRequestOpenParams): Promise<PullRequestOpened> {
     const { kind: _, ...opened } = expect(
@@ -587,7 +593,7 @@ export class Channel {
 
   /**
    * Merge the pull request of a workspace's branch, if it is still open, not a draft, and at the
-   * commit named: the `headOid` its person saw, from {@link Channel.publishState}. Minor 12.
+   * commit named: the `headOid` its person saw, from {@link Channel.publishState}. Minor 14.
    */
   async mergePullRequest(params: PullRequestMergeParams): Promise<void> {
     expect(await this.ask({ op: "pull_request.merge", params }), "done");
@@ -657,6 +663,44 @@ export class Channel {
   /** Answer a question the agent asked. Refused as `not_found` once it is not open any more. */
   async answerAsk(params: ApprovalAnswerParams): Promise<void> {
     expect(await this.ask({ op: "approval.answer", params }), "done");
+  }
+
+  /**
+   * The oldest smoke test run waiting for a person in `workspace`, as the computer's approval
+   * card shows it, and how many wait behind it. Minor 10.
+   */
+  async testsWaiting(workspace: WorkspaceId): Promise<TestWaitingPage> {
+    const { kind: _, ...page } = expect(
+      await this.ask({ op: "test.waiting", params: { workspace } }),
+      "testsWaiting",
+    );
+    return page;
+  }
+
+  /**
+   * Let a waiting smoke test run, or refuse it, by the hash of the file its card showed. Refused
+   * as `not_found` once it waits no more, and as `stale` for another file than the one named.
+   */
+  async decideTest(params: TestDecideParams): Promise<void> {
+    expect(await this.ask({ op: "test.decide", params }), "done");
+  }
+
+  /**
+   * A page of the pull requests the computer last read from its forge, of the projects this
+   * device may see: by default those its workspaces opened or follow. The computer never waits
+   * for the forge: a page that says `reading` is of an older reading, with a newer one on its
+   * way. Minor 11.
+   */
+  async pulls(params: Partial<PullListParams> = {}): Promise<PullPage> {
+    const full: PullListParams = { of: "workspaces", cursor: null, limit: null, ...params };
+    const { kind: _, ...page } = expect(await this.ask({ op: "pull.list", params: full }), "pulls");
+    return page;
+  }
+
+  /** One pull request, with each check and reviewer by name. `not_found` once it is not read. */
+  async pull(params: PullRef): Promise<PullDetail> {
+    const { kind: _, ...detail } = expect(await this.ask({ op: "pull.describe", params }), "pull");
+    return detail;
   }
 
   /** An ended conversation again, under its own record: one whose summary says `resumable`. */

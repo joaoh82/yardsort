@@ -1,5 +1,6 @@
 //! The control socket: how this computer's own commands (`pair`, `devices`, `revoke`, `status`,
-//! `sign-out`) ask the running host, which alone holds the sign-in. One JSON message per line.
+//! `sign-out`, `sync`, `memory`) ask the running host, which alone holds the sign-in. One JSON
+//! message per line.
 //!
 //! It is `<data dir>/host.sock`, readable and writable by this user only. Nothing listens on the
 //! network: not this, and not the daemon.
@@ -37,6 +38,79 @@ pub enum Ask {
         projects: Option<Vec<String>>,
     },
     SignOut,
+    /// How sync stands, and the synced projects that could be linked here.
+    SyncStatus,
+    /// What turning sync on for a project would send. Changes nothing.
+    SyncPreview {
+        project: String,
+    },
+    /// Turn sync on for a project, by name or id. Refused unless a person at a terminal asked.
+    SyncOn {
+        project: String,
+    },
+    /// Link a project here to a synced one, by the id or name `sync status` shows. Refused unless
+    /// a person at a terminal asked.
+    SyncLink {
+        project: String,
+        synced: String,
+    },
+    /// Stop syncing a project here. Refused unless a person at a terminal asked.
+    SyncStop {
+        project: String,
+    },
+    /// Remove a project's records from the server, for every host. Refused unless a person at a
+    /// terminal asked.
+    SyncRemove {
+        project: String,
+    },
+    /// A project's memory, every note in every state, shared with its agents or not. Refused
+    /// unless a person at a terminal asked: an agent reads only `ys memory`'s approved, shared
+    /// notes.
+    MemoryList {
+        project: String,
+    },
+    /// Write a note, approved as written. Refused unless a person at a terminal asked.
+    MemoryWrite {
+        project: String,
+        text: String,
+    },
+    /// Approve, reject, revoke or restore a note, by the id `memory list` shows. Refused unless a
+    /// person at a terminal asked.
+    MemoryDecide {
+        entry: String,
+        decision: String,
+    },
+    /// Rewrite a note's text. Refused unless a person at a terminal asked.
+    MemoryEdit {
+        entry: String,
+        text: String,
+    },
+    /// Settle a note two hosts changed at once: keep `standing` or `other`, or write `text`.
+    /// Refused unless a person at a terminal asked.
+    MemorySettle {
+        entry: String,
+        keep: String,
+        text: Option<String>,
+    },
+}
+
+impl Ask {
+    /// Only a person at a terminal of their own may ask it (`guard`).
+    pub fn guarded(&self) -> bool {
+        matches!(
+            self,
+            Ask::Pair
+                | Ask::SyncOn { .. }
+                | Ask::SyncLink { .. }
+                | Ask::SyncStop { .. }
+                | Ask::SyncRemove { .. }
+                | Ask::MemoryList { .. }
+                | Ask::MemoryWrite { .. }
+                | Ask::MemoryDecide { .. }
+                | Ask::MemoryEdit { .. }
+                | Ask::MemorySettle { .. }
+        )
+    }
 }
 
 /// What the host answers.
@@ -72,9 +146,65 @@ pub enum Reply {
     /// The offer lapsed with nobody asking.
     Lapsed,
     SignedOut,
+    Sync(SyncStatus),
+    Preview(yardsort_core::sync::SyncPreview),
+    Memory {
+        notes: Vec<Note>,
+    },
+    /// Done, in words.
+    Done {
+        message: String,
+    },
     Failed {
         message: String,
     },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SyncStatus {
+    /// Remote is on here.
+    pub remote: bool,
+    /// The loop, in words.
+    pub state: String,
+    pub synced_at: Option<i64>,
+    pub problem: Option<String>,
+    /// Ops waiting to go up, refused ones included.
+    pub waiting: usize,
+    pub projects: Vec<SyncedProject>,
+    /// The account's synced projects not linked here. Empty when the server could not be asked.
+    pub offered: Vec<Offered>,
+    /// Why the server could not be asked for them.
+    pub offered_problem: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SyncedProject {
+    pub name: String,
+    /// How it stands, in words.
+    pub state: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Offered {
+    pub id: String,
+    pub name: String,
+    pub remote: Option<String>,
+    /// The project here whose remote matches, by name.
+    pub matches: Option<String>,
+}
+
+/// One of a project's notes, as `memory list` shows it.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Note {
+    /// The first 8 characters of its id.
+    pub id: String,
+    pub text: String,
+    /// `candidate`, `approved`, `rejected` or `revoked`.
+    pub state: String,
+    /// Where it came from, in words, with the other host for one synced from there.
+    pub from: String,
+    /// Two hosts changed it at once: the other text, and the host it is from.
+    pub conflict: Option<(String, String)>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -223,6 +353,48 @@ fn listen_at(path: &Path) -> Result<std::os::unix::net::UnixListener, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_reading_sync_is_left_unguarded_and_all_of_memory_is_guarded() {
+        let project = || "widgets".to_owned();
+        for ask in [
+            Ask::Pair,
+            Ask::SyncOn { project: project() },
+            Ask::SyncLink {
+                project: project(),
+                synced: "fa737444".into(),
+            },
+            Ask::SyncStop { project: project() },
+            Ask::SyncRemove { project: project() },
+        ] {
+            assert!(ask.guarded(), "{ask:?}");
+        }
+        for ask in [
+            Ask::MemoryList { project: project() },
+            Ask::MemoryWrite {
+                project: project(),
+                text: "Use bun.".into(),
+            },
+            Ask::MemoryDecide {
+                entry: "4a1b2c3d".into(),
+                decision: "approve".into(),
+            },
+            Ask::MemoryEdit {
+                entry: "4a1b2c3d".into(),
+                text: "Use bun.".into(),
+            },
+            Ask::MemorySettle {
+                entry: "4a1b2c3d".into(),
+                keep: "other".into(),
+                text: None,
+            },
+        ] {
+            assert!(ask.guarded(), "{ask:?}");
+        }
+        for ask in [Ask::SyncStatus, Ask::SyncPreview { project: project() }] {
+            assert!(!ask.guarded(), "{ask:?}");
+        }
+    }
 
     #[test]
     fn the_socket_is_this_users_alone() {

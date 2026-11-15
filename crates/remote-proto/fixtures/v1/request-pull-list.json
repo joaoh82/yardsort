@@ -1,0 +1,10 @@
+{
+  "requestId": "r-41",
+  "protocol": { "major": 1, "minor": 11 },
+  "op": "pull.list",
+  "params": {
+    "of": "open",
+    "cursor": null,
+    "limit": 50
+  }
+}

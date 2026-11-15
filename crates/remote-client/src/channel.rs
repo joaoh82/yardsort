@@ -280,7 +280,7 @@ impl Channel {
         started(self.ask(Operation::SessionResume(params)).await?)
     }
 
-    /// The branches a new workspace in a project can start from or open. Minor 10.
+    /// The branches a new workspace in a project can start from or open. Minor 12.
     pub async fn branches(&self, params: ProjectRef) -> Result<ProjectBranches> {
         match self.ask(Operation::ProjectBranches(params)).await? {
             Reply::Branches(branches) => Ok(branches),
@@ -289,7 +289,7 @@ impl Channel {
     }
 
     /// A repository cloned into the host's projects folder and added as a project. The reply
-    /// comes once the clone is done, which can take as long as the repository is large. Minor 10.
+    /// comes once the clone is done, which can take as long as the repository is large. Minor 12.
     pub async fn clone_project(&self, params: ProjectCloneParams) -> Result<ProjectCloned> {
         match self.ask(Operation::ProjectClone(params)).await? {
             Reply::Cloned(cloned) => Ok(cloned),
@@ -297,27 +297,27 @@ impl Channel {
         }
     }
 
-    /// The host's shell in a workspace. Minor 10.
+    /// The host's shell in a workspace. Minor 12.
     pub async fn start_shell(&self, params: ShellStartParams) -> Result<Started> {
         started(self.ask(Operation::ShellStart(params)).await?)
     }
 
-    /// Change what a workspace is called. Minor 10.
+    /// Change what a workspace is called. Minor 12.
     pub async fn rename_workspace(&self, params: WorkspaceRenameParams) -> Result<()> {
         done(self.ask(Operation::WorkspaceRename(params)).await?)
     }
 
-    /// Put a workspace away, keeping its branch and its record. Minor 10.
+    /// Put a workspace away, keeping its branch and its record. Minor 12.
     pub async fn archive_workspace(&self, params: WorkspaceRemoveParams) -> Result<()> {
         done(self.ask(Operation::WorkspaceArchive(params)).await?)
     }
 
-    /// Remove a workspace, keeping its branch. Minor 10.
+    /// Remove a workspace, keeping its branch. Minor 12.
     pub async fn delete_workspace(&self, params: WorkspaceRemoveParams) -> Result<()> {
         done(self.ask(Operation::WorkspaceDelete(params)).await?)
     }
 
-    /// What changed in a workspace. Minor 11.
+    /// What changed in a workspace. Minor 13.
     pub async fn changes(&self, workspace: WorkspaceId) -> Result<WorkspaceChanges> {
         match self
             .ask(Operation::WorkspaceChanges(WorkspaceRef { workspace }))
@@ -328,7 +328,7 @@ impl Channel {
         }
     }
 
-    /// One folder of a workspace's file tree. Minor 11.
+    /// One folder of a workspace's file tree. Minor 13.
     pub async fn files(&self, params: WorkspaceFilesParams) -> Result<FileList> {
         match self.ask(Operation::WorkspaceFiles(params)).await? {
             Reply::Files(files) => Ok(files),
@@ -336,7 +336,7 @@ impl Channel {
         }
     }
 
-    /// One piece of a file in a workspace. Minor 11.
+    /// One piece of a file in a workspace. Minor 13.
     pub async fn read_file(&self, params: FileReadParams) -> Result<FileChunk> {
         match self.ask(Operation::FileRead(params)).await? {
             Reply::File(chunk) => Ok(chunk),
@@ -344,7 +344,7 @@ impl Channel {
         }
     }
 
-    /// Where a workspace stands with its remote; with `forge`, its pull request too. Minor 12.
+    /// Where a workspace stands with its remote; with `forge`, its pull request too. Minor 14.
     pub async fn publish_state(
         &self,
         params: remote_proto::publish::WorkspacePublishParams,
@@ -352,7 +352,7 @@ impl Channel {
         publish(self.ask(Operation::WorkspacePublish(params)).await?)
     }
 
-    /// Commit everything changed in a workspace. Minor 12.
+    /// Commit everything changed in a workspace. Minor 14.
     pub async fn commit(
         &self,
         params: remote_proto::publish::WorkspaceCommitParams,
@@ -360,7 +360,7 @@ impl Channel {
         publish(self.ask(Operation::WorkspaceCommit(params)).await?)
     }
 
-    /// Push a workspace's branch to its project's remote. Minor 12.
+    /// Push a workspace's branch to its project's remote. Minor 14.
     pub async fn push(
         &self,
         workspace: WorkspaceId,
@@ -371,7 +371,7 @@ impl Channel {
         )
     }
 
-    /// Open a pull request for a workspace's branch. Minor 12.
+    /// Open a pull request for a workspace's branch. Minor 14.
     pub async fn open_pull_request(
         &self,
         params: remote_proto::publish::PullRequestOpenParams,
@@ -382,7 +382,7 @@ impl Channel {
         }
     }
 
-    /// Merge a workspace's pull request, if it is still at the commit named. Minor 12.
+    /// Merge a workspace's pull request, if it is still at the commit named. Minor 14.
     pub async fn merge_pull_request(
         &self,
         params: remote_proto::publish::PullRequestMergeParams,
@@ -391,7 +391,7 @@ impl Channel {
     }
 
     /// A whole file in a workspace, read piece by piece and put together. A file that changes
-    /// while it is read is read again from the start, a few times at most. Minor 11.
+    /// while it is read is read again from the start, a few times at most. Minor 13.
     pub async fn whole_file(&self, first: FileReadParams) -> Result<WholeFile> {
         use base64::Engine;
         let broken = |why: &str| ChannelError::Unexpected(why.into());

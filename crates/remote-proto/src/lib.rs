@@ -27,11 +27,13 @@
 //! type into a terminal may also start an agent, in a new workspace or an existing one, and
 //! upload a file for one, and since minor 6 resume an ended conversation: see [`start`]. Since
 //! minor 8 a client may read a conversation's turns and answer the permissions its agent asks
-//! for: see [`conversation`]. Since minor 10 a start may say a name, a model, an effort and a
-//! branch, and a client that may type may also look after projects and workspaces: see
-//! [`manage`]. Since minor 11 such a client may read a workspace's changes and files: see [`look`].
-//! Since minor 12 it may commit, push, and open and merge a pull request there: see [`publish`].
-//! A host lists what it answers in [`HostDescription::capabilities`].
+//! for: see [`conversation`]. Since minor 10 it may see a smoke test run waiting for its person
+//! and let it go or refuse it: see [`smoke`]. Since minor 11 it may read the pull requests the
+//! host last read from its forge: see [`pull`]. Since minor 12 a start may say a name, a model,
+//! an effort and a branch, and a client that may type may also look after projects and
+//! workspaces: see [`manage`]. Since minor 13 such a client may read a workspace's changes and
+//! files: see [`look`]. Since minor 14 it may commit, push, and open and merge a pull request
+//! there: see [`publish`]. A host lists what it answers in [`HostDescription::capabilities`].
 //!
 //! Sync between hosts ([`sync`]) is not part of this protocol: it is between a host and the
 //! server, over HTTPS, with its own schema version. Only its hint to a host is a relay notice.
@@ -46,7 +48,9 @@ pub mod model;
 pub mod notify;
 pub mod pairing;
 pub mod publish;
+pub mod pull;
 pub mod relay;
+pub mod smoke;
 pub mod start;
 pub mod sync;
 pub mod terminal;
@@ -95,14 +99,16 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// - 8: `conversation.read` and `approval.answer`.
 /// - 9: the relay's `syncChanged` notice to a host ([`relay::HostNotice::SyncChanged`]). Sync's
 ///   records are versioned apart from this ([`sync::SYNC_SCHEMA`]).
-/// - 10: `name`, `model`, `effort`, `baseBranch` and `existingBranch` on `workspace.start`;
+/// - 10: `test.waiting` and `test.decide` ([`smoke`]).
+/// - 11: `pull.list` and `pull.describe` ([`pull`]).
+/// - 12: `name`, `model`, `effort`, `baseBranch` and `existingBranch` on `workspace.start`;
 ///   `models` and `efforts` in `harness.list`; `remote` in a project's summary;
 ///   `project.branches`, `project.clone`, `shell.start`, `workspace.rename`, `workspace.archive`
 ///   and `workspace.delete`; and the `uncommitted_work` error.
-/// - 11: `workspace.changes`, `workspace.files` and `file.read`.
-/// - 12: `workspace.publish`, `workspace.commit`, `workspace.push`, `pull_request.open` and
+/// - 13: `workspace.changes`, `workspace.files` and `file.read`.
+/// - 14: `workspace.publish`, `workspace.commit`, `workspace.push`, `pull_request.open` and
 ///   `pull_request.merge`.
-pub const PROTOCOL_MINOR: u16 = 12;
+pub const PROTOCOL_MINOR: u16 = 14;
 /// `workflow:read` and `workflow:decide` arrived in this minor. A host is shown
 /// those scope names when it stated this minor or a newer minor of this major.
 pub const WORKFLOW_SCOPES_MINOR: u16 = 7;
@@ -244,7 +250,7 @@ pub enum ErrorCode {
     /// Not a wrong code, and not a reason to try the same challenge again.
     Stale,
     /// The workspace has uncommitted work that archiving or deleting it would lose. Ask the
-    /// person, and send the request again with `force` if they say so. Since minor 10; an older
+    /// person, and send the request again with `force` if they say so. Since minor 12; an older
     /// client reads it as unknown, and never sends the requests that get it.
     UncommittedWork,
     /// An operation this host does not answer (yet, or at all).
@@ -419,12 +425,12 @@ pub struct MemoryListParams {
 ///
 /// There is deliberately no operation that edits or proposes memory, launches a
 /// program the device names, or writes a file. Each of those is its own scoped increment, if it
-/// ever comes. Reading a file inside a workspace came in minor 11 ([`look`]). Starting one of the host's own harnesses, and
+/// ever comes. Reading a file inside a workspace came in minor 13 ([`look`]). Starting one of the host's own harnesses, and
 /// putting a file in the host's uploads folder, came in minor 5, and resuming one of its
 /// conversations in minor 6 ([`start`]). Deciding a workflow the desktop is running came in
 /// minor 7 ([`workflow`]): a signed-in phone, with the one-time code, and not a host token.
 /// Cloning a repository into the host's own projects folder, the host's shell in a workspace,
-/// and renaming, archiving or deleting a workspace came in minor 10 ([`manage`]).
+/// and renaming, archiving or deleting a workspace came in minor 12 ([`manage`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", content = "params")]
 pub enum Operation {
@@ -489,45 +495,57 @@ pub enum Operation {
     #[serde(rename = "approval.answer")]
     ApprovalAnswer(conversation::ApprovalAnswerParams),
     /// Since minor 10.
+    #[serde(rename = "test.waiting")]
+    TestWaiting(smoke::TestWaitingParams),
+    /// Since minor 10.
+    #[serde(rename = "test.decide")]
+    TestDecide(smoke::TestDecideParams),
+    /// Since minor 11.
+    #[serde(rename = "pull.list")]
+    PullList(pull::PullListParams),
+    /// Since minor 11.
+    #[serde(rename = "pull.describe")]
+    PullDescribe(pull::PullRef),
+    /// Since minor 12.
     #[serde(rename = "project.branches")]
     ProjectBranches(ProjectRef),
-    /// Since minor 10.
+    /// Since minor 12.
     #[serde(rename = "project.clone")]
     ProjectClone(ProjectCloneParams),
-    /// Since minor 10.
+    /// Since minor 12.
     #[serde(rename = "shell.start")]
     ShellStart(ShellStartParams),
-    /// Since minor 10.
+    /// Since minor 12.
     #[serde(rename = "workspace.rename")]
     WorkspaceRename(WorkspaceRenameParams),
-    /// Since minor 10.
+    /// Since minor 12.
     #[serde(rename = "workspace.archive")]
     WorkspaceArchive(WorkspaceRemoveParams),
-    /// Since minor 10.
+    /// Since minor 12.
     #[serde(rename = "workspace.delete")]
     WorkspaceDelete(WorkspaceRemoveParams),
-    /// Since minor 11.
+    /// Since minor 13.
     #[serde(rename = "workspace.changes")]
     WorkspaceChanges(WorkspaceRef),
-    /// Since minor 11.
+    /// Since minor 13.
     #[serde(rename = "workspace.files")]
     WorkspaceFiles(WorkspaceFilesParams),
-    /// Since minor 11.
+    /// Since minor 13.
     #[serde(rename = "file.read")]
     FileRead(FileReadParams),
-    /// Since minor 12.
+    /// Since minor 14.
     #[serde(rename = "workspace.publish")]
     WorkspacePublish(publish::WorkspacePublishParams),
-    /// Since minor 12.
+    /// Since minor 14.
     #[serde(rename = "workspace.commit")]
     WorkspaceCommit(publish::WorkspaceCommitParams),
-    /// Since minor 12.
+    /// Since minor 14.
     #[serde(rename = "workspace.push")]
     WorkspacePush(WorkspaceRef),
-    /// Since minor 12.
+    /// Since minor 14.
     #[serde(rename = "pull_request.open")]
     PullRequestOpen(publish::PullRequestOpenParams),
-    /// Since minor 12.
+    /// Since minor 14.
     #[serde(rename = "pull_request.merge")]
     PullRequestMerge(publish::PullRequestMergeParams),
 }
@@ -561,6 +579,10 @@ pub const OPERATIONS: &[&str] = &[
     "workflow.decide",
     "conversation.read",
     "approval.answer",
+    "test.waiting",
+    "test.decide",
+    "pull.list",
+    "pull.describe",
     "project.branches",
     "project.clone",
     "shell.start",
@@ -607,20 +629,24 @@ impl Operation {
             Self::WorkflowDecide(_) => 24,
             Self::ConversationRead(_) => 25,
             Self::ApprovalAnswer(_) => 26,
-            Self::ProjectBranches(_) => 27,
-            Self::ProjectClone(_) => 28,
-            Self::ShellStart(_) => 29,
-            Self::WorkspaceRename(_) => 30,
-            Self::WorkspaceArchive(_) => 31,
-            Self::WorkspaceDelete(_) => 32,
-            Self::WorkspaceChanges(_) => 33,
-            Self::WorkspaceFiles(_) => 34,
-            Self::FileRead(_) => 35,
-            Self::WorkspacePublish(_) => 36,
-            Self::WorkspaceCommit(_) => 37,
-            Self::WorkspacePush(_) => 38,
-            Self::PullRequestOpen(_) => 39,
-            Self::PullRequestMerge(_) => 40,
+            Self::TestWaiting(_) => 27,
+            Self::TestDecide(_) => 28,
+            Self::PullList(_) => 29,
+            Self::PullDescribe(_) => 30,
+            Self::ProjectBranches(_) => 31,
+            Self::ProjectClone(_) => 32,
+            Self::ShellStart(_) => 33,
+            Self::WorkspaceRename(_) => 34,
+            Self::WorkspaceArchive(_) => 35,
+            Self::WorkspaceDelete(_) => 36,
+            Self::WorkspaceChanges(_) => 37,
+            Self::WorkspaceFiles(_) => 38,
+            Self::FileRead(_) => 39,
+            Self::WorkspacePublish(_) => 40,
+            Self::WorkspaceCommit(_) => 41,
+            Self::WorkspacePush(_) => 42,
+            Self::PullRequestOpen(_) => 43,
+            Self::PullRequestMerge(_) => 44,
         };
         OPERATIONS[index]
     }
@@ -634,14 +660,17 @@ impl Operation {
             | Self::WorkspaceDescribe(_)
             | Self::SessionList(_)
             | Self::HarnessList
-            | Self::ProjectBranches(_) => Scope::WorkspaceRead,
+            | Self::ProjectBranches(_)
+            | Self::PullList(_)
+            | Self::PullDescribe(_) => Scope::WorkspaceRead,
             Self::ActivityList(_) | Self::ActivitySubscribe(_) | Self::ActivityUnsubscribe(_) => {
                 Scope::ActivityRead
             }
             Self::MemoryList(_) => Scope::MemoryRead,
-            Self::TerminalAttach(_) | Self::TerminalDetach(_) | Self::ConversationRead(_) => {
-                Scope::TerminalRead
-            }
+            Self::TerminalAttach(_)
+            | Self::TerminalDetach(_)
+            | Self::ConversationRead(_)
+            | Self::TestWaiting(_) => Scope::TerminalRead,
             Self::TerminalAcquire(_)
             | Self::TerminalRenew(_)
             | Self::TerminalRelease(_)
@@ -653,6 +682,7 @@ impl Operation {
             | Self::UploadChunk(_)
             | Self::SessionResume(_)
             | Self::ApprovalAnswer(_)
+            | Self::TestDecide(_)
             | Self::ProjectClone(_)
             | Self::ShellStart(_)
             | Self::WorkspaceRename(_)
@@ -730,6 +760,17 @@ impl Operation {
                 Some(message) => invalid(message),
                 None => Ok(()),
             },
+            Self::TestDecide(params) => match params.invalid() {
+                Some(message) => invalid(message),
+                None => Ok(()),
+            },
+            Self::PullList(params) if params.limit == Some(0) => {
+                invalid("A page holds at least one item.")
+            }
+            Self::PullDescribe(params) => match params.invalid() {
+                Some(message) => invalid(message),
+                None => Ok(()),
+            },
             _ => Ok(()),
         }
     }
@@ -781,18 +822,24 @@ pub enum Reply {
     /// Since minor 8.
     Conversation(conversation::ConversationPage),
     /// Since minor 10.
+    TestsWaiting(smoke::TestWaitingPage),
+    /// Since minor 11.
+    Pulls(pull::PullPage),
+    /// Since minor 11. Boxed: with every check by name it is far larger than most replies.
+    Pull(Box<pull::PullDetail>),
+    /// Since minor 12.
     Branches(ProjectBranches),
-    /// Since minor 10.
+    /// Since minor 12.
     Cloned(ProjectCloned),
-    /// Since minor 11.
+    /// Since minor 13.
     Changes(WorkspaceChanges),
-    /// Since minor 11.
+    /// Since minor 13.
     Files(FileList),
-    /// Since minor 11.
+    /// Since minor 13.
     File(FileChunk),
-    /// Since minor 12.
+    /// Since minor 14.
     Publish(publish::PublishState),
-    /// Since minor 12.
+    /// Since minor 14.
     PullRequestOpened(publish::PullRequestOpened),
     Done,
 }

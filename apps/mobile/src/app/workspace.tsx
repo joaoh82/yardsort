@@ -2,8 +2,9 @@
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 /**
- * One workspace: its conversations and other terminals, and what has been recorded there, followed
- * live. None of it is kept: it shows only when the computer can be reached, and goes with the screen.
+ * One workspace: its pull request, its conversations and other terminals, and what has been
+ * recorded there, followed live. None of it is kept: it shows only when the computer can be
+ * reached, and goes with the screen.
  */
 
 import type {
@@ -24,6 +25,7 @@ import { messageOf } from "../lib/accounts";
 import { useApp } from "../lib/context";
 import { moment, stamp } from "../lib/format";
 import type { ObservedWorkspace } from "../lib/observed";
+import { routeOf, standingWords, toneWords } from "../lib/pulls";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
 import { canResume, canStart } from "./start";
 import {
@@ -39,6 +41,7 @@ import {
   useColors,
   Waiting,
 } from "../ui/parts";
+import { PullBadge, PullCard, useNow, usePullDetail, usePulls } from "../ui/pull";
 
 export default function WorkspaceScreen() {
   const params = useLocalSearchParams<{ host?: string; workspace?: string }>();
@@ -85,6 +88,16 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
     [workspace, ended],
   );
   const sessions = useRead(channel, readSessions, asked);
+
+  // The workspace's own pull requests, the one the computer shows first leading, then any it
+  // follows in other repositories.
+  const pulls = usePulls(channel, "workspaces", asked).read;
+  const [pull, ...otherPulls] = useMemo(
+    () => pulls?.pulls.filter((p) => p.workspaces.includes(workspace)) ?? [],
+    [pulls, workspace],
+  );
+  const pullDetail = usePullDetail(channel, pull ?? null, pulls);
+  const now = useNow();
 
   const feed = useMemo(() => new ActivityFeed(workspace), [workspace]);
   const activity = useSyncExternalStore(feed.subscribe, feed.getSnapshot);
@@ -143,6 +156,32 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
       />
       {!channel && !page && (
         <Body muted>Conversations and activity show when the computer can be reached.</Body>
+      )}
+
+      {pull && (
+        <Section title="Pull request">
+          <PullCard pull={pullDetail?.pull ?? pull} detail={pullDetail} now={now} />
+        </Section>
+      )}
+      {otherPulls.length > 0 && (
+        <Section title="Also opened from this workspace" note={otherPulls.length}>
+          <Group>
+            {otherPulls.map((other) => (
+              <Row
+                key={`${other.followed ?? ""} ${other.number}`}
+                title={other.title}
+                plainTitle
+                detail={standingWords(other)}
+                monoDetail
+                trailing={<PullBadge pull={other} />}
+                label={`${other.title}, ${toneWords(other)}`}
+                onPress={() =>
+                  router.push({ pathname: "/pull", params: { host, ...routeOf(other) } })
+                }
+              />
+            ))}
+          </Group>
+        </Section>
       )}
 
       <Section title="Conversations" note={page?.sessions.length}>
