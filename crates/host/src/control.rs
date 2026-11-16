@@ -104,20 +104,34 @@ pub enum Ask {
 impl Ask {
     /// Only a person at a terminal of their own may ask it (`guard`).
     pub fn guarded(&self) -> bool {
-        matches!(
-            self,
-            Ask::Pair
-                | Ask::SyncOn { .. }
-                | Ask::SyncLink { .. }
-                | Ask::SyncStop { .. }
-                | Ask::SyncRemove { .. }
-                | Ask::SyncCheckout { .. }
-                | Ask::MemoryList { .. }
-                | Ask::MemoryWrite { .. }
-                | Ask::MemoryDecide { .. }
-                | Ask::MemoryEdit { .. }
-                | Ask::MemorySettle { .. }
-        )
+        self.person_only().is_some()
+    }
+
+    /// What it is, in words, and the command that asks it, for a guarded ask: what the guard says
+    /// when it refuses one. `None` for one anybody may ask.
+    pub fn person_only(&self) -> Option<(&'static str, &'static str)> {
+        Some(match self {
+            Ask::MemoryDecide { decision, .. } => (
+                "Deciding about a note",
+                match decision.as_str() {
+                    "reject" => "memory reject",
+                    "revoke" => "memory revoke",
+                    "restore" => "memory restore",
+                    _ => "memory approve",
+                },
+            ),
+            Ask::Pair => ("Pairing", "pair"),
+            Ask::SyncOn { .. } => ("Turning sync on", "sync on"),
+            Ask::SyncLink { .. } => ("Linking a project", "sync link"),
+            Ask::SyncStop { .. } => ("Stopping sync", "sync stop"),
+            Ask::SyncRemove { .. } => ("Removing a project from the server", "sync remove"),
+            Ask::SyncCheckout { .. } => ("Checking a workspace out", "sync checkout"),
+            Ask::MemoryList { .. } => ("Reading a project's memory", "memory list"),
+            Ask::MemoryWrite { .. } => ("Writing a note", "memory write"),
+            Ask::MemoryEdit { .. } => ("Rewriting a note", "memory edit"),
+            Ask::MemorySettle { .. } => ("Settling a note", "memory settle"),
+            _ => return None,
+        })
     }
 }
 
@@ -406,6 +420,27 @@ mod tests {
         for ask in [Ask::SyncStatus, Ask::SyncPreview { project: project() }] {
             assert!(!ask.guarded(), "{ask:?}");
         }
+    }
+
+    #[test]
+    fn a_refusal_names_what_was_asked_and_the_command_to_run() {
+        use crate::guard::Refusal;
+        let ask = Ask::SyncCheckout {
+            project: "widgets".into(),
+            workspace: "fix-login".into(),
+        };
+        let (act, command) = ask.person_only().unwrap();
+        let said = Refusal::NoTerminal.say(act, command);
+        assert_eq!(
+            said,
+            "Checking a workspace out needs a person at a terminal: run `yardsort-host sync \
+             checkout` in one, not from a script."
+        );
+        assert!(!said.contains("Pairing"));
+        assert!(Refusal::Launched
+            .say("Pairing", "pair")
+            .contains("Pairing is refused from a terminal Yardsort started"));
+        assert!(Ask::SyncStatus.person_only().is_none());
     }
 
     #[test]
