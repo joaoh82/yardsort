@@ -117,6 +117,7 @@ The domain is `yardsort.sh`. The website keeps `www.yardsort.sh` on Vercel.
 | `remote.yardsort.sh`         | The production server, which the app and the phone connect to: sign-in, devices, and later the relay                |
 | `remote-staging.yardsort.sh` | Staging                                                                                                             |
 | `auth.yardsort.sh`           | Production's ZITADEL custom domain (Pro): the sign-in pages people see. Staging keeps its `*.zitadel.cloud` address |
+| `status.yardsort.sh`         | The managed service's status page, on a service of its own outside Fly ([46](46-remote-r7.md), slice 10)            |
 | `<server>/v1/login/callback` | The one redirect URI registered at ZITADEL for each environment (27 §2)                                             |
 | `yardsort://signed-in`       | The app's redirect, allowed by the server, never registered at ZITADEL                                              |
 | `http://127.0.0.1/signed-in` | A computer's redirect, on any port                                                                                  |
