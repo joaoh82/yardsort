@@ -1103,7 +1103,9 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       passed. Slice 5, checking a branch out here, was built the same day (42 §13): **Check out
       here** and `yardsort-host sync checkout`, fetching from the remote and never moving a branch
       with commits of its own; its local smoke test, `sync-checkout.yaml`, passed. All five
-      slices are built; the gate's runs through staging are the owner's.
+      slices are built, and the gate's runs through staging passed on 2026-11-15, this computer
+      and the box: offline edits shown as one conflict on both and settled once, a revoke over an
+      offline edit holding on both, and nothing made on the box that it did not ask for.
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is
