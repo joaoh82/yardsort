@@ -477,12 +477,7 @@ impl Hands for AppHands<'_> {
             )?;
             Ok(found
                 .filter(|pr| pr.state == yardsort_core::forge::PullRequestState::Open)
-                .map(|pr| yardsort_core::workflow::runs::PrFacts {
-                    number: pr.number,
-                    url: pr.url,
-                    title: pr.title,
-                    elsewhere: None,
-                }))
+                .map(yardsort_core::workflow::runs::PrFacts::own))
         })
     }
 }

@@ -2578,6 +2578,11 @@ export type PrFacts_Deserialize = {
 	title: string,
 	/**  Set when it is one the workspace tracks in another repository: asked about by its link. */
 	elsewhere?: Elsewhere_Deserialize | null,
+	/**
+	 *  The branch it would merge into, when the forge said. For the workspace's own pull
+	 *  request it is what the branch is based on, if Yardsort did not start the branch.
+	 */
+	base?: string | null,
 };
 
 export type PrFacts_Serialize = {
@@ -2586,6 +2591,11 @@ export type PrFacts_Serialize = {
 	title: string,
 	/**  Set when it is one the workspace tracks in another repository: asked about by its link. */
 	elsewhere?: Elsewhere_Serialize | null,
+	/**
+	 *  The branch it would merge into, when the forge said. For the workspace's own pull
+	 *  request it is what the branch is based on, if Yardsort did not start the branch.
+	 */
+	base?: string | null,
 };
 
 export type Preflight = {

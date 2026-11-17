@@ -6090,6 +6090,16 @@ fn a_forks_pull_request_is_checked_out_and_its_review_finds_it() {
         "gh is asked in the workspace, so it answers for the project's own repository: {:?}",
         prs.asked()
     );
+    // Yardsort did not start `pr/7`, so the review's `{{ workspace.base_branch }}` is what the
+    // pull request merges into, `trunk`, and not whatever the project is on.
+    assert_eq!(pr.base.as_deref(), Some("trunk"));
+    let empty = queued["empty"].as_array().expect("the notes");
+    assert!(
+        empty
+            .iter()
+            .all(|note| !note.as_str().unwrap().contains("base_branch")),
+        "{empty:?}"
+    );
 }
 
 /// `ys session resume` and `fork` find a session by the start of its id, as `ys session list`
