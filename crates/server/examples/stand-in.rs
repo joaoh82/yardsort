@@ -34,6 +34,11 @@
 //! - `{"op":"note","text":…}`: write an approved memory note in the workspace's project.
 //! - `{"op":"conversation","title":…}`: record a conversation in the workspace by that title,
 //!   started with it as its first message, on the program's terminal.
+//! - `{"op":"agentFinished"}`: the agent of the conversation on the program's terminal went quiet
+//!   after working: a row in the host's Notifications list, which it keeps as the app does.
+//!   Answers whether the list changed.
+//! - `{"op":"agentWaits"}`: that agent asks for a permission, as its hook reports it: a row of
+//!   the list that needs its person. Answers whether there is a conversation to have asked.
 //! - `{"op":"signInAs","subject":…}`: whom the provider signs in from now on, for a second
 //!   account. Everyone is `someone` until then.
 //! - `{"op":"removeHost"}`: take the host off the account.
@@ -366,6 +371,19 @@ async fn obey(
             here.converse(title)?;
             Ok(Value::Null)
         }
+        "agentFinished" => {
+            // The agent of the conversation on the program's terminal went quiet after a
+            // stretch of work, as the terminals tell the list.
+            let listed = yardsort_core::notifications::settled_terminal(
+                &here.store,
+                &here.program.0,
+                12 * 60_000,
+                yardsort_core::store::now_ms(),
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(json!(listed))
+        }
+        "agentWaits" => Ok(json!(here.agent_waits()?)),
         "signInAs" => {
             let subject = command["subject"]
                 .as_str()
@@ -443,6 +461,11 @@ struct Here {
     project: String,
     workspace: String,
     seen: Arc<Mutex<String>>,
+    /// Its Notifications list, kept as the app and a host with no window keep theirs.
+    notifications: yardsort_core::notifications::Keeper,
+    /// The newest conversation's record, and how many events were recorded for any.
+    conversation: Mutex<Option<String>>,
+    events: std::sync::atomic::AtomicU64,
 }
 
 impl Here {
@@ -484,6 +507,9 @@ impl Here {
                 }),
             )
             .map_err(|e| e.to_string())?;
+        let notifications = yardsort_core::notifications::Keeper::new(|| {});
+        // Its first look, at a store with nothing recorded: what agents report after is news.
+        notifications.read_events(&store);
         Ok(Arc::new(Self {
             _dir: dir,
             store,
@@ -497,6 +523,9 @@ impl Here {
             project: project.id,
             workspace: workspace.id,
             seen,
+            notifications,
+            conversation: Mutex::new(None),
+            events: std::sync::atomic::AtomicU64::new(0),
         }))
     }
 
@@ -583,9 +612,10 @@ impl Here {
     fn converse(&self, title: &str) -> Result<(), String> {
         static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let record = format!("rec-stand-in-{n}");
         self.store
             .add_session(&yardsort_core::store::NewSession {
-                id: &format!("rec-stand-in-{n}"),
+                id: &record,
                 workspace_id: &self.workspace,
                 harness_id: "claude",
                 title,
@@ -593,7 +623,55 @@ impl Here {
                 prompt: Some(title),
                 ..Default::default()
             })
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        // Its run, as the launcher records one: what the agent's hook events are told under.
+        let run = format!("run-{record}");
+        self.store
+            .add_run(&yardsort_core::store::NewRun {
+                id: &run,
+                workspace_id: &self.workspace,
+                session_id: Some(&record),
+                kind: "harness",
+                harness_id: Some("claude"),
+                harness_session_id: None,
+                launched_by: "app",
+            })
+            .map_err(|e| e.to_string())?;
+        self.store
+            .run_spawned(&run, &self.program.0)
+            .map_err(|e| e.to_string())?;
+        *self.conversation.lock().unwrap() = Some(record);
+        Ok(())
+    }
+
+    /// The newest conversation's agent asks for a permission, as its hook would report it, and
+    /// the list reads that. False with no conversation.
+    fn agent_waits(&self) -> Result<bool, String> {
+        let Some(record) = self.conversation.lock().unwrap().clone() else {
+            return Ok(false);
+        };
+        let n = self
+            .events
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.store
+            .add_event(&yardsort_core::store::NewEvent {
+                id: &format!("event-stand-in-{n}"),
+                schema_version: yardsort_core::activity::SCHEMA_VERSION,
+                workspace_id: &self.workspace,
+                session_id: Some(&record),
+                run_id: Some(&format!("run-{record}")),
+                occurred_at: yardsort_core::store::now_ms(),
+                kind: "approval.requested",
+                producer: "claude",
+                method: "hook",
+                fidelity: "exact",
+                source_key: None,
+                privacy_class: yardsort_core::activity::PRIVACY_METADATA,
+                payload: "{}",
+            })
+            .map_err(|e| e.to_string())?;
+        self.notifications.read_events(&self.store);
+        Ok(true)
     }
 
     fn stop(&self) {
@@ -616,7 +694,7 @@ impl Serving for Here {
             conversations: None,
             tests: None,
             pulls: None,
-            notifications: None,
+            notifications: Some(&self.notifications),
         });
     }
 }

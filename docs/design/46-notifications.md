@@ -1,7 +1,7 @@
 # 46. Notifications
 
-Status: proposed in Figma and answered by the owner on 2026-11-17. Being built, a slice at a
-time.
+Status: proposed in Figma and answered by the owner on 2026-11-17. Built on the desktop and on
+the phone; the push for an agent that finished (slice 5) is left.
 
 ## The problem
 
@@ -178,8 +178,8 @@ Each comes with its tests, its guide and changelog lines, and a smoke test.
    runs that end, smoke tests that wait, and schedules and triggers that could not start.
 3. **Other computers on the desktop. Built on 2026-11-17.** Protocol minor 15: the list, word
    when it changes, and marking a row seen. Their rows join the list, each naming its computer.
-4. **The phone.** The bell and its count, the list, the counts on a computer's row and the marks
-   on its workspaces, from the same protocol minor.
+4. **The phone. Built on 2026-11-17.** The bell and its count, the list, the counts on a
+   computer's row and the marks on its workspaces, from the same protocol minor.
 5. **The push for an agent that finished.** A new kind of notice on the server, and its switch
    under Settings → Notifications ([40](40-mobile-notifications.md)).
 
@@ -333,6 +333,94 @@ Not run: macOS and Windows, a second real computer, another desktop app as the h
 test and the core's tests cover a host that keeps workflows' rows), and a host on an earlier
 Yardsort beside this one.
 
+### Slice 4, as built and as checked
+
+Nothing new on the wire: the phone speaks minor 15 as the desktop does, through the TypeScript
+client's `notifications`, `notificationsSeen` and `followNotifications`.
+
+**One reading of every computer's list** (`apps/mobile/src/lib/notifications.ts`, `Lists`). It is
+kept in memory for the profile in use, and never on the phone's disk. A screen hands it the
+channels it holds; a computer's list is read when its channel opens and again when the computer
+says it changed (or every 20 seconds from one that does not say). A computer that is offline,
+refuses the phone or is gone loses its rows at once; one between two channels keeps them, so a
+dropped connection does not empty the screen. A computer that does not answer
+`notification.list` is not asked, and the list says it runs an earlier Yardsort.
+
+**Channels.** The account's screen already holds one to each computer, and reads the lists
+through them. The list's own screen holds one to each. A computer's screen holds its own and,
+for the bell's count to be of every computer, one to each of the others: with one computer,
+which is the common case, that is nothing more.
+
+**Seen.** Pressing a finished row says so to its computer and opens what it is about. So does
+looking: the conversation's screen and the run's screen mark what finished in what they show,
+when they hold a channel, which they do only while in front. A row moves to Earlier on the
+phone at once. A reading asked for before the computer took the word can still say
+_finished_; the phone keeps the row under Earlier until the computer agrees, or the word fails.
+Without that, opening a conversation said seen twice, and the row flickered back.
+
+**What a row opens** is what the phone already had: `/terminal` by the conversation's record
+for an agent, `/decision` for a workflow that waits, `/workflow` for a run that ended, and the
+workspace for the rest. A smoke test's card was only in Chat, so a test asked for outside any
+conversation had nowhere to be answered; the workspace's screen now shows the card too.
+
+**Differences from the Figma frames**, all in words the list cannot back:
+
+- An answered permission says _asked for a permission_, not _and you allowed it_: the list does
+  not know how it was answered. Its command is not shown once answered, since the computer
+  keeps a command only while its question is open.
+- A smoke test's row says it _waits for you to let it run_, not that it _has changed_: a new
+  file waits too.
+- With no computer reached, **Nothing needs you** is not said.
+- A computer on an earlier release gets a line of its own.
+
+Not in the frames and not built: **Mark all seen**, grouping by project, and filters.
+
+**Its tests.** The reading, the three parts and every word against a hand-made channel
+(`test/lib/notifications.test.ts`); the same reading against the real server, relay and host
+(`test/lib/notification-list.test.ts`), for which the stand-in host now keeps a list and has two
+commands, `agentFinished` and `agentWaits`; and the screens through the real router and the real
+protocol client against the fake server (`test/screens/notifications.test.tsx`): the bell and
+the row's counts, the three parts, seen on opening and on looking, a change told, an offline
+computer, two computers, the marks, and the test's card.
+
+**Run by hand on 2026-11-17**, on Linux: the development build on a headless Android emulator,
+with this branch's code served to it, signed in to the stand-in server and paired with its host.
+
+- The account's screen: the bell with **1**, and the computer's row with _Online · 1 needs you,
+  1 finished_.
+- The list: a row under each heading, each with its workspace, _demo · Stand-in host_, its
+  words and how long ago.
+- Pressing the finished row opened that agent's terminal. Back in the list, read anew from the
+  host, the row was under **Earlier**.
+- With the list on screen, the agent finishing again showed a new row within three seconds,
+  with nothing pressed.
+- The computer's screen: **finished** on the workspace, then **needs you** and the bell's count
+  within three seconds of the agent asking.
+- With the host offline: the computer's row said so, the bell lost its count, and the list
+  showed the line and no rows. Within twenty seconds of its coming back, the rows were back.
+
+What the run found, both put right: the count was cut off by Android's header, which clips what
+a header button draws outside its own bounds; and the list said **Nothing needs you** while its
+only computer was offline.
+
+**Its smoke test.** `remote-phone-sees-notifications.yaml`, new, with the phone step
+`sees-notifications` and the window step `seen-from-the-phone`. It is the half the emulator run
+did not cover: the real desktop app as the computer. A pretend phone, which is the TypeScript
+client the phone app uses, follows the app's list and starts an agent that prints for ten
+seconds and then waits. It is told that the list changed, reads the agent's row as finished
+and not seen, and marks it seen; the real window then has nothing unseen and the row under
+**Earlier**.
+
+Its steps were run by hand on 2026-11-17, on Linux, against a fresh debug build on a profile
+of its own, with the window on a monitor nobody sees, and all passed: the phone was told
+fourteen seconds after it started the agent, ten of them the agent's work. The file was
+checked with `ys test validate`. It has not been run through `ys test run`, which needs its
+owner's approval first.
+
+Not run: an iPhone, where the header is the system's glass; a real computer with a workflow, a
+smoke test or a schedule waiting (the screens' tests cover their rows against the fake server);
+two real computers; the light colours on a device.
+
 ## Limits, said plainly
 
 - **A system notification cannot open its row.** The notification plugin the app uses does not
@@ -347,5 +435,7 @@ Yardsort beside this one.
   `terminal:read` and `terminal:control`, not for `workflow:read`: a workflow's row from another
   computer says that it waits and names the workflow, without its question.
 - The phone's list covers the computers it can reach. One that is offline shows no rows.
+- The phone shows a computer's newest hundred rows, and has no **Mark all seen**.
+- Nothing tells the phone that an agent finished while the app is closed, until slice 5.
 - A computer on an earlier release sends no list, and one that lets this computer see its
   workspaces but not watch its terminals gives none.

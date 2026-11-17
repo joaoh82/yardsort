@@ -43,6 +43,7 @@ import { useApp } from "../lib/context";
 import { deviceName, fitted, TerminalControl } from "../lib/control";
 import type { Reach } from "../lib/presence";
 import { Timings, timingWords } from "../lib/timing";
+import type { Listed } from "../lib/notifications";
 import { type View as Shown, viewChoices } from "../lib/views";
 import { type Sight, PageFeed, TerminalWatch } from "../lib/watch";
 import { AboveKeyboard } from "../ui/above-keyboard";
@@ -58,6 +59,7 @@ import {
   useChannelTo,
   useLive,
 } from "../ui/live";
+import { useLooking } from "../ui/notifications";
 import { Button, Dot, FONTS, Problem, Screen, useColors, Waiting } from "../ui/parts";
 import { type Room, TerminalView } from "../ui/terminal-view";
 
@@ -167,6 +169,14 @@ function Conversation({
   );
   const showTerminal = useCallback(() => choose("terminal"), [choose]);
   const termId = found?.terminal?.id ?? terminal;
+  // Looking at an agent here is looking at it: what it finished is seen on the computer too.
+  const record = found?.id ?? session;
+  const shows = useCallback(
+    (row: Listed) =>
+      (record !== null && row.session === record) || (termId !== null && row.terminal === termId),
+    [record, termId],
+  );
+  useLooking(host, link.channel, link.reach, shows);
 
   if (link.reach?.kind === "gone") {
     return (

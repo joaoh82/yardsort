@@ -2,9 +2,9 @@
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 /**
- * One workspace: its pull request, its conversations and other terminals, and what has been
- * recorded there, followed live. None of it is kept: it shows only when the computer can be
- * reached, and goes with the screen.
+ * One workspace: a smoke test waiting there to be let run, its pull request, its conversations
+ * and other terminals, and what has been recorded there, followed live. None of it is kept: it
+ * shows only when the computer can be reached, and goes with the screen.
  */
 
 import type {
@@ -26,6 +26,7 @@ import { useApp } from "../lib/context";
 import { moment, stamp } from "../lib/format";
 import type { ObservedWorkspace } from "../lib/observed";
 import { routeOf, standingWords, toneWords } from "../lib/pulls";
+import { TESTS_EVERY_MS, WaitingTests } from "../lib/tests";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
 import { canResume, canStart } from "./start";
 import {
@@ -42,6 +43,7 @@ import {
   Waiting,
 } from "../ui/parts";
 import { PullBadge, PullCard, useNow, usePullDetail, usePulls } from "../ui/pull";
+import { TestCard } from "../ui/test-card";
 
 export default function WorkspaceScreen() {
   const params = useLocalSearchParams<{ host?: string; workspace?: string }>();
@@ -107,6 +109,18 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
     return () => feed.stop();
   }, [channel, feed, asked]);
 
+  // A smoke test run waiting here to be let go, whoever asked for it: the card Chat shows, so
+  // that the Notifications list's row has somewhere to open with no conversation to open it in.
+  const tests = useMemo(() => new WaitingTests(workspace), [workspace]);
+  const waiting = useSyncExternalStore(tests.subscribe, tests.getSnapshot);
+  useEffect(() => {
+    if (!channel) return;
+    void tests.read(channel);
+    const every = setInterval(() => void tests.read(channel), TESTS_EVERY_MS);
+    return () => clearInterval(every);
+  }, [channel, tests, asked]);
+  const test = waiting.first;
+
   const showMore = async (cursor: NonNullable<SessionPage["next"]>) => {
     if (!channel) return;
     try {
@@ -156,6 +170,17 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
       />
       {!channel && !page && (
         <Body muted>Conversations and activity show when the computer can be reached.</Body>
+      )}
+
+      {test && (
+        <TestCard
+          key={test.run}
+          test={test}
+          behind={waiting.behind}
+          askedBy={ASKED_BY[test.askedBy] ?? "the computer"}
+          problem={waiting.problem}
+          decide={channel ? (decision) => tests.decide(channel, test, decision) : undefined}
+        />
       )}
 
       {pull && (
@@ -399,6 +424,13 @@ function duration(ms: number): string {
   if (minutes < 60) return `${minutes} min`;
   return `${Math.floor(minutes / 60)} h`;
 }
+
+/** Who asked for a smoke test's run, where no one conversation is in front. */
+const ASKED_BY: Record<string, string> = {
+  agent: "an agent",
+  workflow: "a workflow",
+  app: "you, at the computer",
+};
 
 function purposeWords(purpose: TerminalPurpose, program: string): string {
   switch (purpose) {

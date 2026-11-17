@@ -25,6 +25,8 @@ import { messageOf } from "./accounts";
 
 /** The operation a computer must answer for a waiting run to show. */
 export const TEST_WAITING = "test.waiting";
+/** How often a screen showing what waits asks again: the computer does not say when it changes. */
+export const TESTS_EVERY_MS = 5_000;
 
 export interface Waiting {
   /** The oldest run waiting in the workspace, when there is one. */

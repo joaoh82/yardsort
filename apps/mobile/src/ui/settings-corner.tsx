@@ -12,7 +12,7 @@ export function SettingsCorner() {
   return <Stack.Screen options={{ headerRight: () => <SettingsButton /> }} />;
 }
 
-function SettingsButton() {
+export function SettingsButton() {
   const router = useRouter();
   const colors = useColors();
   return (

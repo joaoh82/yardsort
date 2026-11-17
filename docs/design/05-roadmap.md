@@ -1411,7 +1411,13 @@ looking.
       rows seen, and being told when the list changes. The keeper of the list moved into the
       core, so `yardsort-host` keeps one too. A row there opens its workspace there; what a
       workflow, a test, a schedule or a trigger there waits for is answered on that computer.
-- [ ] Slice 4: the phone: the bell, the list, counts on computers and marks on workspaces.
+- [x] Slice 4: the phone: the bell, the list, counts on computers and marks on workspaces,
+      read from each computer over the same protocol minor. Seen is said back to the computer.
+      Found by running it on an emulator: Android's header clips a count drawn outside the
+      bell's own bounds, and with no computer reached the list said that nothing needed its
+      person, which it could not know.
+- [x] Its smoke test, `remote-phone-sees-notifications`: its steps passed by hand on Linux
+      (2026-11-17), a pretend phone against the real window. Not yet run through `ys test run`.
 - [ ] Slice 5: a push when an agent finishes, with its own switch.
 
 _Exit:_ with agents at work in several projects and on more than one computer, a person learns

@@ -917,6 +917,28 @@ switch (doing) {
     console.log(`saw: ${String(asked)}`);
     break;
   }
+  case "seen-from-the-phone": {
+    // Here the last argument is the run's folder, where the phone left the name of the
+    // workspace whose row it marked seen. The window has nothing unseen, no ring to show for
+    // it, and the row under Earlier.
+    const workspace = (await Bun.file(`${runDir}/seen-workspace`).text()).trim();
+    await until("nothing finished and not seen, on the Notifications row", async () => {
+      const label = (await page(
+        `[...document.querySelectorAll('aside[aria-label="Projects"] > button')].map((b) => b.getAttribute("aria-label") ?? "").find((label) => label.startsWith("Notifications")) ?? ""`,
+      )) as string;
+      return label !== "" && !label.includes("finished and not seen");
+    });
+    if (!(await textOf(LIST))) await page(clickedNamed("Notifications"));
+    await until("the list", async () => (await textOf(LIST)) !== "");
+    await until(`${workspace} under Earlier`, async () =>
+      (await textOf(`${LIST} section[aria-label="Earlier"]`)).includes(workspace),
+    );
+    if ((await textOf(UNSEEN)).includes(workspace)) {
+      throw new Error(`${workspace} is still under Finished, not seen.`);
+    }
+    console.log(`saw: ${workspace} under Earlier, seen from the phone`);
+    break;
+  }
   case "lists-there": {
     // Here the last arguments are the host's name and how many of its rows are unseen. The
     // Notifications row counts them, and the list names the host on each.

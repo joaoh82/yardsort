@@ -77,6 +77,45 @@ The dot is the one the sidebar and the tabs use
 ([status dots](terminals-and-sessions.md#status-dots)): solid amber needs you, ringed is finished
 and not seen, red went badly, grey has left.
 
+## On the phone
+
+The [phone app](remote.md#the-phone-app) has the same list, called **Notifications**, over every
+computer the phone is paired with. Each computer keeps its own list, the one its window shows;
+the phone reads it while that computer can be reached, and is told when it changes.
+
+- **The bell** in the corner of the account's screen and of a computer's screen opens it. The
+  number on the bell is how many things need you, on all your computers together. What only
+  finished is not counted there.
+- **A computer's row** on the account's screen says what waits there: _Online · 2 need you, 1
+  finished_.
+- **A computer's screen marks its workspaces**: **needs you** on one where something waits for
+  you, **finished** on one where something finished unseen. A workspace with neither keeps
+  saying how many of its conversations are running. A folded project says what is inside it.
+- **The list** has the same three parts. Each row names the workspace, its project and its
+  computer, says what happened, and shows the command asked for, the question, the reason or the
+  start of what the agent said. Rows are not grouped by project on the phone, and there are no
+  filters.
+- **Pressing a row** opens what the phone has for it. An agent's row opens its conversation, in
+  Chat or its terminal. A workflow's question or approval opens the decision, and a run that
+  ended opens the run. A smoke test's row opens its workspace, where
+  [the card to answer it](remote.md#when-a-smoke-test-waits-for-you) is. A schedule's or a
+  trigger's row opens its workspace and nothing more: those are changed at the computer. One
+  that has no workspace opens nothing, and says so.
+- **Seen is one fact, kept on the computer.** Opening a finished row, or looking at that agent's
+  conversation or that run on the phone however you got there, moves the row to **Earlier** on
+  the computer too. Looking at it at the computer moves it on the phone. There is no **Mark all
+  seen** on the phone.
+- **A computer that is offline shows a line and no rows**, and its count leaves the bell. Its
+  rows are back when it is. Offline does not mean its agents stopped. While no computer can be
+  reached, the list does not say that nothing needs you: it does not know.
+- **A computer on an earlier Yardsort** keeps no list. The phone says so on the list, and shows
+  that computer's workspaces without marks.
+
+The list is separate from the notifications the phone's system shows. Those are sent through the
+server and are chosen under Settings → Notifications on the phone, which the foot of the list
+also opens ([Remote](remote.md#notifications)). The list is read from the computers, and nothing
+of it passes through the push service.
+
 ## Opening a row
 
 Pressing a row closes the list and opens what the row is about:
@@ -170,7 +209,9 @@ agent is listed like any other.
 
 ## What is not here yet
 
-- **The phone** is coming: the list is not in the phone app yet.
+- **The phone is not told when an agent finishes.** It lists it, and marks its workspace, the
+  next time you look. A push for it is coming.
+- On the phone, the list shows a computer's newest hundred rows. One with more says so.
 - A row of another computer does not ring a tab or a workspace in the sidebar's list of that
   computer. The Notifications row and the list are where it shows.
 - **Pull requests and tasks** are not part of this list. They have their own views.

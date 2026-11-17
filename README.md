@@ -200,7 +200,9 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   computer is online. On the phone a conversation reads as a chat, a column at the phone's width,
   and Claude Code's permission questions can be answered there, as can a smoke test waiting to
   be let run. A workspace's pull request shows there too, with its checks and reviews, read-only,
-  and a project folds to put its workspaces away.
+  and a project folds to put its workspaces away. A bell opens the
+  [Notifications](docs/guide/notifications.md#on-the-phone) list there: what needs you and what
+  finished, on every computer the phone reaches.
   Installing a desktop update stays on the computer.
   Whoever runs the server
   can see what passes through it, and the phone app is not in the app stores yet. Expect it to

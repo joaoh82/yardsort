@@ -49,7 +49,7 @@ import { useApp } from "../lib/context";
 import { stamp } from "../lib/format";
 import { lineCount } from "../lib/markdown";
 import { type Said, say } from "../lib/say";
-import { askedByWords, WaitingTests } from "../lib/tests";
+import { askedByWords, TESTS_EVERY_MS, WaitingTests } from "../lib/tests";
 import { inFront } from "./live";
 import { Markdown } from "./markdown";
 import { Button, FONTS, Problem, useColors, Waiting } from "./parts";
@@ -64,8 +64,6 @@ const WHILE_WORKING_MS = 4_000;
 const AFTER_EVENT_MS = [400, 2_500];
 /** How often to ask whether the conversation's terminal ended or went quiet. */
 const SEEN_EVERY_MS = 5_000;
-/** How often to ask whether a smoke test run waits: one can be asked for while nothing is said. */
-const TESTS_EVERY_MS = 5_000;
 /** Near enough the bottom to stay there as more comes. */
 const AT_BOTTOM_PX = 48;
 

@@ -108,6 +108,7 @@ const ICONS = {
   settings:
     "M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2zM15 12a3 3 0 11-6 0 3 3 0 016 0z",
   terminal: "M5 7l5 5-5 5M12 18h7",
+  bell: "M6 16.5V11a6 6 0 0112 0v5.5l1.5 2h-15l1.5-2zM10 20.5a2.2 2.2 0 004 0",
 };
 
 export function Icon({
@@ -414,10 +415,12 @@ export function Row({
   about,
   detail,
   monoDetail,
+  attention,
   plainTitle,
   leading,
   tag,
   badge,
+  badgeKind = "now",
   trailing,
   label,
   selected,
@@ -432,6 +435,8 @@ export function Row({
   detail?: string;
   /** The detail is a branch, a state or an address, not a sentence. */
   monoDetail?: boolean;
+  /** After the detail, in amber: something here that wants its person. */
+  attention?: string | undefined;
   /** The title reads as text in a list, rather than as a name. */
   plainTitle?: boolean;
   leading?: ReactNode;
@@ -439,6 +444,12 @@ export function Row({
   tag?: string;
   /** Something at the end that is happening now. */
   badge?: string;
+  /**
+   * What the badge says by its look as well as its words: `now` for something going on, `needs`
+   * (filled) for something that waits for its person, `finished` (outlined) for something done
+   * and not looked at.
+   */
+  badgeKind?: "now" | "needs" | "finished";
   /** At the end, under the badge when there is one: something of the row's own to press. */
   trailing?: ReactNode;
   /** What a screen reader says, when not the title and detail. */
@@ -451,7 +462,7 @@ export function Row({
   onPress?: () => void;
 }) {
   const colors = useColors();
-  const says = label ?? (detail ? `${title}, ${detail}` : title);
+  const says = label ?? [title, detail, attention].filter(Boolean).join(", ");
   const inside = (
     <>
       {leading}
@@ -460,17 +471,40 @@ export function Row({
           {title}
         </Text>
         {about ? <Text style={[styles.monoSmall, { color: colors.muted }]}>{about}</Text> : null}
-        {detail ? (
+        {detail || attention ? (
           <Text style={[monoDetail ? styles.monoSmall : styles.caption, { color: colors.muted }]}>
             {detail}
+            {attention ? (
+              <Text style={{ color: colors.accentText }}>
+                {detail ? " · " : ""}
+                {attention}
+              </Text>
+            ) : null}
           </Text>
         ) : null}
       </View>
       {badge || trailing ? (
         <View style={styles.rowEnd}>
           {badge ? (
-            <View style={[styles.badge, { backgroundColor: colors.accentTint }]}>
-              <Text style={[styles.monoSmall, { color: colors.accentText }]}>{badge}</Text>
+            <View
+              style={[
+                styles.badge,
+                badgeKind === "needs"
+                  ? { backgroundColor: colors.accent }
+                  : badgeKind === "finished"
+                    ? styles.badgeOutlined
+                    : { backgroundColor: colors.accentTint },
+                badgeKind === "finished" && { borderColor: colors.accentText },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.monoSmall,
+                  { color: badgeKind === "needs" ? colors.onAccent : colors.accentText },
+                ]}
+              >
+                {badge}
+              </Text>
             </View>
           ) : null}
           {trailing}
@@ -617,6 +651,7 @@ const styles = StyleSheet.create({
   rowTitle: { fontFamily: FONTS.semibold, fontSize: 16, lineHeight: 21 },
   rowPlain: { fontFamily: FONTS.medium, fontSize: 15, lineHeight: 21 },
   badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
+  badgeOutlined: { borderWidth: 1, paddingHorizontal: 7, paddingVertical: 3 },
   tag: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 6,

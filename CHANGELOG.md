@@ -33,6 +33,17 @@ has the downloads and the full commit lists.
   version on the other computer, and that computer letting this one watch. A computer with no
   screen, running `yardsort-host`, keeps a list of its agents too. See
   [Notifications](docs/guide/notifications.md#other-computers).
+- **Notifications on the phone** (Remote, under development). A bell in the corner of the
+  account's screen and of a computer's screen opens the same list on the phone, over every
+  computer it is paired with: what needs you, what finished and was not seen, and what left.
+  The number on the bell is how many things need you. A computer's row says how many need you
+  there and how many finished, and its workspaces are marked **needs you** or **finished**.
+  Pressing a row opens the agent's conversation, the workflow's decision or run, or the
+  workspace. Opening a finished row, or looking at that agent on the phone, marks it seen on the
+  computer too, and what is answered or seen at the computer leaves the phone's list. A computer
+  that is offline shows a line and no rows. A smoke test waiting to be let run now shows its
+  card on the workspace's screen as well as in Chat. It needs this version on the computer. See
+  [Notifications](docs/guide/notifications.md#on-the-phone).
 - **The ringed dot is remembered.** An agent that finished and was not looked at keeps its ring
   when Yardsort is closed and opened again, and one that finished while Yardsort was closed gets
   it. Before, every waiting agent was ringed at each start, looked at or not. Coming back to the

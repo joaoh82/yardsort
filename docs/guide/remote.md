@@ -78,6 +78,19 @@ running — _api-gateway 3 · 2 running_. Press it again to open it. The phone r
 projects you folded, for each computer, as this window remembers its own sidebar; nothing about
 it is sent anywhere.
 
+A workspace where something waits for you says **needs you** in place of how many are running,
+and one where something finished and was not looked at says **finished**. A folded project's
+line says those too. They come from the computer's
+[Notifications list](notifications.md#on-the-phone), which the bell in the corner opens.
+
+## What waits, on the phone
+
+The bell in the corner of the account's screen and of a computer's screen opens
+**Notifications**: one list of what needs you and what finished unseen, over every computer the
+phone can reach, with the number of things that need you on the bell. Each computer keeps its
+own list and the phone reads it, so a row answered or looked at on either is gone from both.
+What it shows and what each row opens is in [Notifications](notifications.md#on-the-phone).
+
 ## Pull requests on the phone
 
 When this computer has `gh` installed and signed in, the phone shows what became of a workspace's
@@ -241,7 +254,8 @@ For other agents, Chat says the agent is waiting and opens its terminal.
 A [smoke test](smoke-tests.md) from the repository runs only once you have seen what it does. When
 one waits in a workspace — an agent ran `ys test run` on a file that is new or has changed, or the
 project asks to see every run — Chat in any of that workspace's conversations shows
-[the approval card](smoke-tests.md#the-approval-card) this window shows: who asked and with what
+[the approval card](smoke-tests.md#the-approval-card) this window shows, and so does the
+workspace's own screen, above its conversations: who asked and with what
 inputs, every step in words, the names of the project's test environment it can read, and, for a
 file you approved before, the lines that changed. Values of the test environment are never sent.
 
@@ -536,7 +550,10 @@ app stores yet. To run a server of your own, see the
 
 ## Notifications
 
-With Remote on, this computer can tell your phone when something needs a look.
+With Remote on, this computer can tell your phone when something needs a look. These are the
+notifications the phone's system shows. The list inside the app, of what waits and what
+finished on every computer, is [another thing](#what-waits-on-the-phone), read from the
+computers themselves.
 
 - A task moved forward, or finished.
 - A review needs attention: checks failed, it conflicts, changes were requested, or it has no review yet.
