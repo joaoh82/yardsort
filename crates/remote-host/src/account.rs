@@ -200,10 +200,7 @@ pub fn failed(error: ClientError) -> Failure {
 /// the server's own words ("Sign in again.") are for any client.
 pub fn refused_here(error: ClientError) -> Failure {
     if error.account_deleted() {
-        Failure::signed_out(
-            "This computer's account was deleted at the server. Everything on this computer is \
-             still here.",
-        )
+        Failure::signed_out(crate::ACCOUNT_DELETED)
     } else if error.code() == Some(ErrorCode::Unauthenticated) {
         Failure::signed_out("This computer was signed out at the server.")
     } else {
@@ -980,6 +977,23 @@ mod tests {
         assert!(failure
             .message
             .contains("Everything on this computer is still here"));
+    }
+
+    #[test]
+    fn the_link_stops_saying_the_account_was_deleted() {
+        let deleted = ClientError::Remote(
+            RemoteError::new(ErrorCode::Unauthenticated, "Gone.")
+                .because(remote_proto::ErrorReason::AccountDeleted),
+        );
+        assert!(matches!(
+            AccessError::from(deleted),
+            AccessError::SignedOut(why) if why == crate::ACCOUNT_DELETED
+        ));
+        let refused = ClientError::Remote(RemoteError::new(ErrorCode::Unauthenticated, "No."));
+        assert!(matches!(
+            AccessError::from(refused),
+            AccessError::SignedOut(why) if why == "This computer was signed out at the server."
+        ));
     }
 
     #[test]

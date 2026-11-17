@@ -234,10 +234,14 @@ async fn open(host: &HostId, access: &dyn Access) -> Result<RelayLink, AccessErr
 const SIGNED_OUT: &str = "This computer was signed out at the server.";
 /// The server has no such host for this computer's account.
 const NO_LONGER_A_HOST: &str = "This computer is no longer a host at the server.";
+/// The server refused it because the account itself was deleted.
+pub(crate) const ACCOUNT_DELETED: &str =
+    "This computer's account was deleted at the server. Everything on this computer is still here.";
 
 impl From<ClientError> for AccessError {
     fn from(error: ClientError) -> Self {
         match error.code() {
+            _ if error.account_deleted() => Self::SignedOut(ACCOUNT_DELETED.into()),
             Some(ErrorCode::Unauthenticated) => Self::SignedOut(SIGNED_OUT.into()),
             _ => Self::Unavailable(error.to_string()),
         }
