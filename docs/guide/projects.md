@@ -16,7 +16,7 @@ Click **×** to clear the filter and show all projects again. Press **Escape** i
 clear it and return to the Projects heading. If nothing matches, the panel says so. The **+**
 button remains available while searching. When the field is empty, **×** closes it.
 
-![Searching five demo projects for weather shows weather-cli and weather-api, with a workspace open](../images/projects-search.png)
+![Searching the projects for weather leaves weather-cli and its workspaces, with one open](../images/projects-search.png)
 
 ## Adding a project
 
@@ -53,7 +53,7 @@ your GitHub account owns or collaborates on, most recently pushed first, each wi
 its language, when it was last pushed to, and whether it is private, archived or a fork of
 something.
 
-![The clone dialog: a list of the account's repositories under the Repository field, three of them marked Already added, one private, one a fork, one archived; the location remembered as a line](../images/clone-repository.png) The list comes from the [GitHub CLI](https://cli.github.com), logged in as you;
+![The clone dialog: a list of the account's repositories under the Repository field, three of them marked Already added, one private, one a fork, one archived; a name and a location below](../images/clone-repository.png) The list comes from the [GitHub CLI](https://cli.github.com), logged in as you;
 Yardsort holds no credential of its own.
 
 Type to narrow the list, by name or by description. **↑** and **↓** move through it, **Enter**

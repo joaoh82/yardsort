@@ -3,6 +3,7 @@
 #
 #   scripts/screenshots.sh setup     # throwaway profile, agent shims, demo projects
 #   scripts/screenshots.sh seed      # add the demo projects to the running app's profile
+#   scripts/screenshots.sh usage     # write the Usage view's demo logs again, ending today
 #   scripts/screenshots.sh shoot composer
 #   scripts/screenshots.sh size      # measure the window without writing anything
 #   scripts/screenshots.sh clean     # remove everything setup made
@@ -70,7 +71,7 @@ dispatch() {
 }
 
 usage() {
-  sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -172,6 +173,7 @@ EOF
   demo_pull_requests
   demo_tasks
   demo_repositories
+  demo_usage
   echo
   echo "Start the app with the throwaway profile, then run 'scripts/screenshots.sh seed' to add"
   echo "the demo projects to it (or add them by hand, in this order: weather-cli, api-gateway,"
@@ -888,8 +890,12 @@ EOF
 # search for "weather" finds on the forge.
 demo_repositories() {
   python3 - "$DEMO/gh" <<'PY'
-import json, sys
+import datetime, json, sys
 out = sys.argv[1]
+# When each was last pushed, counted back from now: a fixed date reads as "5w ago" a month on.
+def ago(hours):
+    then = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
+    return then.strftime("%Y-%m-%dT%H:%M:%SZ")
 def repo(name, desc, lang, pushed, private=False, fork=None, archived=False):
     owner, short = name.split("/")
     return {
@@ -902,14 +908,14 @@ def repo(name, desc, lang, pushed, private=False, fork=None, archived=False):
                    "sshUrl": f"git@github.com:{fork}.git"} if fork else None,
     }
 rows = [
-    repo("yardsort-demo/weather-cli", "Today's weather for a city, in one line", "JavaScript", "2026-10-09T16:30:18Z"),
-    repo("yardsort-demo/api-gateway", "Routes, rate limits and auth in front of the services", "Go", "2026-10-09T11:02:41Z"),
-    repo("yardsort-demo/weather-api", "The forecast service weather-cli talks to", "Rust", "2026-10-08T19:48:03Z"),
-    repo("yardsort-demo/docs-site", "The documentation site", "TypeScript", "2026-10-07T08:15:27Z"),
-    repo("yardsort-demo/infra", "Terraform for everything", "HCL", "2026-10-03T14:21:09Z", private=True),
-    repo("yardsort-demo/awesome-cli-tools", "A curated list of command-line tools", None, "2026-09-26T10:05:55Z", fork="cli-tools/awesome-cli-tools"),
-    repo("yardsort-demo/mobile-app", "The app, before it moved to the monorepo", "Kotlin", "2025-11-14T17:40:12Z", archived=True),
-    repo("yardsort-demo/design-tokens", None, "CSS", "2025-08-02T09:33:46Z"),
+    repo("yardsort-demo/weather-cli", "Today's weather for a city, in one line", "JavaScript", ago(5)),
+    repo("yardsort-demo/api-gateway", "Routes, rate limits and auth in front of the services", "Go", ago(11)),
+    repo("yardsort-demo/weather-api", "The forecast service weather-cli talks to", "Rust", ago(26)),
+    repo("yardsort-demo/docs-site", "The documentation site", "TypeScript", ago(61)),
+    repo("yardsort-demo/infra", "Terraform for everything", "HCL", ago(6 * 24 + 3), private=True),
+    repo("yardsort-demo/awesome-cli-tools", "A curated list of command-line tools", None, ago(13 * 24 + 7), fork="cli-tools/awesome-cli-tools"),
+    repo("yardsort-demo/mobile-app", "The app, before it moved to the monorepo", "Kotlin", ago(330 * 24), archived=True),
+    repo("yardsort-demo/design-tokens", None, "CSS", ago(434 * 24)),
 ]
 json.dump({"data": {"viewer": {"login": "demo", "repositories": {
     "totalCount": len(rows), "pageInfo": {"hasNextPage": False, "endCursor": "Y3Vyc29y"},
@@ -920,12 +926,98 @@ def item(name, desc, lang, pushed, private=False):
             "private": private, "fork": False, "archived": False, "has_issues": True,
             "pushed_at": pushed, "language": lang}
 json.dump({"total_count": 3, "incomplete_results": False, "items": [
-    item("open-meteo/weather-widgets", "Embeddable weather widgets", "TypeScript", "2026-10-08T07:12:00Z"),
-    item("acme-platform/weather-ingest", "Pulls station readings into the lake", "Python", "2026-10-06T22:41:19Z", private=True),
-    item("someone/weather-cli-plugins", None, "JavaScript", "2026-09-30T15:02:48Z"),
+    item("open-meteo/weather-widgets", "Embeddable weather widgets", "TypeScript", ago(37)),
+    item("acme-platform/weather-ingest", "Pulls station readings into the lake", "Python", ago(70), private=True),
+    item("someone/weather-cli-plugins", None, "JavaScript", ago(9 * 24)),
 ]}, open(f"{out}/search.json", "w"), indent=2)
 PY
   echo "  repositories for the clone dialog in $DEMO/gh"
+}
+
+# What the Usage view's Token usage tab shows: a month of session logs for Claude Code, Codex and
+# Grok, in the throwaway folders the launch line points them at, so nothing of your own is read.
+# Counted back from today, so the chart always ends now. The figures are made up; the same ones
+# every time.
+demo_usage() {
+  rm -rf "$SHOT/claude/projects" "$SHOT/codex/sessions" "$SHOT/grok/sessions"
+  python3 - "$SHOT" "$DEMO" <<'PY'
+import datetime, json, os, random, sys, urllib.parse
+shot, demo = sys.argv[1], sys.argv[2]
+random.seed(7)
+now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+iso = lambda t: t.strftime("%Y-%m-%dT%H:%M:%SZ")
+places = [
+    f"{demo}/wt/weather-cli/add-imperial-option-shows",
+    f"{demo}/wt/weather-cli/celsius-fahrenheit",
+    f"{demo}/repos/api-gateway",
+    f"{demo}/repos/docs-site",
+]
+def days():
+    for back in range(29, -1, -1):
+        day = now - datetime.timedelta(days=back)
+        # Quieter at the weekend, as work is.
+        yield back, day, (0.35 if day.weekday() >= 5 else 1.0) * random.uniform(0.5, 1.4)
+
+# Claude Code: one transcript for each folder, an assistant line for each model call.
+for index, cwd in enumerate(places):
+    folder = os.path.join(shot, "claude", "projects", cwd.replace("/", "-"))
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, f"demo-session-{index}.jsonl"), "w") as out:
+        for back, day, busy in days():
+            if (back + index) % 3 == 2:
+                continue
+            for call in range(3):
+                at = day - datetime.timedelta(minutes=17 * call + 5 * index)
+                model = "claude-opus-5-5" if (back + call + index) % 3 else "claude-sonnet-5-5"
+                usage = {
+                    "input_tokens": int(9_000 * busy),
+                    "cache_read_input_tokens": int(260_000 * busy),
+                    "cache_creation_input_tokens": int(21_000 * busy),
+                    "output_tokens": int(11_000 * busy),
+                }
+                out.write(json.dumps({
+                    "type": "assistant", "timestamp": iso(at), "cwd": cwd,
+                    "requestId": f"req_demo_{index}_{back}_{call}",
+                    "message": {"id": f"msg_demo_{index}_{back}_{call}", "model": model, "usage": usage},
+                }) + "\n")
+
+# Codex: a rollout a day, with the plan's limits as it last heard them in the newest.
+for back, day, busy in days():
+    if back % 4 == 3:
+        continue
+    cwd = places[back % len(places)]
+    folder = os.path.join(shot, "codex", "sessions", day.strftime("%Y"), day.strftime("%m"), day.strftime("%d"))
+    os.makedirs(folder, exist_ok=True)
+    lines = [
+        {"timestamp": iso(day), "type": "session_meta", "payload": {"id": f"demo-{back}", "cwd": cwd}},
+        {"timestamp": iso(day), "type": "turn_context",
+         "payload": {"model": "gpt-6-sol" if back % 3 else "gpt-5.6-terra", "cwd": cwd}},
+    ]
+    for call in range(4):
+        lines.append({"timestamp": iso(day - datetime.timedelta(minutes=9 * call)), "type": "token_usage_record",
+                      "payload": {"response_id": f"resp_demo_{back}_{call}", "usage": {
+                          "input_tokens": int(310_000 * busy), "cached_input_tokens": int(270_000 * busy),
+                          "output_tokens": int(9_500 * busy)}}})
+    if back == 0:
+        at = now - datetime.timedelta(minutes=15)
+        reset = lambda minutes: int((now + datetime.timedelta(minutes=minutes)).timestamp())
+        lines.append({"timestamp": iso(at), "type": "event_msg", "payload": {"type": "token_count", "info": {},
+                      "rate_limits": {"plan_type": "pro",
+                                      "primary": {"used_percent": 32.0, "window_minutes": 300, "resets_at": reset(181)},
+                                      "secondary": {"used_percent": 58.0, "window_minutes": 10080, "resets_at": reset(3 * 1440 + 420)}}}})
+    with open(os.path.join(folder, f"rollout-demo-{back}.jsonl"), "w") as out:
+        out.write("\n".join(json.dumps(line) for line in lines) + "\n")
+
+# Grok: one session, a turn every third day. Its models have no price here, so tokens only.
+cwd = places[2]
+folder = os.path.join(shot, "grok", "sessions", urllib.parse.quote(cwd, safe=""), "demo-session")
+os.makedirs(folder, exist_ok=True)
+turns = [{"turnNumber": number, "endedAt": iso(day), "primaryModelId": "grok-5",
+          "inputTokens": int(240_000 * busy), "cachedReadTokens": int(190_000 * busy), "outputTokens": int(7_000 * busy)}
+         for number, (back, day, busy) in enumerate(days()) if back % 3 == 0]
+json.dump({"turns": turns}, open(os.path.join(folder, "usage.json"), "w"), indent=1)
+PY
+  echo "  a month of token usage for Claude Code, Codex and Grok under $SHOT"
 }
 
 # What the Schedules view shows, as SQL: six schedules across the demo projects, in each kind
@@ -1327,6 +1419,7 @@ shoot() {
 case "${1:-}" in
   setup) setup ;;
   seed) seed ;;
+  usage) demo_usage ;;
   shoot) shift; shoot "${1:?usage: scripts/screenshots.sh shoot <name>}" ;;
   size) shoot size ;;
   clean) rm -rf "$SHOT" "$AGENTS" "$DEMO"; echo "Removed $SHOT, $AGENTS and $DEMO." ;;
