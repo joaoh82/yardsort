@@ -173,7 +173,7 @@ pub async fn update_install(app: AppHandle, progress: Channel<DownloadProgress>)
         .map_err(|e| failed("install the update", e))?;
 
     // On Windows the installer has already taken over; elsewhere, start the new version.
-    restart(&app)
+    restart(&app).await
 }
 
 /// Start the new version and leave.
@@ -185,7 +185,10 @@ pub async fn update_install(app: AppHandle, progress: Channel<DownloadProgress>)
 /// user runs a mix of two versions until they start the app afresh. So an AppImage is started
 /// by hand, with the environment the user launched us with (see `without_appimage`). Everything
 /// else restarts as Tauri does it; the macOS app, for one, may have been renamed by the update.
-pub(crate) fn restart(app: &AppHandle) -> IpcResult<()> {
+pub(crate) async fn restart(app: &AppHandle) -> IpcResult<()> {
+    // Before the new copy starts: it serves the dashboard on the same port. Awaited, since
+    // this is reached from commands, which run on the async runtime and may not block on it.
+    crate::dashboard::stop_before_restart(app).await;
     crate::one_copy::leaving();
     #[cfg(target_os = "linux")]
     if let Some(appimage) = app.env().appimage.clone() {

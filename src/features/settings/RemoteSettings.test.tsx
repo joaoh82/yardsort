@@ -16,6 +16,7 @@ const core = vi.hoisted(() => ({
   onRemotePairingRequested: vi.fn(),
   remoteProjectsDir: vi.fn(),
   remoteSetProjectsDir: vi.fn(),
+  dashboardStatus: vi.fn(),
   remoteExport: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
@@ -65,6 +66,13 @@ beforeEach(() => {
   core.remoteRequests.mockResolvedValue({ requests: [], status: on });
   core.onRemotePairingRequested.mockResolvedValue(() => {});
   core.remoteProjectsDir.mockResolvedValue({ set: null, used: "/home/me/Projects" });
+  core.dashboardStatus.mockResolvedValue({
+    enabled: false,
+    address: null,
+    tunnel: null,
+    signedIn: 0,
+    problem: null,
+  });
   useRemoteStore.setState({ asking: [] });
   useProjectsStore.setState({
     projects: [

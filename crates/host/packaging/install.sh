@@ -249,6 +249,7 @@ main() {
   fi
   say "  yardsort-host install-agent claude    # or cursor, grok, codex, opencode, pi, omp; then sign it in"
   say "  yardsort-host pair                    # for your phone"
+  say "  yardsort-host dashboard               # a page for the rest, in a browser: agents, Git, setup"
   say "Git and GitHub: $guide#git-and-github"
 }
 

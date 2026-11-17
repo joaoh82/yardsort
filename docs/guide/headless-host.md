@@ -10,7 +10,9 @@ the phone; you watch them and type into them from the phone. They keep running o
 whatever happens to the connection, to the phone, or to `yardsort-host` itself.
 
 It is a separate program from the app and from `ys`, with no window and nothing to do with WebKit or
-GTK. Nothing it runs listens on the network: it reaches out to the server, as the app does.
+GTK. Nothing it runs listens on the network: it reaches out to the server, as the app does. The one
+thing it serves is [its dashboard](#the-dashboard), a web page for setting the computer up, on
+`127.0.0.1` alone, where no other computer can connect.
 
 ## What it needs
 
@@ -36,7 +38,8 @@ It takes the release's tarball for this computer, puts `yardsort-host` and `ys` 
 the systemd user service in `~/.config/systemd/user`, and keeps your services running after you log
 out where it may (`loginctl enable-linger`, with `sudo` if that asks for no password). It starts
 nothing and signs in to nothing: it prints what is left, which is [signing in](#signing-in),
-[the service](#as-a-service), [an agent](#installing-an-agent) and [pairing](#only-a-person-can-pair-a-device).
+[the service](#as-a-service), [an agent](#installing-an-agent) and [pairing](#only-a-person-can-pair-a-device),
+and [the dashboard](#the-dashboard), where an agent, Git and the rest can be done from a browser.
 `sh -s -- --version 0.34.1` after the pipe takes that release instead. Read
 [the script](../../crates/host/packaging/install.sh) first if you would rather know what it does.
 
@@ -147,8 +150,9 @@ yardsort-host serve
 
 It runs until stopped, and does what the open app does for this computer's terminals: keeps their
 records true, takes in what agents report as they work, and keeps the link to the server's relay so
-paired devices reach it. If the network goes, it keeps trying by itself. Try it under `tmux` first;
-then run it as a service, below.
+paired devices reach it. If the network goes, it keeps trying by itself. It also serves
+[the dashboard](#the-dashboard), and says where as it starts. Try it under `tmux` first; then run it
+as a service, below.
 
 **Stopping it (`Ctrl-C`, or `SIGTERM`) stops none of the agents.** It closes its link to the server
 and its control socket, and exits. The agents run in Yardsort's terminal daemon, a process of its own,
@@ -179,7 +183,26 @@ is expected. A service of your own needs the same line, or stopping it ends the 
 sign in again, or sign in as another name, stop the service first, and start it after.
 
 `yardsort-host status` says whether the host is running, whether it is signed in, how its link to the
-server stands, how many devices are let in, and how many terminals are running.
+server stands, how many devices are let in, how many terminals are running, and where the dashboard
+is.
+
+## The dashboard
+
+While it runs, the host serves a web page for looking after this computer from a browser: how the
+host and the computer stand, installing agents, Git and GitHub, cloning repositories, and running
+the commands that set a server up. It is on unless you turn it off, and listens on `127.0.0.1`,
+port 28680, alone.
+
+```sh
+yardsort-host dashboard                                   # where it is, and a one-time link to sign a browser in
+ssh -L 28680:127.0.0.1:28680 build-box                    # from your own computer, to open that link there
+yardsort-host dashboard tunnel on --subdomain build-box   # or give it an https address, with rustunnel
+yardsort-host dashboard off                               # stop serving it, now and at every start
+```
+
+A sign-in link is given only to a person at a terminal of their own, as `pair` is, and whoever signs
+in can run commands here as you. [The host dashboard](host-dashboard.md) has all of it: what each
+tab does, the tunnel and what its server can see, and how to turn it off.
 
 ## In a container
 
@@ -221,7 +244,8 @@ pasting the address back, as above: forwarding the port does not reach into the 
   you add them by. Keep each its own volume. The home volume holds the agents' sign-ins: guard it as
   you would `/credentials`.
 - **It publishes no port**: the host only reaches out. Never give it the Docker socket, which is root
-  on the computer it runs on.
+  on the computer it runs on. [The dashboard](host-dashboard.md#in-a-container) is served on the
+  container's own `127.0.0.1`, which a published port would not reach.
 
 **Stopping or restarting the container ends the agents**, since the terminal daemon lives inside it.
 Their workspaces, worktrees and records stay in the volumes, and so do their conversations, which
@@ -258,6 +282,7 @@ yardsort-host install-agent claude      # or cursor, grok, codex, opencode, pi, 
 
 It installs an agent into `~/.local`, as you, or brings one up to date. Run it as the user that runs
 `serve`, since that is where the agents it starts look; it refuses to run as root.
+[The dashboard](host-dashboard.md#agents)'s **Install** does the same from a browser.
 
 - **Claude Code, Cursor's CLI and Grok** come from each vendor's own installer: `https://claude.ai/install.sh`,
   `https://cursor.com/install` and `https://x.ai/cli/install.sh`. It names the vendor and where their
@@ -315,6 +340,7 @@ the container.
 
 The agents commit, push and open pull requests as the user that runs the host, with whatever that
 user can reach. Nothing of yours is there on a new server, so give it three things, as that user.
+Each can be done from a browser instead, under **Git** in [the dashboard](host-dashboard.md#git).
 
 **A name for its commits:**
 
@@ -419,7 +445,8 @@ watch and to type, as a phone does, and `pair` asks the same questions it asks a
 `pair` is refused from any terminal Yardsort started, and from anything an agent runs: the host checks
 who is at the other end of its socket, and refuses a process that carries a launched session's
 markers, descends from the terminal daemon, or types at one of the daemon's terminals, and one whose
-input is not a terminal at all. **This is a guard, not a wall.** A program running as the same user can
+input is not a terminal at all. A command run from [the dashboard](#the-dashboard) is refused the
+same way: it is the host's own child, and marked as one. **This is a guard, not a wall.** A program running as the same user can
 read everything the host can, its sign-in included. What the guard stops is an agent letting a device
 in by accident, or because something it read told it to: nothing an agent is given can approve a
 device.
@@ -563,6 +590,7 @@ paired device loses it. Works whether `serve` is running or not.
 | The profile              | `--data-dir`, else `YARDSORT_DATA_DIR`, else `~/.local/share/dev.yardsort.app`: the database, the daemon's log, the activity inbox and spool                                                                                                                 |
 | `settings.toml`          | `YARDSORT_CONFIG_DIR` when that is set, unless `--data-dir` named the profile. Otherwise in the profile when `YARDSORT_DATA_DIR` is set. Otherwise, on Linux, `$XDG_CONFIG_HOME/dev.yardsort.app`, else `~/.config/dev.yardsort.app`; elsewhere, the profile |
 | The sign-in              | `YARDSORT_CREDENTIALS_DIR`, else `credentials` in the profile                                                                                                                                                                                                |
+| The dashboard's sessions | `dashboard/sessions.json` in the profile: who is signed in to [the dashboard](host-dashboard.md), by a hash of each session                                                                                                                                  |
 | Worktrees                | `~/yardsort`, or `YARDSORT_WORKTREE_ROOT`, or the setting in `settings.toml`, as for the app                                                                                                                                                                 |
 | `serve`'s control socket | `$XDG_RUNTIME_DIR/yardsort/<tag>.host.sock`, else `host.sock` in the profile; only its user can reach it                                                                                                                                                     |
 | The terminal daemon's    | `$XDG_RUNTIME_DIR/yardsort/<tag>.sock`, else `daemon.sock` in the profile                                                                                                                                                                                    |

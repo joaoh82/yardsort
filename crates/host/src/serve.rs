@@ -2,9 +2,10 @@
 //!
 //! It holds the profile's lock (as the app does, so the two never share a sign-in), connects to
 //! the profile's terminal daemon or starts one, settles the records, drains the activity inbox as
-//! it fills, keeps the link to the server's relay when signed in, and answers this computer's own
-//! commands on the control socket. Stopped (`SIGTERM`, `SIGINT`), it closes the link and the
-//! socket and exits; the daemon and the programs in it carry on, and the next `serve` finds them.
+//! it fills, keeps the link to the server's relay when signed in, serves the dashboard on
+//! 127.0.0.1 unless told not to, and answers this computer's own commands on the control socket.
+//! Stopped (`SIGTERM`, `SIGINT`), it closes the link, the dashboard and the socket and exits; the
+//! daemon and the programs in it carry on, and the next `serve` finds them.
 
 use std::sync::{Arc, OnceLock};
 
@@ -118,6 +119,9 @@ pub async fn run(profile: Profile) -> Result<(), String> {
              stopping this."
         ),
     }
+    if let Some(said) = crate::dashboard::start_if_wanted(&home).await {
+        println!("{said}");
+    }
 
     let stopped = async {
         let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
@@ -144,6 +148,7 @@ pub async fn run(profile: Profile) -> Result<(), String> {
         () = accepting => Ok(()),
     };
     println!("Stopping. The terminals and the programs in them keep running.");
+    crate::dashboard::stop(&home).await;
     account::disconnect(home.as_ref()).await;
     let _ = std::fs::remove_file(&socket);
     drop(lock);
@@ -227,6 +232,23 @@ async fn one(home: &Arc<HostHome>, ask: Ask) -> account::Result<Reply> {
         Ask::MemorySettle { entry, keep, text } => {
             crate::memory::settle(home, &entry, &keep, text)?
         }
+        Ask::Dashboard => crate::dashboard::sign_in(home),
+        Ask::DashboardEnable { enabled } => crate::dashboard::enable(home, enabled).await,
+        Ask::DashboardTunnel {
+            enabled,
+            subdomain,
+            region,
+            server,
+        } => {
+            let wanted = yardsort_core::settings::TunnelSettings {
+                enabled,
+                subdomain,
+                region,
+                server,
+            };
+            crate::dashboard::tunnel(home, wanted).await
+        }
+        Ask::DashboardSignOut => crate::dashboard::sign_out(home),
         Ask::AccountExport => Reply::Export {
             export: Box::new(remote_host::export::export(home.as_ref()).await?),
         },
@@ -236,7 +258,7 @@ async fn one(home: &Arc<HostHome>, ask: Ask) -> account::Result<Reply> {
     })
 }
 
-fn status(home: &HostHome) -> Status {
+pub fn status(home: &HostHome) -> Status {
     let terminals = home
         .terminals
         .as_ref()
@@ -286,6 +308,7 @@ fn status(home: &HostHome) -> Status {
         remote,
         terminals,
         earlier_daemon,
+        dashboard: crate::dashboard::status(home),
     }
 }
 

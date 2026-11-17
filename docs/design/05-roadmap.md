@@ -1398,6 +1398,27 @@ _Exit:_ a person starts a task on another computer from the composer, follows it
 as a local workspace, reviews what it changed and opens its pull request, without that computer's
 screen.
 
+## M35 — The host dashboard
+
+Asked for by the owner on 2026-11-17, after the one-line install
+([#267](https://github.com/joaoh82/yardsort/pull/267)) left the rest of a server's setup to SSH.
+Built the same day, in one piece: [47-host-dashboard](47-host-dashboard.md).
+
+- [x] A web page a host serves to itself on 127.0.0.1, port 28680: how the host and the computer
+      stand, installing agents, Git and GitHub, cloning, and running setup commands as jobs.
+- [x] A browser signs in with a one-time code that only a person is given, by
+      `yardsort-host dashboard` behind the operator's guard or by the app's window. It can do
+      nothing that guard is there to stop.
+- [x] On by default in `yardsort-host serve`; off in the app, under **Settings → Remote**.
+- [x] A rustunnel tunnel, with a subdomain, for an address beyond that computer. Off until asked
+      for, and the token is rustunnel's to keep.
+- [ ] Run on a real server, and through a real tunnel, by the owner.
+- [ ] Reachable in a container (47, open question 1).
+
+_Exit:_ a person installs `yardsort-host` on a new server with one line, signs it in, opens the
+dashboard and finishes the rest there, an agent, GitHub and their repositories, without typing
+another command over SSH but the agent's own sign-in.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

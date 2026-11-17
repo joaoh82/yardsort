@@ -11,6 +11,13 @@
 //! launched session has; its standard input is a terminal, and not one of the daemon's; and it
 //! does not descend from the daemon. Linux only, where `/proc` says all that. Elsewhere approving
 //! is refused, since none of it could be checked.
+//!
+//! **A command the dashboard ran is not a person either.** The dashboard runs commands for a
+//! signed-in browser, as children of this host and outside the daemon, and such a command can
+//! make itself a terminal (`script`). So the caller must also not carry the mark every dashboard
+//! job is given, and must not descend from this host. That keeps the dashboard's sign-in out of
+//! what guards pairing, at the strength the rest of this has: a job that sheds both its mark and
+//! its ancestry gets past, as an agent that sheds its own does.
 
 use std::os::fd::AsRawFd;
 
@@ -29,6 +36,8 @@ pub enum Refusal {
     OtherUser,
     /// A terminal Yardsort started, or a program running in one: an agent's.
     Launched,
+    /// A command the dashboard ran for a signed-in browser, or a program that command started.
+    Job,
     /// Not a terminal at all: a script, or a pipe.
     NoTerminal,
 }
@@ -46,6 +55,11 @@ impl Refusal {
             Refusal::Launched => format!(
                 "{act} is refused from a terminal Yardsort started. Only a person may do it, from a \
                  terminal of their own on this computer (an SSH login, say), never an agent."
+            ),
+            Refusal::Job => format!(
+                "{act} is refused to a command the dashboard ran. Only a person may do it, from a \
+                 terminal of their own on this computer (an SSH login, say), never through the \
+                 dashboard."
             ),
             Refusal::NoTerminal => format!(
                 "{act} needs a person at a terminal: run `yardsort-host {command}` in one, not from \
@@ -89,11 +103,18 @@ mod linux {
         if launched(&environ) {
             return Some(Refusal::Launched);
         }
+        // The dashboard's jobs are this host's own children, each given a mark.
+        let above = ancestors(pid);
+        if carries(&environ, &[host_dashboard::jobs::JOB_ENV])
+            || above.contains(&std::process::id())
+        {
+            return Some(Refusal::Job);
+        }
         let Some(tty) = terminal_of(pid) else {
             return Some(Refusal::NoTerminal);
         };
         if let Some(daemon) = daemon {
-            if ancestors(pid).contains(&daemon) || daemons_terminals(daemon).contains(&tty) {
+            if above.contains(&daemon) || daemons_terminals(daemon).contains(&tty) {
                 return Some(Refusal::Launched);
             }
         }
@@ -123,8 +144,13 @@ mod linux {
 
     /// Whether an environment (`/proc/<pid>/environ`) carries a launched session's markers.
     pub(super) fn launched(environ: &[u8]) -> bool {
+        carries(environ, &[RUN_ENV, WORKSPACE_ENV, RECORD_ENV])
+    }
+
+    /// Whether an environment sets any of `names` to something.
+    pub(super) fn carries(environ: &[u8], names: &[&str]) -> bool {
         environ.split(|b| *b == 0).any(|entry| {
-            [RUN_ENV, WORKSPACE_ENV, RECORD_ENV].iter().any(|name| {
+            names.iter().any(|name| {
                 entry
                     .strip_prefix(name.as_bytes())
                     .and_then(|rest| rest.strip_prefix(b"="))
@@ -195,6 +221,15 @@ mod tests {
         assert!(launched(b"YARDSORT_RUN_ID=1\0"));
         assert!(!launched(b"HOME=/home/a\0YARDSORT_RUN_ID=\0"));
         assert!(!launched(b"NOT_YARDSORT_RUN_ID=1\0YARDSORT_RUN_IDS=2\0"));
+    }
+
+    #[test]
+    fn a_dashboard_jobs_mark_is_seen_and_is_not_a_launched_sessions() {
+        let job = [host_dashboard::jobs::JOB_ENV];
+        assert!(carries(b"HOME=/home/a\0YARDSORT_DASHBOARD_JOB=1\0", &job));
+        assert!(!carries(b"HOME=/home/a\0YARDSORT_DASHBOARD_JOB=\0", &job));
+        assert!(!carries(b"NOT_YARDSORT_DASHBOARD_JOB=1\0", &job));
+        assert!(!launched(b"YARDSORT_DASHBOARD_JOB=1\0"));
     }
 
     #[test]

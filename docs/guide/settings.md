@@ -177,6 +177,13 @@ Reach this computer from your phone or from another computer through a Yardsort 
 project between your computers. Still under development, and off until you turn it on: see
 [Remote](remote.md).
 
+**Host dashboard**, at the foot of the section, serves a web page on this computer for looking after
+it from a browser: how it stands, the agents installed, Git and GitHub, and setup commands. It is off
+until you tick **Serve the host dashboard**, listens on this computer alone, and needs no Remote.
+**Open the dashboard** opens it in your browser, signed in. Whoever signs in to it can run commands
+here as you. It is kept as `enabled` under `[dashboard]` in `settings.toml`: see
+[The host dashboard](host-dashboard.md).
+
 ## Environment variables
 
 For testing and unusual setups:

@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Yardsort host</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <noscript><p class="lone">The dashboard needs JavaScript.</p></noscript>
+
+    <!-- Signing in -->
+    <main id="gate" class="gate" hidden>
+      <form id="gate-form" class="card gate-card" autocomplete="off">
+        <img src="/favicon.svg" alt="" width="40" height="40" />
+        <h1>Yardsort host</h1>
+        <p class="muted">
+          Sign in with a code from this computer. At a terminal of your own there, run
+          <code>yardsort-host dashboard</code>; in the Yardsort app, open
+          <b>Settings → Remote → Host dashboard</b>.
+        </p>
+        <label for="gate-code">Sign-in code</label>
+        <input
+          id="gate-code"
+          name="code"
+          class="code"
+          inputmode="latin"
+          autocapitalize="characters"
+          spellcheck="false"
+          placeholder="XXXX-XXXX-XXXX-XXXX"
+          required
+        />
+        <p id="gate-error" class="error" role="alert" hidden></p>
+        <button class="primary" type="submit">Sign in</button>
+        <p class="faint">A code is good once, for ten minutes.</p>
+      </form>
+    </main>
+
+    <!-- The dashboard -->
+    <div id="shell" class="shell" hidden>
+      <header class="top">
+        <div class="brand">
+          <img src="/favicon.svg" alt="" width="30" height="30" />
+          <div>
+            <strong id="host-name">Yardsort host</strong>
+            <span id="host-sub" class="faint"></span>
+          </div>
+        </div>
+        <nav id="tabs" class="tabs" aria-label="Sections">
+          <a href="#overview" data-tab="overview">Overview</a>
+          <a href="#agents" data-tab="agents">Agents</a>
+          <a href="#git" data-tab="git">Git</a>
+          <a href="#commands" data-tab="commands">Commands</a>
+          <a href="#access" data-tab="access">Access</a>
+        </nav>
+        <button id="sign-out" type="button">Sign out</button>
+      </header>
+
+      <p id="lost" class="banner" role="alert" hidden>
+        This computer is not answering. Trying again…
+      </p>
+
+      <main>
+        <!-- Overview -->
+        <section id="tab-overview" class="tab" hidden>
+          <div id="notices"></div>
+          <div class="grid">
+            <article class="card">
+              <h2>Host</h2>
+              <dl id="host-facts" class="facts"></dl>
+            </article>
+            <article class="card">
+              <h2>This computer</h2>
+              <dl id="machine-facts" class="facts"></dl>
+              <div id="meters" class="meters"></div>
+            </article>
+          </div>
+          <article class="card">
+            <h2>Projects</h2>
+            <div id="overview-projects"></div>
+          </article>
+        </section>
+
+        <!-- Agents -->
+        <section id="tab-agents" class="tab" hidden>
+          <article class="card">
+            <div class="card-head">
+              <h2>Agents</h2>
+              <button id="agents-refresh" type="button">Look again</button>
+            </div>
+            <p class="muted">
+              The agents Yardsort can start on this computer, as its login shell finds them. An
+              agent is installed into <code>~/.local</code>, as this user, and still has to be
+              signed in once, at a terminal there, as its own guide says.
+            </p>
+            <div id="agents-list" class="rows"></div>
+            <div id="agents-job"></div>
+          </article>
+        </section>
+
+        <!-- Git -->
+        <section id="tab-git" class="tab" hidden>
+          <article class="card">
+            <h2>Commit identity</h2>
+            <p class="muted">The name and email this computer's commits carry.</p>
+            <p id="git-missing" class="error" hidden>
+              There is no <code>git</code> on this user's PATH. Install it, then look again.
+            </p>
+            <form id="identity-form" class="form">
+              <label>Name <input id="identity-name" name="name" required maxlength="200" /></label>
+              <label>
+                Email
+                <input id="identity-email" name="email" type="email" required maxlength="200" />
+              </label>
+              <div class="actions">
+                <button class="primary" type="submit">Save</button>
+                <span id="identity-said" class="said" role="status"></span>
+              </div>
+            </form>
+          </article>
+
+          <article class="card">
+            <div class="card-head">
+              <h2>GitHub</h2>
+              <button id="git-refresh" type="button">Look again</button>
+            </div>
+            <p class="muted">
+              Yardsort pushes and opens pull requests through the GitHub CLI,
+              <code>gh</code>. What it is signed in with is what every agent here can use.
+            </p>
+            <p id="github-state" class="state"></p>
+            <pre id="github-detail" class="detail" hidden></pre>
+            <div id="github-actions" class="actions">
+              <button id="github-sign-in" class="primary" type="button">
+                Sign in with a browser
+              </button>
+              <button id="github-sign-out" type="button" hidden>Sign out here</button>
+            </div>
+            <details id="github-token">
+              <summary>Sign in with a token instead</summary>
+              <p class="muted">
+                A fine-grained token hands this computer less than your whole account: make one at
+                GitHub for the repositories it works on, with Contents and Pull requests set to read
+                and write. It goes to <code>gh</code> on its input, and is kept by
+                <code>gh</code> alone.
+              </p>
+              <form id="token-form" class="form inline" autocomplete="off">
+                <input
+                  id="token-input"
+                  name="token"
+                  type="password"
+                  placeholder="github_pat_…"
+                  autocomplete="off"
+                  required
+                />
+                <button type="submit">Sign in with it</button>
+              </form>
+            </details>
+            <div id="github-job"></div>
+          </article>
+
+          <article class="card">
+            <h2>Repositories</h2>
+            <p class="muted">
+              Clone a repository with this computer's own Git sign-in, and add it as a project. It
+              goes into <code id="projects-dir">~/Projects</code>.
+            </p>
+            <form id="clone-form" class="form inline">
+              <input
+                id="clone-remote"
+                name="remote"
+                placeholder="https://github.com/you/my-service"
+                spellcheck="false"
+                required
+              />
+              <button class="primary" type="submit">Clone</button>
+            </form>
+            <div id="clone-job"></div>
+            <div id="git-projects"></div>
+          </article>
+        </section>
+
+        <!-- Commands -->
+        <section id="tab-commands" class="tab" hidden>
+          <article class="card">
+            <h2>Run a command</h2>
+            <p class="muted">
+              Runs on this computer as <b id="command-user">its user</b>, from the home folder, as
+              <code id="command-shell">sh -c</code> would. Nothing is on its input: a command that
+              asks a question fails rather than waits, so pass <code>-y</code> or its like.
+            </p>
+            <form id="command-form" class="form inline">
+              <input
+                id="command-line"
+                name="command"
+                class="mono"
+                placeholder="sudo -n apt-get install -y ripgrep"
+                spellcheck="false"
+                autocapitalize="off"
+                autocomplete="off"
+                required
+              />
+              <button class="primary" type="submit">Run</button>
+            </form>
+            <p id="command-error" class="error" role="alert" hidden></p>
+          </article>
+          <article class="card">
+            <h2>Jobs</h2>
+            <p id="jobs-none" class="muted">Nothing has been run since the host last started.</p>
+            <div class="jobs">
+              <ul id="jobs-list" class="jobs-list"></ul>
+              <div id="jobs-view" class="jobs-view"></div>
+            </div>
+          </article>
+        </section>
+
+        <!-- Access -->
+        <section id="tab-access" class="tab" hidden>
+          <article class="card">
+            <h2>Addresses</h2>
+            <dl id="access-facts" class="facts"></dl>
+            <p class="muted">
+              The dashboard listens on this computer alone. From another, forward the port over SSH
+              (<code id="ssh-line">ssh -L 28680:127.0.0.1:28680 this-computer</code>), or turn the
+              tunnel on.
+            </p>
+          </article>
+
+          <article class="card">
+            <h2>Tunnel</h2>
+            <p class="muted">
+              A
+              <a
+                href="https://github.com/joaoh82/rustunnel"
+                rel="noreferrer noopener"
+                target="_blank"
+                >rustunnel</a
+              >
+              tunnel gives the dashboard an <code>https://</code> address anyone can open, with its
+              sign-in as the only lock. The tunnel's server carries, and can read, everything that
+              passes. It needs the <code>rustunnel</code> client installed for this user, with its
+              token set by <code>rustunnel setup</code>.
+            </p>
+            <p id="tunnel-state" class="state"></p>
+            <form id="tunnel-form" class="form">
+              <label class="check">
+                <input id="tunnel-enabled" name="enabled" type="checkbox" />
+                <span>Keep a tunnel to this dashboard</span>
+              </label>
+              <label>
+                Subdomain
+                <input
+                  id="tunnel-subdomain"
+                  name="subdomain"
+                  placeholder="build-box"
+                  spellcheck="false"
+                  autocapitalize="off"
+                  maxlength="63"
+                />
+                <span class="faint">Left empty, the server picks one, new each time.</span>
+              </label>
+              <label>
+                Region
+                <select id="tunnel-region" name="region">
+                  <option value="">As rustunnel is set up</option>
+                  <option value="auto">Nearest</option>
+                  <option value="eu">Europe</option>
+                  <option value="us">United States</option>
+                  <option value="ap">Asia Pacific</option>
+                </select>
+              </label>
+              <label>
+                Server
+                <input
+                  id="tunnel-server"
+                  name="server"
+                  placeholder="tunnel.example.com:4040"
+                  spellcheck="false"
+                  autocapitalize="off"
+                />
+                <span class="faint">Only for a rustunnel server of your own.</span>
+              </label>
+              <div class="actions">
+                <button class="primary" type="submit">Save</button>
+                <span id="tunnel-said" class="said" role="status"></span>
+              </div>
+            </form>
+          </article>
+
+          <article class="card">
+            <h2>Signed-in browsers</h2>
+            <p id="sessions-count" class="state"></p>
+            <p class="muted">
+              A browser stays signed in for thirty days. Signing every browser out also voids the
+              codes not yet used.
+            </p>
+            <div class="actions">
+              <button id="sign-everyone-out" class="danger" type="button">
+                Sign every browser out
+              </button>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="confirm" class="dialog">
+      <form method="dialog">
+        <h2 id="confirm-title"></h2>
+        <p id="confirm-text"></p>
+        <p id="confirm-terms" class="muted" hidden></p>
+        <div class="actions end">
+          <button value="no" type="submit">Cancel</button>
+          <button id="confirm-yes" class="primary" value="yes" type="submit"></button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

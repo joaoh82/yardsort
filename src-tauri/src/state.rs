@@ -44,6 +44,8 @@ pub struct AppState {
     pub computers: crate::computers::ComputersState,
     /// The terminals of other computers open in this window: `crate::remote_terminal`.
     pub remote_terminals: crate::remote_terminal::RemoteTerminals,
+    /// The host dashboard, while it is served. See `crate::dashboard`.
+    pub dashboard: crate::dashboard::DashboardState,
     env: Mutex<Option<Arc<ShellEnv>>>,
 }
 
@@ -71,6 +73,7 @@ impl AppState {
             remote: crate::remote::RemoteState::default(),
             computers: crate::computers::ComputersState::default(),
             remote_terminals: Default::default(),
+            dashboard: crate::dashboard::DashboardState::default(),
             env: Mutex::new(None),
         }
     }

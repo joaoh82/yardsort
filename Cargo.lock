@@ -2507,6 +2507,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "host-dashboard"
+version = "0.35.0"
+dependencies = [
+ "axum",
+ "dunce",
+ "getrandom 0.3.4",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sysinfo",
+ "tempfile",
+ "tokio",
+ "yardsort-core",
+]
+
+[[package]]
 name = "html5ever"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8096,6 +8113,7 @@ name = "yardsort"
 version = "0.35.0"
 dependencies = [
  "dunce",
+ "host-dashboard",
  "ignore",
  "keyring",
  "libc",
@@ -8191,6 +8209,7 @@ name = "yardsort-host"
 version = "0.35.0"
 dependencies = [
  "clap",
+ "host-dashboard",
  "libc",
  "pty-host",
  "pty-ipc",
