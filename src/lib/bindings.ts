@@ -382,6 +382,11 @@ export const commands = {
 	/**  Make a pairing offer: a code to type, and a QR code, good once for five minutes. */
 	remotePair: () => typedError<RemotePairing, IpcError>(__TAURI_INVOKE("remote_pair")),
 	/**
+	 *  Save everything the server keeps of this computer's account at `path`, as JSON. The person
+	 *  chose `path` in the save dialog, which asked before replacing a file there.
+	 */
+	remoteExport: (path: string) => typedError<RemoteExported, IpcError>(__TAURI_INVOKE("remote_export", { path })),
+	/**
 	 *  Devices waiting for an answer, and the devices let in here once the server has said which
 	 *  are still in force. The server can take a device off this list, never put one on it.
 	 */
@@ -3085,6 +3090,14 @@ export type RemoteEarlierDaemon = {
 	agents: string[],
 	/**  How many running sessions are not agents. */
 	shells: number,
+};
+
+/**  An account's export, saved: where, and how much it holds. */
+export type RemoteExported = {
+	path: string,
+	devices: number,
+	hosts: number,
+	records: number,
 };
 
 export type RemoteHost = {

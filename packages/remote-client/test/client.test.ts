@@ -278,3 +278,66 @@ describe("a session", () => {
     expect(checks).toEqual([0, 0, 0, 0]);
   });
 });
+
+describe("exporting an account", () => {
+  const server = {
+    server: "4b3c2d1e-0f9a-4b8c-9d7e-6f5a4b3c2d1e",
+    name: "Example",
+    protocol: { major: 1, minor: 0 },
+    issuer: "https://id.example",
+    capabilities: ["account.export"],
+  };
+  const note = (id: string) => ({ kind: "note", id, body: { text: id }, aNewerField: 1 });
+
+  test("every page is put together, by id, and what it holds is kept as sent", async () => {
+    const asked: (string | null)[] = [];
+    const base = serve((request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/v1/server") return Response.json(server);
+      expect(request.headers.get("authorization")).toBe("Bearer the-access");
+      const after = url.searchParams.get("after");
+      asked.push(after);
+      if (after === null) {
+        return Response.json({
+          account: { subject: "ada", devices: [] },
+          records: [note("a"), note("b")],
+          next: "b",
+        });
+      }
+      return Response.json({ records: [note("c")] });
+    });
+    const exported = await new Client(base).exportAccount(new Secret("the-access"), 7);
+    expect(asked).toEqual([null, "b"]);
+    expect(exported).toEqual({
+      format: 1,
+      server: server.server,
+      serverName: "Example",
+      exportedAt: 7,
+      account: { subject: "ada", devices: [] },
+      records: [note("a"), note("b"), note("c")],
+    });
+  });
+
+  test("a page that does not move on stops it, and an older server says so", async () => {
+    const base = serve((request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/v1/server") return Response.json(server);
+      return Response.json({ account: {}, records: [note("a")], next: "a" });
+    });
+    const stuck = await new Client(base).exportAccount(new Secret("x"), 1).catch((e: unknown) => e);
+    expect((stuck as ClientError).kind).toBe("unexpected");
+
+    const older = serve((request) =>
+      new URL(request.url).pathname === "/v1/server"
+        ? Response.json(server)
+        : Response.json(
+            { code: "not_found", message: "Nothing is there.", retryable: false },
+            { status: 404 },
+          ),
+    );
+    const refused = await new Client(older)
+      .exportAccount(new Secret("x"), 1)
+      .catch((e: unknown) => e);
+    expect((refused as ClientError).code).toBe("not_found");
+  });
+});

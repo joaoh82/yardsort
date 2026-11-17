@@ -30,6 +30,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use remote_proto::account::{LoginParams, TokenRequest};
+use remote_proto::export::ExportQuery;
 use remote_proto::notify::{NoticeSubmission, NotificationPreferences, PushRegistration};
 use remote_proto::pairing::{GrantDecision, HostRegistration, PairingRequest};
 use remote_proto::relay::{TicketRequest, MAX_MESSAGE};
@@ -66,7 +67,8 @@ pub const PAIRINGS_PER_MINUTE: u32 = 10;
 pub const TICKETS_PER_MINUTE: u32 = 60;
 /// Notices, token registrations and reachable calls one device may make a minute.
 pub const NOTICES_PER_MINUTE: u32 = 60;
-/// Sync calls one host may make a minute. A host pushes after each change and pulls when told,
+/// Sync calls one host may make a minute, and pages of an export one device may ask for. A host
+/// pushes after each change and pulls when told,
 /// in batches; catching up after a long time offline is a few dozen pages.
 pub const SYNC_PER_MINUTE: u32 = 120;
 
@@ -197,6 +199,7 @@ pub fn router<R: Records + Clone + 'static>(
         )
         .route("/v1/sync/pull", synced(get(sync_pull::<R>)))
         .route("/v1/sync/snapshot", synced(get(sync_snapshot::<R>)))
+        .route("/v1/account/export", synced(get(export::<R>)))
         .route("/v1/sync/projects", synced(get(sync_projects::<R>)))
         .route("/v1/sync/projects/{id}/link", synced(post(sync_link::<R>)))
         .route(
@@ -907,6 +910,28 @@ async fn sync_pull<R: Records>(
         ));
     };
     answer(service.sync_pull(&caller, query.after.unwrap_or(0)).await)
+}
+
+async fn export<R: Records>(
+    State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
+    headers: HeaderMap,
+    query: Result<Query<ExportQuery>, QueryRejection>,
+) -> Response {
+    let caller = match known_caller(&service, known, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    let after = query
+        .ok()
+        .map(|Query(q)| q.after.map(SyncId::new).transpose());
+    let Some(Ok(after)) = after else {
+        return failure(RemoteError::new(
+            ErrorCode::InvalidRequest,
+            "An export's next page starts after a record's sync id.",
+        ));
+    };
+    answer(service.export(&caller, after, now_ms()).await)
 }
 
 #[derive(Deserialize)]

@@ -21,6 +21,7 @@
     "opener:allow-reveal-item-in-dir",
     "notification:default",
     "dialog:allow-open",
+    "dialog:allow-save",
     "dialog:allow-message",
     "dialog:allow-ask",
     "dialog:allow-confirm"

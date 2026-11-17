@@ -16,8 +16,10 @@ yardsort-core = { path = "../core" }
 pty-host = { path = "../pty-host" }
 remote-client = { path = "../remote-client" }
 remote-proto = { path = "../remote-proto" }
-# The relay's notices to the host.
+# The relay's notices to the host, and an account's export.
 serde_json = "1"
+# An export is written beside its place, then put there whole.
+tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 # The pairing link a QR code holds.
 url = "2"
@@ -28,5 +30,4 @@ yardsort-core = { path = "../core", features = ["testing"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 serde_json = "1"
-tempfile = "3"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }

@@ -10,6 +10,7 @@
 //   bun .yardsort/tests/support/phone.ts <run dir> registers | opens-notice <name> <pushes file>
 //   bun .yardsort/tests/support/phone.ts <run dir> lets-a-test-run <name>
 //   bun .yardsort/tests/support/phone.ts <run dir> sees-pull-requests <name>
+//   bun .yardsort/tests/support/phone.ts <run dir> exports
 //
 // `type` takes control of the one session running on the computer, types the line and a return,
 // and waits for the expected text in what the terminal prints. `take-over` does the same while
@@ -24,7 +25,9 @@
 // is refused letting another file's hash run, lets the one shown run, and leaves the run's id in
 // the run's folder as `test-run`. `sees-pull-requests` asks the computer for its pull requests
 // until it has read them, and checks the one from the project's checkout: its badge's facts, its
-// checks by name with the failed one first, and that one it never read is not found.
+// checks by name with the failed one first, and that one it never read is not found. `exports`
+// signs a phone in and exports the account, every page, to `phone-export.json` in the run's
+// folder, after checking that its own credentials are nowhere in it.
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -533,6 +536,18 @@ switch (doing) {
     );
     await client.refresh(first.refresh);
     console.log("spent the sign-in this computer kept");
+    break;
+  }
+  case "exports": {
+    const phone = await signIn();
+    const access = await phone.access();
+    const exported = await client.exportAccount(access, Date.now());
+    const text = `${JSON.stringify(exported, null, 2)}\n`;
+    for (const secret of [access.expose(), readFileSync(KEPT, "utf8")]) {
+      if (text.includes(secret)) throw new Error("The export holds this phone's credential.");
+    }
+    writeFileSync(join(dir, "phone-export.json"), text, { mode: 0o600 });
+    console.log(`exported ${exported.records.length} records`);
     break;
   }
   default:

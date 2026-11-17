@@ -1,0 +1,139 @@
+id: account-export
+name: Each client exports the whole account, with no sign-in in it
+description: >-
+  R7 slice 1 (docs/design/46-remote-r7.md §9). Against the stand-in server, one account on three
+  clients: the real window as a host, a computer with no screen, and a pretend phone. The computer
+  with no screen syncs a project with a note in it. Its export is refused from a shell that is not
+  a terminal, and saved from one, readable by its owner only. The window's section says what the file
+  holds; the system's save dialog, which the page cannot answer, is stood in for by asking the
+  command its answer goes to with a place, as if the person had chosen it. The phone's is every
+  page put together. Each file holds the account, both computers and the note,
+  and none of the sign-ins this run's computers keep. Linux only, since it stands in for the
+  browser with xdg-open. A window opens while it runs; nothing needs clicking.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_app
+    action: run
+    program: bun
+    args: [tauri, build, --debug, --no-bundle]
+    timeout: 20m
+  - id: build_host
+    action: shell
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 20m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: seed
+    action: shell
+    line: sh .yardsort/tests/support/app.sh seed
+  - id: a_repository_for_the_computer_with_no_screen
+    action: shell
+    line: >-
+      mkdir -p "$YS_RUN_DIR/host" && cp .yardsort/tests/support/headless-settings.toml
+      "$YS_RUN_DIR/host/settings.toml" && git init -q "$YS_RUN_DIR/widgets" && git -C "$YS_RUN_DIR/widgets"
+      -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false commit -q
+      --allow-empty -m first
+  - id: open_app
+    action: shell
+    line: sh .yardsort/tests/support/app.sh open
+  - id: window_up
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+
+steps:
+  - id: turn_on_in_the_window
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", turn-on, "{{ run.dir }}"]
+    timeout: 90s
+  - id: sign_in_the_computer_with_no_screen
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/host" bun .yardsort/tests/support/host.ts "$YS_RUN_DIR" sign-in "Smoke host"
+    expect:
+      stdout_contains: Signed in as Smoke host
+  - id: serve_it
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/host" setsid sh .yardsort/tests/support/headless.sh yardsort-host serve >
+      "$YS_RUN_DIR/host.log" 2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/host.pid"
+  - id: it_is_linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        YS_PROFILE="$YS_RUN_DIR/host" sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q
+        "Link: connected"
+    timeout: 60s
+  - id: a_project_syncs_with_a_note
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/host" sh .yardsort/tests/support/headless.sh ys project add "$YS_RUN_DIR/widgets"
+      && printf 'y\n' | YS_PROFILE="$YS_RUN_DIR/host" script -qefc "sh .yardsort/tests/support/headless.sh
+      yardsort-host sync on widgets" /dev/null > /dev/null && YS_PROFILE="$YS_RUN_DIR/host" script -qefc "sh
+      .yardsort/tests/support/headless.sh yardsort-host memory write widgets 'Exported note.'" /dev/null <
+      /dev/null && for i in $(seq 60); do YS_PROFILE="$YS_RUN_DIR/host" sh .yardsort/tests/support/headless.sh
+      ys sync status > "$YS_RUN_DIR/sync-status" && grep -Eq "widgets +syncing" "$YS_RUN_DIR/sync-status" &&
+      ! grep -q "Waiting to go up" "$YS_RUN_DIR/sync-status" && exit 0; sleep 1; done; exit 1
+  - id: not_exported_from_a_shell_that_is_not_a_terminal
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/host" sh .yardsort/tests/support/headless.sh yardsort-host account export --yes
+      --out "$YS_RUN_DIR/refused.json" < /dev/null 2>&1; status=$?; test ! -e "$YS_RUN_DIR/refused.json" &&
+      exit $status
+    expect:
+      exit: nonzero
+      stdout_contains: Exporting the account needs a person at a terminal
+  - id: exported_at_a_terminal
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/host" script -qefc "sh .yardsort/tests/support/headless.sh yardsort-host account
+      export --yes --out $YS_RUN_DIR/host-export.json" /dev/null < /dev/null
+    expect:
+      stdout_contains: "synced records."
+  - id: exported_from_the_window
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", exports, "{{ run.dir }}"]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: Saved"
+  - id: exported_from_the_phone
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", exports]
+    timeout: 60s
+    expect:
+      stdout_contains: exported
+  - id: each_holds_the_account_and_no_sign_in
+    action: shell
+    line: >-
+      for file in host-export.json desktop-export.json phone-export.json; do bun
+      .yardsort/tests/support/export-check.ts "$YS_RUN_DIR" $file "Exported note." "Smoke computer" "Smoke host"
+      || exit 1; done
+    expect:
+      stdout_contains: "phone-export.json:"
+
+teardown:
+  - id: stop_the_computer_with_no_screen
+    action: shell
+    line: >-
+      kill "$(cat "$YS_RUN_DIR/host.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon
+      .*$YS_RUN_DIR/host"; pkill -f "yardsort-daemon .*$YS_RUN_DIR/host"; true
+  - id: close_everything
+    action: shell
+    line: sh .yardsort/tests/support/app.sh stop-everything

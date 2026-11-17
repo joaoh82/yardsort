@@ -312,6 +312,54 @@ impl Client {
         self.send(self.authed(self.http.get(url), access)).await
     }
 
+    /// `GET /v1/account/export`: one page of the account's export, the first without `after`.
+    pub async fn export_page(
+        &self,
+        access: &Secret,
+        after: Option<&remote_proto::sync::SyncId>,
+    ) -> Result<remote_proto::export::ExportPage> {
+        let mut url = self.url("v1/account/export")?;
+        if let Some(after) = after {
+            url.query_pairs_mut().append_pair("after", after.as_str());
+        }
+        self.send(self.authed(self.http.get(url), access)).await
+    }
+
+    /// The whole of the account's export, every page put together, as the file a person keeps.
+    /// A server too old to export answers `not_found`.
+    pub async fn export(
+        &self,
+        access: &Secret,
+        exported_at: i64,
+    ) -> Result<remote_proto::export::AccountExport> {
+        let server = self.describe().await?;
+        let first = self.export_page(access, None).await?;
+        let account = first.account.ok_or_else(|| {
+            ClientError::Unexpected("the export's first page had no account".into())
+        })?;
+        let mut records = first.records;
+        let mut next = first.next;
+        while let Some(after) = next {
+            let page = self.export_page(access, Some(&after)).await?;
+            // Pages go by id: one that does not move on would never end.
+            if page.records.first().is_none_or(|r| r.id <= after) {
+                return Err(ClientError::Unexpected(
+                    "the export's pages did not move on".into(),
+                ));
+            }
+            records.extend(page.records);
+            next = page.next;
+        }
+        Ok(remote_proto::export::AccountExport {
+            format: remote_proto::export::EXPORT_FORMAT,
+            server: server.server,
+            server_name: server.name,
+            exported_at,
+            account,
+            records,
+        })
+    }
+
     /// `GET /v1/sync/projects`: the account's synced projects, to link one.
     pub async fn sync_projects(&self, access: &Secret) -> Result<remote_proto::sync::SyncProjects> {
         self.send(self.authed(self.http.get(self.url("v1/sync/projects")?), access))

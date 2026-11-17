@@ -3,6 +3,16 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Export your account** (Remote, under development). **Settings → Remote → Your account → Export
+  my account's data…** saves everything the server keeps of your account as one JSON file: your
+  devices and computers, which phones get notifications, and every synced project, note and
+  workspace name. It says what the file holds before it is made, and it never holds a credential or
+  a push token. The phone has it under **Settings → Your account**, and a computer with no screen
+  has `yardsort-host account export`. It needs a server of this version. See
+  [Exporting your account](docs/guide/remote.md#exporting-your-account).
+
 ## 0.35.0
 
 - **Pull requests on the phone.** A workspace's row on the phone carries its pull request's

@@ -4,11 +4,13 @@ import {
   ipc,
   type RemoteDevice,
   type RemoteEarlierDaemon,
+  type RemoteExported,
   type RemoteLink,
   type RemotePairing,
   type RemoteRequest,
   type RemoteStatus,
 } from "@/lib/ipc";
+import { native } from "@/lib/native";
 import { agentPlaces } from "@/features/shell/agentPlaces";
 import { useProjectsStore } from "@/stores/projects";
 import { useRemoteStore } from "@/stores/remote";
@@ -251,6 +253,8 @@ export function RemoteSettings() {
             )}
           </section>
 
+          {!stopped && <AccountExport />}
+
           <ProjectsFolderSettings />
         </>
       ) : (
@@ -307,6 +311,111 @@ export function RemoteSettings() {
       <OtherComputersSettings />
     </div>
   );
+}
+
+/**
+ * Exporting the account: what the file holds, said before it is made, then a save dialog. The
+ * server makes nothing until the person has chosen where it goes.
+ */
+function AccountExport() {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState<RemoteExported | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const choose = async () => {
+    setError(null);
+    const path = await native.pickSaveFile("Export your account", exportName(new Date()));
+    if (!path) return;
+    setBusy(true);
+    try {
+      setSaved(await ipc.remoteExport(path));
+      setOpen(false);
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section aria-label="Your account" className="grid gap-2">
+      <h4 className="text-ink-muted">Your account</h4>
+      {error && (
+        <p role="alert" className="text-red-400 select-text">
+          {error}
+        </p>
+      )}
+      {saved && (
+        <p role="status" className="flex flex-wrap items-center gap-2">
+          <span>
+            Saved <span className="font-mono text-detail select-text">{saved.path}</span>:{" "}
+            {counted(saved.devices, "device")}, {counted(saved.hosts, "computer")},{" "}
+            {counted(saved.records, "synced record")}.
+          </span>
+          <button
+            type="button"
+            onClick={() => void native.revealInFileManager(saved.path)}
+            className={buttonClass}
+          >
+            Show in folder
+          </button>
+        </p>
+      )}
+      {open ? (
+        <div className="grid gap-2 rounded border border-line px-3 py-2">
+          <p>An export is a file of everything the server keeps of your account:</p>
+          <ul className="list-disc pl-5 text-ink-faint">
+            <li>your account: the identity provider, your id there, and when it was made</li>
+            <li>your devices and computers, and which devices each lets in</li>
+            <li>which phones get notifications, never their tokens, and your settings for them</li>
+            <li>every synced project, note and workspace name, in plain text</li>
+          </ul>
+          <p className="text-ink-faint">
+            Never a credential. Keep the file somewhere only you can read.
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void choose()}
+              className={primaryButtonClass}
+            >
+              Choose where to save…
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setOpen(false)}
+              className={buttonClass}
+            >
+              Cancel
+            </button>
+            {busy && <span className="text-ink-faint">Exporting…</span>}
+          </div>
+        </div>
+      ) : (
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              setSaved(null);
+              setOpen(true);
+            }}
+            className={buttonClass}
+          >
+            Export my account's data…
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** `yardsort-account-2026-11-17.json`, by the local date. */
+function exportName(now: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `yardsort-account-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.json`;
 }
 
 /** The code to type and the QR code, with how long they are good for. */

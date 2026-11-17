@@ -1109,7 +1109,9 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       R7 planned on 2026-11-16 in [46](46-remote-r7.md): ten slices, four of them (exporting
       and deleting an account, entitlements and metering, the isolation test) buildable now and
       the rest waiting on the owner's answers to its eleven questions, production, the stores,
-      billing and a status page among them.
+      billing and a status page among them. Slice 1 built on 2026-11-17: an account's export, from
+      the desktop's Settings → Remote, the phone's Settings and `yardsort-host account export`, of
+      everything the server keeps of it but credentials and push tokens (46 §9).
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is

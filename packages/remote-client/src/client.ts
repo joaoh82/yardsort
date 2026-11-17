@@ -35,6 +35,7 @@ import {
   CHALLENGE_METHOD,
 } from "./account.ts";
 import { challengeFor, type Crypto, newVerifier, webCrypto } from "./crypto.ts";
+import { type AccountExport, EXPORT_FORMAT, exportPage, type ExportPage } from "./export.ts";
 import { DecodeError, type Decoder, parse } from "./decode.ts";
 import type { DeviceId, GrantId, HostId, RemoteError } from "./protocol.ts";
 import { remoteError } from "./protocol.ts";
@@ -282,6 +283,45 @@ export class Client {
   /** `GET /v1/notifications/{id}`. Another account's notice is missing. */
   notice(access: Secret, id: string): Promise<NoticeView> {
     return this.#send("GET", `v1/notifications/${encodeURIComponent(id)}`, noticeView, { access });
+  }
+
+  /** `GET /v1/account/export`: one page of the account's export, the first without `after`. */
+  exportPage(access: Secret, after?: string): Promise<ExportPage> {
+    const path =
+      after === undefined ? "v1/account/export" : `v1/account/export?${query({ after })}`;
+    return this.#send("GET", path, exportPage, { access });
+  }
+
+  /**
+   * The whole of the account's export, every page put together, as the file a person keeps. A
+   * server too old to export refuses with `not_found`.
+   */
+  async exportAccount(access: Secret, exportedAt: number): Promise<AccountExport> {
+    const server = await this.describe();
+    const first = await this.exportPage(access);
+    if (!first.account) {
+      throw new ClientError("unexpected", "The export's first page had no account.");
+    }
+    const records = [...first.records];
+    let next = first.next;
+    while (next !== undefined) {
+      const page = await this.exportPage(access, next);
+      // Pages go by id: one that does not move on would never end.
+      const head = page.records[0];
+      if (!head || head.id <= next) {
+        throw new ClientError("unexpected", "The export's pages did not move on.");
+      }
+      records.push(...page.records);
+      next = page.next;
+    }
+    return {
+      format: EXPORT_FORMAT,
+      server: server.server,
+      serverName: server.name,
+      exportedAt,
+      account: first.account,
+      records,
+    };
   }
 
   /** `POST /v1/relay/tickets`: a ticket to reach `host`, under the grant the server has in force. */

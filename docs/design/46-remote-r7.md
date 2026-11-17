@@ -1,7 +1,7 @@
 # Remote, R7: the managed launch
 
-**Status:** planned on 2026-11-16, with the questions in §3 open for the owner. Nothing in it is
-built.
+**Status:** planned on 2026-11-16, with the questions in §3 open for the owner. Slice 1, exporting
+an account, built on 2026-11-17 (§9), on question 8's lean.
 
 This is the plan for the last phase of the proposal ([25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)
 §13): what it has to show, what it starts from, the decisions it needs, and the slices in the order
@@ -211,3 +211,54 @@ for each deploy.
 - End-to-end encryption of synced records.
 - Buying a plan inside the phone app.
 - Published uptime targets, and credits when they are missed. The status page itself is slice 10.
+
+## 9 · Slice 1, exporting an account
+
+Built on 2026-11-17, on question 8's lean, which the owner has not answered yet.
+
+**The server.** `GET /v1/account/export` (`remote_proto::export`), listed as `account.export` in
+`GET /v1/server`'s capabilities, for any device the account has signed in, phone, computer or host,
+and for its own account only: every read is by the caller's account, never by an id a request
+names. The first page carries the account: its issuer, subject and when it was made; its devices,
+signed out ones included, as `GET /v1/devices` shows them; its hosts, as `GET /v1/hosts`; every
+grant, as the grant pages show them, whatever became of it; its push routes, by device and
+platform with when each was saved, never the token; and its notification settings. Every page
+carries synced records by id, those with a body only, a revoked note's included with its flag:
+tombstones, pruned markers and the change log stay out, as do notices on their way to a phone,
+which name runs and workspaces by id and lapse within days. A page holds at most 200 records and
+about 512 KiB of their bodies, at least one, since a page of 200 at the 16 KiB a record may hold
+would be over the phone client's 1 MiB answer. Pages are under the per-device `sync` limit. Three
+store methods, `account_row`, `push_routes` and `exported_records`, and `GrantFilter::All`, on both
+stores; the memory store now keeps when each account was made, and when each push token was saved.
+
+**The clients.** Each puts the pages together as one `AccountExport`, the format 1 file, with the
+server's id and name and when it was made, and checks that each page moves on.
+
+- The desktop: **Settings → Remote → Your account → Export my account's data…** says what the file
+  holds; **Choose where to save…** opens the system's save dialog (the new `dialog:allow-save`
+  capability), and only then is the server asked (`remote_export`). It is offered while this
+  computer is signed in.
+- The phone: **Settings → Your account → Export my account's data**, a screen saying what the file
+  holds, and **Export**. On iOS the share sheet, from a copy in the cache folder deleted once it
+  closes; on Android a folder the person picks. No new native module.
+- A computer with no screen: `yardsort-host account export [--out FILE] [--yes]`, behind the guard
+  as `pair` is, since the file holds every synced note. It says what the file holds and asks; an
+  existing file is kept.
+
+The desktop and the host write through `remote_host::export::save`: beside its place, then put
+there whole, readable by its owner only. A server too old to export answers `not_found`, which each
+client words as the server not exporting yet.
+
+**Proof.** The store test (`tests/records.rs`), on memory and PostgreSQL: one account's row, push
+routes, grants and records, by id and a page at a time, a revoked note in and a deleted workspace
+out, nothing of another account's. The HTTP tests (`tests/export.rs`), on both: an account of 251
+records over two pages, the first with the account and the second without; no credential and no
+push token in either; the host may export too; another account's records never; a signed-out
+device and a request without one refused; a page of large notes kept under the byte bound. The
+desktop's, the phone's and the TypeScript client's own tests, and `remote_host::export`'s: whole,
+kept unless replacing, and mode 600. The smoke test `account-export`: one account on the real
+window, a computer with no screen and a pretend phone against the stand-in; the host's export
+refused from a shell that is not a terminal and saved from one; the window's section read, then the command
+the save dialog's answer goes to asked with a place, since a page cannot answer that dialog; the phone's every page; each file with the
+account, both computers and a synced note, readable by its owner only, and none of the sign-ins
+those computers keep.
