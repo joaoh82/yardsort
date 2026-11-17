@@ -1362,8 +1362,10 @@ history a line at a time.
 - [x] Its smoke test, `remote-phone-sees-pull-requests`, passed on Linux (2026-11-15): the real
       window, a stand-in `gh`, a pretend phone.
 - [ ] See it on a phone.
-- [ ] A notification when a check fails or a review arrives (issue #263); merging from the phone;
-      pull requests of a computer with no window.
+- [x] Pull requests of a computer with no window (2026-11-17): `yardsort-host` reads them with
+      its own `gh` when a device asks (`remote::pull::polled`). Not yet those a workspace follows
+      in another repository.
+- [ ] A notification when a check fails or a review arrives (issue #263); merging from the phone.
 
 _Exit:_ on a phone, a person reads an agent's whole conversation without scrolling sideways,
 answers its permission question, and sends it the next message, while the computer's terminal

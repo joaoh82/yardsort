@@ -104,9 +104,11 @@ background. Nothing of them is kept on the phone, so they show only while this c
 reached.
 
 Without `gh`, or signed out of it, the phone shows no badges and no card, and says nothing about
-it, as here. The same goes for a computer on a version before this one, and for
-[a computer with no screen](headless-host.md), which reads no pull requests yet. A notification
-when a check fails or a review arrives is not built yet.
+it, as here. The same goes for a computer on a version before this one.
+[A computer with no screen](headless-host.md) reads them too, with its own `gh`, when the phone
+asks, so the first look at one starts the reading and the list fills in a moment later. It does
+not yet read the pull requests a workspace follows in another repository. A notification when a
+check fails or a review arrives is not built yet.
 
 ## Starting work from the phone
 

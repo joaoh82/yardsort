@@ -99,9 +99,17 @@ read while only a phone is looking.
 
 ## A computer with no window
 
-`yardsort-host` reads no pull requests: the cache that does lives in the desktop app. So it does
-not answer these operations, and a phone shows nothing of pull requests for it, as for a
-computer on an earlier release. Left for later.
+The desktop app's cache lives in the app, so `yardsort-host` has a reader of its own,
+`remote::pull::polled` in the core (2026-11-17). It reads only when a device asks, on the same
+terms as the window's lender: what was last read is answered at once, a reading older than 45
+seconds starts another on a thread of its own and the answer says one is on its way, and one
+that left nothing is not tried again for 10 seconds. A reading is `gh pr list` of the newest
+fifty in the project's checkout, and `gh`'s open pull requests too when the device asks for every
+open one; a reading of only the newest keeps the older open ones the last full one found. Which
+workspace opened which is `forge::pull_requests_from`, as in the window. Without `gh`, or with it
+signed out, the reading is of none.
+
+Not read there yet: the pull requests a workspace follows in another repository.
 
 ## On the phone
 
@@ -166,5 +174,5 @@ a screen showing them asks again each minute while it is in front.
 - **See it on a phone**, iPhone and Android, against a real repository.
 - A push notification when a check fails or a review arrives: issue #263.
 - Merging and marking ready for review from the phone.
-- A computer with no window.
+- On a computer with no window, the pull requests a workspace follows in another repository.
 - The description and the conversation of a pull request, which the desktop's Summary shows.

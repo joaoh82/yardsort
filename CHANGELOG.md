@@ -3,6 +3,13 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## 0.36.0
+
+- **Pull requests on the phone from a computer with no screen.** `yardsort-host` now reads its
+  projects' pull requests with its own `gh` when the phone asks, so the badges, the card and the
+  **Pull requests** list show for it as for a desktop. Those a workspace follows in another
+  repository are not read there yet. See [Pull requests on the phone](docs/guide/remote.md#pull-requests-on-the-phone).
+
 ## 0.35.0
 
 - **Pull requests on the phone.** A workspace's row on the phone carries its pull request's
