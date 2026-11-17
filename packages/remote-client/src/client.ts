@@ -35,6 +35,7 @@ import {
   CHALLENGE_METHOD,
 } from "./account.ts";
 import { challengeFor, type Crypto, newVerifier, webCrypto } from "./crypto.ts";
+import { type AccountExport, EXPORT_FORMAT, exportPage, type ExportPage } from "./export.ts";
 import { DecodeError, type Decoder, parse } from "./decode.ts";
 import type { DeviceId, GrantId, HostId, RemoteError } from "./protocol.ts";
 import { remoteError } from "./protocol.ts";
@@ -54,6 +55,12 @@ import { Secret } from "./secret.ts";
 const TIMEOUT_MS = 30_000;
 /** The most a JSON answer may hold. The server's are far smaller. */
 const MAX_ANSWER = 1024 * 1024;
+/**
+ * How many times a page of an export is asked for again after the server's rate limit, and the
+ * first wait before it; each wait is twice the one before. The pages already read are kept.
+ */
+const EXPORT_RETRIES = 6;
+const EXPORT_BACKOFF_MS = 500;
 
 export type ClientErrorKind =
   /** The server refused, with its reason: {@link ClientError.remote}. */
@@ -282,6 +289,63 @@ export class Client {
   /** `GET /v1/notifications/{id}`. Another account's notice is missing. */
   notice(access: Secret, id: string): Promise<NoticeView> {
     return this.#send("GET", `v1/notifications/${encodeURIComponent(id)}`, noticeView, { access });
+  }
+
+  /** `GET /v1/account/export`: one page of the account's export, the first without `after`. */
+  exportPage(access: Secret, after?: string): Promise<ExportPage> {
+    const path =
+      after === undefined ? "v1/account/export" : `v1/account/export?${query({ after })}`;
+    return this.#send("GET", path, exportPage, { access });
+  }
+
+  /**
+   * The whole of the account's export, every page put together, as the file a person keeps. A
+   * server too old to export refuses with `not_found`.
+   */
+  async exportAccount(access: Secret, exportedAt: number): Promise<AccountExport> {
+    const server = await this.describe();
+    const first = await this.#exportPagePatiently(access);
+    if (!first.account) {
+      throw new ClientError("unexpected", "The export's first page had no account.");
+    }
+    const records = [...first.records];
+    let next = first.next;
+    while (next !== undefined) {
+      const page = await this.#exportPagePatiently(access, next);
+      // Pages go by id: one that does not move on would never end.
+      const head = page.records[0];
+      if (!head || head.id <= next) {
+        throw new ClientError("unexpected", "The export's pages did not move on.");
+      }
+      records.push(...page.records);
+      next = page.next;
+    }
+    return {
+      format: EXPORT_FORMAT,
+      server: server.server,
+      serverName: server.name,
+      exportedAt,
+      account: first.account,
+      records,
+    };
+  }
+
+  /**
+   * A page of the export, asked for again after a wait while the server says it is asked too
+   * often: its limit is shared with sync, and a large account has many pages.
+   */
+  async #exportPagePatiently(access: Secret, after?: string): Promise<ExportPage> {
+    let wait = EXPORT_BACKOFF_MS;
+    for (let tries = 0; tries < EXPORT_RETRIES; tries++) {
+      try {
+        return await this.exportPage(access, after);
+      } catch (error) {
+        if (!(error instanceof ClientError) || error.code !== "rate_limited") throw error;
+        await new Promise((waited) => setTimeout(waited, wait));
+        wait *= 2;
+      }
+    }
+    return this.exportPage(access, after);
   }
 
   /** `POST /v1/relay/tickets`: a ticket to reach `host`, under the grant the server has in force. */

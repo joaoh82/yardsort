@@ -249,6 +249,9 @@ async fn one(home: &Arc<HostHome>, ask: Ask) -> account::Result<Reply> {
             crate::dashboard::tunnel(home, wanted).await
         }
         Ask::DashboardSignOut => crate::dashboard::sign_out(home),
+        Ask::AccountExport => Reply::Export {
+            export: Box::new(remote_host::export::export(home.as_ref()).await?),
+        },
         Ask::Pair | Ask::Answer { .. } => Reply::Failed {
             message: "Not here.".into(),
         },

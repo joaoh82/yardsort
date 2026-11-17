@@ -30,13 +30,14 @@ import TerminalScreen from "../../src/app/terminal";
 import Pair from "../../src/app/pair";
 import Servers from "../../src/app/servers";
 import Settings from "../../src/app/settings";
+import ExportScreen from "../../src/app/export";
 import StartWork from "../../src/app/start";
 import PullScreen from "../../src/app/pull";
 import PullsScreen from "../../src/app/pulls";
 import WorkspaceScreen from "../../src/app/workspace";
 import { Accounts, type Browser, type Env } from "../../src/lib/accounts";
 import type { PickImage } from "../../src/lib/attach";
-import { AppProvider } from "../../src/lib/context";
+import { AppProvider, type SaveFile } from "../../src/lib/context";
 import { Diagnostics } from "../../src/lib/diagnostics";
 import { folds } from "../../src/lib/folds";
 import { Incoming } from "../../src/lib/pairing";
@@ -55,6 +56,7 @@ async function start({
   env = envFor(server),
   incoming = new Incoming(),
   pickImage = async () => null,
+  saveFile = async () => true,
   diagnostics = new Diagnostics(),
 }: {
   server?: FakeServer;
@@ -63,6 +65,7 @@ async function start({
   env?: Env;
   incoming?: Incoming;
   pickImage?: PickImage;
+  saveFile?: SaveFile;
   diagnostics?: Diagnostics;
 } = {}) {
   const accounts = new Accounts({ diagnostics, ...env }, vault);
@@ -72,6 +75,7 @@ async function start({
     deviceName: "iPhone",
     incoming,
     pickImage,
+    saveFile,
     diagnostics,
     about: { app: "0.1.5", system: "ios 18.1" },
   };
@@ -90,6 +94,7 @@ async function start({
       account: Account,
       servers: Servers,
       settings: Settings,
+      export: ExportScreen,
       pair: Pair,
       computer: ComputerScreen,
       pull: PullScreen,
@@ -349,6 +354,49 @@ describe("Account", () => {
 
     await act(async () => answer());
     await screen.findByText("Other workstation");
+  });
+});
+
+describe("Exporting the account", () => {
+  async function onExport(saveFile: SaveFile, server = new FakeServer()) {
+    const app = await start({ server, saveFile });
+    await signIn();
+    await act(async () => router.push("/settings"));
+    await fireEvent.press(await screen.findByRole("button", { name: "Export my account’s data" }));
+    await screen.findByText("Never a credential. Keep the file somewhere only you can read.");
+    return app;
+  }
+
+  test("says what the file holds, then saves every page of it, and no credential", async () => {
+    const saved: { name: string; text: string }[] = [];
+    const { server } = await onExport(async (name, text) => {
+      saved.push({ name, text });
+      return true;
+    });
+    expect(server.asked).not.toContain("GET /v1/account/export");
+    await fireEvent.press(screen.getByRole("button", { name: "Export" }));
+    await screen.findByText(/^Saved yardsort-account-\d{4}-\d{2}-\d{2}\.json: 3 synced records/);
+    expect(saved).toHaveLength(1);
+    const file = JSON.parse(saved[0]!.text);
+    expect(file.format).toBe(1);
+    expect(file.serverName).toBe("Example Remote");
+    expect(file.account.subject).toBe("ana");
+    expect(file.records.map((r: { id: string }) => r.id)).toEqual(["a", "b", "c"]);
+    expect(saved[0]!.text).not.toMatch(/access-|refresh-/);
+  });
+
+  test("a save the person backed out of says nothing, and an older server says why", async () => {
+    const server = new FakeServer();
+    await onExport(async () => false, server);
+    await fireEvent.press(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(server.asked).toContain("GET /v1/account/export"));
+    expect(screen.queryByText(/^Saved /)).toBeNull();
+
+    server.exports = false;
+    await fireEvent.press(screen.getByRole("button", { name: "Export" }));
+    await screen.findByText(
+      "Example Remote cannot export an account yet. Its operator has to update it.",
+    );
   });
 });
 

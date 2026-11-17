@@ -22,6 +22,13 @@ has the downloads and the full commit lists.
   projects' pull requests with its own `gh` when the phone asks, so the badges, the card and the
   **Pull requests** list show for it as for a desktop. Those a workspace follows in another
   repository are not read there yet. See [Pull requests on the phone](docs/guide/remote.md#pull-requests-on-the-phone).
+- **Export your account** (Remote, under development). **Settings → Remote → Your account → Export
+  my account's data…** saves everything the server keeps of your account as one JSON file: your
+  devices and computers, which phones get notifications, and every synced project, note and
+  workspace name. It says what the file holds before it is made, and it never holds a credential or
+  a push token. The phone has it under **Settings → Your account**, and a computer with no screen
+  has `yardsort-host account export`. It needs a server of this version. See
+  [Exporting your account](docs/guide/remote.md#exporting-your-account).
 - **Pull requests from forks can be code reviewed.** A workspace on a fork's pull request — its
   branch is `pr/<number>`, from **Start workspace** or `ys pr checkout` — now finds that pull
   request by the number its branch follows, so **Request code review** and

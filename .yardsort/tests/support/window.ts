@@ -272,6 +272,27 @@ switch (doing) {
     await connected();
     break;
   }
+  case "exports": {
+    // Settings → Remote → Your account, up to the system's save dialog, which a page cannot answer:
+    // the window's internals are fixed. So the section is read and closed, then the command the
+    // dialog's answer goes to is asked with `<run dir>/desktop-export.json`, as if the person had
+    // chosen it, as `add-project` stands in for the folder picker.
+    const path = `${runDir}/desktop-export.json`;
+    await click("Export my account's data…");
+    await expectToSee("every synced project, note and workspace name");
+    await expectToSee("Never a credential.");
+    await click("Cancel");
+    await page(
+      `void (window.__exported = "", window.__TAURI_INTERNALS__.invoke("remote_export", { path: ${JSON.stringify(path)} }).then((saved) => { window.__exported = JSON.stringify(saved); }, (e) => { window.__exported = "failed: " + JSON.stringify(e); }))`,
+    );
+    const saved = String(await until("the export saved", () => page(`window.__exported ?? ""`)));
+    if (saved.startsWith("failed")) throw new Error(`Not saved: ${saved}`);
+    const counts = JSON.parse(saved);
+    console.log(
+      `saw: Saved ${counts.path}: ${counts.devices} devices, ${counts.hosts} computers, ${counts.records} records`,
+    );
+    break;
+  }
   case "pairing-code": {
     await click("Pair a device");
     const code = await until("a pairing code", () =>

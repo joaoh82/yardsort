@@ -17,6 +17,7 @@ import {
   foldsFile,
   nativeEnv,
   pickImage,
+  saveFile,
   secureVault,
   suggestedDeviceName,
   systemBrowser,
@@ -38,6 +39,7 @@ const app = {
   deviceName: suggestedDeviceName(),
   incoming,
   pickImage,
+  saveFile,
   diagnostics,
   about: { app: appVersion, system: systemVersion },
 };
@@ -128,6 +130,7 @@ export default function Layout() {
               <Stack.Screen name="servers" options={{ title: "Servers" }} />
               <Stack.Screen name="settings" options={{ title: "Settings" }} />
               <Stack.Screen name="diagnostics" options={{ title: "Diagnostics" }} />
+              <Stack.Screen name="export" options={{ title: "Export your account" }} />
               <Stack.Screen name="computer" options={{ title: "Computer" }} />
               <Stack.Screen name="workflows" options={{ title: "Workflows" }} />
               <Stack.Screen name="workflow" options={{ title: "Workflow" }} />

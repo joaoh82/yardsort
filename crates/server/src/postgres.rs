@@ -25,6 +25,7 @@ use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod, Transacti
 use std::collections::BTreeSet;
 
 use remote_proto::account::{DeviceKind, Secret};
+use remote_proto::export::PushRoute;
 use remote_proto::notify::{NotificationPreferences, FLUSH_CAP};
 use remote_proto::pairing::MAX_OFFER_MISSES;
 use remote_proto::sync::{
@@ -35,9 +36,9 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_postgres::{AsyncMessage, Client, IsolationLevel, Row};
 
 use crate::records::{
-    allowance, category_allowed, AccountId, Allowance, Decision, DeliveryEnd, Device, GrantFilter,
-    GrantRecord, GrantStatus, GrantView, Handoff, Host, HostOffer, IncomingNotice, Issued,
-    LinkPlace, NoticePage, NoticeRecord, NoticeToSend, PendingLogin, Records, RecordsError,
+    allowance, category_allowed, AccountId, AccountRow, Allowance, Decision, DeliveryEnd, Device,
+    GrantFilter, GrantRecord, GrantStatus, GrantView, Handoff, Host, HostOffer, IncomingNotice,
+    Issued, LinkPlace, NoticePage, NoticeRecord, NoticeToSend, PendingLogin, Records, RecordsError,
     Redemption, Result, RevokeReason, Revoked, Rotation, Signal, CLAIM_LEASE_MS, OPEN_NOTICE_CAP,
     SEEN_RESOLUTION_MS, SIGNALS_KEPT,
 };
@@ -969,6 +970,8 @@ impl Records for PgRecords {
             GrantFilter::One(id) => ("g.id", id.as_str()),
             GrantFilter::OfHost(host) => ("g.host", host.as_str()),
             GrantFilter::ForDevice(device) => ("g.device", device.as_str()),
+            // Every grant has its account in `g.account`, which the query matches already.
+            GrantFilter::All => ("g.account", account.0.as_str()),
         };
         self.client()
             .await?
@@ -2017,6 +2020,72 @@ impl Records for PgRecords {
             .await
             .map_err(failed)?;
         Ok(true)
+    }
+
+    async fn account_row(&self, account: &AccountId) -> Result<Option<AccountRow>> {
+        Ok(self
+            .client()
+            .await?
+            .query_opt(
+                "SELECT issuer, subject, created_at FROM accounts WHERE id = $1",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?
+            .map(|row| AccountRow {
+                issuer: row.get(0),
+                subject: row.get(1),
+                created_at: row.get(2),
+            }))
+    }
+
+    async fn push_routes(&self, account: &AccountId) -> Result<Vec<PushRoute>> {
+        self.client()
+            .await?
+            .query(
+                "SELECT device, platform, updated_at FROM push_tokens
+                 WHERE account = $1 ORDER BY device",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(|row| {
+                Ok(PushRoute {
+                    device: DeviceId::new(row.get::<_, String>(0)).map_err(failed)?,
+                    platform: row.get(1),
+                    updated_at: row.get(2),
+                })
+            })
+            .collect()
+    }
+
+    async fn exported_records(
+        &self,
+        account: &AccountId,
+        after: Option<&SyncId>,
+        limit: usize,
+    ) -> Result<(Vec<SyncRecord>, bool)> {
+        let mut records = self
+            .client()
+            .await?
+            .query(
+                &format!(
+                    "SELECT {RECORD} FROM sync_records r
+                     WHERE r.account = $1 AND NOT r.pruned AND NOT r.deleted
+                       AND r.body IS NOT NULL AND ($2::TEXT IS NULL OR r.id > $2)
+                     ORDER BY r.id LIMIT $3"
+                ),
+                &[&account.0, &after.map(SyncId::as_str), &(limit as i64 + 1)],
+            )
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(sync_record)
+            .collect::<Result<Vec<_>>>()?;
+        let more = records.len() > limit;
+        records.truncate(limit);
+        Ok((records, more))
     }
 
     async fn prune_sync(

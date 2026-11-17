@@ -202,6 +202,8 @@ export class FakeServer {
   releases = 0;
   inputs: { data: string; paste: boolean }[] = [];
   resizes: { cols: number; rows: number }[] = [];
+  /** Answer `GET /v1/account/export`, as a server that can export does. */
+  exports = true;
   /** Answer requests for control as if someone else held it. */
   refuseControl = false;
   /** Operations taken and never answered, as when a link goes quiet just after one. */
@@ -271,6 +273,29 @@ export class FakeServer {
             { code: "not_found", message: "Not found.", retryable: false },
             { status: 404 },
           );
+    }
+    if (method === "GET" && url.pathname === "/v1/account/export") {
+      if (!this.exports) {
+        return Response.json(
+          { code: "not_found", message: "Nothing is there.", retryable: false },
+          { status: 404 },
+        );
+      }
+      const after = url.searchParams.get("after");
+      const note = (id: string) => ({ kind: "note", id, body: { text: `note ${id}` } });
+      return Response.json(
+        after === null
+          ? {
+              account: {
+                subject: "ana",
+                devices: this.devices.map((d) => ({ ...d, current: d.id === signedIn.id })),
+                hosts: this.hosts,
+              },
+              records: [note("a"), note("b")],
+              next: "b",
+            }
+          : { records: [note("c")] },
+      );
     }
     if (method === "GET" && url.pathname === "/v1/hosts") {
       return Response.json({ hosts: this.hosts });

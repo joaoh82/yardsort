@@ -8,6 +8,9 @@ import type { PickImage } from "./attach";
 import type { Diagnostics } from "./diagnostics";
 import type { Incoming } from "./pairing";
 
+/** Save `text` as a file named `name`, where the person chooses. False when they did not. */
+export type SaveFile = (name: string, text: string) => Promise<boolean>;
+
 interface App {
   accounts: Accounts;
   browser: Browser;
@@ -17,6 +20,8 @@ interface App {
   incoming: Incoming;
   /** Ask the person for a picture to give an agent. */
   pickImage: PickImage;
+  /** Save a file the person keeps, where they choose. Whether it was saved. */
+  saveFile: SaveFile;
   /** What happened to the connections since the app started, for Settings → Diagnostics. */
   diagnostics: Diagnostics;
   /** This app's version and the phone's system, `0.1.5` and `ios 18.1`. */

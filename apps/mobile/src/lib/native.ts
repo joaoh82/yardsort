@@ -11,14 +11,15 @@ import type { Crypto, Platform } from "@yardsort/remote-client";
 import Constants from "expo-constants";
 import * as ExpoCrypto from "expo-crypto";
 import * as Device from "expo-device";
-import { File, Paths } from "expo-file-system";
+import { Directory, File, Paths } from "expo-file-system";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
-import { Platform as ReactPlatform } from "react-native";
+import { Platform as ReactPlatform, Share } from "react-native";
 
 import type { Browser, Env } from "./accounts";
+import type { SaveFile } from "./context";
 import { diagnostics } from "./diagnostics";
 import type { ChoiceFile } from "./appearance";
 import { LONGEST_SIDE, type PickImage } from "./attach";
@@ -43,6 +44,35 @@ export const secureVault: Vault = {
  * The phone's cache folder: never in a backup, and the system may clear it, which costs only what
  * was last seen. A key is this app's own, never anything a server said.
  */
+/**
+ * Save a file where the person chooses. On iOS, from the share sheet, which offers Save to Files;
+ * the copy it shares from is in the cache folder, deleted once the sheet closes. On Android, in a
+ * folder they pick.
+ */
+export const saveFile: SaveFile = async (name, text) => {
+  if (ReactPlatform.OS === "android") {
+    let folder: Directory;
+    try {
+      folder = await Directory.pickDirectoryAsync();
+    } catch {
+      return false;
+    }
+    const file = folder.createFile(name, "application/json");
+    file.write(text);
+    return true;
+  }
+  const file = new File(Paths.cache, name);
+  if (file.exists) file.delete();
+  file.create();
+  file.write(text);
+  try {
+    const shared = await Share.share({ url: file.uri, title: name });
+    return shared.action === Share.sharedAction;
+  } finally {
+    if (file.exists) file.delete();
+  }
+};
+
 export const cacheShelf: Shelf = {
   get: async (key) => {
     const file = new File(Paths.cache, `${key}.json`);

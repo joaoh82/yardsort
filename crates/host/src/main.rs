@@ -117,6 +117,9 @@ mod cli {
             #[command(subcommand)]
             command: Option<Dashboard>,
         },
+        /// Your account at the server.
+        #[command(subcommand)]
+        Account(Account),
         /// Install an agent, or bring it up to date, into ~/.local, as you.
         ///
         /// Claude Code, Cursor's CLI and Grok come from each vendor's own installer, under the
@@ -235,6 +238,22 @@ mod cli {
         },
     }
 
+    /// Only from a terminal on this computer that no agent runs in.
+    #[derive(Subcommand)]
+    enum Account {
+        /// Save everything the server keeps of your account as a JSON file: says what it holds
+        /// first, and asks.
+        Export {
+            /// Where to save it. Defaults to yardsort-account-<date>.json here. An existing file
+            /// is kept.
+            #[arg(long, value_name = "FILE")]
+            out: Option<PathBuf>,
+            /// Do not ask.
+            #[arg(long)]
+            yes: bool,
+        },
+    }
+
     pub fn main() -> i32 {
         let cli = Cli::parse();
         // Needs no profile, and no runtime: it runs the vendor's installer and waits.
@@ -266,6 +285,7 @@ mod cli {
                 Command::Sync(command) => sync(&profile, command).await,
                 Command::Memory(command) => memory(&profile, command).await,
                 Command::Dashboard { command } => dashboard(&profile, command).await,
+                Command::Account(command) => account(&profile, command).await,
                 Command::InstallAgent { .. } => unreachable!("handled before the profile"),
             }
         });
@@ -453,6 +473,40 @@ mod cli {
                 done(profile, Ask::SyncRemove { project }).await
             }
         }
+    }
+
+    async fn account(profile: &Profile, command: Account) -> Result<(), String> {
+        let Account::Export { out, yes } = command;
+        let path = out.unwrap_or_else(|| {
+            remote_host::export::file_name(remote_host::account::now_ms()).into()
+        });
+        println!("An export is a file of everything the server keeps of your account:");
+        println!("  Your account: the identity provider, your id there, and when it was made");
+        println!("  Your devices and computers, and which devices each lets in");
+        println!("  Which phones get notifications, never their tokens, and your settings");
+        println!("  Every synced project, note and workspace name, in plain text");
+        println!("Never a credential. Keep the file somewhere only you can read.");
+        if path.exists() {
+            return Err(format!(
+                "{} is there already. Name another with --out.",
+                path.display()
+            ));
+        }
+        if !yes && !confirmed(&format!("Export your account to {}?", path.display())) {
+            return Err("Nothing was exported.".into());
+        }
+        let Reply::Export { export } = control::ask_once(profile, Ask::AccountExport).await? else {
+            return Err("The host answered something else.".into());
+        };
+        remote_host::export::save(&export, &path, false).map_err(|f| f.message)?;
+        println!(
+            "Saved {}: {} devices, {} computers, {} synced records.",
+            path.display(),
+            export.account.devices.len(),
+            export.account.hosts.len(),
+            export.records.len()
+        );
+        Ok(())
     }
 
     async fn memory(profile: &Profile, command: Memory) -> Result<(), String> {

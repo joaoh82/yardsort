@@ -82,6 +82,9 @@ Things it holds to:
   back and with the profile. Taking control of a terminal, and what a device that may take control
   can do besides — start an agent, give one a picture — are the only things here that change
   anything on the computer.
+- **An account's export** (Settings → Your account) is made only when the person presses Export,
+  after the screen has said what it holds, and goes only where they save it: on iOS from a copy in
+  the cache folder, deleted once the share sheet closes. Nothing of it is kept or logged.
 - **Diagnostics** are ids, states and codes with their times, never a name, title, path or a
   server's words, kept in memory and shown whole before **Share** sends that same text. The app
   writes no log. A test types, prints, titles and notes markers through the real server and host,

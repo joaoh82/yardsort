@@ -1,6 +1,6 @@
 //! The control socket: how this computer's own commands (`pair`, `devices`, `revoke`, `status`,
-//! `sign-out`, `sync`, `memory`, `dashboard`) ask the running host, which alone holds the sign-in.
-//! One JSON message per line.
+//! `sign-out`, `sync`, `memory`, `account`, `dashboard`) ask the running host, which alone holds the
+//! sign-in. One JSON message per line.
 //!
 //! It is `<data dir>/host.sock`, readable and writable by this user only. Neither this nor the
 //! daemon listens on the network. The one thing here that does is the dashboard, on 127.0.0.1
@@ -118,6 +118,9 @@ pub enum Ask {
     },
     /// Sign every browser out of the dashboard. Taking access away needs no check.
     DashboardSignOut,
+    /// Everything the server keeps of this computer's account, every page put together. Refused
+    /// unless a person at a terminal asked: it holds every synced note and workspace name.
+    AccountExport,
 }
 
 impl Ask {
@@ -154,6 +157,7 @@ impl Ask {
             Ask::DashboardTunnel { enabled: true, .. } => {
                 ("Opening a tunnel to the dashboard", "dashboard tunnel on")
             }
+            Ask::AccountExport => ("Exporting the account", "account export"),
             _ => return None,
         })
     }
@@ -198,6 +202,10 @@ pub enum Reply {
         notes: Vec<Note>,
     },
     Dashboard(Dashboard),
+    /// The account's export, for the command to save.
+    Export {
+        export: Box<remote_proto::export::AccountExport>,
+    },
     /// Done, in words.
     Done {
         message: String,
@@ -484,6 +492,7 @@ mod tests {
                 keep: "other".into(),
                 text: None,
             },
+            Ask::AccountExport,
         ] {
             assert!(ask.guarded(), "{ask:?}");
         }

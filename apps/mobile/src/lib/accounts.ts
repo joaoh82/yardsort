@@ -494,6 +494,12 @@ export class Accounts {
     return this.#withAccess((session, access) => session.client.devices(access));
   }
 
+  /** Everything the server keeps of this account, every page put together, to save as a file. */
+  exportAccount(): Promise<import("@yardsort/remote-client").AccountExport> {
+    const now = (this.env.clock ?? Date.now)();
+    return this.#withAccess((session, access) => session.client.exportAccount(access, now));
+  }
+
   /** What this phone is set to receive. */
   notificationPreferences(): Promise<import("@yardsort/remote-client").NotificationPreferences> {
     return this.#withAccess((session, access) => session.client.notificationPreferences(access));

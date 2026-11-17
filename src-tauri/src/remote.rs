@@ -513,6 +513,16 @@ pub struct RemotePairing {
     pub expires_in_ms: u32,
 }
 
+/// An account's export, saved: where, and how much it holds.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteExported {
+    pub path: String,
+    pub devices: u32,
+    pub hosts: u32,
+    pub records: u32,
+}
+
 /// A device that redeemed this host's code and waits for an answer.
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -802,6 +812,24 @@ pub async fn remote_pair(app: AppHandle) -> IpcResult<RemotePairing> {
         code: offer.code,
         qr_svg,
         expires_in_ms: offer.expires_in_ms,
+    })
+}
+
+/// Save everything the server keeps of this computer's account at `path`, as JSON. The person
+/// chose `path` in the save dialog, which asked before replacing a file there.
+#[tauri::command]
+#[specta::specta]
+pub async fn remote_export(app: AppHandle, path: String) -> IpcResult<RemoteExported> {
+    let export = remote_host::export::export(&AppHome::new(&app))
+        .await
+        .map_err(ipc)?;
+    remote_host::export::save(&export, std::path::Path::new(&path), true).map_err(ipc)?;
+    let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+    Ok(RemoteExported {
+        path,
+        devices: count(export.account.devices.len()),
+        hosts: count(export.account.hosts.len()),
+        records: count(export.records.len()),
     })
 }
 

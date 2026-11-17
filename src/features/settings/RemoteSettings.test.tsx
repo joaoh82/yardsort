@@ -17,11 +17,17 @@ const core = vi.hoisted(() => ({
   remoteProjectsDir: vi.fn(),
   remoteSetProjectsDir: vi.fn(),
   dashboardStatus: vi.fn(),
+  remoteExport: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
   ipc: core,
 }));
+const native = vi.hoisted(() => ({
+  pickSaveFile: vi.fn(),
+  revealInFileManager: vi.fn(),
+}));
+vi.mock("@/lib/native", () => ({ native }));
 
 import { useProjectsStore } from "@/stores/projects";
 import { useRemoteStore } from "@/stores/remote";
@@ -543,5 +549,76 @@ describe("where a project cloned for a device goes", () => {
     await userEvent.click(within(section).getByRole("button", { name: "Use the default" }));
     expect(core.remoteSetProjectsDir).toHaveBeenLastCalledWith(null);
     await vi.waitFor(() => expect(section).toHaveTextContent("(the default)"));
+  });
+});
+
+describe("exporting the account", () => {
+  const exported = { path: "/home/me/yardsort-account.json", devices: 3, hosts: 1, records: 42 };
+
+  it("says what the file holds first, and makes nothing until a place is chosen", async () => {
+    core.remoteStatus.mockResolvedValue(on);
+    native.pickSaveFile.mockResolvedValueOnce(null);
+    render(<RemoteSettings />);
+    const section = await screen.findByRole("region", { name: "Your account" });
+    await userEvent.click(
+      within(section).getByRole("button", { name: "Export my account's data…" }),
+    );
+    expect(section).toHaveTextContent("every synced project, note and workspace name");
+    expect(section).toHaveTextContent("never their tokens");
+    expect(section).toHaveTextContent("Never a credential.");
+    expect(core.remoteExport).not.toHaveBeenCalled();
+
+    // The save dialog closed without a place: nothing is asked of the server.
+    await userEvent.click(within(section).getByRole("button", { name: "Choose where to save…" }));
+    expect(native.pickSaveFile).toHaveBeenCalledWith(
+      "Export your account",
+      expect.stringMatching(/^yardsort-account-\d{4}-\d{2}-\d{2}\.json$/),
+    );
+    expect(core.remoteExport).not.toHaveBeenCalled();
+    await userEvent.click(within(section).getByRole("button", { name: "Cancel" }));
+    expect(within(section).queryByText("Never a credential.", { exact: false })).toBeNull();
+    expect(core.remoteExport).not.toHaveBeenCalled();
+  });
+
+  it("saves where the person chose, and says what it holds", async () => {
+    core.remoteStatus.mockResolvedValue(on);
+    native.pickSaveFile.mockResolvedValue(exported.path);
+    core.remoteExport
+      .mockRejectedValueOnce({
+        code: "remote_refused",
+        message: "This server cannot export an account yet. Its operator has to update it.",
+      })
+      .mockResolvedValueOnce(exported);
+    render(<RemoteSettings />);
+    const section = await screen.findByRole("region", { name: "Your account" });
+    await userEvent.click(
+      within(section).getByRole("button", { name: "Export my account's data…" }),
+    );
+    const choose = within(section).getByRole("button", { name: "Choose where to save…" });
+    await userEvent.click(choose);
+    expect(await within(section).findByRole("alert")).toHaveTextContent("cannot export");
+    await userEvent.click(choose);
+    expect(core.remoteExport).toHaveBeenLastCalledWith(exported.path);
+    const saved = await within(section).findByRole("status");
+    expect(saved).toHaveTextContent(
+      "Saved /home/me/yardsort-account.json: 3 devices, 1 computer, 42 synced records.",
+    );
+    await userEvent.click(within(saved).getByRole("button", { name: "Show in folder" }));
+    expect(native.revealInFileManager).toHaveBeenCalledWith(exported.path);
+  });
+
+  it("is not offered while this computer is signed out at the server", async () => {
+    const stopped: RemoteStatus = {
+      ...on,
+      host: {
+        ...on.host!,
+        link: { kind: "stopped", why: "This computer was signed out at the server." },
+      },
+    };
+    core.remoteStatus.mockResolvedValue(stopped);
+    core.remoteRequests.mockResolvedValue({ requests: [], status: stopped });
+    render(<RemoteSettings />);
+    await screen.findByRole("button", { name: "Sign in again" });
+    expect(screen.queryByRole("region", { name: "Your account" })).toBeNull();
   });
 });
