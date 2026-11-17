@@ -162,6 +162,23 @@ fn keep(marks: &Mutex<Marks>, project_id: &str, found: Option<Reading>, now: Ins
                     .filter(|pr| !found.pull_requests.iter().any(|n| n.number == pr.number))
                     .filter(|pr| pr.state == crate::forge::PullRequestState::Open)
                     .collect();
+                // The newest alone cannot say which workspace opened an older one: the last
+                // full reading did, and that holds for as long as the pull request is kept.
+                for (workspace, numbers) in before.found.workspaces {
+                    let kept: Vec<u32> = numbers
+                        .into_iter()
+                        .filter(|n| older.iter().any(|pr| pr.number == *n))
+                        .collect();
+                    if kept.is_empty() {
+                        continue;
+                    }
+                    let own = found.workspaces.entry(workspace).or_default();
+                    for number in kept {
+                        if !own.contains(&number) {
+                            own.push(number);
+                        }
+                    }
+                }
                 found.pull_requests.extend(older);
                 before.open_at
             }
@@ -232,9 +249,16 @@ pub fn read(
     };
     let mut pull_requests = match gh.pull_requests(root, RECENT) {
         Ok(found) => found,
-        Err(error) => {
+        // Signed out, the open ones cannot be read either.
+        Err(error) if error.is_logged_out() => {
             eprintln!("pull requests: could not read {}: {error}", project.name);
             return Some(Reading::default());
+        }
+        // The open ones are asked another way, which can answer when this timed out: as the
+        // window does, they are still asked for.
+        Err(error) => {
+            eprintln!("pull requests: could not read {}: {error}", project.name);
+            Vec::new()
         }
     };
     let mut read_open = false;

@@ -105,7 +105,9 @@ terms as the window's lender: what was last read is answered at once, a reading 
 seconds starts another on a thread of its own and the answer says one is on its way, and one
 that left nothing is not tried again for 10 seconds. A reading is `gh pr list` of the newest
 fifty in the project's checkout, and `gh`'s open pull requests too when the device asks for every
-open one; a reading of only the newest keeps the older open ones the last full one found. Which
+open one; a reading of only the newest keeps the older open ones the last full one found, with the workspace each
+belongs to. A `pr list` that fails other than signed out does not stop the open ones being asked
+for, as in the window. Which
 workspace opened which is `forge::pull_requests_from`, as in the window. Without `gh`, or with it
 signed out, the reading is of none.
 

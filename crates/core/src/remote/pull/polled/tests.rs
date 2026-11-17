@@ -96,6 +96,7 @@ fn every_open_one_is_asked_for_when_wanted_and_kept_through_a_reading_of_the_new
     polled.marks.lock().unwrap().reading.remove("p");
     let mut full = reading(&[9, 2]);
     full.every_open = true;
+    full.workspaces.insert("w".into(), vec![2]);
     keep(&polled.marks, "p", Some(full), after(2));
     // The newest, read again: 2 is older than any of them, and still open.
     keep(&polled.marks, "p", Some(reading(&[10, 9])), after(50));
@@ -106,6 +107,14 @@ fn every_open_one_is_asked_for_when_wanted_and_kept_through_a_reading_of_the_new
         .map(|pr| pr.number)
         .collect();
     assert_eq!(numbers, [10, 9, 2]);
+    // And 2 is still the workspace's own, so its badge stays.
+    assert_eq!(
+        polled.marks.lock().unwrap().kept["p"]
+            .found
+            .workspaces
+            .get("w"),
+        Some(&vec![2])
+    );
     // A workspace list does not ask for them.
     assert_eq!(polled.begin("p", false, after(51)), None);
 }
@@ -183,4 +192,51 @@ fn read_asks_gh_in_the_project_and_shares_its_pull_requests_out_among_the_worksp
     assert!(none.pull_requests.is_empty());
     // A project that is not there: nothing to keep.
     assert!(read(&store, &git, Some(&gh), "gone", false).is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_open_ones_are_still_asked_for_when_the_newest_could_not_be_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = crate::git::normalize(dir.path());
+    let git = crate::git::testing::git();
+    let store = Store::in_memory();
+    let root = base.join("orchard");
+    std::fs::create_dir_all(&root).unwrap();
+    git.init(&root).unwrap();
+    std::fs::write(root.join("README.md"), "hello\n").unwrap();
+    git.commit_all(&root, "first").unwrap();
+    git.run(
+        &root,
+        &["remote", "add", "origin", "https://github.com/o/r.git"],
+    )
+    .unwrap();
+    let project = store
+        .add_project("orchard", &root.to_string_lossy())
+        .unwrap();
+    let page = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/gh/2.102.0/open-page-2.json");
+    let script = base.join("gh");
+    // `pr list` times out at GitHub; the paged query for the open ones answers.
+    crate::program::testing::executable(
+        &script,
+        format!(
+            "#!/bin/sh\necho \"$1\" >> '{asked}'\ncase \"$1\" in\n\
+             pr) echo 'HTTP 504: Gateway Timeout' >&2; exit 1 ;;\n\
+             *) cat '{page}' ;;\nesac\n",
+            asked = base.join("asked").display(),
+            page = page.display(),
+        ),
+    );
+    let env = crate::env::ShellEnv {
+        vars: std::env::vars().collect(),
+        source: crate::env::EnvSource::Process,
+        warning: None,
+    };
+    let gh = Gh::at(script, &env);
+
+    let found = read(&store, &git, Some(&gh), &project.id, true).unwrap();
+    assert!(found.every_open);
+    assert!(found.pull_requests.iter().any(|pr| pr.number == 14017));
+    let asked = std::fs::read_to_string(base.join("asked")).unwrap();
+    assert_eq!(asked.lines().collect::<Vec<_>>(), ["pr", "api"]);
 }
