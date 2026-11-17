@@ -13,9 +13,11 @@
 //! terminal of their own, or the app's window. Beyond this computer it is reached by an SSH
 //! forward, or by a rustunnel tunnel ([`tunnel`]) when one is turned on.
 //!
-//! **What it adds for whoever is signed in**: nothing that this computer's user could not do at
-//! a shell of their own. It lets no device in, approves no note and turns no sync on, so the
-//! guard on those (`crates/host/src/guard.rs`) holds whatever happens here.
+//! **What it adds for whoever is signed in**: what this computer's user can do at a shell of
+//! their own, less what the operator's guard keeps for a person at a terminal. It lets no device
+//! in, approves no note and turns no sync on, and a command it runs is refused those too: every
+//! job is marked ([`jobs::JOB_ENV`]) and is the host's own child, and the guard
+//! (`crates/host/src/guard.rs`) refuses both. So a session here is not a way round that guard.
 //!
 //! See `docs/design/47-host-dashboard.md` and `docs/guide/host-dashboard.md`.
 
@@ -308,8 +310,9 @@ impl Dashboard {
         }
     }
 
-    /// Sign every browser out, and void every code. Says how many browsers that was.
-    pub fn sign_everyone_out(&self) -> usize {
+    /// Sign every browser out, and void every code. Says how many browsers that was. An error
+    /// means they are signed out for now, and that a restart would sign them in again.
+    pub fn sign_everyone_out(&self) -> Result<usize, String> {
         self.inner.auth.end_all()
     }
 

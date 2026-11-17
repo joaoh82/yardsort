@@ -96,10 +96,13 @@ impl Auth {
                 sessions: kept.sessions,
             }),
         };
-        auth.lock().drop_lapsed(now_ms());
-        if new {
-            // So that the name is the same after a restart, whether or not anyone signs in.
-            auth.save();
+        {
+            let mut state = auth.lock();
+            state.drop_lapsed(now_ms());
+            if new {
+                // So that the name is the same after a restart, whether or not anyone signs in.
+                auth.keep(&mut state);
+            }
         }
         auth
     }
@@ -154,9 +157,10 @@ impl Auth {
                 hash: hex(&hash(&token)),
                 since: now_ms(),
             });
+            // A session that could not be written is one a restart forgets: the safe way round.
+            self.keep(&mut state);
             token
         };
-        self.save();
         Some(token)
     }
 
@@ -170,27 +174,25 @@ impl Auth {
             .any(|session| !session.lapsed(now) && same(session.hash.as_bytes(), wanted.as_bytes()))
     }
 
-    /// Sign one browser out.
-    pub fn end(&self, token: &str) {
+    /// Sign one browser out. It is signed out from this moment whatever is returned; an error
+    /// says the file still holds it, so that a restart would sign it in again.
+    pub fn end(&self, token: &str) -> Result<(), String> {
         let wanted = hex(&hash(token));
-        self.lock()
-            .sessions
-            .retain(|session| session.hash != wanted);
-        self.save();
+        let mut state = self.lock();
+        state.sessions.retain(|session| session.hash != wanted);
+        self.forget(&mut state)
     }
 
-    /// Sign every browser out, and void every code. Says how many browsers that was.
-    pub fn end_all(&self) -> usize {
-        let ended = {
-            let mut state = self.lock();
-            state.codes.clear();
-            let now = now_ms();
-            let ended = state.sessions.iter().filter(|s| !s.lapsed(now)).count();
-            state.sessions.clear();
-            ended
-        };
-        self.save();
-        ended
+    /// Sign every browser out, and void every code. Says how many browsers that was. They are
+    /// signed out from this moment whatever is returned; an error says the file still holds
+    /// them, so that a restart would sign them in again.
+    pub fn end_all(&self) -> Result<usize, String> {
+        let mut state = self.lock();
+        state.codes.clear();
+        let now = now_ms();
+        let ended = state.sessions.iter().filter(|s| !s.lapsed(now)).count();
+        state.sessions.clear();
+        self.forget(&mut state).map(|()| ended)
     }
 
     /// How many browsers are signed in.
@@ -203,23 +205,45 @@ impl Auth {
             .count()
     }
 
-    fn save(&self) {
-        let sessions = {
-            let mut state = self.lock();
-            state.drop_lapsed(now_ms());
-            state.sessions.clone()
-        };
+    /// Write the sessions as they stand. Takes the state locked and writes before letting it
+    /// go: two writers that each took a copy and then wrote in whichever order they got to it
+    /// would leave the older copy in the file, a signed-out session in it and all.
+    fn write(&self, state: &mut State) -> std::io::Result<()> {
+        state.drop_lapsed(now_ms());
         let text = serde_json::to_vec(&Kept {
             instance: self.instance.clone(),
-            sessions,
+            sessions: state.sessions.clone(),
         })
         .expect("sessions are plain data");
-        if let Err(error) = write_private(&self.file, &text) {
-            // Still signed in until this program stops; only the restart forgets it.
+        write_private(&self.file, &text)
+    }
+
+    /// Write the sessions after one was added. Failing only costs that session at a restart.
+    fn keep(&self, state: &mut State) {
+        if let Err(error) = self.write(state) {
             eprintln!(
                 "yardsort: the dashboard's sessions could not be kept in {}: {error}",
                 self.file.display()
             );
+        }
+    }
+
+    /// Write the sessions after some were ended. A file that cannot be written still holds
+    /// them, and a restart would read them back: then the file is deleted, which signs
+    /// everyone out at a restart instead, and only if that fails too is it an error.
+    fn forget(&self, state: &mut State) -> Result<(), String> {
+        let Err(written) = self.write(state) else {
+            return Ok(());
+        };
+        match std::fs::remove_file(&self.file) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(removed) => Err(format!(
+                "Signed out for now, but {} could be neither written ({written}) nor deleted \
+                 ({removed}): it still holds the sessions that were ended, and a restart would \
+                 sign them in again. Delete that file.",
+                self.file.display()
+            )),
         }
     }
 
@@ -371,7 +395,7 @@ mod tests {
             kept.contains(auth.instance()),
             "the same dashboard as before"
         );
-        auth.end(&token);
+        auth.end(&token).unwrap();
         assert!(!auth.allows(&token));
         assert!(!Auth::open(dir.path()).allows(&token));
     }
@@ -382,9 +406,82 @@ mod tests {
         let auth = Auth::open(dir.path());
         let first = auth.redeem(&auth.offer()).unwrap();
         let waiting = auth.offer();
-        assert_eq!(auth.end_all(), 1);
+        assert_eq!(auth.end_all(), Ok(1));
         assert!(!auth.allows(&first));
         assert!(auth.redeem(&waiting).is_none());
+    }
+
+    /// Each sign-out wrote a copy of the sessions it took before the others had finished, so
+    /// the last to write could put an older copy back, with sessions in it that had been ended.
+    #[test]
+    fn sessions_ended_at_once_are_all_ended_after_a_restart_too() {
+        for _round in 0..20 {
+            let dir = tempfile::tempdir().unwrap();
+            let auth = std::sync::Arc::new(Auth::open(dir.path()));
+            let tokens: Vec<String> = (0..8)
+                .map(|_| auth.redeem(&auth.offer()).unwrap())
+                .collect();
+            let start = std::sync::Arc::new(std::sync::Barrier::new(tokens.len()));
+            let ending: Vec<_> = tokens
+                .iter()
+                .cloned()
+                .map(|token| {
+                    let (auth, start) = (auth.clone(), start.clone());
+                    std::thread::spawn(move || {
+                        start.wait();
+                        auth.end(&token)
+                    })
+                })
+                .collect();
+            for thread in ending {
+                thread.join().unwrap().unwrap();
+            }
+            assert_eq!(auth.signed_in(), 0);
+            let reopened = Auth::open(dir.path());
+            let still: Vec<_> = tokens.iter().filter(|t| reopened.allows(t)).collect();
+            assert!(still.is_empty(), "{} ended sessions came back", still.len());
+        }
+    }
+
+    #[test]
+    fn a_sign_out_that_cannot_be_written_deletes_the_file_rather_than_leave_the_session_in_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = Auth::open(dir.path());
+        let token = auth.redeem(&auth.offer()).unwrap();
+        // In the way of the write: the file it writes to before renaming is a folder.
+        std::fs::create_dir(dir.path().join("sessions.json.tmp")).unwrap();
+        assert_eq!(auth.end(&token), Ok(()));
+        assert!(!auth.allows(&token));
+        assert!(!dir.path().join("sessions.json").exists());
+        assert!(!Auth::open(dir.path()).allows(&token));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_sign_out_that_can_be_neither_written_nor_deleted_says_a_restart_would_undo_it() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        if unsafe { libc::geteuid() } == 0 {
+            // Root writes where it pleases.
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let kept = dir.path().join("dashboard");
+        let auth = Auth::open(&kept);
+        let token = auth.redeem(&auth.offer()).unwrap();
+        let other = auth.redeem(&auth.offer()).unwrap();
+        std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let said = auth.end(&token).unwrap_err();
+        assert!(
+            said.contains("a restart would sign them in again"),
+            "{said}"
+        );
+        // Signed out all the same, for as long as this program runs.
+        assert!(!auth.allows(&token) && auth.allows(&other));
+        let all = auth.end_all().unwrap_err();
+        assert!(all.contains("Delete that file"), "{all}");
+        assert_eq!(auth.signed_in(), 0);
+        std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
 
     #[test]

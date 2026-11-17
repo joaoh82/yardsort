@@ -196,10 +196,44 @@ async fn start(app: &AppHandle) {
 }
 
 async fn stop(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    let dashboard = state.dashboard.serving.lock().await.take();
-    if let Some(dashboard) = dashboard {
-        dashboard.stop().await;
+    app.state::<AppState>().dashboard.stop().await;
+}
+
+impl DashboardState {
+    /// Stop serving, and wait until the port is let go.
+    async fn stop(&self) {
+        let dashboard = self.serving.lock().await.take();
+        if let Some(dashboard) = dashboard {
+            dashboard.stop().await;
+        }
+    }
+
+    /// Stop serving from wherever this is called, without waiting on the async runtime when
+    /// that cannot be done.
+    ///
+    /// A thread of the runtime's own may not block on it: Tokio panics rather than deadlock.
+    /// From one, the dashboard is taken and dropped instead, which ends its tunnel's client and
+    /// stops its jobs at once and lets the port go as the runtime gets to it. Anywhere else,
+    /// the stop is waited for.
+    fn leave(&self) {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            // Held only by a command that is starting or stopping it this instant: then the
+            // process is on its way out anyway, and takes the listener with it.
+            if let Ok(mut serving) = self.serving.try_lock() {
+                drop(serving.take());
+            }
+            return;
+        }
+        tauri::async_runtime::block_on(self.stop());
+    }
+}
+
+/// Before the app starts itself again, from a command: stop serving and wait for the port, so
+/// that the new copy finds it free. Commands run on the async runtime, where [`leaving`] could
+/// not wait.
+pub async fn stop_before_restart(app: &AppHandle) {
+    if app.try_state::<AppState>().is_some() {
+        stop(app).await;
     }
 }
 
@@ -214,12 +248,12 @@ pub fn start_if_wanted(app: &AppHandle) {
 }
 
 /// As the app leaves: stop serving, which ends the tunnel's client and anything the dashboard
-/// was running. Without this they would outlive the app on macOS and Windows.
+/// was running. Without this they would outlive the app on macOS and Windows. Safe from any
+/// thread, the runtime's own included.
 pub fn leaving(app: &AppHandle) {
-    if app.try_state::<AppState>().is_none() {
-        return;
+    if let Some(state) = app.try_state::<AppState>() {
+        state.dashboard.leave();
     }
-    tauri::async_runtime::block_on(stop(app));
 }
 
 #[tauri::command]
@@ -279,7 +313,11 @@ pub async fn dashboard_sign_everyone_out(app: AppHandle) -> IpcResult<DashboardS
     {
         let state = app.state::<AppState>();
         let serving = state.dashboard.serving.lock().await;
-        serving.as_ref().ok_or_else(off)?.sign_everyone_out();
+        serving
+            .as_ref()
+            .ok_or_else(off)?
+            .sign_everyone_out()
+            .map_err(|why| IpcError::new("dashboard_not_kept", why))?;
     }
     Ok(status(&app).await)
 }
@@ -306,6 +344,114 @@ mod tests {
             .as_deref(),
             Some("not up: Invalid token. Run rustunnel setup.")
         );
+    }
+
+    /// A host that is nothing but its settings, to serve a dashboard in a test.
+    struct Bare {
+        settings: SettingsFile,
+    }
+
+    impl Source for Bare {
+        fn about(&self) -> About {
+            About {
+                program: "Yardsort".into(),
+                version: "0.0.0".into(),
+                pid: std::process::id(),
+                remote: None,
+                terminals: 0,
+                notices: Vec::new(),
+                remote_off_hint: String::new(),
+            }
+        }
+
+        fn env(&self) -> Arc<ShellEnv> {
+            Arc::new(ShellEnv {
+                vars: std::env::vars().collect(),
+                source: yardsort_core::env::EnvSource::Process,
+                warning: None,
+            })
+        }
+
+        fn settings(&self) -> &SettingsFile {
+            &self.settings
+        }
+
+        fn projects(&self) -> Vec<Project> {
+            Vec::new()
+        }
+
+        fn clone_project(&self, _remote: &str) -> Result<Project, String> {
+            Err("Not here.".into())
+        }
+    }
+
+    /// A state serving a dashboard on a port of its own, and that port.
+    fn serving(dir: &std::path::Path) -> (DashboardState, u16) {
+        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let path = dir.join("settings.toml");
+        std::fs::write(&path, format!("[dashboard]\nport = {port}\n")).unwrap();
+        let state = DashboardState::default();
+        let dashboard = tauri::async_runtime::block_on(Dashboard::start(
+            Arc::new(Bare {
+                settings: SettingsFile::load(path),
+            }),
+            Options {
+                state_dir: dir.join("dashboard"),
+            },
+        ))
+        .expect("the dashboard starts");
+        assert_eq!(dashboard.port(), port);
+        *state.serving.blocking_lock() = Some(dashboard);
+        (state, port)
+    }
+
+    fn answers(port: u16) -> bool {
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+    }
+
+    /// Restarting for an update, and replacing the daemon, leave from a command, which runs on
+    /// the async runtime: waiting on the runtime there panics.
+    #[test]
+    fn leaving_from_a_command_on_the_runtime_stops_serving_and_does_not_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, port) = serving(dir.path());
+        assert!(answers(port));
+        let state = Arc::new(state);
+        let on_the_runtime = state.clone();
+        tauri::async_runtime::block_on(tauri::async_runtime::spawn(async move {
+            on_the_runtime.leave();
+        }))
+        .expect("leaving did not panic");
+        assert!(state.serving.blocking_lock().is_none());
+        let since = std::time::Instant::now();
+        while answers(port) {
+            assert!(
+                since.elapsed() < std::time::Duration::from_secs(10),
+                "still listening"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn leaving_as_the_app_exits_waits_until_the_port_is_let_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, port) = serving(dir.path());
+        assert!(answers(port));
+        // The exit hook's thread: not one of the runtime's.
+        state.leave();
+        assert!(!answers(port), "still listening after leaving");
+        // And a restart from a command waits the same way, on the runtime.
+        let (state, port) = serving(dir.path());
+        tauri::async_runtime::block_on(tauri::async_runtime::spawn(async move {
+            state.stop().await;
+            assert!(!answers(port), "still listening after the stop was awaited");
+        }))
+        .unwrap();
     }
 
     #[test]

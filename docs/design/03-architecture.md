@@ -739,9 +739,11 @@ alone.
   `yardsort-host dashboard` behind the operator's guard, or by the app's window. Every request is
   refused unless it is addressed to a loopback name or the tunnel's own, comes from the page
   itself, and carries a session.
-- **What it adds: nothing beyond that user's own shell.** It runs commands as the host's user,
-  and lets no device in, approves no note and turns no sync on, so the guard on those holds
-  whatever happens to the dashboard.
+- **What it adds: that user's own shell, less what the guard keeps for a person.** It runs
+  commands as the host's user. It lets no device in, approves no note and turns no sync on, and
+  the guard refuses those to a command the dashboard ran as it does to an agent's terminal: a
+  job is marked, and descends from the host. So a session in the dashboard is not a way round
+  the guard.
 - **Beyond the computer**: an SSH forward, or a rustunnel tunnel whose client the host runs as a
   child and reads by its `--json` events. The tunnel's token is rustunnel's own to keep.
 

@@ -32,7 +32,8 @@ Knowing the design helps judge what is a vulnerability:
   tunnel, comes from its own page, and carries a session bought with a one-time code, which is
   handed out only to a person at that computer. A signed-in browser can run commands there as
   that user: that is its purpose, and the one place a line someone typed is handed to a shell. It
-  can let no device in.
+  can let no device in, and a command it runs is refused what only a person at a terminal may
+  ask of the host.
 
 Reports about breaking those guarantees — path traversal out of a workspace, command injection
 through a prompt or a harness field, a webview escape, anything that would let an unsigned or

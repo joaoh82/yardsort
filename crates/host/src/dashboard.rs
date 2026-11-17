@@ -224,16 +224,16 @@ pub fn sign_out(home: &HostHome) -> Reply {
         None => Reply::Failed {
             message: OFF.into(),
         },
-        Some(dashboard) => {
-            let ended = dashboard.sign_everyone_out();
-            Reply::Done {
+        Some(dashboard) => match dashboard.sign_everyone_out() {
+            Ok(ended) => Reply::Done {
                 message: match ended {
                     0 => "No browser was signed in. Codes not yet used are void.".into(),
                     1 => "One browser was signed out.".into(),
                     n => format!("{n} browsers were signed out."),
                 },
-            }
-        }
+            },
+            Err(message) => Reply::Failed { message },
+        },
     }
 }
 

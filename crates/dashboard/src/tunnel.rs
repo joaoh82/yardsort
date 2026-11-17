@@ -26,6 +26,8 @@ use yardsort_core::settings::TunnelSettings;
 pub const CLIENT: &str = "rustunnel";
 /// The longest wait before starting the client again.
 const LONGEST_WAIT: Duration = Duration::from_secs(300);
+/// How long a client that has closed its output gets to end by itself.
+const LINGERS: Duration = Duration::from_secs(5);
 
 /// How the tunnel stands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -58,7 +60,10 @@ struct Shared {
     /// The public host name, from the moment the tunnel was first up until it is turned off:
     /// kept through a reconnect, so a page open on it is not refused meanwhile.
     host: Mutex<Option<String>>,
-    child: Mutex<Option<Child>>,
+    /// The client running now, with the run of the supervisor that started it. A supervisor
+    /// only ever takes the one that is its own: after a restart, an earlier run that is still
+    /// reading its dead client's last output would otherwise find the next run's client here.
+    child: Mutex<Option<(u64, Child)>>,
     /// Which run of the supervisor is the current one. A stop, or a new start, moves it on.
     turn: AtomicU64,
 }
@@ -130,7 +135,9 @@ impl Tunnel {
     /// End the client, and say the tunnel is off.
     pub fn stop(&self) {
         self.shared.turn.fetch_add(1, Ordering::SeqCst);
-        if let Some(mut child) = lock(&self.shared.child).take() {
+        // Taken in a statement of its own: the client is ended with the lock let go.
+        let running = lock(&self.shared.child).take();
+        if let Some((_, mut child)) = running {
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -257,7 +264,7 @@ fn supervise(
                 let _ = child.wait();
                 return;
             }
-            *kept = Some(child);
+            *kept = Some((mine, child));
         }
         // What it says outside its events: kept for when it ends without one.
         let said = Arc::new(Mutex::new(String::new()));
@@ -302,10 +309,41 @@ fn supervise(
                 }
             }
         }
-        // Its output closed: it has ended, or is about to.
-        let status = lock(&shared.child).take().map(|mut child| child.wait());
+        // Its output closed: it has ended, or is about to. Only this run's own client is
+        // waited for, and never with the lock held, so that `stop` can always end what runs.
+        let closed = std::time::Instant::now();
+        let status = loop {
+            {
+                let mut kept = lock(&shared.child);
+                let Some((_, child)) = kept.as_mut().filter(|(turn, _)| *turn == mine) else {
+                    // Stopped, or replaced: whatever is here now is not this run's.
+                    break None;
+                };
+                match child.try_wait() {
+                    Ok(None) if closed.elapsed() < LINGERS => {}
+                    // One that closed its output and stays is no tunnel: ended, and tried again.
+                    Ok(None) => {
+                        let _ = child.kill();
+                        break kept.take().map(|(_, mut child)| child.wait());
+                    }
+                    Ok(Some(status)) => {
+                        kept.take();
+                        break Some(Ok(status));
+                    }
+                    Err(error) => {
+                        kept.take();
+                        break Some(Err(error));
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        // What it said is read as it comes; something it started may hold that open for good.
         if let Some(saying) = saying {
-            let _ = saying.join();
+            let since = std::time::Instant::now();
+            while !saying.is_finished() && since.elapsed() < Duration::from_millis(500) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
         }
         if !current() {
             return;
@@ -586,6 +624,72 @@ mod tests {
                 0,
                 "the client outlived the tunnel"
             );
+        }
+
+        /// Turned off and on again while the first client's output is still open, held by
+        /// something it started: the first supervisor is still reading when the second client is
+        /// in place. When that output closes, the first supervisor must leave the second client
+        /// alone. It used to take it and wait for it, with the lock `stop` needs.
+        #[test]
+        fn a_supervisor_from_before_a_restart_leaves_the_new_client_alone() {
+            let dir = tempfile::tempdir().unwrap();
+            let pids = dir.path().join("pids");
+            yardsort_core::program::testing::executable(
+                dir.path().join("rustunnel"),
+                format!(
+                    "#!/bin/sh\necho $$ >> {pids}\n\
+                     echo '{{\"event\":\"tunnel_ready\",\"public_url\":\"https://b.example.test\"}}'\n\
+                     sleep 1.5 &\nexec sleep 600\n",
+                    pids = pids.display(),
+                ),
+            );
+            let clients = || -> Vec<i32> {
+                std::fs::read_to_string(&pids)
+                    .unwrap_or_default()
+                    .lines()
+                    .filter_map(|line| line.trim().parse().ok())
+                    .collect()
+            };
+            // SAFETY: signal 0 only asks whether the process is there.
+            let alive = |pid: i32| unsafe { libc::kill(pid, 0) } == 0;
+            let ready = |s: &State| matches!(s, State::Ready { .. });
+            let tunnel = Arc::new(Tunnel::default());
+            let env = env(dir.path(), dir.path());
+
+            tunnel.apply(&on(), 28680, env.clone());
+            until(&tunnel, "the first client", ready);
+            tunnel.apply(&on(), 28680, env);
+            until(&tunnel, "the second client", ready);
+            let since = Instant::now();
+            while clients().len() < 2 {
+                assert!(since.elapsed() < Duration::from_secs(10));
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let [first, second] = clients()[..] else {
+                panic!("two clients were started: {:?}", clients());
+            };
+            assert!(!alive(first), "the first client was ended by the restart");
+
+            // Past the moment the first client's output closes, and its supervisor wakes.
+            std::thread::sleep(Duration::from_millis(2200));
+            assert!(ready(&tunnel.state()), "{:?}", tunnel.state());
+            assert!(
+                alive(second),
+                "the second client was ended by the first supervisor"
+            );
+
+            let (done, stopped) = std::sync::mpsc::channel();
+            let stopping = tunnel.clone();
+            std::thread::spawn(move || {
+                stopping.stop();
+                let _ = done.send(());
+            });
+            assert!(
+                stopped.recv_timeout(Duration::from_secs(3)).is_ok(),
+                "stopping the tunnel waited on a client it could not reach"
+            );
+            assert_eq!(tunnel.state(), State::Off);
+            assert!(!alive(second), "the second client outlived the tunnel");
         }
 
         #[test]

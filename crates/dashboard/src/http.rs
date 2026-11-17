@@ -329,17 +329,24 @@ async fn sign_in(State(inner): Shared, headers: HeaderMap, Json(typed): Json<Cod
 
 async fn sign_out(State(inner): Shared, headers: HeaderMap) -> Response {
     let name = cookie_name(&inner);
-    if let Some(token) = cookie(&headers, &name) {
-        inner.auth.end(token);
+    let ended = match cookie(&headers, &name) {
+        Some(token) => inner.auth.end(token),
+        None => Ok(()),
+    };
+    // The browser forgets its cookie whether or not the file could be written.
+    let forget = [(
+        header::SET_COOKIE,
+        format!("{name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"),
+    )];
+    match ended {
+        Ok(()) => (forget, Json(Session { signed_in: false })).into_response(),
+        Err(why) => (forget, not_kept(&why)).into_response(),
     }
-    (
-        [(
-            header::SET_COOKIE,
-            format!("{name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"),
-        )],
-        Json(Session { signed_in: false }),
-    )
-        .into_response()
+}
+
+/// A sign-out that holds for now and that a restart would undo: said, never passed over.
+fn not_kept(why: &str) -> Response {
+    refuse(StatusCode::INTERNAL_SERVER_ERROR, "not_kept", why)
 }
 
 #[derive(Serialize)]
@@ -347,10 +354,11 @@ struct Ended {
     ended: usize,
 }
 
-async fn sign_everyone_out(State(inner): Shared) -> Json<Ended> {
-    Json(Ended {
-        ended: inner.auth.end_all(),
-    })
+async fn sign_everyone_out(State(inner): Shared) -> Response {
+    match inner.auth.end_all() {
+        Ok(ended) => Json(Ended { ended }).into_response(),
+        Err(why) => not_kept(&why),
+    }
 }
 
 // ── How things stand ────────────────────────────────────────────────────────────────────────

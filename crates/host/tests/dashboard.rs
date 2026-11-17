@@ -56,7 +56,11 @@ impl Host {
     /// `yardsort-host`, told nothing of the machine it is tested on: no display, no agent's
     /// markers, a plain shell for a login shell.
     fn command(&self) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_yardsort-host"));
+        self.told_nothing(Command::new(env!("CARGO_BIN_EXE_yardsort-host")))
+    }
+
+    /// A program with this host's profile and nothing else of the machine it is tested on.
+    fn told_nothing(&self, mut command: Command) -> Command {
         command
             .env_clear()
             .env("HOME", self.dir.path().join("home"))
@@ -107,6 +111,73 @@ impl Host {
 
     fn status(&self) -> String {
         String::from_utf8_lossy(&self.run(&["status"]).stdout).into_owned()
+    }
+
+    /// A request as the dashboard's own page makes it: the status line, the session cookie it
+    /// set if it set one, and the body.
+    fn page(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&serde_json::Value>,
+        cookie: Option<&str>,
+    ) -> (String, Option<String>, String) {
+        let port = self.port;
+        let body = body.map(ToString::to_string).unwrap_or_default();
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).expect("it listens");
+        let cookie = cookie
+            .map(|c| format!("cookie: {c}\r\n"))
+            .unwrap_or_default();
+        stream
+            .write_all(
+                format!(
+                    "{method} {path} HTTP/1.1\r\nhost: 127.0.0.1:{port}\r\n\
+                     x-yardsort-dashboard: 1\r\ncontent-type: application/json\r\n{cookie}\
+                     content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        let mut answer = String::new();
+        stream.read_to_string(&mut answer).unwrap();
+        let (head, body) = answer.split_once("\r\n\r\n").expect("a whole answer");
+        let set = head
+            .lines()
+            .find_map(|line| line.strip_prefix("set-cookie: "))
+            .map(|set| set.split(';').next().unwrap().to_owned());
+        (
+            head.lines().next().unwrap_or_default().to_owned(),
+            set,
+            body.to_owned(),
+        )
+    }
+
+    /// Have the dashboard run `line`, and give back everything it printed once it has ended.
+    fn job(&self, line: &str, cookie: &str) -> String {
+        let (status, _, started) = self.page(
+            "POST",
+            "/api/commands",
+            Some(&serde_json::json!({ "command": line })),
+            Some(cookie),
+        );
+        assert_eq!(status, "HTTP/1.1 200 OK", "{started}");
+        let started: serde_json::Value = serde_json::from_str(&started).unwrap();
+        let since = Instant::now();
+        loop {
+            let (_, _, reading) = self.page(
+                "GET",
+                &format!("/api/jobs/{}?from=0", started["id"]),
+                None,
+                Some(cookie),
+            );
+            let reading: serde_json::Value = serde_json::from_str(&reading).unwrap();
+            if reading["state"] != "running" {
+                return reading["output"].as_str().unwrap().to_owned();
+            }
+            assert!(since.elapsed() < Duration::from_secs(60), "{reading}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     /// The status line of an answer on `port`, or `None` when nothing listens there.
@@ -290,4 +361,80 @@ fn a_host_whose_ports_are_all_taken_serves_on_without_the_dashboard() {
     assert!(started.contains("[dashboard]"), "{started}");
     // The host itself is up all the same.
     assert!(host.status().contains("Host: running"), "{}", host.status());
+}
+
+/// What the dashboard runs for a signed-in browser is not a person at a terminal, even when it
+/// makes itself a terminal: `script` gives its command one, which is all the guard used to ask.
+/// Were such a command let through, a session in the dashboard would be a way to pair a device,
+/// approve a note, or mint more sessions.
+#[test]
+fn a_command_the_dashboard_runs_is_refused_what_only_a_person_may_ask() {
+    let script = |host: &Host, line: &str| {
+        let mut command = Command::new("script");
+        command.args(["-qefc", line, "/dev/null"]);
+        host.told_nothing(command).output()
+    };
+    let mut host = Host::new("[dashboard]\nport = {port}\n");
+    host.serve();
+    let exe = env!("CARGO_BIN_EXE_yardsort-host");
+
+    // The operator, at a terminal of their own: asked this way, the host gives a way in. So
+    // what is refused below is refused for being the dashboard's, not for want of a terminal.
+    let Ok(asked) = script(&host, &format!("{exe} dashboard")) else {
+        eprintln!("skipped: there is no `script` here to give a command a terminal");
+        return;
+    };
+    let said = said(&asked);
+    let code = said
+        .split("#code=")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .unwrap_or_else(|| panic!("no sign-in link at a terminal of one's own: {said}"));
+    let (status, cookie, body) = host.page(
+        "POST",
+        "/api/session",
+        Some(&serde_json::json!({ "code": code })),
+        None,
+    );
+    assert_eq!(status, "HTTP/1.1 200 OK", "{body}");
+    let cookie = cookie.expect("a session");
+
+    // The same question, from a command the dashboard ran, with a terminal of its own making.
+    let through = host.job(
+        &format!("script -qefc '{exe} dashboard' /dev/null"),
+        &cookie,
+    );
+    assert!(through.contains("opened up only by a person"), "{through}");
+    assert!(
+        !through.contains("#code="),
+        "the dashboard minted itself a session: {through}"
+    );
+    // With the job's mark taken off, it is still this host's own child.
+    let unmarked = host.job(
+        &format!("script -qefc 'env -u YARDSORT_DASHBOARD_JOB {exe} dashboard' /dev/null"),
+        &cookie,
+    );
+    assert!(
+        unmarked.contains("opened up only by a person"),
+        "{unmarked}"
+    );
+    assert!(!unmarked.contains("#code="), "{unmarked}");
+    // Pairing is behind the same guard, and so are sync and memory.
+    for guarded in ["pair", "memory list anything", "sync stop anything"] {
+        let refused = host.job(
+            &format!("script -qefc '{exe} {guarded}' /dev/null"),
+            &cookie,
+        );
+        assert!(
+            refused.contains("Refused to a command the dashboard ran"),
+            "{guarded}: {refused}"
+        );
+    }
+    let tunnel = host.job(
+        &format!("script -qefc '{exe} dashboard tunnel on --subdomain x' /dev/null"),
+        &cookie,
+    );
+    assert!(tunnel.contains("opened up only by a person"), "{tunnel}");
+    let settings = std::fs::read_to_string(host.data().join("settings.toml")).unwrap();
+    assert!(!settings.contains("tunnel"), "{settings}");
 }

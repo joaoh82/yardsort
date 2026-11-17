@@ -144,7 +144,9 @@ $("sign-out").addEventListener("click", async () => {
   try {
     await ask("DELETE", "/api/session");
   } catch (error) {
-    if (!quiet(error)) console.error(error);
+    // Signed out, but the host could not write it down: it says what a restart would do.
+    showGate(quiet(error) ? undefined : error.message);
+    return;
   }
   showGate();
 });
@@ -818,7 +820,8 @@ $("sign-everyone-out").addEventListener("click", async () => {
   try {
     await ask("POST", "/api/sessions/end");
   } catch (error) {
-    if (!quiet(error)) console.error(error);
+    showGate(quiet(error) ? undefined : error.message);
+    return;
   }
   showGate();
 });

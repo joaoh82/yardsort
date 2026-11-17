@@ -31,7 +31,9 @@ guess. A link is good once, for ten minutes; the browser then stays signed in fo
 what it is for. Treat a sign-in link as you would treat a shell on that computer.
 
 It lets no device in, approves no [memory](memory.md) note and turns no sync on. Those stay at a
-terminal of your own, or in the app, so that nothing an agent could reach can do them.
+terminal of your own, or in the app, so that nothing an agent could reach can do them, and a
+command you run from the dashboard is refused them too: `yardsort-host pair` typed into
+**Commands** does not pair a device.
 
 ## Opening it on a computer with no screen
 
@@ -129,6 +131,10 @@ started.
 **Nothing is on a command's input.** One that asks a question gets no answer and fails, so pass
 `-y`, or whatever the command has for that: `sudo -n apt-get install -y ripgrep`, not
 `sudo apt-get install ripgrep`.
+
+**A command is not you at a terminal.** `yardsort-host pair`, `yardsort-host dashboard`, and the
+`sync` and `memory` commands that [only a person may run](headless-host.md#only-a-person-can-pair-a-device)
+are refused to a command the dashboard ran, and to anything that command starts.
 
 **Jobs** lists what has been run since the host last started, an agent's install and a GitHub
 sign-in included, each with its output. They are kept in memory: restarting the host forgets
@@ -231,8 +237,11 @@ from an image of your own with `rustunnel` in it. This has not been tried yet.
   When the host runs as a service, the client is found on the `PATH` that user's login shell
   has, as agents are.
 - **"The dashboard is opened up only by a person…"** You ran `yardsort-host dashboard` from an
-  agent's terminal, a script, or a computer that is not Linux. Run it in an SSH login of your
-  own.
+  agent's terminal, a script, the dashboard's own **Commands**, or a computer that is not Linux.
+  Run it in an SSH login of your own.
+- **"Signed out for now, but … could be neither written nor deleted"** The profile's
+  `dashboard` folder cannot be changed, so the sign-out holds only until the host restarts. Fix
+  the folder's owner or the full disk, or delete the file it names.
 
 ## Where things are
 

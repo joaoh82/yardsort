@@ -4,8 +4,9 @@ description: >-
   Runs yardsort-host with no display and no sign-in to any server, on this run's profile and port.
   The dashboard's page loads in a browser and tells it nothing until it signs in. Asked for a
   sign-in link by a script, the host refuses; asked at a terminal of the operator's own, it gives
-  one, which signs in once, and the dashboard then runs a command as the host's user. Turned off,
-  nothing listens. With build set to package, it runs the tarball the release ships. Linux only.
+  one, which signs in once, and the dashboard then runs a command as the host's user; the same
+  request for a link, made by a command the dashboard ran with a terminal of its own, is refused.
+  Turned off, nothing listens. With build set to package, it runs the tarball the release ships. Linux only.
   No window opens.
 version: 1
 timeout: 45m
@@ -74,13 +75,13 @@ steps:
     args: [.yardsort/tests/support/headless.sh, yardsort-host, status]
     expect:
       stdout_contains: "Dashboard: http://127.0.0.1:{{ run.port }}, 0 browsers signed in."
-  - id: the_operator_signs_in_and_runs_a_command
+  - id: the_operator_signs_in_and_runs_a_command_which_is_refused_a_link
     action: run
     program: bun
     args: [.yardsort/tests/support/dashboard.ts, "{{ run.dir }}", "{{ run.port }}"]
     timeout: 90s
     expect:
-      stdout_contains: "ran: from-the-dashboard-42"
+      stdout_contains: "refused: a command the dashboard ran"
   - id: turn_it_off
     action: run
     program: sh

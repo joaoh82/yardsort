@@ -442,7 +442,8 @@ watch and to type, as a phone does, and `pair` asks the same questions it asks a
 `pair` is refused from any terminal Yardsort started, and from anything an agent runs: the host checks
 who is at the other end of its socket, and refuses a process that carries a launched session's
 markers, descends from the terminal daemon, or types at one of the daemon's terminals, and one whose
-input is not a terminal at all. **This is a guard, not a wall.** A program running as the same user can
+input is not a terminal at all. A command run from [the dashboard](#the-dashboard) is refused the
+same way: it is the host's own child, and marked as one. **This is a guard, not a wall.** A program running as the same user can
 read everything the host can, its sign-in included. What the guard stops is an agent letting a device
 in by accident, or because something it read told it to: nothing an agent is given can approve a
 device.

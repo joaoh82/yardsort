@@ -1,8 +1,9 @@
 # 47. The host dashboard
 
-Status: built on 2026-11-17, in one piece, at the owner's request. Its tests pass, its page was
-looked at in a real browser against a stand-in host, and `yardsort-host` was run with it on a
-throwaway profile. **Not yet run through a real tunnel, on a real server, or by the owner.** What
+Status: built on 2026-11-17, in one piece, at the owner's request, and reviewed the same day:
+the review's four findings are fixed, and are in [After the review](#after-the-review). Its tests
+pass, its page was looked at in a real browser against a stand-in host, and `yardsort-host` was
+run with it on a throwaway profile. **Not yet run through a real tunnel, on a real server, or by the owner.** What
 was and was not checked is in [Checked](#checked).
 
 ## What was asked
@@ -76,7 +77,11 @@ There is no password. A password is something to guess at leisure, to reuse, and
 code that lapses in ten minutes needs no rate limit to be safe from guessing, and there is
 nothing to keep but sessions. A session is kept by the SHA-256 of its token, in
 `<profile>/dashboard/sessions.json`, readable by its user alone, so that a restart, which every
-upgrade is, signs nobody out, and the file is no session to whoever reads it.
+upgrade is, signs nobody out, and the file is no session to whoever reads it. The file is
+written with the sessions locked, so that two changes at once cannot leave the older of them in
+it. A sign-out that cannot be written deletes the file instead, which signs everyone out at the
+next start; when it can be neither written nor deleted, the sign-out says so, since a restart
+would then undo it.
 
 Signing in with the Yardsort server's account was considered and left out: the dashboard has to
 work with Remote off, which is exactly when a new server needs it, and a second use of the
@@ -85,18 +90,33 @@ identity provider is a cost per sign-in ([28](28-remote-infrastructure.md)).
 The link carries its code after the `#`, which a browser sends to nobody. The page takes it out
 of the address before it does anything else.
 
-### A signed-in browser gains nothing the user's own shell does not have
+### A session in the dashboard is not a way past the operator's guard
 
-This is what keeps the guard meaningful. The dashboard runs commands as the host's user, so a
-signed-in browser can do what that user can at a shell. What it cannot do is what a shell on
-that computer cannot do either: let a device in, approve a note, or turn sync on. None of those
-is in the dashboard, on purpose. An agent on the same computer can reach 127.0.0.1, and as the
-same user can read the sessions file; had the dashboard been able to pair a device, getting into
-the dashboard would have been a way round the guard. As it is, an agent that got in would hold
-what it held already.
+The dashboard runs commands as the host's user, so a signed-in browser can do what that user
+can at a shell, with one exception that is the point of this section: what the operator's guard
+keeps for a person at a terminal. Letting a device in, approving a note, turning sync on, and
+opening the dashboard itself up are not in the dashboard, and are refused to a command the
+dashboard runs.
+
+Leaving them out of the page was not enough, and the first build stopped there. A command typed
+into **Run a command** is a child of the host, not of the terminal daemon, and carries none of a
+launched session's markers; given a terminal of its own with `script`, it was exactly what the
+guard takes for a person. The review showed it: such a command was handed a new sign-in code,
+and pairing sits behind the same check. So the guard now also refuses:
+
+- **a process that carries the mark every dashboard job is given**, `YARDSORT_DASHBOARD_JOB`,
+  which a job's programs and everything they start inherit; and
+- **a process that descends from the host itself**, which every job does, mark or no mark.
+
+This matters because of who can reach the dashboard. An agent on the same computer can reach
+127.0.0.1, and as the same user can read and write the sessions file; with jobs let through,
+getting into the dashboard would have been a way round the guard for it. As it is, the guard is
+as strong against a dashboard job as against an agent's terminal, and no stronger: a job that
+sheds both its mark and its ancestry gets past, as an agent that sheds its own does. It is a
+guard, not a wall, here as there ([35](35-remote-r4-r5.md)).
 
 So the sign-in protects the computer from the network, and the guard still protects pairing
-from the agents.
+from the agents, and from the dashboard.
 
 ### What the server takes from a request
 
@@ -183,6 +203,9 @@ longer waits, up to five minutes, so that a wrong token is not tried all day at 
 - **The client ends with the host**: when the tunnel is turned off, when the host stops, and, on
   Linux, when the host dies without stopping (`PR_SET_PDEATHSIG`), since systemd's
   `KillMode=process` would leave it otherwise.
+- **A client belongs to the run of the supervisor that started it.** Turning the tunnel off and
+  on starts a new run while the last may still be reading its dead client's output; it only
+  ever takes its own client, and none is waited for with the lock that stopping needs.
 - **What is typed for it cannot become an option**: a subdomain, a region and a server are
   checked before any of them is an argument.
 
@@ -277,6 +300,25 @@ Not checked, and said in the guide where it matters:
   two. The page's **Install** is not offered on Windows, nor for anything but the seven agents.
 - A container. See below.
 
+## After the review
+
+A second agent read the whole change the day it was built and reproduced four faults. All four
+were right, and are fixed, each with a test that fails without its fix.
+
+1. **Restarting the app from a command panicked.** Leaving stopped the dashboard by blocking on
+   the async runtime, and an update's restart and **Replace the daemon** reach that from
+   commands, which run on the runtime: Tokio panics rather than block there, with the dashboard
+   off too. The restart now awaits the stop, and leaving from one of the runtime's own threads
+   drops the dashboard rather than wait (`src-tauri/src/dashboard.rs`).
+2. **Sessions signed out at once could come back after a restart.** Each sign-out wrote a copy
+   of the sessions taken before the others had finished, through one shared temporary file. See
+   _Signing in_, above (`auth.rs`).
+3. **A command the dashboard ran could pass the operator's guard**, by giving itself a terminal.
+   See _A session in the dashboard is not a way past the operator's guard_, above
+   (`crates/host/src/guard.rs`, `jobs.rs`). The test runs it on the real host.
+4. **A tunnel turned off and on could not then be stopped.** The supervisor of the first client
+   took the second's and waited for it, holding the lock. See _The tunnel_, above (`tunnel.rs`).
+
 ## Open questions
 
 Also in [06-open-questions](06-open-questions.md).
@@ -290,9 +332,9 @@ Also in [06-open-questions](06-open-questions.md).
    `rustunnel setup` all want a terminal, and jobs have none. A terminal in the browser would
    finish the "no SSH at all" story, and is a good deal more than a host management page: it is
    a shell on the internet behind one cookie.
-3. **Pairing a device from the dashboard** is left out on purpose (above). If the owner wants
-   the phone's QR code there, the dashboard's sign-in becomes part of what guards pairing, and
-   should be thought of that way first.
+3. **Pairing a device from the dashboard** is left out on purpose, and refused to its commands
+   (above). If the owner wants the phone's QR code there, the dashboard's sign-in becomes part
+   of what guards pairing, and should be thought of that way first.
 4. **Signing the host in to a Yardsort server from the dashboard.** Today that is
    `yardsort-host sign-in`, with `serve` stopped.
 5. **Another tunnel, or a reverse proxy of your own.** Only rustunnel's host name is taken as

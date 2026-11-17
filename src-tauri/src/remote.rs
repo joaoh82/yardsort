@@ -868,7 +868,7 @@ pub async fn remote_replace_daemon(app: AppHandle) -> IpcResult<()> {
     })
     .await?;
     quit::past_the_question();
-    updates::restart(&restarting)
+    updates::restart(&restarting).await
 }
 
 /// Take a device's grant away. Refused here at once; the server is told too.

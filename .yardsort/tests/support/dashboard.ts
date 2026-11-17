@@ -1,12 +1,14 @@
 // The operator of a computer with no screen, opening its dashboard, for a smoke test with no
 // person at it: asks `yardsort-host dashboard` for a sign-in link at a terminal of their own,
-// signs a browser's worth of requests in with it, and has the dashboard run a command.
+// signs a browser's worth of requests in with it, and has the dashboard run a command. Then has
+// it run the command that asked for the link, with a terminal of its own making: refused, since
+// a command the dashboard ran is not a person.
 //
 //   bun .yardsort/tests/support/dashboard.ts <run dir> <port>
 //
 // `yardsort-host` runs through headless.sh: the build headless-build.sh made, on this run's profile.
 
-const [, port] = process.argv.slice(2);
+const [dir, port] = process.argv.slice(2);
 const HOST = "sh .yardsort/tests/support/headless.sh yardsort-host";
 const address = `http://127.0.0.1:${port}`;
 
@@ -61,20 +63,31 @@ const status = await (await page("GET", "/api/status", undefined, cookie)).json(
 if (status.host?.program !== "yardsort-host") fail(`Not the host: ${JSON.stringify(status.host)}`);
 console.log(`the host: ${status.host.program} ${status.host.version}, ${status.dashboard.address}`);
 
-const job = await (
-  await page("POST", "/api/commands", { command: "echo from-the-dashboard-$((6*7))" }, cookie)
-).json();
-for (let tries = 0; ; tries++) {
-  const reading = await (await page("GET", `/api/jobs/${job.id}?from=0`, undefined, cookie)).json();
-  if (reading.state !== "running") {
-    if (reading.state !== "succeeded" || !reading.output.includes("from-the-dashboard-42"))
-      fail(`The command ${reading.state}: ${reading.output}`);
-    console.log("ran: from-the-dashboard-42");
-    break;
+/** Have the dashboard run a line, and wait for how it ended and what it printed. */
+async function ran(command: string): Promise<{ state: string; output: string }> {
+  const job = await (await page("POST", "/api/commands", { command }, cookie)).json();
+  for (let tries = 0; tries < 400; tries++) {
+    const reading = await (
+      await page("GET", `/api/jobs/${job.id}?from=0`, undefined, cookie)
+    ).json();
+    if (reading.state !== "running") return reading;
+    await Bun.sleep(50);
   }
-  if (tries > 200) fail("The command never ended.");
-  await Bun.sleep(50);
+  fail(`The command never ended: ${command}`);
 }
+
+const echoed = await ran("echo from-the-dashboard-$((6*7))");
+if (echoed.state !== "succeeded" || !echoed.output.includes("from-the-dashboard-42"))
+  fail(`The command ${echoed.state}: ${echoed.output}`);
+console.log("ran: from-the-dashboard-42");
+
+// The same question the operator asked above, from a command the dashboard ran, which gives
+// itself a terminal: the host must not take it for a person.
+const bin = (await Bun.file(`${dir}/bin`).text()).trim();
+const through = await ran(`script -qefc '${bin}/yardsort-host dashboard' /dev/null`);
+if (through.output.includes("#code=") || !through.output.includes("opened up only by a person"))
+  fail(`A command the dashboard ran was not refused a sign-in link:\n${through.output}`);
+console.log("refused: a command the dashboard ran, asking for a sign-in link");
 
 const out = await page("DELETE", "/api/session", undefined, cookie);
 const after = await page("GET", "/api/status", undefined, cookie);

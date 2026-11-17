@@ -10,6 +10,13 @@
 //! launched session has; its standard input is a terminal, and not one of the daemon's; and it
 //! does not descend from the daemon. Linux only, where `/proc` says all that. Elsewhere approving
 //! is refused, since none of it could be checked.
+//!
+//! **A command the dashboard ran is not a person either.** The dashboard runs commands for a
+//! signed-in browser, as children of this host and outside the daemon, and such a command can
+//! make itself a terminal (`script`). So the caller must also not carry the mark every dashboard
+//! job is given, and must not descend from this host. That keeps the dashboard's sign-in out of
+//! what guards pairing, at the strength the rest of this has: a job that sheds both its mark and
+//! its ancestry gets past, as an agent that sheds its own does.
 
 use std::os::fd::AsRawFd;
 
@@ -40,6 +47,10 @@ mod linux {
                          only by a person, from a terminal of their own on this computer \
                          (an SSH login, say), never by an agent.";
 
+    const JOB: &str = "Refused to a command the dashboard ran. This is done only by a person, \
+                       from a terminal of their own on this computer (an SSH login, say), never \
+                       through the dashboard.";
+
     pub fn refusal(fd: i32, daemon: Option<u32>) -> Option<String> {
         let Some((pid, uid)) = peer(fd) else {
             return Some("Cannot tell who is asking.".into());
@@ -52,6 +63,13 @@ mod linux {
         if launched(&environ) {
             return Some(AGENT.into());
         }
+        // The dashboard's jobs are this host's own children, each given a mark.
+        let above = ancestors(pid);
+        if carries(&environ, &[host_dashboard::jobs::JOB_ENV])
+            || above.contains(&std::process::id())
+        {
+            return Some(JOB.into());
+        }
         let Some(tty) = terminal_of(pid) else {
             return Some(
                 "Pairing needs a person at a terminal: run `yardsort-host pair` in one, not \
@@ -60,7 +78,7 @@ mod linux {
             );
         };
         if let Some(daemon) = daemon {
-            if ancestors(pid).contains(&daemon) || daemons_terminals(daemon).contains(&tty) {
+            if above.contains(&daemon) || daemons_terminals(daemon).contains(&tty) {
                 return Some(AGENT.into());
             }
         }
@@ -90,8 +108,13 @@ mod linux {
 
     /// Whether an environment (`/proc/<pid>/environ`) carries a launched session's markers.
     pub(super) fn launched(environ: &[u8]) -> bool {
+        carries(environ, &[RUN_ENV, WORKSPACE_ENV, RECORD_ENV])
+    }
+
+    /// Whether an environment sets any of `names` to something.
+    pub(super) fn carries(environ: &[u8], names: &[&str]) -> bool {
         environ.split(|b| *b == 0).any(|entry| {
-            [RUN_ENV, WORKSPACE_ENV, RECORD_ENV].iter().any(|name| {
+            names.iter().any(|name| {
                 entry
                     .strip_prefix(name.as_bytes())
                     .and_then(|rest| rest.strip_prefix(b"="))
@@ -162,6 +185,15 @@ mod tests {
         assert!(launched(b"YARDSORT_RUN_ID=1\0"));
         assert!(!launched(b"HOME=/home/a\0YARDSORT_RUN_ID=\0"));
         assert!(!launched(b"NOT_YARDSORT_RUN_ID=1\0YARDSORT_RUN_IDS=2\0"));
+    }
+
+    #[test]
+    fn a_dashboard_jobs_mark_is_seen_and_is_not_a_launched_sessions() {
+        let job = [host_dashboard::jobs::JOB_ENV];
+        assert!(carries(b"HOME=/home/a\0YARDSORT_DASHBOARD_JOB=1\0", &job));
+        assert!(!carries(b"HOME=/home/a\0YARDSORT_DASHBOARD_JOB=\0", &job));
+        assert!(!carries(b"NOT_YARDSORT_DASHBOARD_JOB=1\0", &job));
+        assert!(!launched(b"YARDSORT_DASHBOARD_JOB=1\0"));
     }
 
     #[test]

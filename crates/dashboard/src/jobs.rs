@@ -19,6 +19,12 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use serde::Serialize;
 use yardsort_core::process::Group;
 
+/// Set in the environment of every program a job runs, so that it, and what it starts, can be
+/// told from a person's own shell. `yardsort-host`'s guard reads it: what only a person at a
+/// terminal may ask for is refused to a command the dashboard ran, whatever terminal that
+/// command made for itself.
+pub const JOB_ENV: &str = "YARDSORT_DASHBOARD_JOB";
+
 /// How much of a job's output is kept: the newest of it.
 const OUTPUT_KEPT: usize = 512 * 1024;
 /// Jobs remembered, running or not.
@@ -405,6 +411,7 @@ fn run_step(job: &Arc<Job>, mut step: Step) -> Result<bool, String> {
     }
     let program = PathBuf::from(step.command.get_program());
     step.command
+        .env(JOB_ENV, "1")
         .stdin(if step.input.is_some() {
             Stdio::piped()
         } else {
@@ -523,6 +530,22 @@ mod tests {
         let again = jobs.read(job.id, reading.next).unwrap();
         assert_eq!(again.output, "");
         assert_eq!(again.from, reading.next);
+    }
+
+    #[test]
+    fn what_a_job_runs_is_marked_as_the_dashboards_and_so_is_what_that_starts() {
+        let jobs = Jobs::default();
+        let job = jobs
+            .start(
+                "command",
+                "marked",
+                Work::steps(vec![sh(
+                    "echo \"here=$YARDSORT_DASHBOARD_JOB\"; sh -c 'echo \"below=$YARDSORT_DASHBOARD_JOB\"'",
+                )]),
+            )
+            .unwrap();
+        let reading = finished(&jobs, job.id);
+        assert_eq!(reading.output, "here=1\nbelow=1\n");
     }
 
     #[test]

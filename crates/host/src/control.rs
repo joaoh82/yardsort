@@ -124,7 +124,8 @@ pub enum Ask {
 /// pairing.
 const DASHBOARD_NEEDS_A_PERSON: &str =
     "The dashboard is opened up only by a person, from a terminal of their own on this computer \
-     (an SSH login, say), on Linux: never by an agent, a script, or a terminal Yardsort started.";
+     (an SSH login, say), on Linux: never by an agent, a script, a terminal Yardsort started, or \
+     a command the dashboard itself ran.";
 
 impl Ask {
     /// Only a person at a terminal of their own may ask it (`guard`).

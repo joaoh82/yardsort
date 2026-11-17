@@ -942,7 +942,7 @@ fn a_browser_stays_signed_in_when_the_host_restarts_and_every_browser_can_be_sig
     // The codes not yet used went with it.
     let refused = refusal(again.post("/api/session", json!({ "code": waiting })));
     assert_eq!(refused, (StatusCode::UNAUTHORIZED, "wrong_code".into()));
-    assert_eq!(again.dashboard().sign_everyone_out(), 0);
+    assert_eq!(again.dashboard().sign_everyone_out(), Ok(0));
 }
 
 #[test]
