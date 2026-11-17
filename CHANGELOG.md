@@ -3,6 +3,23 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## 0.36.0
+
+- **Notifications.** A new first row in the sidebar opens one list of what is waiting for you and
+  what finished while you were looking elsewhere, over every project: an agent that asks for a
+  permission, one that finished a stretch of work, one whose turn failed or that stopped with an
+  error. Each row names the workspace, its project and branch, and shows the command asked for
+  or the start of what the agent said last; pressing it opens that agent's terminal. A finished
+  row leaves when you look at its terminal, or with **Mark seen**; what left is kept under
+  **Earlier** for a week. Group the rows by what they are or by project. The row's two numbers
+  are how many need you and how many finished unseen, each project's row shows its own count,
+  and `Mod+I` opens the list. A row for a permission needs that agent's **Capture what it
+  reports** switch on, in Settings → General. See [Notifications](docs/guide/notifications.md).
+- **The ringed dot is remembered.** An agent that finished and was not looked at keeps its ring
+  when Yardsort is closed and opened again, and one that finished while Yardsort was closed gets
+  it. Before, every waiting agent was ringed at each start, looked at or not. Coming back to the
+  window with the agent's terminal showing now clears the ring, as switching to its tab does.
+
 ## 0.35.0
 
 - **Pull requests on the phone.** A workspace's row on the phone carries its pull request's

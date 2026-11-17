@@ -14,6 +14,7 @@ mod coordinator;
 mod display;
 mod draft;
 mod memory;
+mod notifications;
 mod one_copy;
 mod outcomes;
 mod preflight;
@@ -321,6 +322,10 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             triggers::commands::trigger_reset,
             triggers::commands::trigger_remove,
             smoke::commands::test_list_in_project,
+            notifications::notification_list,
+            notifications::notification_seen,
+            notifications::notification_seen_terminal,
+            notifications::notification_seen_all,
         ])
         .events(collect_events![
             terminal::PtyHostEvent,
@@ -335,6 +340,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             smoke::TestResultSent,
             schedules::SchedulesChanged,
             triggers::commands::TriggersChanged,
+            notifications::NotificationsChanged,
             remote::RemotePairingRequested,
             remote::RemoteChangedProjects,
             remote::sync::SyncChanged,
@@ -534,11 +540,16 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
         &data_dir,
         std::sync::Arc::new(move |event| {
             // Settle the record first, so a client reacting to the event reads the truth.
+            let mut ended = None;
             if let pty_host::HostEvent::Exited { id, exit } = &event {
                 if let Some(state) = handle.try_state::<state::AppState>() {
-                    yardsort_core::runtime::exited(&state.store, &spool_root, &id.0, exit);
+                    ended = yardsort_core::runtime::exited(&state.store, &spool_root, &id.0, exit);
                     activity::drain_inbox(&handle, &state.store, &spool_root);
                 }
+            }
+            // The Notifications list hears of a turn that ended and of an agent that stopped.
+            if let Some(list) = handle.try_state::<notifications::Notifications>() {
+                list.observe(&handle, &event, ended.as_deref());
             }
             // A workflow waiting for an agent to settle hears it here, before the window.
             if let Some(driver) = handle.try_state::<workflows::Driver>() {
@@ -575,6 +586,8 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
     ));
     // Pull requests agents opened while the app was closed: tracked now that git can be found.
     activity::track_settled(app.handle(), settled);
+    // The Notifications list starts from here: what agents report from now on is news.
+    notifications::start(app.handle());
 
     // Hooks write to the inbox whenever an agent does something; watch it, so the
     // timeline moves while the agent works rather than when it exits.

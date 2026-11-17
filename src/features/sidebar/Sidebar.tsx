@@ -12,6 +12,7 @@ import { AddProjectDialog } from "./AddProjectDialog";
 import { ProjectTree } from "./ProjectTree";
 import { OtherComputersTree } from "./OtherComputersTree";
 import { WorkflowsRow } from "@/features/workflows/WorkflowsRow";
+import { NotificationsRow } from "@/features/notifications/NotificationsRow";
 import { PullRequestsRow } from "@/features/pull-requests/PullRequestsRow";
 import { usePullRequestPolling } from "@/features/pull-requests/usePullRequestPolling";
 import { TasksRow } from "@/features/tasks/TasksRow";
@@ -71,6 +72,7 @@ export function Sidebar() {
 
   return (
     <aside aria-label="Projects" className="flex h-full flex-col bg-surface">
+      <NotificationsRow />
       <PullRequestsRow />
       <TasksRow />
       <WorkflowsRow />

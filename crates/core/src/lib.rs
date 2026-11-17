@@ -27,6 +27,7 @@ pub mod harness;
 pub mod launch;
 pub mod legacy;
 pub mod memory;
+pub mod notifications;
 pub mod notify;
 pub mod outcomes;
 pub mod paths;

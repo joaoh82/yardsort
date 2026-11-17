@@ -1,6 +1,7 @@
 import type {
   AddedProject,
   HarnessInfo,
+  NotificationItem,
   Project,
   ProjectPullRequests,
   ProjectTasks,
@@ -483,3 +484,30 @@ export const triggerPresets: TriggerPreset[] = [
     quietMs: 0,
   },
 ];
+
+/** A row of the Notifications list: claude asking for a permission in `fix-login`, a minute ago,
+ *  unless overridden. */
+export const notification = (
+  id: string,
+  overrides: Partial<NotificationItem> = {},
+): NotificationItem => ({
+  id,
+  kind: "agent.asks",
+  part: "needs",
+  projectId: "p-app",
+  projectName: "app",
+  workspaceId: "w-app-fix-login",
+  workspaceName: "fix-login",
+  branch: "ys/fix-login",
+  sessionId: `session-${id}`,
+  sessionTitle: "Fix the login form",
+  harnessId: "claude",
+  terminalId: `pty-${id}`,
+  at: Date.now() - 60_000,
+  settledAt: null,
+  workedMs: null,
+  exitCode: null,
+  command: null,
+  said: null,
+  ...overrides,
+});

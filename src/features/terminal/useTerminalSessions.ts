@@ -3,6 +3,7 @@ import { hasCore, ipc, type HostEvent } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { useActivityStore } from "@/stores/activity";
 import { useAppStore } from "@/stores/app";
+import { useNotificationsStore } from "@/stores/notifications";
 import { useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore, type TerminalTab } from "@/stores/terminals";
@@ -34,6 +35,10 @@ export function handleHostEvent(event: HostEvent) {
     case "quiet": {
       const notable = terminals.markQuiet(event.id, event.busyMs, isWatched(event.id));
       if (notable) announce(notable);
+      // The core has the last word on what an agent finished and who saw it: the mark above
+      // holds until it answers. A shell going quiet is nothing the list keeps.
+      if (terminals.tabs.some((tab) => tab.id === event.id && tab.recordId !== null))
+        void useNotificationsStore.getState().load();
       return;
     }
     case "exited": {

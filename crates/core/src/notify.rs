@@ -444,7 +444,11 @@ pub fn agent_approval(
 
 /// Whether anything since `since` — when the run's current wait began — answered it. The wait's
 /// requests are the `approval.requested` events from then on; see [`REQUEST_ANSWERED`].
-fn wait_answered(conn: &rusqlite::Connection, run_id: &str, since: i64) -> StoreResult<bool> {
+pub(crate) fn wait_answered(
+    conn: &rusqlite::Connection,
+    run_id: &str,
+    since: i64,
+) -> StoreResult<bool> {
     let ids = |payload: &str| {
         let payload: serde_json::Value = serde_json::from_str(payload).unwrap_or_default();
         let id = |key: &str| {

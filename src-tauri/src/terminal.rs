@@ -247,7 +247,8 @@ pub async fn pty_resize(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn pty_kill(state: State<'_, AppState>, id: SessionId) -> IpcResult<()> {
+pub async fn pty_kill(app: AppHandle, state: State<'_, AppState>, id: SessionId) -> IpcResult<()> {
+    closing(&app, &id);
     match state.host.kill(&id) {
         // Killing something that already ended is not a failure worth reporting.
         Ok(()) | Err(HostError::SessionExited(_)) => Ok(()),
@@ -258,8 +259,18 @@ pub async fn pty_kill(state: State<'_, AppState>, id: SessionId) -> IpcResult<()
 /// Kill (if needed) and forget a session.
 #[tauri::command]
 #[specta::specta]
-pub async fn pty_close(state: State<'_, AppState>, id: SessionId) -> IpcResult<()> {
+pub async fn pty_close(app: AppHandle, state: State<'_, AppState>, id: SessionId) -> IpcResult<()> {
+    closing(&app, &id);
     Ok(state.host.remove(&id)?)
+}
+
+/// The window is ending this session on purpose: its agent did not stop with an error, and the
+/// Notifications list is not to say it did.
+fn closing(app: &AppHandle, id: &SessionId) {
+    use tauri::Manager;
+    if let Some(list) = app.try_state::<crate::notifications::Notifications>() {
+        list.closing(&id.0);
+    }
 }
 
 #[tauri::command]

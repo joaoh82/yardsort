@@ -145,7 +145,9 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   an issue's or a pull request's address and opens it, ready to delegate; a repository that is
   not a project yet is cloned on the way. See [Projects](docs/guide/projects.md#clone-a-repository).
 - **Know who needs you.** Status dots show which agents are working and which are waiting; a
-  desktop notification tells you when one finishes while you are elsewhere.
+  desktop notification tells you when one finishes while you are elsewhere, and
+  [Notifications](docs/guide/notifications.md) lists, over every project, the agents that ask
+  for a permission and the ones that finished or stopped while you were not looking.
 - **Careful with your work.** Deleting or archiving a workspace always keeps the branch, and
   never discards uncommitted changes without a second, explicit confirmation.
 - **A second pair of eyes, if you want one.** [Assist](docs/guide/assist.md) asks
@@ -627,6 +629,7 @@ says no.
 | [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving                                         |
 | [Migrate from Conductor](docs/guide/migrate-from-conductor.md)                                   | Import existing local worktrees and reconfigure scripts by hand                      |
 | [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off, shared conversations |
+| [Notifications](docs/guide/notifications.md)                                                     | One list of what needs you and what finished unseen, over every project              |
 | [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                                          |
 | [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file                             |
 | [Memory](docs/guide/memory.md)                                                                   | Lessons for a project's agents, approved by you                                      |

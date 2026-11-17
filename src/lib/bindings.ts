@@ -913,11 +913,20 @@ export const commands = {
 	 *  that does not exist yet, which starts from that repository.
 	 */
 	testListInProject: (projectId: string) => typedError<TestItem[], IpcError>(__TAURI_INVOKE("test_list_in_project", { projectId })),
+	/**  The list: what needs an answer, what finished and was not seen, and the newest of what left. */
+	notificationList: () => typedError<NotificationItem[], IpcError>(__TAURI_INVOKE("notification_list")),
+	/**  These finished rows were looked at. */
+	notificationSeen: (ids: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("notification_seen", { ids })),
+	/**  This terminal is in front of its person: what its agent finished is seen. */
+	notificationSeenTerminal: (terminalId: string) => typedError<null, IpcError>(__TAURI_INVOKE("notification_seen_terminal", { terminalId })),
+	/**  Everything finished is seen. */
+	notificationSeenAll: () => typedError<null, IpcError>(__TAURI_INVOKE("notification_seen_all")),
 };
 
 /** Events */
 export const events = {
 	activityChanged: makeEvent<ActivityChanged>("activity-changed"),
+	notificationsChanged: makeEvent<NotificationsChanged>("notifications-changed"),
 	otherComputersChanged: makeEvent<OtherComputersChanged>("other-computers-changed"),
 	ptyHostEvent: makeEvent<PtyHostEvent>("pty-host-event"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
@@ -2267,6 +2276,61 @@ export type NewWorkspaceEachRun = {
 	/**  `None`: five. */
 	keep: number | null,
 };
+
+/**  One row of the list, as the window shows it. Times are epoch milliseconds. */
+export type NotificationItem = {
+	id: string,
+	kind: NotificationKind,
+	part: NotificationPart,
+	projectId: string,
+	projectName: string,
+	workspaceId: string,
+	workspaceName: string,
+	branch: string | null,
+	/**  The agent's conversation, by its record's id. */
+	sessionId: string | null,
+	/**  What the conversation is called: its label, or the start of its first message. */
+	sessionTitle: string,
+	/**  Which agent: `claude`, `codex`… */
+	harnessId: string | null,
+	/**  The conversation's terminal, while its process runs. */
+	terminalId: string | null,
+	/**  When it happened. */
+	at: number | null,
+	/**  When it was answered or seen. */
+	settledAt: number | null,
+	/**  How long the agent worked before it finished, when that is known. */
+	workedMs: number | null,
+	/**  What its process exited with, for one that stopped. */
+	exitCode: number | null,
+	/**  The command the agent wants to run, while its question is open. */
+	command: string | null,
+	/**  The start of what the agent said last. */
+	said: string | null,
+};
+
+/**  What a row is about. */
+export type NotificationKind = 
+/**  An agent asked for a permission. */
+"agent.asks" | 
+/**  An agent finished a turn. */
+"agent.finished" | 
+/**  An agent's turn failed. */
+"agent.failed" | 
+/**  An agent's process exited with an error. */
+"agent.stopped";
+
+/**  Where a row is in the list. */
+export type NotificationPart = 
+/**  Waiting for an answer. */
+"needs" | 
+/**  Finished, and not seen yet. */
+"finished" | 
+/**  Answered or seen. */
+"earlier";
+
+/**  The list changed: a row was added, answered or seen. The window reads it again. */
+export type NotificationsChanged = Record<string, never>;
 
 /**  One tool call that was executing when the file was last written. */
 export type ObservedMatch = {

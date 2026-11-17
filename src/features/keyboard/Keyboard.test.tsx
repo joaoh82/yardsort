@@ -201,6 +201,21 @@ describe("keyboard navigation", () => {
     );
   });
 
+  it("opens Notifications with its key, where a new shell tab is then not on offer", async () => {
+    const user = userEvent.setup();
+    render(<Host />);
+    fireEvent.keyDown(window, { key: "I", ...mod });
+    await waitFor(() => expect(useProjectsStore.getState().notificationsOpen).toBe(true));
+
+    // The panel is showing the list, not a workspace's terminals.
+    fireEvent.keyDown(window, { key: "K", ...mod });
+    await user.type(screen.getByRole("combobox"), "new shell");
+    expect(screen.getByRole("option", { name: /New shell tab/ })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
   it("does not run app commands behind a dialog or on repeated keys", () => {
     render(<Host />);
     fireEvent.keyDown(window, { key: "B", ...mod, repeat: true });

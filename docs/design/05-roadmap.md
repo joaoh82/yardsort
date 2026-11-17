@@ -1388,6 +1388,27 @@ _Exit:_ a person starts a task on another computer from the composer, follows it
 as a local workspace, reviews what it changed and opens its pull request, without that computer's
 screen.
 
+## M34 — Notifications
+
+Proposed in Figma and answered on 2026-11-17 ([46-notifications](46-notifications.md)): one list,
+on the desktop and on the phone, of what needs a person and what finished while they were not
+looking.
+
+- [x] Slice 1: the list for agents on this computer. The core keeps it; the sidebar row with its
+      two counts, the view, both groupings, Mark seen, the count on a project's row, Mod+I, and
+      the ring on tabs drawn from the list. Found while building it: agents' hooks are off by
+      default, so by default the list hears only the terminal and cannot know that an agent
+      asks for a permission; and the ring, kept only in the window until now, was put on every
+      waiting agent at each start, looked at or not.
+- [ ] Slice 2: workflows that ask, runs that end, smoke tests that wait, schedules and triggers
+      that could not start.
+- [ ] Slice 3: other computers' rows on the desktop, over a new protocol minor.
+- [ ] Slice 4: the phone: the bell, the list, counts on computers and marks on workspaces.
+- [ ] Slice 5: a push when an agent finishes, with its own switch.
+
+_Exit:_ with agents at work in several projects and on more than one computer, a person learns
+from one place, at the desk or on the phone, which of them wait for an answer and which finished.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

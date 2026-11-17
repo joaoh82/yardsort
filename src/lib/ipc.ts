@@ -201,6 +201,9 @@ import {
   type IfMissed,
   type TimeOfDay,
   type Weekday,
+  type NotificationItem as RawNotificationItem,
+  type NotificationKind,
+  type NotificationPart,
   type TriggerItem as RawTriggerItem,
   type TriggerFire as RawTriggerFire,
   type TriggerDraft_Deserialize as RawTriggerDraft,
@@ -249,6 +252,8 @@ export type {
   IfMissed,
   TimeOfDay,
   Weekday,
+  NotificationKind,
+  NotificationPart,
   TriggerPreset,
   PresetQuestion,
   PresetPick,
@@ -477,6 +482,9 @@ export type ScheduleDraft = Omit<RawScheduleDraft, "spec"> & { spec: ScheduleSpe
 export type TriggerItem = Finite<RawTriggerItem, "decidedAt" | "number">;
 export type TriggerFire = Finite<RawTriggerFire, "decidedAt">;
 export type TriggerDraft = RawTriggerDraft;
+/** One row of the Notifications list. `settledAt` is null while it is still in its part of
+ *  the list; `workedMs` and `exitCode` are null when they are not known. */
+export type NotificationItem = Finite<RawNotificationItem, "settledAt" | "workedMs" | "exitCode">;
 export type SavedTrigger = Finite<RawSavedTrigger, "decidedAt">;
 export type MachineReport = Finite<RawMachineReport, "loadOne">;
 export type AgentLimits = UsageReport["limits"][number];
@@ -1352,6 +1360,21 @@ export const ipc = {
   /** A trigger was added, changed, switched or removed, gathered an event or fired, or a run it
    *  started ended. */
   onTriggersChanged: (handler: () => void) => events.triggersChanged.listen(() => handler()),
+
+  // --- notifications -------------------------------------------------------------------
+  /** What needs an answer, what finished and was not seen, and the newest of what left. */
+  notificationList: (): Promise<NotificationItem[]> =>
+    unwrap(commands.notificationList()) as Promise<NotificationItem[]>,
+  /** These finished rows were looked at. */
+  notificationSeen: (ids: string[]) => unwrap(commands.notificationSeen(ids)),
+  /** This terminal is in front of its person: what its agent finished is seen. */
+  notificationSeenTerminal: (terminalId: string) =>
+    unwrap(commands.notificationSeenTerminal(terminalId)),
+  /** Everything finished is seen. */
+  notificationSeenAll: () => unwrap(commands.notificationSeenAll()),
+  /** The list changed: a row was added, answered or seen. */
+  onNotificationsChanged: (handler: () => void) =>
+    events.notificationsChanged.listen(() => handler()),
 
   onHostEvent: (handler: (event: HostEvent) => void) =>
     events.ptyHostEvent.listen((event) => handler(event.payload)),

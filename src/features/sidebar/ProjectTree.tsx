@@ -35,6 +35,7 @@ import { useSmokeTestsStore, waitingIn } from "@/stores/smokeTests";
 import { MemoryDialog } from "./MemoryDialog";
 import { OutcomesDialog } from "./OutcomesDialog";
 import { useMemoryStore } from "@/stores/memory";
+import { listedIn, useNotificationsStore } from "@/stores/notifications";
 
 export function ProjectTree({ query = "" }: { query?: string }) {
   const projects = useProjectsStore((s) => s.projects);
@@ -102,6 +103,9 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
   const [outcomesOpen, setOutcomesOpen] = useState(false);
   const [runWorkflow, setRunWorkflow] = useState(false);
   const waiting = useMemoryStore((s) => s.waiting[project.id] ?? 0);
+  // The whole list, counted outside the selector, which must hand back a stable value.
+  const notifications = useNotificationsStore((s) => s.items);
+  const listed = listedIn(notifications, project.id);
 
   const items: MenuItem[] = [
     { label: "Project settings…", onSelect: () => setSettingsOpen(true) },
@@ -155,6 +159,17 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
           </span>
           {project.missing && <span className="text-small text-red-400">missing</span>}
         </button>
+        {listed > 0 && (
+          <button
+            type="button"
+            onClick={() => useProjectsStore.getState().openNotifications(true)}
+            title={`${listed} in Notifications: ${listed === 1 ? "it needs" : "they need"} you, or finished and ${listed === 1 ? "was" : "were"} not seen`}
+            aria-label={`${listed} ${listed === 1 ? "notification" : "notifications"} in ${project.name}`}
+            className="mr-1 shrink-0 rounded-full bg-accent/15 px-1.5 text-micro leading-4.5 text-accent tabular-nums hover:bg-accent/25"
+          >
+            {listed}
+          </button>
+        )}
         {waiting > 0 && (
           <button
             type="button"
