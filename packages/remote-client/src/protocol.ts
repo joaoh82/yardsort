@@ -206,13 +206,14 @@ export interface RemoteError {
   /** With `protocol_incompatible`: the majors that side speaks. */
   supportedProtocols?: number[];
   /**
-   * With `unauthenticated`: why the credential stopped working, when the client says so in its
-   * own words. Absent from an older server; a reason from a newer one reads as `unknown`.
+   * Why it was refused, when the client says so in its own words: with `unauthenticated`, why
+   * the credential stopped working; with `forbidden`, a plan's limit. Absent from an older
+   * server; a reason from a newer one reads as `unknown`.
    */
   reason?: ErrorReason;
 }
 
-export const ERROR_REASONS = ["accountDeleted", "unknown"] as const;
+export const ERROR_REASONS = ["accountDeleted", "planLimit", "unknown"] as const;
 export type ErrorReason = (typeof ERROR_REASONS)[number];
 
 export const remoteError: Decoder<RemoteError> = object({

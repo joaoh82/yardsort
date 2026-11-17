@@ -211,6 +211,7 @@ mod tests {
                 hosts: Vec::new(),
                 grants: Vec::new(),
                 push_routes: Vec::new(),
+                usage: Vec::new(),
                 notifications: NotificationPreferences::default(),
             },
             records: Vec::new(),

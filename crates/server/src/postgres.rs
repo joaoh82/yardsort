@@ -46,6 +46,7 @@ use crate::sync::{
     decide, kind_of, kind_spelled, Applied, ProjectState, Pulled, Snapshot, Verdict,
 };
 use crate::tokens::TokenHash;
+use crate::usage::{UsageDay, UsageDelta};
 
 /// The schema, in the order it is applied. Append only.
 const MIGRATIONS: &[(i32, &str, &str)] = &[
@@ -100,6 +101,7 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         "account_deletion",
         include_str!("../migrations/0011_account_deletion.sql"),
     ),
+    (12, "usage", include_str!("../migrations/0012_usage.sql")),
 ];
 
 /// Held while migrating, so instances starting together take turns. Any constant will do, as
@@ -466,6 +468,106 @@ impl Records for PgRecords {
             .await
             .map_err(failed)?
             .is_some())
+    }
+
+    async fn add_usage(&self, deltas: &[UsageDelta], now: i64) -> Result<()> {
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        for delta in deltas {
+            let n = |v: u64| i64::try_from(v).unwrap_or(i64::MAX);
+            // An account deleted since it was counted adds nothing.
+            tx.execute(
+                "INSERT INTO usage_days (account, day, relay_bytes, peak_streams, sync_bytes)
+                 SELECT $1, $2, $3, $4, $5 WHERE EXISTS (SELECT 1 FROM accounts WHERE id = $1)
+                 ON CONFLICT (account, day) DO UPDATE SET
+                     relay_bytes = usage_days.relay_bytes + EXCLUDED.relay_bytes,
+                     peak_streams = GREATEST(usage_days.peak_streams, EXCLUDED.peak_streams),
+                     sync_bytes = usage_days.sync_bytes + EXCLUDED.sync_bytes",
+                &[
+                    &delta.account.0,
+                    &delta.day,
+                    &n(delta.relay_bytes),
+                    &n(delta.peak_streams),
+                    &n(delta.sync_bytes),
+                ],
+            )
+            .await
+            .map_err(failed)?;
+            if delta.devices.is_empty() {
+                continue;
+            }
+            let devices: Vec<&str> = delta.devices.iter().map(DeviceId::as_str).collect();
+            tx.execute(
+                "INSERT INTO usage_devices (account, day, device)
+                 SELECT $1, $2, d.id FROM devices d
+                     WHERE d.account = $1 AND d.id = ANY($3)
+                 ON CONFLICT DO NOTHING",
+                &[&delta.account.0, &delta.day, &devices],
+            )
+            .await
+            .map_err(failed)?;
+            tx.execute(
+                "UPDATE usage_days SET active_devices = (
+                     SELECT count(*) FROM usage_devices WHERE account = $1 AND day = $2)
+                 WHERE account = $1 AND day = $2",
+                &[&delta.account.0, &delta.day],
+            )
+            .await
+            .map_err(failed)?;
+        }
+        let today = crate::usage::day_of(now);
+        tx.execute("DELETE FROM usage_devices WHERE day < $1", &[&(today - 1)])
+            .await
+            .map_err(failed)?;
+        tx.execute(
+            "DELETE FROM usage_days WHERE day < $1",
+            &[&(today - crate::usage::USAGE_RETENTION_DAYS)],
+        )
+        .await
+        .map_err(failed)?;
+        tx.commit().await.map_err(failed)
+    }
+
+    async fn usage(&self, from: i64, to: i64) -> Result<Vec<UsageDay>> {
+        let rows = self
+            .client()
+            .await?
+            .query(
+                "SELECT account, day, relay_bytes, peak_streams, sync_bytes, active_devices
+                 FROM usage_days WHERE day BETWEEN $1 AND $2 ORDER BY day, account",
+                &[&from, &to],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(rows.iter().map(usage_day).collect())
+    }
+
+    async fn account_usage(&self, account: &AccountId) -> Result<Vec<UsageDay>> {
+        let rows = self
+            .client()
+            .await?
+            .query(
+                "SELECT account, day, relay_bytes, peak_streams, sync_bytes, active_devices
+                 FROM usage_days WHERE account = $1 ORDER BY day",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(rows.iter().map(usage_day).collect())
+    }
+
+    async fn sync_bytes(&self, account: &AccountId) -> Result<u64> {
+        let row = self
+            .client()
+            .await?
+            .query_one(
+                "SELECT COALESCE(SUM(octet_length(body)), 0)::BIGINT FROM sync_records
+                 WHERE account = $1 AND body IS NOT NULL",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(u64::try_from(row.get::<_, i64>(0)).unwrap_or(0))
     }
 
     async fn put_login(&self, login: PendingLogin, now: i64) -> Result<()> {
@@ -2571,4 +2673,16 @@ fn failed(error: impl std::error::Error) -> RecordsError {
         cause = next.source();
     }
     RecordsError(text)
+}
+
+fn usage_day(row: &Row) -> UsageDay {
+    let n = |v: i64| u64::try_from(v).unwrap_or(0);
+    UsageDay {
+        account: AccountId(row.get(0)),
+        day: row.get(1),
+        relay_bytes: n(row.get(2)),
+        peak_streams: n(row.get(3)),
+        sync_bytes: n(row.get(4)),
+        active_devices: n(row.get(5)),
+    }
 }

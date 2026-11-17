@@ -395,6 +395,7 @@ function AccountExport({ onDeleted }: { onDeleted: (deleted: RemoteDeleted) => v
             <li>your devices and computers, and which devices each lets in</li>
             <li>which phones get notifications, never their tokens, and your settings for them</li>
             <li>every synced project, note and workspace name, in plain text</li>
+            <li>how much you used each day: devices, connections and bytes, never their content</li>
           </ul>
           <p className="text-ink-faint">
             Never a credential. Keep the file somewhere only you can read.

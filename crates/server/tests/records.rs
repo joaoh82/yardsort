@@ -23,6 +23,7 @@ use yardsort_server::records::{
 };
 use yardsort_server::sync::Pulled;
 use yardsort_server::tokens::{self, TokenHash};
+use yardsort_server::usage::{day_of, UsageDay, UsageDelta, USAGE_RETENTION_DAYS};
 use yardsort_server::REFRESH_RETRY_MS;
 
 /// Each test, once per store.
@@ -91,6 +92,9 @@ for_each_store!(
     an_export_reads_one_account_and_only_what_has_a_body,
     a_confirming_sign_in_and_its_handoff_say_so,
     deleting_an_account_leaves_nothing_of_it_and_another_untouched,
+    usage_adds_up_a_day_at_a_time_and_counts_each_device_once,
+    usage_goes_with_its_account_and_past_its_retention,
+    sync_bytes_are_the_bodies_an_account_holds,
 );
 
 const T: i64 = 1_800_000_000_000;
@@ -2967,4 +2971,140 @@ async fn deleting_an_account_leaves_nothing_of_it_and_another_untouched(
         .is_some());
     assert_eq!(records.devices(&bob).await.unwrap()[0].account, bob);
     let _ = (phone, bobs_phone);
+}
+
+fn counted(account: &AccountId, day: i64, relay: u64, peak: u64, synced: u64) -> UsageDelta {
+    UsageDelta {
+        account: account.clone(),
+        day,
+        relay_bytes: relay,
+        peak_streams: peak,
+        sync_bytes: synced,
+        devices: BTreeSet::new(),
+    }
+}
+
+async fn usage_adds_up_a_day_at_a_time_and_counts_each_device_once(records: Arc<impl Records>) {
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    let bob = records.account("https://id.one", "bob", T).await.unwrap();
+    let phone = enroll(&*records, &alice, "use-phone", T).await;
+    let laptop = enroll(&*records, &alice, "use-laptop", T).await;
+    let bobs = enroll(&*records, &bob, "use-bob", T).await;
+    let today = day_of(T);
+
+    // Two instances' minutes, and another account's.
+    let mut first = counted(&alice, today, 100, 2, 10);
+    first.devices = [phone.id.clone()].into();
+    let mut second = counted(&alice, today, 50, 5, 0);
+    second.devices = [phone.id.clone(), laptop.id.clone()].into();
+    let mut lower = counted(&alice, today, 1, 1, 1);
+    // Bob's device is not alice's, and is not counted as hers.
+    lower.devices = [bobs.id.clone()].into();
+    records.add_usage(&[first], T).await.unwrap();
+    records
+        .add_usage(&[second, counted(&bob, today, 7, 1, 0)], T)
+        .await
+        .unwrap();
+    records.add_usage(&[lower], T).await.unwrap();
+    records
+        .add_usage(&[counted(&alice, today + 1, 9, 0, 0)], T)
+        .await
+        .unwrap();
+
+    let days = records.usage(today, today + 1).await.unwrap();
+    let (first_of_ours, theirs) = if alice.0 < bob.0 { (0, 1) } else { (1, 0) };
+    assert_eq!(days.len(), 3, "{days:?}");
+    assert_eq!(
+        days[first_of_ours],
+        UsageDay {
+            account: alice.clone(),
+            day: today,
+            relay_bytes: 151,
+            peak_streams: 5,
+            sync_bytes: 11,
+            active_devices: 2,
+        }
+    );
+    assert_eq!(
+        (
+            days[theirs].account.clone(),
+            days[theirs].relay_bytes,
+            days[theirs].active_devices
+        ),
+        (bob.clone(), 7, 0)
+    );
+    assert_eq!((days[2].day, days[2].relay_bytes), (today + 1, 9));
+    assert_eq!(records.usage(today + 1, today + 1).await.unwrap().len(), 1);
+    let hers = records.account_usage(&alice).await.unwrap();
+    assert_eq!(
+        hers.iter()
+            .map(|d| (d.day, d.relay_bytes))
+            .collect::<Vec<_>>(),
+        [(today, 151), (today + 1, 9)]
+    );
+    assert!(records
+        .usage(today + 2, today + 9)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+async fn usage_goes_with_its_account_and_past_its_retention(records: Arc<impl Records>) {
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    let bob = records.account("https://id.one", "bob", T).await.unwrap();
+    let phone = enroll(&*records, &alice, "gone-phone", T).await;
+    let today = day_of(T);
+    let mut hers = counted(&alice, today, 10, 1, 1);
+    hers.devices = [phone.id.clone()].into();
+    records
+        .add_usage(&[hers.clone(), counted(&bob, today, 3, 0, 0)], T)
+        .await
+        .unwrap();
+    records
+        .delete_account(&alice, T + 1)
+        .await
+        .unwrap()
+        .unwrap();
+    // Counted before it went, added after: nothing comes back.
+    records.add_usage(&[hers], T + 2).await.unwrap();
+    let days = records.usage(today, today).await.unwrap();
+    assert_eq!(days.len(), 1);
+    assert_eq!(days[0].account, bob);
+
+    // A day kept while it was recent goes once it is past the retention.
+    let old = today - USAGE_RETENTION_DAYS - 1;
+    let then = T - (USAGE_RETENTION_DAYS + 1) * 24 * 60 * 60_000;
+    records
+        .add_usage(&[counted(&bob, old, 1, 0, 0)], then)
+        .await
+        .unwrap();
+    assert_eq!(records.usage(old, old).await.unwrap().len(), 1);
+    records.add_usage(&[], T + 4).await.unwrap();
+    assert!(records.usage(old, old).await.unwrap().is_empty());
+    assert_eq!(
+        records.usage(today, today).await.unwrap().len(),
+        1,
+        "today's stays"
+    );
+}
+
+async fn sync_bytes_are_the_bodies_an_account_holds(records: Arc<impl Records>) {
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    let bob = records.account("https://id.one", "bob", T).await.unwrap();
+    assert_eq!(records.sync_bytes(&alice).await.unwrap(), 0);
+    let here = sync_host(&*records, &alice, "bytes-host").await;
+    let project = synced_project(&*records, &alice, &here).await;
+    let before = records.sync_bytes(&alice).await.unwrap();
+    assert!(before > 0, "the project's own body counts");
+    let note = sid();
+    apply(
+        &*records,
+        &alice,
+        &here,
+        &put(RecordKind::Note, &note, &project, None, "twelve chars"),
+    )
+    .await;
+    let with_note = records.sync_bytes(&alice).await.unwrap();
+    assert!(with_note > before + 12, "{before} then {with_note}");
+    assert_eq!(records.sync_bytes(&bob).await.unwrap(), 0);
 }

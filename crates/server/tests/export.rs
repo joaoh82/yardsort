@@ -106,7 +106,7 @@ async fn page(s: &Served, who: &Credentials, after: Option<&str>) -> (ExportPage
 }
 
 async fn an_account_is_exported_whole_a_page_at_a_time(records: impl Records + Clone + 'static) {
-    let s = Served::start(records).await;
+    let s = Served::start(records.clone()).await;
     let (host, project) = host_with_notes(&s, "ada", EXPORT_PAGE + 50).await;
     let phone = s.sign_in("ada", "Phone", DeviceKind::Phone).await;
     let registered = s
@@ -117,6 +117,13 @@ async fn an_account_is_exported_whole_a_page_at_a_time(records: impl Records + C
         )
         .await;
     assert_eq!(registered.status(), StatusCode::NO_CONTENT);
+
+    // What the instance counted so far, added as its next minute would.
+    let now = yardsort_server::http::now_ms();
+    records
+        .add_usage(&s.relay.meter().take(), now)
+        .await
+        .unwrap();
 
     let (first, first_text) = page(&s, &phone, None).await;
     let account = first
@@ -133,6 +140,15 @@ async fn an_account_is_exported_whole_a_page_at_a_time(records: impl Records + C
     assert_eq!(account.hosts.len(), 1);
     assert_eq!(account.push_routes.len(), 1);
     assert_eq!(account.push_routes[0].platform, "apns");
+    // The day's usage: both devices made requests, and the host synced its notes.
+    let today = &account.usage[0];
+    assert_eq!(account.usage.len(), 1);
+    assert_eq!(today.active_devices, 2);
+    assert!(today.sync_bytes > 0);
+    assert_eq!(
+        today.date,
+        yardsort_server::usage::date(yardsort_server::usage::day_of(now))
+    );
     assert_eq!(first.records.len(), EXPORT_PAGE);
     let next = first.next.clone().expect("more than a page");
 

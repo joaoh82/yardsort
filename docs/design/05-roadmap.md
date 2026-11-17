@@ -1113,7 +1113,10 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       the desktop's Settings → Remote, the phone's Settings and `yardsort-host account export`, of
       everything the server keeps of it but credentials and push tokens (46 §9). Slice 2 built
       the same day: deleting an account, from the desktop, the phone or the server's own page,
-      after the person signs in again; every device told, nothing local touched (46 §10).
+      after the person signs in again; every device told, nothing local touched (46 §10). Slice 4
+      built the same day: an entitlements service asked before another device, a connection or
+      more synced data, unset on a self-hosted server, with a day's grace when it cannot be
+      reached; and each account's daily usage, with `yardsort-server usage` (46 §11).
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is

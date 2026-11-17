@@ -97,6 +97,11 @@ export class ClientError extends Error {
     return this.remote?.reason === "accountDeleted";
   }
 
+  /** Whether the server said the account's plan has no room for this. */
+  get planLimit(): boolean {
+    return this.remote?.reason === "planLimit";
+  }
+
   static from(error: RemoteError): ClientError {
     return new ClientError("remote", error.message, error);
   }

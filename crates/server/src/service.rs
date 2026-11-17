@@ -10,6 +10,7 @@ use remote_proto::delete::{AccountDeleted, DeleteRequest, FRESH_SIGN_IN_MS};
 use remote_proto::{DeviceId, ErrorCode, ErrorReason, ProtocolVersion, RemoteError, ServerId};
 use url::Url;
 
+use crate::entitlements::{Action, Counts, Entitlements};
 use crate::oidc::{OidcError, Provider, ProviderConfig, CLOCK_LEEWAY_MS};
 use crate::push::{DisabledPush, PushProvider};
 use crate::records::{
@@ -68,6 +69,7 @@ pub struct ControlService<R> {
     pub(crate) records: R,
     pub(crate) relay: Relay,
     pub(crate) push: Arc<dyn PushProvider>,
+    pub(crate) entitlements: Entitlements,
 }
 
 impl<R: Records> ControlService<R> {
@@ -96,6 +98,7 @@ impl<R: Records> ControlService<R> {
             records,
             relay: Relay::default(),
             push: Arc::new(DisabledPush),
+            entitlements: Entitlements::none(),
         })
     }
 
@@ -106,8 +109,31 @@ impl<R: Records> ControlService<R> {
         self
     }
 
+    /// Ask `entitlements` before what costs the operator. Without, everything is allowed.
+    pub fn with_entitlements(mut self, entitlements: Entitlements) -> Self {
+        self.entitlements = entitlements;
+        self
+    }
+
     pub fn records(&self) -> &R {
         &self.records
+    }
+
+    /// Whether an entitlements service is asked.
+    pub fn entitlements_configured(&self) -> bool {
+        self.entitlements.configured()
+    }
+
+    /// Add what this instance counted to the records. What fails to go is kept for the next.
+    pub async fn flush_usage(&self, now: i64) {
+        let deltas = self.relay.meter().take();
+        if deltas.is_empty() {
+            return;
+        }
+        if let Err(error) = self.records.add_usage(&deltas, now).await {
+            tracing::error!("usage: records: {error}");
+            self.relay.meter().restore(deltas);
+        }
     }
 
     /// The relay's sockets, to close them all when the server stops.
@@ -385,6 +411,17 @@ impl<R: Records> ControlService<R> {
                         ),
                     ));
                 }
+                self.entitlements
+                    .may(
+                        &handoff.account,
+                        Action::Device,
+                        Counts {
+                            devices: Some(signed_in as u64),
+                            ..Counts::default()
+                        },
+                        now,
+                    )
+                    .await?;
                 let id = DeviceId::new(uuid::Uuid::new_v4().to_string()).map_err(unreadable)?;
                 let (issued, pair) = issue(now);
                 let credentials = pair.for_device(id.clone());
@@ -457,6 +494,7 @@ impl<R: Records> ControlService<R> {
             .seen(&device.id, now)
             .await
             .map_err(unreadable)?;
+        self.relay.meter().active(&device.account, &device.id, now);
         Ok(Caller {
             account: device.account,
             device: device.id,

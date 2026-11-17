@@ -13,7 +13,8 @@ Nothing on your computers or phones is deleted.
 - the devices each computer lets in, and pairing codes still open;
 - which phones get notifications, their push tokens, your notification settings, and notices on
   their way to a phone;
-- every synced project, note and workspace name, with the history sync keeps of them.
+- every synced project, note and workspace name, with the history sync keeps of them;
+- how much the account used each day.
 
 **Kept, on your own devices:** projects, workspaces, branches, agents and their terminals, notes and
 everything else on your computers. Yardsort keeps working there without an account. Remote turns

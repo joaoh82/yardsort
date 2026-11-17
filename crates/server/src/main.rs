@@ -5,6 +5,10 @@
 //! account out instead, for an operator: the provider's subject, at the provider the server is
 //! configured with unless `--issuer` names another. It needs only `DATABASE_URL`, and signals the
 //! running servers through it, which close those devices' live sockets at once.
+//!
+//! `yardsort-server usage [--from DATE] [--to DATE]` prints what each account used a day at a
+//! time, `YYYY-MM-DD` in UTC, the last seven days unless told otherwise (`crate::usage`). It too
+//! needs only `DATABASE_URL`.
 
 use std::io::IsTerminal;
 use std::net::SocketAddr;
@@ -12,13 +16,15 @@ use std::process::ExitCode;
 
 use tracing_subscriber::EnvFilter;
 use yardsort_server::config::{AdminSettings, Settings};
+use yardsort_server::entitlements::Entitlements;
 use yardsort_server::http::{self, now_ms};
 use yardsort_server::postgres::PgRecords;
 use yardsort_server::records::{Records, RevokeReason, Revoked, Signal};
 use yardsort_server::relay::Relay;
 use yardsort_server::{oidc, ControlService, ServerConfig};
 
-const USAGE: &str = "usage: yardsort-server [revoke-account --subject SUBJECT [--issuer ISSUER]]";
+const USAGE: &str = "usage: yardsort-server [revoke-account --subject SUBJECT [--issuer ISSUER] \
+                     | usage [--from YYYY-MM-DD] [--to YYYY-MM-DD]]";
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -33,6 +39,7 @@ async fn main() -> ExitCode {
     let result = match args.first().map(String::as_str) {
         None => serve().await,
         Some("revoke-account") => revoke_account(&args[1..]).await,
+        Some("usage") => usage(&args[1..]).await,
         Some("help" | "-h" | "--help") => {
             println!("{USAGE}");
             Ok(())
@@ -72,11 +79,19 @@ async fn serve() -> Result<(), String> {
             device_redirects: settings.device_redirects,
         },
         records,
-        http_client,
+        http_client.clone(),
     )
     .map_err(|e| e.to_string())?
     .with_relay(Relay::new(settings.instance, settings.routing))
-    .with_push(push);
+    .with_push(push)
+    .with_entitlements(match settings.entitlements {
+        Some(service) => Entitlements::service(service.url, service.token, http_client.clone()),
+        None => Entitlements::none(),
+    });
+    tracing::info!(
+        entitlements = service.entitlements_configured(),
+        "entitlements are asked when configured; unset, everything is allowed"
+    );
     tracing::info!(
         server = %service.describe().server,
         issuer = %service.describe().issuer,
@@ -94,6 +109,7 @@ async fn serve() -> Result<(), String> {
         settings.listen
     );
     let relay = service.relay().clone();
+    let kept = service.records().clone();
     let app = http::router(
         service,
         http::Options {
@@ -106,12 +122,50 @@ async fn serve() -> Result<(), String> {
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     // The relay's sockets stay open until told to close, and a graceful stop waits for them.
-    .with_graceful_shutdown(async move {
-        stopped().await;
-        relay.shutdown();
+    .with_graceful_shutdown({
+        let relay = relay.clone();
+        async move {
+            stopped().await;
+            relay.shutdown();
+        }
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    // What was counted since the last minute, once every socket has closed.
+    let counted = relay.meter().take();
+    if let Err(error) = kept.add_usage(&counted, now_ms()).await {
+        tracing::error!("usage: records: {error}");
+    }
+    Ok(())
+}
+
+/// Print each account's days, from `--from` to `--to`.
+async fn usage(args: &[String]) -> Result<(), String> {
+    let today = yardsort_server::usage::day_of(now_ms());
+    let (mut from, mut to) = (today - 6, today);
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let slot = match arg.as_str() {
+            "--from" => &mut from,
+            "--to" => &mut to,
+            other => return Err(format!("unexpected {other:?}\n{USAGE}")),
+        };
+        let value = args
+            .next()
+            .ok_or_else(|| format!("{arg} needs a date\n{USAGE}"))?;
+        *slot = yardsort_server::usage::parse_date(value)
+            .ok_or_else(|| format!("{arg} {value:?}: a date as YYYY-MM-DD"))?;
+    }
+    if from > to {
+        return Err("--from is after --to".into());
+    }
+    let settings = AdminSettings::from_env().map_err(|e| e.to_string())?;
+    let records = PgRecords::connect(settings.database_url.expose())
+        .await
+        .map_err(|e| e.to_string())?;
+    let days = records.usage(from, to).await.map_err(|e| e.to_string())?;
+    print!("{}", yardsort_server::usage::table(&days));
+    Ok(())
 }
 
 /// Revoke every device of one account, as its owner could one at a time. The devices stop on their

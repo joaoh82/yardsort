@@ -204,6 +204,42 @@ has to be a direct connection, as this recipe's is, not a pooler that hands out 
 transaction. Behind one, what another process revokes reaches live connections only at the
 server's next five-second check, and its log warns about it about once a minute.
 
+## What each account uses
+
+The server counts what each account uses, a UTC day at a time: how many of its devices made a
+request, the most connections its devices had open to its computers at once, and the bytes the
+relay carried for it and its computers sent to sync. Counts only, never what passed through.
+Each day is kept 400 days; the account's export includes them, and deleting the account deletes
+them. To see them:
+
+```sh
+docker compose exec server yardsort-server usage --from 2026-11-01 --to 2026-11-30
+```
+
+It prints a line a day for each account, by the server's own account id, tab-separated; the last
+seven days unless you give dates. On several instances, the most connections is the most through
+one instance.
+
+## Plans and entitlements
+
+Unset, the server allows everything up to its own limits, such as 50 devices an account: that is
+how a server you run yourself is meant to run, and you need nothing here. A managed service can
+set `YARDSORT_ENTITLEMENTS_URL` to a service of its own, which the server asks before signing in
+another device, opening a connection from a device to a computer, or storing more synced data. It
+`POST`s the account's id (the server's own, never the identity provider's subject), the action
+(`device`, `stream` or `sync`) and the count that action needs, such as `{"devices": 2}`, and
+nothing that names a person. The answer is `{"allowed": true}`, or `{"allowed": false,
+"message": "…"}` with words to show the person. `YARDSORT_ENTITLEMENTS_TOKEN` (or `_FILE`) is sent
+with each question as a bearer token. The address must be HTTPS, or plain HTTP to a loopback
+address.
+
+Answers are kept a minute for each account and action. When the service cannot be reached, or
+does not answer within three seconds, what an account was allowed in the last 24 hours stays
+allowed, and anything else waits, with a message that the plan cannot be checked right now. That
+memory is each instance's own, so an instance started while the service is down knows of nothing
+allowed yet. Nothing is asked before reading, signing out, removing a computer, exporting or
+deleting, and devices already signed in keep working whatever the answer.
+
 ## What it keeps for sync
 
 Sync between a person's computers is being built

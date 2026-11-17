@@ -8,6 +8,7 @@ use remote_proto::account::{Credentials, DeviceKind, NewDevice, Secret, TokenReq
 use remote_proto::{Platform, RemoteError, ServerId};
 use reqwest::header::LOCATION;
 use url::Url;
+use yardsort_server::entitlements::Entitlements;
 use yardsort_server::oidc::{self, ProviderConfig};
 use yardsort_server::push::PushProvider;
 use yardsort_server::records::Records;
@@ -69,6 +70,7 @@ impl Served {
             Relay::default(),
             vec![APP.into()],
             Some(push),
+            Entitlements::none(),
         )
         .await
     }
@@ -80,10 +82,19 @@ impl Served {
         relay: Relay,
         redirects: Vec<String>,
     ) -> Self {
-        Self::open(records, options, relay, redirects, None).await
+        Self::open(
+            records,
+            options,
+            relay,
+            redirects,
+            None,
+            Entitlements::none(),
+        )
+        .await
     }
 
-    /// [`Self::start_allowing`], with `push` handed what would be sent to a phone.
+    /// [`Self::start_allowing`], with `push` handed what would be sent to a phone, and asking
+    /// `entitlements`.
     #[allow(dead_code)]
     pub async fn start_allowing_notifying(
         records: impl Records + Clone + 'static,
@@ -91,8 +102,26 @@ impl Served {
         relay: Relay,
         redirects: Vec<String>,
         push: Arc<dyn PushProvider>,
+        entitlements: Entitlements,
     ) -> Self {
-        Self::open(records, options, relay, redirects, Some(push)).await
+        Self::open(records, options, relay, redirects, Some(push), entitlements).await
+    }
+
+    /// Asking `entitlements` before another device, a connection or more synced data.
+    #[allow(dead_code)]
+    pub async fn start_entitled(
+        records: impl Records + Clone + 'static,
+        entitlements: Entitlements,
+    ) -> Self {
+        Self::open(
+            records,
+            http::Options::default(),
+            Relay::default(),
+            vec![APP.into()],
+            None,
+            entitlements,
+        )
+        .await
     }
 
     async fn open(
@@ -101,6 +130,7 @@ impl Served {
         relay: Relay,
         redirects: Vec<String>,
         push: Option<Arc<dyn PushProvider>>,
+        entitlements: Entitlements,
     ) -> Self {
         let idp = Idp::start(Some(SECRET)).await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -122,7 +152,8 @@ impl Served {
             client.clone(),
         )
         .unwrap()
-        .with_relay(relay);
+        .with_relay(relay)
+        .with_entitlements(entitlements);
         let service = match push {
             Some(push) => service.with_push(push),
             None => service,
@@ -188,6 +219,18 @@ pub async fn error(response: reqwest::Response) -> RemoteError {
 impl Served {
     /// Through the browser and back, as `subject`, then redeemed: a device of `kind` signed in.
     pub async fn sign_in(&self, subject: &str, name: &str, kind: DeviceKind) -> Credentials {
+        let signed_in = self.try_sign_in(subject, name, kind).await;
+        assert!(signed_in.status().is_success(), "{}", signed_in.status());
+        signed_in.json().await.unwrap()
+    }
+
+    /// [`Self::sign_in`], with the server's answer to redeeming the code as it came.
+    pub async fn try_sign_in(
+        &self,
+        subject: &str,
+        name: &str,
+        kind: DeviceKind,
+    ) -> reqwest::Response {
         let verifier = tokens::random();
         let mut start = self.url("v1/login");
         start
@@ -203,19 +246,16 @@ impl Served {
             .append_pair("code", &code)
             .append_pair("state", &state);
         let back = location(&self.client.get(callback).send().await.unwrap());
-        let signed_in = self
-            .token(&TokenRequest::SignIn {
-                code: Secret::new(query(&back)["code"].clone()),
-                verifier: Secret::new(verifier),
-                device: NewDevice {
-                    name: name.into(),
-                    kind,
-                    platform: Platform::Linux,
-                },
-            })
-            .await;
-        assert!(signed_in.status().is_success(), "{}", signed_in.status());
-        signed_in.json().await.unwrap()
+        self.token(&TokenRequest::SignIn {
+            code: Secret::new(query(&back)["code"].clone()),
+            verifier: Secret::new(verifier),
+            device: NewDevice {
+                name: name.into(),
+                kind,
+                platform: Platform::Linux,
+            },
+        })
+        .await
     }
 
     /// A sign-in again that confirms a deletion, through the browser and back, as `subject`: the
