@@ -596,7 +596,8 @@ fn not_failed(short: &str, status: &str) -> IpcError {
 
 /// The open pull request for the branch `workspace` has checked out: the branch as git says,
 /// the pull request as `gh` says when asked about that branch, the newest when there are more.
-/// For [`Look::pull_request`] implementations.
+/// A branch that follows a pull request (a fork's `pr/<number>`) is that pull request, asked
+/// for by its number. For [`Look::pull_request`] implementations.
 ///
 /// `gh` is given [`PULL_REQUEST_LIMIT`] to answer, and not answering is an error like any
 /// other. Queuing waits on this, and the schedules thread queues: one workflow on a network
@@ -631,6 +632,18 @@ fn pull_request_within(
             ))
         }
     };
+    // A branch made for a pull request — a fork's `pr/<number>`, or one `gh pr checkout` set
+    // up — says which one in git's config. On the forge its head has another name, one that
+    // many forks may share, so asking by name finds nothing, or somebody else's.
+    let followed = git
+        .followed_pull_request(root, &branch)
+        .map_err(|e| e.to_string())?;
+    if let Some(number) = followed {
+        let pr = gh
+            .pull_request_within(root, number, limit)
+            .map_err(|error| asked_error(&error, &workspace.name))?;
+        return Ok((pr.state == crate::forge::PullRequestState::Open).then_some(pr));
+    }
     let listed = gh
         .open_pull_requests_for(root, &branch, limit)
         .map_err(|error| asked_error(&error, &workspace.name))?;

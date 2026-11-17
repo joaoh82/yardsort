@@ -11,6 +11,11 @@ pr-view.json
     one pull request with a comment and two reviews, cut down to its first three checks.
     `baseRefOid`, which the question gained later, was added by hand with a made-up id.
 
+pr-view-fork.json
+    `gh pr view <n> --json <forge::PULL_REQUEST_FIELDS>`, recorded on 2026-11-17 against an open
+    pull request from a fork (`isCrossRepository` true, head `patch-1`), cut down to its first
+    three checks. Its number was made 7, to match the `pr/7` the tests check it out as.
+
 pr-line-comments.json
     `gh api --paginate --slurp repos/{owner}/{repo}/pulls/<n>/comments`: one page, cut down to
     three comments on lines — one on a single line, one on a range, and a reply to the first.

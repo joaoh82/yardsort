@@ -1,0 +1,67 @@
+{
+  "additions": 17,
+  "author": {
+    "id": "U_alan",
+    "is_bot": false,
+    "login": "alan",
+    "name": "Alan"
+  },
+  "baseRefName": "trunk",
+  "baseRefOid": "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567",
+  "createdAt": "2026-09-07T10:43:26Z",
+  "deletions": 0,
+  "headRefName": "patch-1",
+  "headRefOid": "5d3c1b7e9a2f4c6e8b0d1f3a5c7e9b1d3f5a7c9e",
+  "isCrossRepository": true,
+  "isDraft": false,
+  "latestReviews": [],
+  "mergeable": "MERGEABLE",
+  "number": 7,
+  "reviewDecision": "REVIEW_REQUIRED",
+  "reviewRequests": [
+    {
+      "__typename": "User",
+      "login": "edsger"
+    },
+    {
+      "__typename": "User",
+      "login": "barbara"
+    }
+  ],
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-07T10:43:38Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/o/r/actions/runs/1/job/1",
+      "name": "label-external / label_issues",
+      "startedAt": "2026-09-07T10:43:34Z",
+      "status": "COMPLETED",
+      "workflowName": "PR Triaging"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-07T10:43:31Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/o/r/actions/runs/1/job/2",
+      "name": "close-from-default-branch / close-from-default-branch",
+      "startedAt": "2026-09-07T10:43:31Z",
+      "status": "COMPLETED",
+      "workflowName": "PR Triaging"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-07T10:43:42Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/o/r/actions/runs/1/job/3",
+      "name": "check-requirements / check-requirements",
+      "startedAt": "2026-09-07T10:43:34Z",
+      "status": "COMPLETED",
+      "workflowName": "PR Triaging"
+    }
+  ],
+  "title": "Say how to install it on an older system",
+  "updatedAt": "2026-09-07T13:43:01Z",
+  "url": "https://github.com/o/r/pull/7"
+}
