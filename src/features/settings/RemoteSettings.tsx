@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   errorMessage,
   ipc,
+  type RemoteDeleted,
   type RemoteDevice,
   type RemoteEarlierDaemon,
   type RemoteExported,
@@ -38,6 +39,7 @@ export function RemoteSettings() {
   const [requests, setRequests] = useState<RemoteRequest[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleted, setDeleted] = useState<RemoteDeleted | null>(null);
 
   // Off, the form offers what Remote was last turned on with, unless something is typed already.
   const show = (next: RemoteStatus) => {
@@ -130,6 +132,15 @@ export function RemoteSettings() {
       {error && (
         <p role="alert" className="text-red-400 select-text">
           {error}
+        </p>
+      )}
+
+      {deleted && (
+        <p role="status" className="rounded border border-line px-3 py-2">
+          Your account was deleted at the server, with {counted(deleted.devices, "device")},{" "}
+          {counted(deleted.hosts, "computer")} and {counted(deleted.records, "synced record")}.
+          Every device was signed out. Remote is off on this computer, and everything on it is still
+          here.
         </p>
       )}
 
@@ -253,7 +264,19 @@ export function RemoteSettings() {
             )}
           </section>
 
-          {!stopped && <AccountExport />}
+          {!stopped && (
+            <AccountExport
+              onDeleted={(gone) => {
+                setPairing(null);
+                setRequests([]);
+                setDeleted(gone);
+                void ipc
+                  .remoteStatus()
+                  .then(show)
+                  .catch(() => {});
+              }}
+            />
+          )}
 
           <ProjectsFolderSettings />
         </>
@@ -317,7 +340,7 @@ export function RemoteSettings() {
  * Exporting the account: what the file holds, said before it is made, then a save dialog. The
  * server makes nothing until the person has chosen where it goes.
  */
-function AccountExport() {
+function AccountExport({ onDeleted }: { onDeleted: (deleted: RemoteDeleted) => void }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<RemoteExported | null>(null);
@@ -408,7 +431,112 @@ function AccountExport() {
           </button>
         </div>
       )}
+      <AccountDeletion onDeleted={onDeleted} />
     </section>
+  );
+}
+
+/**
+ * Deleting the account, for every device: what goes and what stays, said first; then the person
+ * types the confirmation, and signs in again in the browser, which is what deletes. Nothing is
+ * deleted until that sign-in comes back.
+ */
+function AccountDeletion({ onDeleted }: { onDeleted: (deleted: RemoteDeleted) => void }) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [waiting, setWaiting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const confirmed = typed.trim().toLowerCase() === "delete";
+
+  const remove = async () => {
+    setError(null);
+    setWaiting(true);
+    try {
+      const deleted = await ipc.remoteDeleteAccount();
+      setOpen(false);
+      onDeleted(deleted);
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setWaiting(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <div>
+        <button
+          type="button"
+          onClick={() => {
+            setTyped("");
+            setError(null);
+            setOpen(true);
+          }}
+          className={buttonClass}
+        >
+          Delete my account…
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div
+      role="group"
+      aria-label="Delete your account"
+      className="grid gap-2 rounded border border-red-400/50 px-3 py-2"
+    >
+      {error && (
+        <p role="alert" className="text-red-400 select-text">
+          {error}
+        </p>
+      )}
+      <p>Deleting your account removes everything the server keeps of it, for every device:</p>
+      <ul className="list-disc pl-5 text-ink-faint">
+        <li>every phone and computer signed in to it, each of them signed out</li>
+        <li>the devices each computer lets in, and which phones get notifications</li>
+        <li>every synced project, note and workspace name</li>
+      </ul>
+      <p>
+        What stays: everything on this computer and on your other devices. Projects, workspaces and
+        agents carry on. Remote turns off here.
+      </p>
+      <p className="text-ink-faint">
+        It cannot be undone. Export your account first to keep a copy. To confirm it is you, you
+        sign in again in the browser.
+      </p>
+      <Field label="Type delete to confirm">
+        <input
+          value={typed}
+          onChange={(event) => setTyped(event.target.value)}
+          disabled={waiting}
+          autoComplete="off"
+          spellCheck={false}
+          className={inputClass}
+        />
+      </Field>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={!confirmed || waiting}
+          onClick={() => void remove()}
+          className={primaryButtonClass}
+        >
+          Sign in again and delete
+        </button>
+        {waiting ? (
+          <>
+            <span className="text-ink-faint">Waiting for the browser…</span>
+            <button type="button" onClick={() => void ipc.remoteCancel()} className={buttonClass}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button type="button" onClick={() => setOpen(false)} className={buttonClass}>
+            Keep my account
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 

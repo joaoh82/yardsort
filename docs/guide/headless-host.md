@@ -547,6 +547,18 @@ everything it holds and leaves out.
 Like `pair`, it is refused from any terminal Yardsort started and from anything an agent runs, since
 the file holds every synced note. `serve` has to be running.
 
+## When the account is deleted
+
+There is no command to delete the account from here. Delete it from your computer, your phone or
+your server's web page: see [Deleting your account](delete-account.md). The next time this computer
+reaches the server, `yardsort-host status` says so:
+
+```text
+Link: stopped: This computer's account was deleted at the server. Everything on this computer is still here. Sign in again with `yardsort-host sign-in`.
+```
+
+Its projects, workspaces and agents keep running. Signing in again starts a new, empty account.
+
 ## Signing out
 
 ```sh

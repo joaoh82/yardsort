@@ -40,6 +40,7 @@
 
 pub mod account;
 pub mod conversation;
+pub mod delete;
 pub mod export;
 pub mod grant;
 pub mod ids;
@@ -281,6 +282,22 @@ pub struct RemoteError {
     /// With `protocol_incompatible`: the majors this side speaks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supported_protocols: Option<Vec<u16>>,
+    /// With `unauthenticated`: why the credential stopped working, when that is something a
+    /// client says in its own words. Absent from an older server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<ErrorReason>,
+}
+
+/// Why a request was refused, beyond its code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ErrorReason {
+    /// The account this device signed in to was deleted, from this device or another. Nothing
+    /// of it is left at the server; everything on the device is still there.
+    AccountDeleted,
+    /// A reason from a newer server this build does not know.
+    #[serde(other)]
+    Unknown,
 }
 
 impl RemoteError {
@@ -290,6 +307,15 @@ impl RemoteError {
             message: message.into(),
             retryable: code.retryable(),
             supported_protocols: None,
+            reason: None,
+        }
+    }
+
+    /// This error, with `reason`.
+    pub fn because(self, reason: ErrorReason) -> Self {
+        Self {
+            reason: Some(reason),
+            ..self
         }
     }
 

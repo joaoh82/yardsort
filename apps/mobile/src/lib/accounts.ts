@@ -19,12 +19,14 @@
  */
 
 import {
+  type AccountDeleted,
   type Channel,
   type Client,
   Client as ServerClient,
   ClientError,
   codeFromRedirect,
   type Crypto,
+  DELETE_CAPABILITY,
   type DevicePage,
   type GrantId,
   type GrantSummary,
@@ -389,7 +391,7 @@ export class Accounts {
         this.#notice =
           "The new sign-in could not be saved on this phone. It works until the app closes; then sign in again.";
       } else if (refused(error)) {
-        return await this.#signedOut(profile);
+        return await this.#signedOut(profile, error);
       } else {
         standing = { kind: "unreachable", message: messageOf(error) };
         code = error instanceof ClientError ? (error.code ?? error.kind) : "error";
@@ -406,11 +408,17 @@ export class Accounts {
     this.#changed();
   }
 
-  /** The server refused this phone's credential: forget the profile, and say so. */
-  async #signedOut(profile: Profile): Promise<void> {
+  /**
+   * The server refused this phone's credential: forget the profile, and say so, and why when the
+   * server said its account was deleted.
+   */
+  async #signedOut(profile: Profile, error?: unknown): Promise<void> {
     this.env.diagnostics?.record({ what: "signIn", standing: "signedOut" });
     await this.#forget(profile.id);
-    this.#notice = `This phone was signed out of ${profile.serverName}. Nothing from it is kept here.`;
+    this.#notice =
+      error instanceof ClientError && error.accountDeleted
+        ? `Your account at ${profile.serverName} was deleted, so this phone is signed out. Everything on your computers is still there.`
+        : `This phone was signed out of ${profile.serverName}. Nothing from it is kept here.`;
     this.#changed();
   }
 
@@ -462,7 +470,7 @@ export class Accounts {
       }
     } catch (error) {
       if (refused(error)) {
-        await this.#signedOut(profile);
+        await this.#signedOut(profile, error);
       } else if (error instanceof OtherServer) {
         // Opening it again asks again, from the credential kept.
         this.#sessions.delete(profile.id);
@@ -498,6 +506,44 @@ export class Accounts {
   exportAccount(): Promise<import("@yardsort/remote-client").AccountExport> {
     const now = (this.env.clock ?? Date.now)();
     return this.#withAccess((session, access) => session.client.exportAccount(access, now));
+  }
+
+  /**
+   * Delete the active profile's account, for every device: the person typed the confirmation,
+   * and now signs in again in the browser, which is what deletes. Then the profile goes from this
+   * phone. `null` when they closed the browser first: nothing was deleted.
+   */
+  async deleteAccount(browser: Browser): Promise<AccountDeleted | null> {
+    const { profile, session } = this.#session();
+    const { client } = session;
+    const { capabilities } = await client.describe();
+    if (!capabilities.includes(DELETE_CAPABILITY)) {
+      throw new ClientError(
+        "invalid",
+        `${profile.serverName} cannot delete an account yet. Its operator has to update it.`,
+      );
+    }
+    const { url, verifier } = await client.beginSignIn(REDIRECT, "confirm");
+    const returned = await browser(url, REDIRECT);
+    if (returned === null) return null;
+    const code = codeFromRedirect(returned);
+    // Not through #withAccess: a confirmation that lapsed is refused as unauthenticated too, and
+    // that must not sign this phone out.
+    let deleted: AccountDeleted;
+    try {
+      deleted = await client.deleteAccount(await session.access(), code, verifier);
+    } catch (error) {
+      // Deleted meanwhile, from another device: gone all the same.
+      if (error instanceof ClientError && error.accountDeleted) {
+        await this.#signedOut(profile, error);
+      }
+      throw error;
+    }
+    this.env.diagnostics?.record({ what: "signIn", standing: "signedOut" });
+    await this.#forget(profile.id);
+    this.#notice = `Your account at ${profile.serverName} was deleted, and every device signed out. Everything on your computers is still there.`;
+    this.#changed();
+    return deleted;
   }
 
   /** What this phone is set to receive. */

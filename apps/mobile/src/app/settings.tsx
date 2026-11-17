@@ -39,9 +39,11 @@ export default function Settings() {
         <Section title="Your account">
           <Group>
             <Row title="Export my account’s data" onPress={() => router.push("/export")} />
+            <Row title="Delete my account" onPress={() => router.push("/delete-account")} />
           </Group>
           <Body muted>
-            Everything {snapshot.active.serverName} keeps of your account, as a file you keep.
+            Everything {snapshot.active.serverName} keeps of your account, as a file you keep, or
+            gone for every device. Nothing on your computers is deleted.
           </Body>
         </Section>
       )}

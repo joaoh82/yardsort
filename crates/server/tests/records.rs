@@ -89,6 +89,8 @@ for_each_store!(
     pruning_raises_the_floor_and_forgets_old_ops,
     racing_ops_on_one_record_apply_one,
     an_export_reads_one_account_and_only_what_has_a_body,
+    a_confirming_sign_in_and_its_handoff_say_so,
+    deleting_an_account_leaves_nothing_of_it_and_another_untouched,
 );
 
 const T: i64 = 1_800_000_000_000;
@@ -151,6 +153,7 @@ fn login(state: &str, expires_at: i64) -> PendingLogin {
         provider_verifier: Secret::new(format!("{state}-verifier")),
         device_challenge: format!("{state}-challenge"),
         device_redirect: "yardsort://signed-in".into(),
+        confirm: false,
         expires_at,
     }
 }
@@ -198,6 +201,7 @@ fn handoff(code: &str, account: &AccountId, expires_at: i64) -> Handoff {
         code: h(code),
         account: account.clone(),
         device_challenge: format!("{code}-challenge"),
+        confirm: false,
         expires_at,
     }
 }
@@ -2708,4 +2712,259 @@ async fn an_export_reads_one_account_and_only_what_has_a_body(records: Arc<impl 
         .unwrap()
         .0
         .is_empty());
+}
+
+async fn a_confirming_sign_in_and_its_handoff_say_so(records: Arc<impl Records>) {
+    let account = records.account("https://id.one", "alice", T).await.unwrap();
+    assert_eq!(
+        records
+            .find_account("https://id.one", "alice")
+            .await
+            .unwrap(),
+        Some(account.clone())
+    );
+    assert_eq!(
+        records
+            .find_account("https://id.one", "nobody")
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        records
+            .find_account("https://id.one", "nobody")
+            .await
+            .unwrap(),
+        None,
+        "looking makes no account"
+    );
+    records
+        .put_login(
+            PendingLogin {
+                confirm: true,
+                ..login("again", T + 600)
+            },
+            T,
+        )
+        .await
+        .unwrap();
+    assert!(
+        records
+            .take_login(&h("again"))
+            .await
+            .unwrap()
+            .unwrap()
+            .confirm
+    );
+    records.put_login(login("plain", T + 600), T).await.unwrap();
+    assert!(
+        !records
+            .take_login(&h("plain"))
+            .await
+            .unwrap()
+            .unwrap()
+            .confirm
+    );
+    records
+        .put_handoff(
+            Handoff {
+                confirm: true,
+                ..handoff("again", &account, T + 60)
+            },
+            T,
+        )
+        .await
+        .unwrap();
+    assert!(
+        records
+            .take_handoff(&h("again"))
+            .await
+            .unwrap()
+            .unwrap()
+            .confirm
+    );
+}
+
+/// Everything an account can have, on `account`: a phone with a push route and a host with a
+/// grant for it, an open offer, a link place, preferences and a synced project with a note.
+async fn furnish(records: &impl Records, account: &AccountId, name: &str) -> (Device, HostId) {
+    let phone = enroll(records, account, &format!("{name}-phone"), T).await;
+    assert!(records
+        .save_push_token(account, &phone.id, "apns", &format!("{name}-token"), T)
+        .await
+        .unwrap());
+    let here = sync_host(records, account, &format!("{name}-host")).await;
+    let host = records.host(account, &here).await.unwrap().unwrap();
+    records.add_grant(pending(&host, &phone, T)).await.unwrap();
+    records
+        .put_offer(offer(&host, &format!("{name}-offer"), T + 300_000), T)
+        .await
+        .unwrap();
+    records
+        .put_link(LinkPlace {
+            host: here.clone(),
+            instance: format!("{name}-instance"),
+            link: format!("{name}-link"),
+            seen_at: T,
+        })
+        .await
+        .unwrap();
+    records
+        .set_notification_preferences(
+            account,
+            &remote_proto::notify::NotificationPreferences {
+                muted: true,
+                task: true,
+                review: true,
+                failure: true,
+                desktop_update: true,
+                workflow: true,
+                agent: Some(false),
+            },
+        )
+        .await
+        .unwrap();
+    let project = synced_project(records, account, &here).await;
+    apply(
+        records,
+        account,
+        &here,
+        &put(RecordKind::Note, &sid(), &project, None, "a note"),
+    )
+    .await;
+    (phone, here)
+}
+
+/// How much `account` has of each thing [`furnish`] gives it.
+async fn holdings(
+    records: &impl Records,
+    account: &AccountId,
+    host: &HostId,
+) -> (usize, usize, usize, usize, usize, bool, bool) {
+    (
+        records.devices(account).await.unwrap().len(),
+        records.hosts(account).await.unwrap().len(),
+        records
+            .grants(account, GrantFilter::All)
+            .await
+            .unwrap()
+            .len(),
+        records.push_routes(account).await.unwrap().len(),
+        records
+            .exported_records(account, None, 100)
+            .await
+            .unwrap()
+            .0
+            .len(),
+        records
+            .notification_preferences(account)
+            .await
+            .unwrap()
+            .muted,
+        records.link_place(host).await.unwrap().is_some(),
+    )
+}
+
+async fn deleting_an_account_leaves_nothing_of_it_and_another_untouched(
+    records: Arc<impl Records>,
+) {
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    let bob = records.account("https://id.one", "bob", T).await.unwrap();
+    let (phone, here) = furnish(&*records, &alice, "del-alice").await;
+    let (bobs_phone, bobs_host) = furnish(&*records, &bob, "del-bob").await;
+    let before = holdings(&*records, &bob, &bobs_host).await;
+    assert_eq!(before, (2, 1, 1, 1, 2, true, true));
+
+    let deleted = records
+        .delete_account(&alice, T + 10)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!((deleted.devices, deleted.hosts, deleted.records), (2, 1, 2));
+
+    assert!(records.account_row(&alice).await.unwrap().is_none());
+    assert!(records
+        .find_account("https://id.one", "alice")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(records.devices(&alice).await.unwrap().is_empty());
+    assert!(records.hosts(&alice).await.unwrap().is_empty());
+    assert!(records.host(&alice, &here).await.unwrap().is_none());
+    assert!(records
+        .grants(&alice, GrantFilter::All)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(records.push_routes(&alice).await.unwrap().is_empty());
+    assert!(records
+        .exported_records(&alice, None, 100)
+        .await
+        .unwrap()
+        .0
+        .is_empty());
+    assert!(records.link_place(&here).await.unwrap().is_none());
+    assert!(
+        !records
+            .notification_preferences(&alice)
+            .await
+            .unwrap()
+            .muted
+    );
+    assert!(records
+        .access(&h("del-alice-phone-access"))
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        records
+            .rotate(
+                &h("del-alice-phone-refresh"),
+                issued("after", T + 20),
+                T + 20
+            )
+            .await
+            .unwrap(),
+        Rotation::Unknown
+    );
+    assert_eq!(records.delete_account(&alice, T + 30).await.unwrap(), None);
+
+    // What is kept: the hashes, until each would have lapsed. Nothing of bob's.
+    assert!(records
+        .deleted_credential(&h("del-alice-phone-access"), T + 10)
+        .await
+        .unwrap());
+    assert!(records
+        .deleted_credential(&h("del-alice-phone-refresh"), T + 10)
+        .await
+        .unwrap());
+    assert!(!records
+        .deleted_credential(&h("del-alice-phone-access"), T + 1000)
+        .await
+        .unwrap());
+    assert!(records
+        .deleted_credential(&h("del-alice-phone-refresh"), T + 9_999)
+        .await
+        .unwrap());
+    assert!(!records
+        .deleted_credential(&h("del-alice-phone-refresh"), T + 10_000)
+        .await
+        .unwrap());
+    assert!(!records
+        .deleted_credential(&h("del-bob-phone-access"), T + 10)
+        .await
+        .unwrap());
+    assert!(!records
+        .deleted_credential(&h("never-issued"), T + 10)
+        .await
+        .unwrap());
+
+    assert_eq!(holdings(&*records, &bob, &bobs_host).await, before);
+    assert!(records
+        .access(&h("del-bob-phone-access"))
+        .await
+        .unwrap()
+        .is_some());
+    assert_eq!(records.devices(&bob).await.unwrap()[0].account, bob);
+    let _ = (phone, bobs_phone);
 }

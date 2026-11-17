@@ -27,6 +27,7 @@
 
 pub mod account;
 pub mod computer;
+pub mod delete;
 pub mod export;
 pub mod sync;
 

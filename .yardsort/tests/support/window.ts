@@ -293,6 +293,27 @@ switch (doing) {
     );
     break;
   }
+  case "deletes": {
+    // Settings → Remote → Your account → Delete my account…: what goes and what stays, the
+    // confirmation typed, then the browser, which the stand-in answers as the person signing in
+    // again would.
+    await click("Delete my account…");
+    await expectToSee("every phone and computer signed in to it, each of them signed out");
+    await expectToSee("everything on this computer and on your other devices");
+    await until("the confirmation typed", () =>
+      page(`(() => {
+        const input = document.querySelector('[aria-label="Delete your account"] input');
+        if (!input) return false;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, "delete");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      })()`),
+    );
+    await click("Sign in again and delete");
+    await expectToSee("Your account was deleted at the server");
+    await expectToSee("Turn on and sign in");
+    break;
+  }
   case "pairing-code": {
     await click("Pair a device");
     const code = await until("a pairing code", () =>

@@ -218,6 +218,30 @@ impl Served {
         signed_in.json().await.unwrap()
     }
 
+    /// A sign-in again that confirms a deletion, through the browser and back, as `subject`: the
+    /// provider's authorize address the server sent the browser to, and the device's verifier
+    /// and the redirect it came back to.
+    #[allow(dead_code)]
+    pub async fn confirm(&self, subject: &str) -> (Url, String, Url) {
+        let verifier = tokens::random();
+        let mut start = self.url("v1/login");
+        start
+            .query_pairs_mut()
+            .append_pair("challenge", &tokens::s256(&verifier))
+            .append_pair("challengeMethod", "S256")
+            .append_pair("redirect", APP)
+            .append_pair("purpose", "confirm");
+        let to_provider = location(&self.client.get(start).send().await.unwrap());
+        let (code, state) = self.idp.approve(&to_provider, subject);
+        let mut callback = self.url("v1/login/callback");
+        callback
+            .query_pairs_mut()
+            .append_pair("code", &code)
+            .append_pair("state", &state);
+        let back = location(&self.client.get(callback).send().await.unwrap());
+        (to_provider, verifier, back)
+    }
+
     /// `GET` as the device holding `access`.
     pub async fn get_as(&self, access: &Secret, path: &str) -> reqwest::Response {
         self.client

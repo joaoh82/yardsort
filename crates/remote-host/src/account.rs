@@ -199,7 +199,12 @@ pub fn failed(error: ClientError) -> Failure {
 /// A request made with this computer's own credential. Refused, it was signed out at the server;
 /// the server's own words ("Sign in again.") are for any client.
 pub fn refused_here(error: ClientError) -> Failure {
-    if error.code() == Some(ErrorCode::Unauthenticated) {
+    if error.account_deleted() {
+        Failure::signed_out(
+            "This computer's account was deleted at the server. Everything on this computer is \
+             still here.",
+        )
+    } else if error.code() == Some(ErrorCode::Unauthenticated) {
         Failure::signed_out("This computer was signed out at the server.")
     } else {
         failed(error)
@@ -773,6 +778,18 @@ pub async fn revoke(home: &impl Home, grant_id: String) -> Result<()> {
         .map_err(refused_here)
 }
 
+/// Forget this computer's account here, once the server has deleted it: the link closes, and
+/// its row and credential go. Nothing is remembered for signing in again, since the host it was
+/// is gone too. Local work is untouched.
+pub(crate) async fn forget(home: &impl Home, row: &RemoteHostRow) -> Result<()> {
+    disconnect(home).await;
+    *home.remote().session.lock().await = None;
+    home.store().forget_remote_host().map_err(store_failed)?;
+    forget_refresh(home, &row.device_id).map_err(|e| Failure::new("remote_credentials", e))?;
+    let _ = home.settings().update(|s| s.remote.left_host = None);
+    Ok(())
+}
+
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -945,6 +962,24 @@ mod tests {
         let theirs = failed(refused(ErrorCode::Unauthenticated));
         assert!(theirs.is_signed_out());
         assert!(!theirs.needs_where_to_sign_in());
+    }
+
+    #[test]
+    fn an_account_deleted_elsewhere_says_so_and_that_this_computer_keeps_everything() {
+        let deleted = ClientError::Remote(
+            RemoteError::new(ErrorCode::Unauthenticated, "Gone.")
+                .because(remote_proto::ErrorReason::AccountDeleted),
+        );
+        let failure = refused_here(deleted);
+        assert!(failure.is_signed_out() && failure.needs_where_to_sign_in());
+        assert!(
+            failure.message.contains("account was deleted"),
+            "{}",
+            failure.message
+        );
+        assert!(failure
+            .message
+            .contains("Everything on this computer is still here"));
     }
 
     #[test]

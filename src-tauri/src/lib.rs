@@ -175,6 +175,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             remote::remote_disable,
             remote::remote_pair,
             remote::remote_export,
+            remote::remote_delete_account,
             remote::remote_requests,
             remote::remote_answer,
             remote::remote_revoke,

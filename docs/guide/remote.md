@@ -553,6 +553,24 @@ on Android you pick a folder. On a computer with no screen, see
 
 A server too old to export says so. Its operator updates it.
 
+## Deleting your account
+
+**Settings → Remote → Your account → Delete my account…** deletes everything the server keeps of
+your account, for every device: the account, its phones and computers, which devices each lets in,
+notification settings, and every synced project, note and workspace name. Nothing on this computer
+or your other devices is deleted, and Yardsort keeps working without an account.
+
+It says what goes and what stays first. Type **delete**, press **Sign in again and delete**, and
+sign in again in the browser. Nothing is deleted until that sign-in comes back, and **Cancel** stops
+waiting for it. Afterwards Settings → Remote says how many devices, computers and synced records went,
+and Remote is off here. Every other device is signed out, and says the account was deleted the next
+time it reaches the server. Export your account first to keep a copy, since deleting cannot be
+undone.
+
+The phone has it under **Settings → Your account → Delete my account**, and the server has a web
+page for it, `/account/delete`. See [Deleting your account](delete-account.md) for both, and for
+the little the server keeps afterwards.
+
 ## The phone app
 
 [The phone app](phone.md) says what it does and what it needs. It is invite only for now, and will

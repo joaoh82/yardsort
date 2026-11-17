@@ -11,6 +11,7 @@ export * from "./account.ts";
 export * from "./channel.ts";
 export * from "./client.ts";
 export * from "./crypto.ts";
+export * from "./delete.ts";
 export * from "./export.ts";
 export { chars, DecodeError, type Decoder, decode, parse, utf8Length } from "./decode.ts";
 export * from "./frame.ts";

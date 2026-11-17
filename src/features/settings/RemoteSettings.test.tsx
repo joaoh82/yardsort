@@ -17,6 +17,7 @@ const core = vi.hoisted(() => ({
   remoteProjectsDir: vi.fn(),
   remoteSetProjectsDir: vi.fn(),
   remoteExport: vi.fn(),
+  remoteDeleteAccount: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -612,5 +613,66 @@ describe("exporting the account", () => {
     render(<RemoteSettings />);
     await screen.findByRole("button", { name: "Sign in again" });
     expect(screen.queryByRole("region", { name: "Your account" })).toBeNull();
+  });
+});
+
+describe("deleting the account", () => {
+  const open = async () => {
+    render(<RemoteSettings />);
+    const section = await screen.findByRole("region", { name: "Your account" });
+    await userEvent.click(within(section).getByRole("button", { name: "Delete my account…" }));
+    return within(section).getByRole("group", { name: "Delete your account" });
+  };
+
+  it("says what goes and what stays, and asks nothing of the server until delete is typed", async () => {
+    core.remoteStatus.mockResolvedValue(on);
+    const asked = await open();
+    expect(asked).toHaveTextContent("every phone and computer signed in to it");
+    expect(asked).toHaveTextContent("every synced project, note and workspace name");
+    expect(asked).toHaveTextContent("everything on this computer and on your other devices");
+    expect(asked).toHaveTextContent("It cannot be undone.");
+    const go = within(asked).getByRole("button", { name: "Sign in again and delete" });
+    expect(go).toBeDisabled();
+    const typed = within(asked).getByRole("textbox", { name: "Type delete to confirm" });
+    await userEvent.type(typed, "delet");
+    expect(go).toBeDisabled();
+    await userEvent.click(within(asked).getByRole("button", { name: "Keep my account" }));
+    expect(screen.queryByRole("group", { name: "Delete your account" })).toBeNull();
+    expect(core.remoteDeleteAccount).not.toHaveBeenCalled();
+  });
+
+  it("waits for the browser, can be cancelled, and once deleted says so with Remote off", async () => {
+    core.remoteStatus.mockResolvedValue(on);
+    let cancelled: (reason: unknown) => void = () => {};
+    core.remoteDeleteAccount.mockImplementationOnce(
+      () => new Promise((_, reject) => (cancelled = reject)),
+    );
+    core.remoteCancel.mockImplementation(async () => {
+      cancelled({
+        code: "remote_cancelled",
+        message: "Deleting was cancelled. Nothing was deleted.",
+      });
+      return on;
+    });
+    const asked = await open();
+    await userEvent.type(
+      within(asked).getByRole("textbox", { name: "Type delete to confirm" }),
+      " Delete",
+    );
+    await userEvent.click(within(asked).getByRole("button", { name: "Sign in again and delete" }));
+    expect(asked).toHaveTextContent("Waiting for the browser…");
+    await userEvent.click(within(asked).getByRole("button", { name: "Cancel" }));
+    expect(await within(asked).findByRole("alert")).toHaveTextContent("Nothing was deleted.");
+
+    core.remoteDeleteAccount.mockResolvedValueOnce({ devices: 3, hosts: 1, records: 42 });
+    core.remoteStatus.mockResolvedValue(off);
+    await userEvent.click(within(asked).getByRole("button", { name: "Sign in again and delete" }));
+    const told = await screen.findByText(/Your account was deleted at the server/);
+    expect(told).toHaveTextContent(
+      "with 3 devices, 1 computer and 42 synced records. Every device was signed out.",
+    );
+    expect(told).toHaveTextContent("everything on it is still here");
+    expect(await screen.findByRole("button", { name: "Turn on and sign in" })).toBeVisible();
+    expect(core.remoteDeleteAccount).toHaveBeenCalledTimes(2);
   });
 });
