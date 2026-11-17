@@ -18,7 +18,8 @@ vi.mock("@/lib/ipc", async (original) => ({
 import { useNotificationsStore } from "@/stores/notifications";
 import { useProjectsStore } from "@/stores/projects";
 import { useTerminalStore, type TerminalTab } from "@/stores/terminals";
-import { notification } from "@/test/fixtures";
+import { useWorkflowStore } from "@/stores/workflows";
+import { notification, standingNotification } from "@/test/fixtures";
 import { NotificationsView } from "./NotificationsView";
 
 const tab = (id: string): TerminalTab => ({
@@ -189,6 +190,94 @@ describe("NotificationsView", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Earlier" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "All" })).toBeInTheDocument();
+  });
+
+  it("lists a workflow, a smoke test, a schedule and a trigger beside the agents", () => {
+    show([
+      standingNotification("question", {
+        kind: "workflow.question",
+        said: "Which zones should the fix cover?",
+        // The newer of the two that wait, so the first of them.
+        at: Date.now() - 30_000,
+      }),
+      standingNotification("failed", {
+        kind: "workflow.failed",
+        part: "finished",
+        note: "The agent's terminal closed.",
+      }),
+      standingNotification("lost", {
+        kind: "schedule.noWorkspace",
+        title: "Nightly review",
+        workspaceId: null,
+        branch: null,
+        at: Date.now() - 120_000,
+      }),
+    ]);
+    const needs = screen.getByRole("region", { name: "Needs you" });
+    const [question, lost] = within(needs).getAllByRole("listitem");
+    expect(question).toHaveTextContent(
+      "fix-loginappys/fix-login· ReviewWorkflow asks you a question“Which zones should the fix cover?”",
+    );
+    // With no workspace, the schedule's own name leads, and the one it lost follows.
+    expect(lost).toHaveTextContent(
+      "Nightly reviewapp· was in fix-loginSchedule has no workspace to run in",
+    );
+    // Nothing that waits can be marked seen: it leaves when it is dealt with.
+    expect(within(needs).queryByRole("button", { name: "Mark seen" })).toBeNull();
+
+    const done = screen.getByRole("region", { name: "Finished, not seen" });
+    expect(within(done).getByRole("listitem")).toHaveTextContent(
+      "fix-loginappys/fix-login· ReviewWorkflow failedThe agent's terminal closed.",
+    );
+    expect(within(done).getByRole("img", { name: "went badly, not seen yet" })).toBeInTheDocument();
+    expect(within(done).getByRole("button", { name: "Mark seen" })).toBeInTheDocument();
+  });
+
+  it("opens a workflow's run from its row", async () => {
+    const user = userEvent.setup();
+    show([standingNotification("approval")]);
+    await user.click(
+      screen.getByRole("button", { name: "fix-login in app: Workflow waits for your approval" }),
+    );
+    expect(useProjectsStore.getState().workflowId).toBe("review");
+    expect(useProjectsStore.getState().notificationsOpen).toBe(false);
+    expect(useWorkflowStore.getState().shownRun.review).toBe("run-approval");
+  });
+
+  it("opens the workspace of a smoke test that waits, where its file is approved", async () => {
+    const user = userEvent.setup();
+    show([standingNotification("test", { kind: "test.waits", title: "Half-hour zones" })]);
+    await user.click(
+      screen.getByRole("button", {
+        name: "fix-login in app: Smoke test waits for you to approve its file",
+      }),
+    );
+    expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-app-fix-login");
+    expect(useProjectsStore.getState().notificationsOpen).toBe(false);
+  });
+
+  it("opens Schedules and Triggers from their rows", async () => {
+    const user = userEvent.setup();
+    show([
+      standingNotification("refused", { kind: "schedule.refused", title: "Nightly review" }),
+      standingNotification("capped", { kind: "trigger.capped", title: "Review when done" }),
+    ]);
+    await user.click(
+      screen.getByRole("button", { name: "fix-login in app: Schedule could not start its run" }),
+    );
+    expect(useProjectsStore.getState().schedulesOpen).toBe(true);
+    expect(useProjectsStore.getState().notificationsOpen).toBe(false);
+
+    useProjectsStore.getState().openNotifications(true);
+    await user.click(
+      await screen.findByRole("button", {
+        name: "fix-login in app: Trigger reached its limit of runs",
+      }),
+    );
+    const projects = useProjectsStore.getState();
+    expect(projects.triggersOpen).toBe(true);
+    // On its workspace's triggers, so the one that is held is easy to find.
+    expect(projects.triggersFocus).toEqual({ workspaceId: "w-app-fix-login" });
   });
 
   it("closes from its header", async () => {

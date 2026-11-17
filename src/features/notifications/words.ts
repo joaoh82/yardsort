@@ -30,9 +30,17 @@ export function workedWords(ms: number): string | null {
   return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
 }
 
+/** What a row is about: which mark it is drawn with, and where pressing it goes. */
+export type About = "agent" | "workflow" | "test" | "schedule" | "trigger";
+
+export function about(item: Pick<NotificationItem, "kind">): About {
+  return item.kind.slice(0, item.kind.indexOf(".")) as About;
+}
+
 /** What happened, in the row's words. */
 export function what(item: NotificationItem): string {
   const agent = agentName(item);
+  const waits = item.part === "needs";
   switch (item.kind) {
     case "agent.asks":
       return item.part === "needs"
@@ -46,6 +54,44 @@ export function what(item: NotificationItem): string {
       return `${agent}'s turn failed`;
     case "agent.stopped":
       return `${agent} stopped with an error`;
+    case "workflow.approval":
+      return waits ? "Workflow waits for your approval" : "Workflow waited for an approval";
+    case "workflow.question":
+      return waits ? "Workflow asks you a question" : "Workflow asked a question";
+    case "workflow.succeeded":
+      return "Workflow finished";
+    case "workflow.failed":
+      return "Workflow failed";
+    case "test.waits":
+      return waits
+        ? "Smoke test waits for you to approve its file"
+        : "Smoke test waited for its file to be approved";
+    case "schedule.refused":
+      return waits ? "Schedule could not start its run" : "Schedule could not start a run";
+    case "schedule.noWorkspace":
+      return waits ? "Schedule has no workspace to run in" : "Schedule had no workspace to run in";
+    case "trigger.refused":
+      return waits ? "Trigger could not start its run" : "Trigger could not start a run";
+    case "trigger.capped":
+      return waits ? "Trigger reached its limit of runs" : "Trigger had reached its limit of runs";
+    case "trigger.noWorkspace":
+      return waits ? "Trigger has no workspace to run in" : "Trigger had no workspace to run in";
+  }
+}
+
+/** What pressing the row opens, for its label and its hint. */
+export function opens(item: NotificationItem): string {
+  switch (about(item)) {
+    case "agent":
+      return item.terminalId ? "the agent's terminal" : "its workspace";
+    case "workflow":
+      return "the run";
+    case "test":
+      return "its workspace, where the file is approved";
+    case "schedule":
+      return "Schedules";
+    case "trigger":
+      return "Triggers";
   }
 }
 
@@ -58,7 +104,23 @@ export function chip(item: NotificationItem): string | null {
 
 /** Whether a row went badly: drawn red rather than amber. */
 export function wentBadly(item: NotificationItem): boolean {
-  return item.kind === "agent.failed" || item.kind === "agent.stopped";
+  return (
+    item.kind === "agent.failed" || item.kind === "agent.stopped" || item.kind === "workflow.failed"
+  );
+}
+
+/** The name a row leads with: its workspace, or for a schedule or a trigger that has none, its
+ *  own name. */
+export function leadName(item: NotificationItem): string {
+  return item.workspaceId !== null && item.workspaceName ? item.workspaceName : item.title;
+}
+
+/** Beside the lead name, after the branch: what the row is about within its workspace. A
+ *  schedule or a trigger with no workspace leads with its own name, and says here which
+ *  workspace it lost. */
+export function detailName(item: NotificationItem): string | null {
+  if (item.workspaceId !== null && item.workspaceName) return item.title || null;
+  return item.workspaceName ? `was in ${item.workspaceName}` : null;
 }
 
 const newestFirst = (a: NotificationItem, b: NotificationItem) => b.at - a.at;
@@ -91,7 +153,7 @@ export function sections(items: NotificationItem[], grouping: Grouping, filter: 
     out.push({
       id: "needs",
       title: "Needs you",
-      note: "Leaves when it is answered",
+      note: "Leaves when it is answered or put right",
       namesProject: true,
       items: waiting.filter((item) => item.part === "needs").sort(newestFirst),
     });

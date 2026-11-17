@@ -1,8 +1,8 @@
 //! The Notifications list: what waits for a person, and what finished while they were not
 //! looking. See `docs/design/46-notifications.md`.
 //!
-//! One row is one thing that happened to an agent's conversation. It is written here when the
-//! thing happens, and it leaves its part of the list by itself:
+//! One row is one thing that happened. A row about an agent's conversation is written here when
+//! the thing happens, and it leaves its part of the list by itself:
 //!
 //! - **Needs you.** The agent asked for a permission ([`read_events`], from its own hook's
 //!   `approval.requested`). It leaves when the wait is answered, by the rule the phone's notice
@@ -12,6 +12,10 @@
 //!   [`Turns`] folds the two into one), or its process stopped with an error ([`exited`]). It
 //!   leaves when someone looks: [`seen`], [`seen_terminal`], [`seen_all`], or a message typed to
 //!   the agent.
+//!
+//! Everything else that waits is read from where it already stands in the store
+//! ([`standing::read`]): a workflow's question or approval, a workflow run that ended, a smoke
+//! test waiting to be let run, and a schedule or a trigger that could not start.
 //!
 //! What has left is kept for a week ([`KEPT_MS`]) and then deleted.
 //!
@@ -85,7 +89,55 @@ pub enum NotificationKind {
     /// An agent's process exited with an error.
     #[serde(rename = "agent.stopped")]
     AgentStopped,
+    /// A workflow run waits for an approval.
+    #[serde(rename = "workflow.approval")]
+    WorkflowApproval,
+    /// A workflow run waits for the answer to a question.
+    #[serde(rename = "workflow.question")]
+    WorkflowQuestion,
+    /// A workflow run ended well.
+    #[serde(rename = "workflow.succeeded")]
+    WorkflowSucceeded,
+    /// A workflow run failed.
+    #[serde(rename = "workflow.failed")]
+    WorkflowFailed,
+    /// A smoke test's run waits for its file to be approved.
+    #[serde(rename = "test.waits")]
+    TestWaits,
+    /// A schedule's time came and its run could not be started.
+    #[serde(rename = "schedule.refused")]
+    ScheduleRefused,
+    /// A schedule's workspace was deleted.
+    #[serde(rename = "schedule.noWorkspace")]
+    ScheduleNoWorkspace,
+    /// A trigger fired and its run could not be started.
+    #[serde(rename = "trigger.refused")]
+    TriggerRefused,
+    /// A trigger has had the runs its limit allows, and waits to be reset.
+    #[serde(rename = "trigger.capped")]
+    TriggerCapped,
+    /// A trigger's workspace was deleted.
+    #[serde(rename = "trigger.noWorkspace")]
+    TriggerNoWorkspace,
 }
+
+/// Every kind, for reading one back by its name.
+const KINDS: [NotificationKind; 14] = [
+    NotificationKind::AgentAsks,
+    NotificationKind::AgentFinished,
+    NotificationKind::AgentFailed,
+    NotificationKind::AgentStopped,
+    NotificationKind::WorkflowApproval,
+    NotificationKind::WorkflowQuestion,
+    NotificationKind::WorkflowSucceeded,
+    NotificationKind::WorkflowFailed,
+    NotificationKind::TestWaits,
+    NotificationKind::ScheduleRefused,
+    NotificationKind::ScheduleNoWorkspace,
+    NotificationKind::TriggerRefused,
+    NotificationKind::TriggerCapped,
+    NotificationKind::TriggerNoWorkspace,
+];
 
 impl NotificationKind {
     fn name(self) -> &'static str {
@@ -94,19 +146,52 @@ impl NotificationKind {
             NotificationKind::AgentFinished => "agent.finished",
             NotificationKind::AgentFailed => "agent.failed",
             NotificationKind::AgentStopped => "agent.stopped",
+            NotificationKind::WorkflowApproval => "workflow.approval",
+            NotificationKind::WorkflowQuestion => "workflow.question",
+            NotificationKind::WorkflowSucceeded => "workflow.succeeded",
+            NotificationKind::WorkflowFailed => "workflow.failed",
+            NotificationKind::TestWaits => "test.waits",
+            NotificationKind::ScheduleRefused => "schedule.refused",
+            NotificationKind::ScheduleNoWorkspace => "schedule.noWorkspace",
+            NotificationKind::TriggerRefused => "trigger.refused",
+            NotificationKind::TriggerCapped => "trigger.capped",
+            NotificationKind::TriggerNoWorkspace => "trigger.noWorkspace",
         }
     }
 
     fn named(name: &str) -> Option<Self> {
-        [
-            NotificationKind::AgentAsks,
-            NotificationKind::AgentFinished,
-            NotificationKind::AgentFailed,
-            NotificationKind::AgentStopped,
-        ]
-        .into_iter()
-        .find(|kind| kind.name() == name)
+        KINDS.into_iter().find(|kind| kind.name() == name)
     }
+
+    /// What the row is about, which says where its words come from.
+    fn about(self) -> About {
+        match self {
+            NotificationKind::AgentAsks
+            | NotificationKind::AgentFinished
+            | NotificationKind::AgentFailed
+            | NotificationKind::AgentStopped => About::Agent,
+            NotificationKind::WorkflowApproval
+            | NotificationKind::WorkflowQuestion
+            | NotificationKind::WorkflowSucceeded
+            | NotificationKind::WorkflowFailed => About::Workflow,
+            NotificationKind::TestWaits => About::Test,
+            NotificationKind::ScheduleRefused | NotificationKind::ScheduleNoWorkspace => {
+                About::Schedule
+            }
+            NotificationKind::TriggerRefused
+            | NotificationKind::TriggerCapped
+            | NotificationKind::TriggerNoWorkspace => About::Trigger,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum About {
+    Agent,
+    Workflow,
+    Test,
+    Schedule,
+    Trigger,
 }
 
 /// Where a row is in the list.
@@ -129,15 +214,25 @@ pub struct Notification {
     pub part: NotificationPart,
     pub project_id: String,
     pub project_name: String,
-    pub workspace_id: String,
+    /// The workspace it happened in. Only a schedule or a trigger can be without one.
+    pub workspace_id: Option<String>,
+    /// What that workspace is called, or was: a schedule and a trigger keep the name of one
+    /// that is gone. Empty for a schedule that makes its own.
     pub workspace_name: String,
     pub branch: Option<String>,
     /// The agent's conversation, by its record's id.
     pub session_id: Option<String>,
-    /// What the conversation is called: its label, or the start of its first message.
-    pub session_title: String,
+    /// What the row is about, within its workspace: the conversation's label or the start of
+    /// its first message, or the name of the workflow, the test, the schedule or the trigger.
+    pub title: String,
     /// Which agent: `claude`, `codex`…
     pub harness_id: Option<String>,
+    /// The workflow's run, the smoke test's run, the schedule or the trigger, by its id.
+    pub subject_id: Option<String>,
+    /// The workflow of a row about a workflow's run.
+    pub workflow_id: Option<String>,
+    /// The step that waits, for a workflow's question or approval.
+    pub step_id: Option<String>,
     /// The conversation's terminal, while its process runs.
     pub terminal_id: Option<String>,
     /// When it happened, in epoch milliseconds.
@@ -148,16 +243,22 @@ pub struct Notification {
     pub exit_code: Option<i64>,
     /// The command the agent wants to run, while its question is open. See [`Lines`].
     pub command: Option<String>,
-    /// The start of what the agent said last. See [`Lines`].
+    /// The start of what the agent said last (see [`Lines`]), or of what a workflow asks.
     pub said: Option<String>,
+    /// Why, for something that went wrong: a failed run's error, or the reason a schedule or a
+    /// trigger could not start.
+    pub note: Option<String>,
 }
 
 struct Raw {
     id: String,
     kind: String,
     part: String,
-    workspace_id: String,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
     session_id: Option<String>,
+    subject_id: Option<String>,
+    step_id: Option<String>,
     worked_ms: Option<i64>,
     exit_code: Option<i64>,
     created_at: i64,
@@ -270,7 +371,12 @@ fn finished(
     worked_ms: Option<i64>,
     exit_code: Option<i64>,
 ) -> StoreResult<bool> {
-    settle(conn, &agent.session, "needs", at)?;
+    let answered = settle(conn, &agent.session, "needs", at)?;
+    // A running workflow reads its own agents' turns and goes on by itself: nobody has to
+    // look. Its questions and its end are the rows ([`standing::read`]).
+    if kind == NotificationKind::AgentFinished && in_running_workflow(conn, agent)? {
+        return Ok(answered);
+    }
     if let Some((id, _, _)) = open_row(conn, &agent.session, "finished")? {
         conn.execute(
             "UPDATE notifications
@@ -296,6 +402,24 @@ fn finished(
         ],
     )?;
     Ok(written > 0)
+}
+
+/// Whether a workflow run that is still going started this agent: a `start_session` step left
+/// its terminal's id as `session`. Nothing on the conversation itself says so. An agent the
+/// run only writes to (`session: origin`) is the person's own, and is not one of these.
+fn in_running_workflow(conn: &rusqlite::Connection, agent: &Agent) -> StoreResult<bool> {
+    let Some(terminal) = &agent.terminal else {
+        return Ok(false);
+    };
+    Ok(conn.query_row(
+        "SELECT EXISTS (
+           SELECT 1 FROM workflow_step_runs step
+           JOIN workflow_runs run ON run.id = step.run_id
+           WHERE run.status = 'running' AND step.action = 'start_session'
+             AND json_extract(step.outputs, '$.session') = ?1)",
+        [terminal],
+        |row| row.get(0),
+    )?)
 }
 
 /// How long the agent had been at it when its turn ended at `at`: since the last message typed
@@ -559,15 +683,15 @@ pub fn list(store: &Store, now: i64) -> StoreResult<Vec<Notification>> {
         let mut raws = Vec::new();
         for (sql, limit) in [
             (
-                "SELECT id, kind, part, workspace_id, session_id, worked_ms, exit_code, created_at,
-                        settled_at
+                "SELECT id, kind, part, workspace_id, project_id, session_id, subject_id, step_id,
+                        worked_ms, exit_code, created_at, settled_at
                  FROM notifications WHERE settled_at IS NULL
                  ORDER BY created_at DESC, id LIMIT ?",
                 i64::MAX,
             ),
             (
-                "SELECT id, kind, part, workspace_id, session_id, worked_ms, exit_code, created_at,
-                        settled_at
+                "SELECT id, kind, part, workspace_id, project_id, session_id, subject_id, step_id,
+                        worked_ms, exit_code, created_at, settled_at
                  FROM notifications WHERE settled_at IS NOT NULL
                  ORDER BY settled_at DESC, id LIMIT ?",
                 EARLIER_SHOWN as i64,
@@ -580,11 +704,14 @@ pub fn list(store: &Store, now: i64) -> StoreResult<Vec<Notification>> {
                     kind: row.get(1)?,
                     part: row.get(2)?,
                     workspace_id: row.get(3)?,
-                    session_id: row.get(4)?,
-                    worked_ms: row.get(5)?,
-                    exit_code: row.get(6)?,
-                    created_at: row.get(7)?,
-                    settled_at: row.get(8)?,
+                    project_id: row.get(4)?,
+                    session_id: row.get(5)?,
+                    subject_id: row.get(6)?,
+                    step_id: row.get(7)?,
+                    worked_ms: row.get(8)?,
+                    exit_code: row.get(9)?,
+                    created_at: row.get(10)?,
+                    settled_at: row.get(11)?,
                 })
             })?;
             for row in rows {
@@ -595,58 +722,163 @@ pub fn list(store: &Store, now: i64) -> StoreResult<Vec<Notification>> {
     };
     let mut out = Vec::with_capacity(raws.len());
     for raw in raws {
-        let Some(kind) = NotificationKind::named(&raw.kind) else {
-            continue; // Written by a later Yardsort.
-        };
-        let Some(workspace) = store.workspace(&raw.workspace_id)? else {
-            continue;
-        };
-        if workspace.forgotten {
-            continue;
+        if let Some(row) = shown(store, raw)? {
+            out.push(row);
         }
-        let Some(project) = store.project(&workspace.project_id)? else {
-            continue;
-        };
-        let session = match &raw.session_id {
-            Some(id) => store.session(id)?,
-            None => None,
-        };
-        let part = match (raw.settled_at, raw.part.as_str()) {
-            (Some(_), _) => NotificationPart::Earlier,
-            (None, "needs") => NotificationPart::Needs,
-            (None, _) => NotificationPart::Finished,
-        };
-        out.push(Notification {
-            id: raw.id,
-            kind,
-            part,
-            project_id: project.id,
-            project_name: project.name,
-            workspace_id: workspace.id,
-            workspace_name: workspace.name,
-            branch: workspace.branch,
-            session_title: session.as_ref().map_or_else(String::new, |session| {
-                if session.label.is_empty() {
-                    session.title.clone()
-                } else {
-                    session.label.clone()
-                }
-            }),
-            harness_id: session.as_ref().map(|session| session.harness_id.clone()),
-            terminal_id: session
-                .as_ref()
-                .filter(|session| session.running)
-                .and_then(|session| session.pty_session_id.clone()),
-            session_id: raw.session_id,
-            at: raw.created_at,
-            settled_at: raw.settled_at,
-            worked_ms: raw.worked_ms,
-            exit_code: raw.exit_code,
-            command: None,
-            said: None,
-        });
     }
     Ok(out)
+}
+
+/// A stored row with what a client shows it with. Nothing when what it is about is gone, or
+/// when a later Yardsort wrote it.
+fn shown(store: &Store, raw: Raw) -> StoreResult<Option<Notification>> {
+    let Some(kind) = NotificationKind::named(&raw.kind) else {
+        return Ok(None);
+    };
+    let workspace = match &raw.workspace_id {
+        Some(id) => match store.workspace(id)? {
+            Some(workspace) if !workspace.forgotten => Some(workspace),
+            _ => return Ok(None),
+        },
+        None => None,
+    };
+    let project = match workspace
+        .as_ref()
+        .map(|workspace| workspace.project_id.clone())
+        .or(raw.project_id)
+    {
+        Some(id) => store.project(&id)?,
+        None => None,
+    };
+    let Some(project) = project else {
+        return Ok(None);
+    };
+    let part = match (raw.settled_at, raw.part.as_str()) {
+        (Some(_), _) => NotificationPart::Earlier,
+        (None, "needs") => NotificationPart::Needs,
+        (None, _) => NotificationPart::Finished,
+    };
+    let mut row = Notification {
+        id: raw.id,
+        kind,
+        part,
+        project_id: project.id,
+        project_name: project.name,
+        workspace_id: workspace.as_ref().map(|workspace| workspace.id.clone()),
+        workspace_name: workspace
+            .as_ref()
+            .map_or_else(String::new, |workspace| workspace.name.clone()),
+        branch: workspace.and_then(|workspace| workspace.branch),
+        session_id: raw.session_id,
+        title: String::new(),
+        harness_id: None,
+        subject_id: raw.subject_id,
+        workflow_id: None,
+        step_id: raw.step_id,
+        terminal_id: None,
+        at: raw.created_at,
+        settled_at: raw.settled_at,
+        worked_ms: raw.worked_ms,
+        exit_code: raw.exit_code,
+        command: None,
+        said: None,
+        note: None,
+    };
+    let subject = row.subject_id.clone().unwrap_or_default();
+    match kind.about() {
+        About::Agent => {
+            let session = match &row.session_id {
+                Some(id) => store.session(id)?,
+                None => None,
+            };
+            if let Some(session) = session {
+                row.title = if session.label.is_empty() {
+                    session.title
+                } else {
+                    session.label
+                };
+                row.harness_id = Some(session.harness_id);
+                row.terminal_id = session.pty_session_id.filter(|_| session.running);
+            }
+        }
+        About::Workflow => {
+            let Some(run) = store.workflow_run(&subject)? else {
+                return Ok(None);
+            };
+            row.title = run.workflow_name;
+            row.workflow_id = Some(run.workflow_id);
+            match (kind, &row.step_id) {
+                (NotificationKind::WorkflowFailed, _) => {
+                    // The run's own error, or else the note of the step that failed.
+                    let why = match run.error {
+                        Some(error) => Some(error),
+                        None => store
+                            .workflow_steps(&subject)?
+                            .into_iter()
+                            .find(|step| step.status == "failed")
+                            .and_then(|step| step.note),
+                    };
+                    row.note = why.map(|why| one_line(&why)).filter(|why| !why.is_empty());
+                }
+                (
+                    NotificationKind::WorkflowApproval | NotificationKind::WorkflowQuestion,
+                    Some(step),
+                ) => {
+                    row.said = store
+                        .workflow_wait(&subject, step)?
+                        .and_then(|wait| wait.prompt)
+                        .map(|prompt| one_line(&prompt))
+                        .filter(|prompt| !prompt.is_empty());
+                }
+                _ => {}
+            }
+        }
+        About::Test => {
+            let Some(run) = store.test_run(&subject)? else {
+                return Ok(None);
+            };
+            row.title = run.test_name;
+        }
+        About::Schedule => {
+            let Some(schedule) = store.schedule(&subject)? else {
+                return Ok(None);
+            };
+            row.title = schedule.name;
+            if row.workspace_id.is_none() {
+                row.workspace_name = schedule.workspace_name;
+            }
+            // Why it could not start is read from its newest time, which says so only while
+            // nothing has happened since.
+            if kind == NotificationKind::ScheduleRefused && part == NotificationPart::Needs {
+                row.note = store
+                    .schedule_runs(&subject, 1)?
+                    .into_iter()
+                    .next()
+                    .filter(|line| line.outcome == "refused")
+                    .and_then(|line| line.note)
+                    .map(|why| one_line(&why));
+            }
+        }
+        About::Trigger => {
+            let Some(trigger) = store.trigger(&subject)? else {
+                return Ok(None);
+            };
+            row.title = trigger.name;
+            if row.workspace_id.is_none() {
+                row.workspace_name = trigger.workspace_name;
+            }
+            if kind != NotificationKind::TriggerNoWorkspace && part == NotificationPart::Needs {
+                row.note = store
+                    .trigger_fires(&subject, standing::FIRES)?
+                    .into_iter()
+                    .find(|fire| fire.outcome != "gathering")
+                    .filter(|fire| matches!(fire.outcome.as_str(), "refused" | "capped"))
+                    .and_then(|fire| fire.note)
+                    .map(|why| one_line(&why));
+            }
+        }
+    }
+    Ok(Some(row))
 }
 
 /// The one line of substance a row is shown with, read when the list is asked for and never
@@ -693,7 +925,9 @@ impl Lines {
                 ) => {
                     let fresh = said.get(&row.id).is_some_and(|(at, _)| *at == row.at);
                     if !fresh {
-                        let read = last_said(store, sources, &row.workspace_id, &session, now);
+                        let read = row.workspace_id.as_deref().and_then(|workspace| {
+                            last_said(store, sources, workspace, &session, now)
+                        });
                         said.insert(row.id.clone(), (row.at, read));
                     }
                     row.said = said.get(&row.id).and_then(|(_, line)| line.clone());
@@ -745,6 +979,8 @@ fn one_line(text: &str) -> String {
     cut.push('…');
     cut
 }
+
+pub mod standing;
 
 #[cfg(test)]
 mod tests;

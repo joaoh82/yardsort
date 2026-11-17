@@ -207,6 +207,7 @@ impl AppStarting {
     /// its projects again.
     fn changed(&self) {
         let _ = RemoteChangedProjects {}.emit(&self.0);
+        crate::notifications::reread(&self.0);
     }
 
     /// An agent was started from a device: the window shows its tab, and the workspace when

@@ -2284,15 +2284,26 @@ export type NotificationItem = {
 	part: NotificationPart,
 	projectId: string,
 	projectName: string,
-	workspaceId: string,
+	/**  The workspace it happened in. Only a schedule or a trigger can be without one. */
+	workspaceId: string | null,
+	/**  What that workspace is called, or was. Empty for a schedule that makes its own. */
 	workspaceName: string,
 	branch: string | null,
 	/**  The agent's conversation, by its record's id. */
 	sessionId: string | null,
-	/**  What the conversation is called: its label, or the start of its first message. */
-	sessionTitle: string,
+	/**
+	 *  What the row is about, within its workspace: the conversation's label or the start of
+	 *  its first message, or the name of the workflow, the test, the schedule or the trigger.
+	 */
+	title: string,
 	/**  Which agent: `claude`, `codex`… */
 	harnessId: string | null,
+	/**  The workflow's run, the smoke test's run, the schedule or the trigger, by its id. */
+	subjectId: string | null,
+	/**  The workflow of a row about a workflow's run. */
+	workflowId: string | null,
+	/**  The step that waits, for a workflow's question or approval. */
+	stepId: string | null,
 	/**  The conversation's terminal, while its process runs. */
 	terminalId: string | null,
 	/**  When it happened. */
@@ -2305,8 +2316,13 @@ export type NotificationItem = {
 	exitCode: number | null,
 	/**  The command the agent wants to run, while its question is open. */
 	command: string | null,
-	/**  The start of what the agent said last. */
+	/**  The start of what the agent said last, or of what a workflow asks. */
 	said: string | null,
+	/**
+	 *  Why, for something that went wrong: a failed run's error, or the reason a schedule or a
+	 *  trigger could not start.
+	 */
+	note: string | null,
 };
 
 /**  What a row is about. */
@@ -2318,7 +2334,27 @@ export type NotificationKind =
 /**  An agent's turn failed. */
 "agent.failed" | 
 /**  An agent's process exited with an error. */
-"agent.stopped";
+"agent.stopped" | 
+/**  A workflow run waits for an approval. */
+"workflow.approval" | 
+/**  A workflow run waits for the answer to a question. */
+"workflow.question" | 
+/**  A workflow run ended well. */
+"workflow.succeeded" | 
+/**  A workflow run failed. */
+"workflow.failed" | 
+/**  A smoke test's run waits for its file to be approved. */
+"test.waits" | 
+/**  A schedule's time came and its run could not be started. */
+"schedule.refused" | 
+/**  A schedule's workspace was deleted. */
+"schedule.noWorkspace" | 
+/**  A trigger fired and its run could not be started. */
+"trigger.refused" | 
+/**  A trigger has had the runs its limit allows, and waits to be reset. */
+"trigger.capped" | 
+/**  A trigger's workspace was deleted. */
+"trigger.noWorkspace";
 
 /**  Where a row is in the list. */
 export type NotificationPart = 

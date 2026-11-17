@@ -102,6 +102,7 @@ pub fn start(app: &AppHandle) {
     let notify: runner::Notify = Arc::new(move |notice| match notice {
         Notice::Runs => {
             let _ = TestRunsChanged {}.emit(&handle);
+            crate::notifications::look(&handle);
         }
         Notice::Output { run_id, step_id } => {
             let _ = TestRunOutput { run_id, step_id }.emit(&handle);
@@ -125,6 +126,7 @@ pub fn tick(handle: &AppHandle, state: &AppState) {
     {
         Ok(true) => {
             let _ = TestRunsChanged {}.emit(handle);
+            crate::notifications::look(handle);
         }
         Ok(false) => {}
         Err(error) => eprintln!("smoke tests: cannot read runs: {}", error.message),
@@ -134,6 +136,7 @@ pub fn tick(handle: &AppHandle, state: &AppState) {
 /// Tell the window runs changed, from a command that changed one.
 pub fn changed(app: &AppHandle) {
     let _ = TestRunsChanged {}.emit(app);
+    crate::notifications::look(app);
     if let Some(driver) = app.try_state::<crate::workflows::Driver>() {
         driver.wake();
     }

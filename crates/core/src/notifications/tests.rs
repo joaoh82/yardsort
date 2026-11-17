@@ -156,7 +156,7 @@ fn a_permission_is_one_row_until_it_is_answered() {
     assert_eq!(row.workspace_name, "fix-timezone-offsets");
     assert_eq!(row.branch.as_deref(), Some("ys/fix-timezone-offsets"));
     assert_eq!(row.session_id.as_deref(), Some("s1"));
-    assert_eq!(row.session_title, "Cover half-hour zones");
+    assert_eq!(row.title, "Cover half-hour zones");
     assert_eq!(row.harness_id.as_deref(), Some("claude"));
     assert_eq!(row.terminal_id.as_deref(), Some("pty-1"));
     assert_eq!(row.at, t);

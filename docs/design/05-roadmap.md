@@ -1400,8 +1400,13 @@ looking.
       default, so by default the list hears only the terminal and cannot know that an agent
       asks for a permission; and the ring, kept only in the window until now, was put on every
       waiting agent at each start, looked at or not.
-- [ ] Slice 2: workflows that ask, runs that end, smoke tests that wait, schedules and triggers
-      that could not start.
+- [x] Slice 2: workflows that ask, runs that end, smoke tests that wait, schedules and triggers
+      that could not start. Read from where each stands in the store, not told as it happens:
+      the app and `ys` both change them. Decided while building it: a trigger held by its limit
+      is listed with the refused ones; a schedule or a trigger whose run waits for a test's
+      approval is the test's row only; a run its person cancelled or rejected is no row; and
+      an agent a running workflow started is not a finished row each turn. Found by running it:
+      a rejected approval ends its run as failed, which was listed as news until it was tried.
 - [ ] Slice 3: other computers' rows on the desktop, over a new protocol minor.
 - [ ] Slice 4: the phone: the bell, the list, counts on computers and marks on workspaces.
 - [ ] Slice 5: a push when an agent finishes, with its own switch.

@@ -146,7 +146,9 @@ fires, how its last time went, and where it stands:
 | missed               | A **Once** whose time passed while Yardsort was closed, and that skips those  |
 
 The number on **Schedules** in the sidebar is how many are _waiting for approval_, _refused_ or
-have _no workspace_: the ones that need you.
+have _no workspace_: the ones that need you. A _refused_ one and one with _no workspace_ are
+also rows of [Notifications](notifications.md); for one _waiting for approval_ the row there is
+the smoke test's.
 
 A row opens to the schedule's details, with:
 

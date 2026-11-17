@@ -14,6 +14,8 @@ interface NotificationsState {
   grouping: Grouping;
   /** The terminal the center panel shows right now, when it shows one. */
   inFront: string | null;
+  /** The workflow run the center panel shows right now, when it shows one. */
+  runInFront: string | null;
 
   load: () => Promise<void>;
   /** These finished rows were looked at. */
@@ -22,6 +24,8 @@ interface NotificationsState {
   seenAll: () => Promise<void>;
   /** The center panel shows this terminal, or none. What its agent finished is seen. */
   looking: (terminalId: string | null) => void;
+  /** The center panel shows this workflow run, or none. That it ended is seen. */
+  lookingAtRun: (runId: string | null) => void;
   setGrouping: (grouping: Grouping) => void;
   dismissError: () => void;
 }
@@ -29,6 +33,11 @@ interface NotificationsState {
 /** Whether the person can see `terminalId` right now. */
 function inFrontOfSomeone(terminalId: string | null, inFront: string | null): boolean {
   return terminalId !== null && terminalId === inFront && document.hasFocus();
+}
+
+/** Whether the person can see the workflow run `runId` right now. */
+function runInFrontOfSomeone(runId: string | null, runInFront: string | null): boolean {
+  return runId !== null && runId === runInFront && document.hasFocus();
 }
 
 /** Rows that have left their part, as the core will say they have once it is asked. */
@@ -47,19 +56,26 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
   error: null,
   grouping: "kind",
   inFront: null,
+  runInFront: null,
 
   async load() {
     if (!hasCore()) return;
     try {
       const listed = await ipc.notificationList();
       // A row made while its terminal is in front of someone has been seen already.
-      const { inFront } = get();
+      const { inFront, runInFront } = get();
       const watched = listed.filter(
         (item) => item.part === "finished" && inFrontOfSomeone(item.terminalId, inFront),
       );
       for (const terminalId of new Set(watched.map((item) => item.terminalId)))
         if (terminalId) void ipc.notificationSeenTerminal(terminalId).catch(console.error);
-      const items = settled(listed, (item) => watched.includes(item));
+      // And so has a run that ended while it was the one on screen.
+      const watchedRuns = listed.filter(
+        (item) => item.part === "finished" && runInFrontOfSomeone(item.subjectId, runInFront),
+      );
+      if (watchedRuns.length > 0)
+        void ipc.notificationSeen(watchedRuns.map((item) => item.id)).catch(console.error);
+      const items = settled(listed, (item) => watched.includes(item) || watchedRuns.includes(item));
       set({ items, loaded: true });
       ring(items);
     } catch (error) {
@@ -103,6 +119,15 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
     set({ items });
     ring(items);
     void ipc.notificationSeenTerminal(terminalId).catch(console.error);
+  },
+
+  lookingAtRun(runId) {
+    set({ runInFront: runId });
+    if (!runInFrontOfSomeone(runId, runId)) return;
+    const ended = get().items.filter(
+      (item) => item.part === "finished" && item.subjectId === runId,
+    );
+    if (ended.length > 0) void get().seen(ended.map((item) => item.id));
   },
 
   setGrouping(grouping) {

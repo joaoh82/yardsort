@@ -14,7 +14,8 @@ terminal, with Yardsort open, because the app is what carries runs out.
 Click **Workflows** in the sidebar, under **Tasks**, and the center panel lists every workflow:
 the built-in ones and yours, by name, with the description under each. The row stays lit while
 the list or one of its workflows is open; click it again from the list to close it. A number
-beside it is how many runs are waiting on you.
+beside it is how many runs are waiting on you. Those runs, and the runs that ended while you
+were not looking, are also rows of [Notifications](notifications.md).
 
 Each row says where the workflow comes from:
 

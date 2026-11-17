@@ -15,6 +15,16 @@ has the downloads and the full commit lists.
   are how many need you and how many finished unseen, each project's row shows its own count,
   and `Mod+I` opens the list. A row for a permission needs that agent's **Capture what it
   reports** switch on, in Settings → General. See [Notifications](docs/guide/notifications.md).
+- **Workflows, smoke tests, schedules and triggers in Notifications.** The same list has a row
+  for a workflow that waits for your approval or asks you a question, with the question; for a
+  smoke test waiting for you to approve its file; and for a schedule or a trigger that could not
+  start its run, lost its workspace, or reached its limit, with the reason. A workflow run that
+  succeeded or failed while you were not looking is listed as finished, with why it failed; one
+  you cancelled or rejected is not.
+  Pressing a row opens the run, the workspace with the approval card, **Schedules** or
+  **Triggers**. A row leaves when what it waits for is done, wherever that was done: the window,
+  `ys` or the phone. While a workflow run is going, an agent it started is not listed each time
+  it finishes a turn, and its tab is not ringed: the run's end is.
 - **The ringed dot is remembered.** An agent that finished and was not looked at keeps its ring
   when Yardsort is closed and opened again, and one that finished while Yardsort was closed gets
   it. Before, every waiting agent was ringed at each start, looked at or not. Coming back to the

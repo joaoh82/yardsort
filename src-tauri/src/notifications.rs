@@ -1,7 +1,7 @@
 //! The Notifications list's home in the app: what the core is told that only the app hears —
-//! a terminal going quiet, an agent's process ending — and the window's commands. The rules,
-//! and the list itself, are the core's (`yardsort_core::notifications`). See
-//! `docs/design/46-notifications.md`.
+//! a terminal going quiet, an agent's process ending — when it is asked to look at what else
+//! waits, and the window's commands. The rules, and the list itself, are the core's
+//! (`yardsort_core::notifications`). See `docs/design/46-notifications.md`.
 
 use std::collections::HashSet;
 use std::sync::{Mutex, PoisonError};
@@ -32,15 +32,24 @@ pub struct NotificationItem {
     pub part: NotificationPart,
     pub project_id: String,
     pub project_name: String,
-    pub workspace_id: String,
+    /// The workspace it happened in. Only a schedule or a trigger can be without one.
+    pub workspace_id: Option<String>,
+    /// What that workspace is called, or was. Empty for a schedule that makes its own.
     pub workspace_name: String,
     pub branch: Option<String>,
     /// The agent's conversation, by its record's id.
     pub session_id: Option<String>,
-    /// What the conversation is called: its label, or the start of its first message.
-    pub session_title: String,
+    /// What the row is about, within its workspace: the conversation's label or the start of
+    /// its first message, or the name of the workflow, the test, the schedule or the trigger.
+    pub title: String,
     /// Which agent: `claude`, `codex`…
     pub harness_id: Option<String>,
+    /// The workflow's run, the smoke test's run, the schedule or the trigger, by its id.
+    pub subject_id: Option<String>,
+    /// The workflow of a row about a workflow's run.
+    pub workflow_id: Option<String>,
+    /// The step that waits, for a workflow's question or approval.
+    pub step_id: Option<String>,
     /// The conversation's terminal, while its process runs.
     pub terminal_id: Option<String>,
     /// When it happened.
@@ -53,8 +62,11 @@ pub struct NotificationItem {
     pub exit_code: Option<i32>,
     /// The command the agent wants to run, while its question is open.
     pub command: Option<String>,
-    /// The start of what the agent said last.
+    /// The start of what the agent said last, or of what a workflow asks.
     pub said: Option<String>,
+    /// Why, for something that went wrong: a failed run's error, or the reason a schedule or a
+    /// trigger could not start.
+    pub note: Option<String>,
 }
 
 impl From<Notification> for NotificationItem {
@@ -69,8 +81,11 @@ impl From<Notification> for NotificationItem {
             workspace_name: row.workspace_name,
             branch: row.branch,
             session_id: row.session_id,
-            session_title: row.session_title,
+            title: row.title,
             harness_id: row.harness_id,
+            subject_id: row.subject_id,
+            workflow_id: row.workflow_id,
+            step_id: row.step_id,
             terminal_id: row.terminal_id,
             at: row.at as f64,
             settled_at: row.settled_at.map(|at| at as f64),
@@ -78,6 +93,7 @@ impl From<Notification> for NotificationItem {
             exit_code: row.exit_code.and_then(|code| i32::try_from(code).ok()),
             command: row.command,
             said: row.said,
+            note: row.note,
         }
     }
 }
@@ -156,8 +172,8 @@ impl Notifications {
 const HEARD_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The app has just started and found these terminals alive. An agent among them that stopped
-/// printing while the app was closed finished something nobody saw. Then read what agents'
-/// hooks reported meanwhile.
+/// printing while the app was closed finished something nobody saw. Before that, what agents'
+/// hooks reported meanwhile is read; after it, what else waits on this computer.
 pub fn start(handle: &AppHandle) {
     let Some(state) = handle.try_state::<AppState>() else {
         return;
@@ -183,6 +199,33 @@ pub fn start(handle: &AppHandle) {
         handle,
         notifications::catch_up(&state.store, &waiting, now_ms()),
     );
+    standing(handle, &state);
+}
+
+/// A workflow's run, a smoke test's run, a schedule or a trigger changed, here or from `ys`:
+/// have the list agree with where they stand now. Called beside each word to the window that
+/// one of them changed, from whichever thread says it; the reading is done off that thread.
+pub fn look(handle: &AppHandle) {
+    let handle = handle.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(state) = handle.try_state::<AppState>() {
+            standing(&handle, &state);
+        }
+    });
+}
+
+/// A workspace or a project went away, and its rows with it; a schedule or a trigger that ran
+/// there now has nowhere to. The window reads the list again, and reading it looks at where
+/// things stand.
+pub fn reread(handle: &AppHandle) {
+    let _ = NotificationsChanged {}.emit(handle);
+}
+
+fn standing(handle: &AppHandle, state: &AppState) {
+    match notifications::standing::read(&state.store, now_ms()) {
+        Ok(changed) => tell(handle, Ok(changed)),
+        Err(error) => eprintln!("notifications: {}", error.message),
+    }
 }
 
 /// Take in what agents' hooks reported since the last look. Called after every drain of the
@@ -216,6 +259,8 @@ fn tell(handle: &AppHandle, changed: yardsort_core::store::StoreResult<bool>) {
 pub async fn notification_list(app: AppHandle) -> IpcResult<Vec<NotificationItem>> {
     blocking(app.clone(), move |state| {
         let now = now_ms();
+        // Whoever asks is shown where things stand now, whether or not anyone said they moved.
+        notifications::standing::read(&state.store, now)?;
         let mut rows = notifications::list(&state.store, now)?;
         if let Some(list) = app.try_state::<Notifications>() {
             let sources = crate::conversations::sources(state);

@@ -13,7 +13,7 @@ vi.mock("@/lib/ipc", async (original) => ({
   ipc: core,
 }));
 
-import { notification } from "@/test/fixtures";
+import { notification, standingNotification } from "@/test/fixtures";
 import { counts, GROUPING_KEY, listedIn, useNotificationsStore } from "./notifications";
 import { useTerminalStore, type TerminalTab } from "./terminals";
 
@@ -49,6 +49,7 @@ beforeEach(() => {
     error: null,
     grouping: "kind",
     inFront: null,
+    runInFront: null,
   });
   useTerminalStore.setState({ tabs: [tab("pty-a"), tab("pty-b"), tab("pty-c")], active: {} });
   core.notificationSeen.mockResolvedValue(null);
@@ -150,6 +151,43 @@ describe("the notifications store", () => {
     await useNotificationsStore.getState().seen(["b"]);
     expect(useNotificationsStore.getState().error).toBe("The disk is full.");
     await vi.waitFor(() => expect(core.notificationList).toHaveBeenCalledTimes(1));
+  });
+
+  it("marks a workflow run's ending seen when that run is the one on screen", async () => {
+    const ended = standingNotification("ended", { kind: "workflow.succeeded", part: "finished" });
+    const waits = standingNotification("waits", { subjectId: "run-ended" });
+    core.notificationList.mockResolvedValue([ended, waits]);
+    await useNotificationsStore.getState().load();
+    expect(counts(useNotificationsStore.getState().items)).toEqual({ needs: 1, finished: 1 });
+
+    // Another run on screen is not this one.
+    useNotificationsStore.getState().lookingAtRun("run-other");
+    expect(core.notificationSeen).not.toHaveBeenCalled();
+    // Nor is this one, while the window is behind another.
+    focused = false;
+    useNotificationsStore.getState().lookingAtRun("run-ended");
+    expect(core.notificationSeen).not.toHaveBeenCalled();
+
+    focused = true;
+    useNotificationsStore.getState().lookingAtRun("run-ended");
+    // Its ending is seen; what the same run still waits for is not.
+    expect(core.notificationSeen).toHaveBeenCalledWith(["ended"]);
+    expect(counts(useNotificationsStore.getState().items)).toEqual({ needs: 1, finished: 0 });
+  });
+
+  it("counts a run that ends while it is on screen as seen at once", async () => {
+    useNotificationsStore.getState().lookingAtRun("run-ended");
+    core.notificationList.mockResolvedValue([
+      standingNotification("ended", { kind: "workflow.failed", part: "finished" }),
+      standingNotification("elsewhere", {
+        kind: "workflow.succeeded",
+        part: "finished",
+        subjectId: "run-other",
+      }),
+    ]);
+    await useNotificationsStore.getState().load();
+    expect(core.notificationSeen).toHaveBeenCalledWith(["ended"]);
+    expect(counts(useNotificationsStore.getState().items)).toEqual({ needs: 0, finished: 1 });
   });
 
   it("remembers how the view is grouped", () => {

@@ -500,8 +500,11 @@ export const notification = (
   workspaceName: "fix-login",
   branch: "ys/fix-login",
   sessionId: `session-${id}`,
-  sessionTitle: "Fix the login form",
+  title: "Fix the login form",
   harnessId: "claude",
+  subjectId: null,
+  workflowId: null,
+  stepId: null,
   terminalId: `pty-${id}`,
   at: Date.now() - 60_000,
   settledAt: null,
@@ -509,5 +512,24 @@ export const notification = (
   exitCode: null,
   command: null,
   said: null,
+  note: null,
   ...overrides,
 });
+
+/** A row of the Notifications list that is not about an agent: the workflow `Review` waiting
+ *  for an approval in `fix-login`, unless overridden. */
+export const standingNotification = (
+  id: string,
+  overrides: Partial<NotificationItem> = {},
+): NotificationItem =>
+  notification(id, {
+    kind: "workflow.approval",
+    sessionId: null,
+    title: "Review",
+    harnessId: null,
+    subjectId: `run-${id}`,
+    workflowId: "review",
+    stepId: "sign-off",
+    terminalId: null,
+    ...overrides,
+  });

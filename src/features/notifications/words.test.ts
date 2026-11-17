@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { notification } from "@/test/fixtures";
-import { chip, sections, what, workedWords } from "./words";
+import { notification, standingNotification } from "@/test/fixtures";
+import {
+  about,
+  chip,
+  detailName,
+  leadName,
+  opens,
+  sections,
+  wentBadly,
+  what,
+  workedWords,
+} from "./words";
 
 const asks = notification("asks", { command: "git push --force-with-lease", at: 400 });
 const finished = notification("finished", {
@@ -96,5 +106,69 @@ describe("the view's sections", () => {
     ]);
     expect(shape(sections(all, "kind", "earlier"))).toEqual([["Earlier", ["seen", "answered"]]]);
     expect(sections([], "kind", "all")).toEqual([]);
+  });
+});
+
+describe("a row that is not about an agent", () => {
+  const approval = standingNotification("approval");
+  const question = standingNotification("question", { kind: "workflow.question" });
+  const failed = standingNotification("failed", { kind: "workflow.failed", part: "finished" });
+  const test = standingNotification("test", { kind: "test.waits", title: "Half-hour zones" });
+  const refused = standingNotification("refused", {
+    kind: "schedule.refused",
+    title: "Nightly review",
+  });
+  const lost = standingNotification("lost", {
+    kind: "trigger.noWorkspace",
+    title: "Review when done",
+    workspaceId: null,
+    branch: null,
+  });
+
+  it("says what waits, and what it was once it has left", () => {
+    expect(what(approval)).toBe("Workflow waits for your approval");
+    expect(what({ ...approval, part: "earlier" })).toBe("Workflow waited for an approval");
+    expect(what(question)).toBe("Workflow asks you a question");
+    expect(what(failed)).toBe("Workflow failed");
+    expect(what({ ...failed, kind: "workflow.succeeded" })).toBe("Workflow finished");
+    expect(what(test)).toBe("Smoke test waits for you to approve its file");
+    expect(what(refused)).toBe("Schedule could not start its run");
+    expect(what({ ...refused, kind: "schedule.noWorkspace" })).toBe(
+      "Schedule has no workspace to run in",
+    );
+    expect(what({ ...lost, kind: "trigger.capped" })).toBe("Trigger reached its limit of runs");
+    expect(what({ ...lost, kind: "trigger.refused", part: "earlier" })).toBe(
+      "Trigger could not start a run",
+    );
+  });
+
+  it("knows what each is about, and what its row opens", () => {
+    expect([approval, test, refused, lost].map(about)).toEqual([
+      "workflow",
+      "test",
+      "schedule",
+      "trigger",
+    ]);
+    expect(about(notification("agent"))).toBe("agent");
+    expect(opens(approval)).toBe("the run");
+    expect(opens(test)).toBe("its workspace, where the file is approved");
+    expect(opens(refused)).toBe("Schedules");
+    expect(opens(lost)).toBe("Triggers");
+    expect(opens(notification("agent"))).toBe("the agent's terminal");
+    expect(opens(notification("gone", { terminalId: null }))).toBe("its workspace");
+  });
+
+  it("draws a failed run red, and nothing that only waits", () => {
+    expect(wentBadly(failed)).toBe(true);
+    expect([approval, question, test, refused, lost].some(wentBadly)).toBe(false);
+  });
+
+  it("leads with the workspace, or with its own name when it has none", () => {
+    expect([leadName(approval), detailName(approval)]).toEqual(["fix-login", "Review"]);
+    // A trigger whose workspace is gone keeps what it was called.
+    expect([leadName(lost), detailName(lost)]).toEqual(["Review when done", "was in fix-login"]);
+    // A schedule that makes its own workspaces never had one to name.
+    const own = { ...refused, workspaceId: null, workspaceName: "" };
+    expect([leadName(own), detailName(own)]).toEqual(["Nightly review", null]);
   });
 });

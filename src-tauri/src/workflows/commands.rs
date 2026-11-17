@@ -277,6 +277,7 @@ fn shown_approval_code(
 
 fn changed(app: &AppHandle) {
     let _ = WorkflowRunsChanged {}.emit(app);
+    crate::notifications::look(app);
 }
 
 /// Every workflow, built in and the user's, with how many runs of each are going now.

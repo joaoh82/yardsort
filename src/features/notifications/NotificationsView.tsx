@@ -1,11 +1,27 @@
 import { useEffect, useState } from "react";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
+import { SchedulesIcon } from "@/features/schedules/SchedulesRow";
 import { timeAgo } from "@/features/terminal/sessionText";
+import { TestsIcon } from "@/features/tests/TestsRow";
+import { TriggersIcon } from "@/features/triggers/TriggersRow";
+import { WorkflowsIcon } from "@/features/workflows/WorkflowsRow";
 import type { NotificationItem } from "@/lib/ipc";
 import { counts, useNotificationsStore, type Grouping } from "@/stores/notifications";
 import { useProjectsStore } from "@/stores/projects";
 import { useTerminalStore } from "@/stores/terminals";
-import { chip, sections, wentBadly, what, type Filter, type Section } from "./words";
+import { useWorkflowStore } from "@/stores/workflows";
+import {
+  about,
+  chip,
+  detailName,
+  leadName,
+  opens,
+  sections,
+  wentBadly,
+  what,
+  type Filter,
+  type Section,
+} from "./words";
 
 const GROUPINGS: { id: Grouping; label: string }[] = [
   { id: "kind", label: "What it is" },
@@ -17,7 +33,8 @@ const GROUPINGS: { id: Grouping; label: string }[] = [
  * nobody was looking, and what was answered or seen in the last week.
  *
  * The core keeps the list and says when a row leaves. A row here is a way to what it is about:
- * pressing it opens the agent's terminal, and looking at that terminal is what marks it seen.
+ * pressing it opens the agent's terminal, the workflow's run, or the view a schedule or a
+ * trigger is changed in, and looking at a terminal or a run is what marks its row seen.
  */
 export function NotificationsView() {
   const items = useNotificationsStore((s) => s.items);
@@ -141,7 +158,9 @@ export function NotificationsView() {
               Nothing needs you, and nothing finished while you were away.
             </p>
             <p className="mt-1 text-small text-ink-faint">
-              An agent that asks for a permission, finishes, or stops with an error shows up here.
+              Agents that ask, finish or stop with an error show up here. So do workflows that wait
+              for you or end, smoke tests waiting for approval, and schedules and triggers that
+              could not start.
             </p>
           </div>
         )}
@@ -153,7 +172,8 @@ export function NotificationsView() {
         ))}
         {shown.length > 0 && (
           <p className="px-4 py-3 text-small text-ink-faint">
-            A row opens the agent&apos;s terminal. Looking at that terminal is what marks it seen.
+            A row opens what it is about. Looking at an agent&apos;s terminal, or at a
+            workflow&apos;s run, is what marks its row seen.
           </p>
         )}
       </div>
@@ -180,13 +200,47 @@ function SectionRows({ section, now }: { section: Section; now: number }) {
   );
 }
 
-/** Open what the row is about: its workspace, with the agent's terminal in front when it still
- *  has one. Looking at it there is what marks it seen. */
+/** Open what the row is about. An agent's is its workspace, with its terminal in front when it
+ *  still has one; a workflow's is the run; a smoke test's is its workspace, where its approval
+ *  card is; a schedule's or a trigger's is the view it is changed in. Looking at a terminal or
+ *  a run is what marks its row seen. */
 function open(item: NotificationItem) {
-  useProjectsStore.getState().select(item.workspaceId);
+  const projects = useProjectsStore.getState();
+  const kind = about(item);
+  if (kind === "workflow" && item.workflowId && item.subjectId) {
+    useWorkflowStore.getState().showRun(item.workflowId, item.subjectId);
+    projects.openWorkflow(item.workflowId);
+    return;
+  }
+  if (kind === "schedule") {
+    projects.openSchedules(true);
+    return;
+  }
+  if (kind === "trigger") {
+    projects.openTriggers(true, item.workspaceId ? { workspaceId: item.workspaceId } : undefined);
+    return;
+  }
+  if (!item.workspaceId) return;
+  projects.select(item.workspaceId);
   const terminals = useTerminalStore.getState();
   if (item.terminalId && terminals.tabs.some((tab) => tab.id === item.terminalId))
     terminals.activate(item.terminalId);
+}
+
+/** The mark of what a row is about: the agent's own, or the one its view has in the sidebar. */
+function AboutIcon({ item }: { item: NotificationItem }) {
+  switch (about(item)) {
+    case "agent":
+      return <HarnessIcon id={item.harnessId ?? ""} label={item.harnessId ?? "agent"} />;
+    case "workflow":
+      return <WorkflowsIcon />;
+    case "test":
+      return <TestsIcon />;
+    case "schedule":
+      return <SchedulesIcon />;
+    case "trigger":
+      return <TriggersIcon />;
+  }
 }
 
 function Row(props: { item: NotificationItem; namesProject: boolean; now: number }) {
@@ -194,29 +248,30 @@ function Row(props: { item: NotificationItem; namesProject: boolean; now: number
   const words = what(item);
   const code = chip(item);
   const left = item.part === "earlier";
+  const name = leadName(item);
+  const detail = detailName(item);
   return (
     <li className="group flex min-h-15 items-center gap-3 border-b border-line px-4 hover:bg-raised">
       <Mark item={item} />
-      <HarnessIcon id={item.harnessId ?? ""} label={item.harnessId ?? "agent"} />
+      <span className="flex shrink-0 text-ink-muted">
+        <AboutIcon item={item} />
+      </span>
       <button
         type="button"
         onClick={() => open(item)}
-        aria-label={`${item.workspaceName} in ${item.projectName}: ${words}`}
+        aria-label={`${name} in ${item.projectName}: ${words}`}
+        title={`Open ${opens(item)}`}
         className="min-w-0 flex-1 py-2 text-left"
       >
         <span className="flex min-w-0 items-baseline gap-2">
-          <span className={`truncate font-medium ${left ? "text-ink-muted" : ""}`}>
-            {item.workspaceName}
-          </span>
+          <span className={`truncate font-medium ${left ? "text-ink-muted" : ""}`}>{name}</span>
           {namesProject && (
             <span className="shrink-0 text-small text-ink-muted">{item.projectName}</span>
           )}
           {item.branch && (
             <span className="shrink-0 font-mono text-small text-ink-faint">{item.branch}</span>
           )}
-          {item.sessionTitle && (
-            <span className="truncate text-small text-ink-faint">· {item.sessionTitle}</span>
-          )}
+          {detail && <span className="truncate text-small text-ink-faint">· {detail}</span>}
         </span>
         <span className="mt-0.5 flex min-w-0 items-baseline gap-2">
           <span className={`shrink-0 ${left ? "text-ink-faint" : "text-ink-muted"}`}>{words}</span>
@@ -226,6 +281,7 @@ function Row(props: { item: NotificationItem; namesProject: boolean; now: number
             </code>
           )}
           {item.said && <span className="truncate text-ink-faint">“{item.said}”</span>}
+          {item.note && <span className="truncate text-ink-faint">{item.note}</span>}
         </span>
       </button>
       {item.part === "finished" && (
@@ -248,14 +304,31 @@ function Row(props: { item: NotificationItem; namesProject: boolean; now: number
   );
 }
 
+/** How a row under Earlier left its part: a question was answered, a finished thing was seen,
+ *  and a schedule or a trigger stopped needing anyone. */
+function leftAs(item: NotificationItem): string {
+  if (item.kind === "agent.asks") return "answered";
+  switch (about(item)) {
+    case "agent":
+      return "seen";
+    case "workflow":
+      return item.kind === "workflow.succeeded" || item.kind === "workflow.failed"
+        ? "seen"
+        : "answered";
+    case "test":
+      return "answered";
+    case "schedule":
+    case "trigger":
+      return "no longer waiting";
+  }
+}
+
 /** The dot, in the sidebar's own language: solid amber waits for you, ringed is finished and
  *  not seen, red went badly, grey has left. */
 function Mark({ item }: { item: NotificationItem }) {
   const label =
     item.part === "earlier"
-      ? item.kind === "agent.asks"
-        ? "answered"
-        : "seen"
+      ? leftAs(item)
       : item.part === "needs"
         ? "needs you"
         : wentBadly(item)

@@ -398,7 +398,9 @@ In the **Triggers** view each trigger shows its event in words — _When a revie
 badge: **on**, **running**, **waiting**, **waiting for approval**, **capped**, **refused**,
 **off**, **no workspace** when its workspace was deleted, or **ended** when the agent it belongs
 to has ended. The number beside **Triggers** in the sidebar counts those that need you: capped,
-refused, waiting for approval, or with no workspace.
+refused, waiting for approval, or with no workspace. A capped or refused one and one with no
+workspace are also rows of [Notifications](notifications.md); for one waiting for approval the
+row there is the smoke test's.
 
 A trigger opens to its switch, **Edit…**, **Reset** when it is capped, **Remove…**, what it is
 set to, the pull request it is watching — or the ones elsewhere —, and its history, newest first, each line with **Open

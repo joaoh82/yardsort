@@ -167,6 +167,7 @@ fn drive(handle: &AppHandle, woken: &Receiver<()>) {
         {
             Ok(true) => {
                 let _ = commands::WorkflowRunsChanged {}.emit(handle);
+                crate::notifications::look(handle);
             }
             Ok(false) => {}
             Err(error) => eprintln!("workflows: cannot read runs: {}", error.message),
