@@ -27,7 +27,14 @@ Knowing the design helps judge what is a vulnerability:
   cannot inject commands.
 - When browsing or diffing a workspace, the webview names the workspace by id and gives a
   relative path; the core resolves it and refuses anything that leaves the workspace folder.
+- **The host dashboard**, where it is served ([guide](docs/guide/host-dashboard.md)), listens on
+  `127.0.0.1` only. It takes a request only when it is addressed to a loopback name or to its own
+  tunnel, comes from its own page, and carries a session bought with a one-time code, which is
+  handed out only to a person at that computer. A signed-in browser can run commands there as
+  that user: that is its purpose, and the one place a line someone typed is handed to a shell. It
+  can let no device in.
 
 Reports about breaking those guarantees — path traversal out of a workspace, command injection
 through a prompt or a harness field, a webview escape, anything that would let an unsigned or
-downgraded update install — are exactly what we want to hear about.
+downgraded update install, a way into the host dashboard without a sign-in code, or to a code
+without being a person at that computer — are exactly what we want to hear about.

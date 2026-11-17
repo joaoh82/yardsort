@@ -142,6 +142,7 @@ fn it_installs_the_programs_and_the_service_for_the_user_and_says_what_is_left()
         "yardsort-host sign-in",
         "yardsort-host install-agent claude",
         "yardsort-host pair",
+        "yardsort-host dashboard",
         "#git-and-github",
     ] {
         assert!(said.contains(step), "{step}: {said}");

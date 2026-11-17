@@ -458,6 +458,39 @@ fn link(app: &AppHandle) -> RemoteLink {
     }
 }
 
+/// Remote as the host dashboard shows it: the server, this computer's name there, the link in
+/// words and how many devices are let in. `None` while Remote is off.
+pub(crate) fn for_dashboard(app: &AppHandle) -> Option<host_dashboard::RemoteLink> {
+    let state = app.state::<AppState>();
+    let row = state.store.remote_host().ok().flatten()?;
+    Some(host_dashboard::RemoteLink {
+        server_url: row.server_url,
+        name: row.name,
+        link: match link(app) {
+            RemoteLink::Off => "not kept".into(),
+            RemoteLink::Connecting => "connecting".into(),
+            RemoteLink::Connected { devices } => {
+                format!("connected, {devices} device(s) on it now")
+            }
+            RemoteLink::Waiting { why, retry_in_ms } => {
+                format!("waiting ({why}); trying again in {}s", retry_in_ms / 1000)
+            }
+            RemoteLink::Stopped { why } => {
+                format!("stopped: {why} Sign in again in Yardsort, under Settings → Remote.")
+            }
+        },
+        devices: host::local_grants(&state.store)
+            .map(|grants| grants.len())
+            .unwrap_or(0),
+    })
+}
+
+/// Clone a repository into the folder for clones and add it as a project, as a device let in
+/// with typing can ask for: its id and its name. The window reads its projects again.
+pub(crate) fn clone_for_dashboard(app: &AppHandle, remote: &str) -> IpcResult<(String, String)> {
+    AppStarting(app.clone()).clone_project(remote, None)
+}
+
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDevice {

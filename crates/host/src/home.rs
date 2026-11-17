@@ -36,6 +36,8 @@ pub struct HostHome {
     pub watcher: OnceLock<InboxWatcher>,
     /// What a paired device that may type starts agents with.
     starting: Arc<HostStarting>,
+    /// The dashboard, while it is served (`dashboard.rs`).
+    pub dashboard: std::sync::Mutex<Option<host_dashboard::Dashboard>>,
 }
 
 impl HostHome {
@@ -55,6 +57,7 @@ impl HostHome {
             asked: tokio::sync::broadcast::channel(8).0,
             watcher: OnceLock::new(),
             starting: Arc::new(HostStarting(home.clone())),
+            dashboard: std::sync::Mutex::new(None),
         }))
     }
 
@@ -78,6 +81,12 @@ impl HostHome {
 
     pub fn asking(&self) -> tokio::sync::broadcast::Receiver<Request> {
         self.asked.subscribe()
+    }
+
+    /// Clone a repository into the folder for clones and add it as a project, as a paired
+    /// device's asking does: its id and its name.
+    pub fn clone_project(&self, remote: &str) -> IpcResult<(String, String)> {
+        self.starting.clone_project(remote, None)
     }
 }
 

@@ -29,6 +29,9 @@ pub struct Settings {
     pub usage: UsageSettings,
     #[serde(skip_serializing_if = "RemoteSettings::is_default")]
     pub remote: RemoteSettings,
+    /// The host dashboard: a web page this computer serves to itself. See [`DashboardSettings`].
+    #[serde(skip_serializing_if = "DashboardSettings::is_default")]
+    pub dashboard: DashboardSettings,
     /// How much the Floor Manager may do through `ys`. See [`FloorManagerSettings`].
     #[serde(skip_serializing_if = "FloorManagerSettings::is_default")]
     pub floor_manager: FloorManagerSettings,
@@ -122,6 +125,62 @@ pub struct LeftHost {
 }
 
 impl RemoteSettings {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// The port the host dashboard listens on when none is set. Below every system's range of
+/// passing ports (32768 up on Linux, 49152 up on macOS and Windows), so that no outgoing
+/// connection is ever found holding it, and registered to nothing.
+pub const DEFAULT_DASHBOARD_PORT: u16 = 28680;
+
+/// The host dashboard: a web page for looking after this computer as a host, served on
+/// 127.0.0.1 only. See `docs/guide/host-dashboard.md`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DashboardSettings {
+    /// Whether it is served. Unset, each program has its own answer: `yardsort-host serve`
+    /// serves it, and the app does not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// The port on 127.0.0.1. Unset, [`DEFAULT_DASHBOARD_PORT`]. Taken, the next free one of
+    /// the ten from it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(skip_serializing_if = "TunnelSettings::is_default")]
+    pub tunnel: TunnelSettings,
+}
+
+impl DashboardSettings {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port.unwrap_or(DEFAULT_DASHBOARD_PORT)
+    }
+}
+
+/// A rustunnel tunnel to the dashboard, so that it has an address beyond this computer. The
+/// tunnel's token is rustunnel's to keep (`~/.rustunnel/config.yml`, or `RUSTUNNEL_TOKEN`), and
+/// is never written here.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TunnelSettings {
+    pub enabled: bool,
+    /// The subdomain to ask for. Unset, the tunnel's server picks one, new each time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subdomain: Option<String>,
+    /// `eu`, `us`, `ap` or `auto`. Unset, what rustunnel's own config says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    /// A rustunnel server of your own, as `host:port`. Unset, what rustunnel's own config says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
+}
+
+impl TunnelSettings {
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
@@ -627,6 +686,46 @@ mod tests {
         assert!(!std::fs::read_to_string(path)
             .unwrap()
             .contains("workflow_harness_id"));
+    }
+
+    #[test]
+    fn the_dashboard_is_left_out_until_it_is_set_so_each_program_keeps_its_own_default() {
+        let (_dir, path) = file();
+        let file = SettingsFile::load(path.clone());
+        // Unset, and so neither on nor off: `yardsort-host` serves it, the app does not.
+        assert_eq!(file.get().dashboard.enabled, None);
+        assert_eq!(file.get().dashboard.port(), DEFAULT_DASHBOARD_PORT);
+        file.update(|s| s.general.notify_when_quiet = false)
+            .unwrap();
+        assert!(!std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("dashboard"));
+
+        file.update(|s| {
+            s.dashboard.enabled = Some(false);
+            s.dashboard.tunnel = TunnelSettings {
+                enabled: true,
+                subdomain: Some("build-box".into()),
+                ..TunnelSettings::default()
+            };
+        })
+        .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[dashboard]\nenabled = false\n"), "{text}");
+        assert!(
+            text.contains("[dashboard.tunnel]\nenabled = true\nsubdomain = \"build-box\"\n"),
+            "{text}"
+        );
+        // No token is kept: there is no place for one.
+        assert!(!text.contains("token"), "{text}");
+        let kept = SettingsFile::load(path.clone()).get().dashboard;
+        assert_eq!(kept, file.get().dashboard);
+
+        // Written by hand, with only a port.
+        std::fs::write(&path, "[dashboard]\nport = 30000\n").unwrap();
+        let by_hand = SettingsFile::load(path).get().dashboard;
+        assert_eq!((by_hand.enabled, by_hand.port()), (None, 30000));
+        assert!(!by_hand.tunnel.enabled);
     }
 
     #[test]

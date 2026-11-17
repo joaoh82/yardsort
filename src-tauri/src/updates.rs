@@ -186,6 +186,8 @@ pub async fn update_install(app: AppHandle, progress: Channel<DownloadProgress>)
 /// by hand, with the environment the user launched us with (see `without_appimage`). Everything
 /// else restarts as Tauri does it; the macOS app, for one, may have been renamed by the update.
 pub(crate) fn restart(app: &AppHandle) -> IpcResult<()> {
+    // Before the new copy starts: it serves the dashboard on the same port.
+    crate::dashboard::leaving(app);
     crate::one_copy::leaving();
     #[cfg(target_os = "linux")]
     if let Some(appimage) = app.env().appimage.clone() {

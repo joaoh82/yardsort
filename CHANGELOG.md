@@ -3,6 +3,22 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## 0.36.0
+
+- **A dashboard for setting a server up from a browser** (Remote, under development).
+  **`yardsort-host serve` now serves a web page on `127.0.0.1:28680`, and a host upgraded to this
+  release starts doing so without being asked**; `yardsort-host dashboard off` turns it off for
+  good. The page shows how the host and the computer stand, installs agents, gives Git a name,
+  signs the GitHub CLI in from a browser or with a token, clones repositories as projects, and
+  runs setup commands, each with its output as it comes. It listens on that computer alone: reach
+  it over an SSH forward, or turn on a [rustunnel](https://github.com/joaoh82/rustunnel) tunnel
+  with `yardsort-host dashboard tunnel on --subdomain <name>` for an `https://` address, whose
+  server can read what passes through it. A browser signs in with a one-time link that
+  `yardsort-host dashboard` prints only at a terminal of your own, as `pair` does, and whoever
+  signs in can run commands there as you. It is not another Yardsort and lets no device in. The
+  app can serve the same page for this computer: **Settings → Remote → Host dashboard**, off
+  until you tick it. See [The host dashboard](docs/guide/host-dashboard.md).
+
 ## 0.35.0
 
 - **Pull requests on the phone.** A workspace's row on the phone carries its pull request's

@@ -1,0 +1,103 @@
+id: host-dashboard
+name: A computer with no screen serves its dashboard, and only a person opens it
+description: >-
+  Runs yardsort-host with no display and no sign-in to any server, on this run's profile and port.
+  The dashboard's page loads in a browser and tells it nothing until it signs in. Asked for a
+  sign-in link by a script, the host refuses; asked at a terminal of the operator's own, it gives
+  one, which signs in once, and the dashboard then runs a command as the host's user. Turned off,
+  nothing listens. With build set to package, it runs the tarball the release ships. Linux only.
+  No window opens.
+version: 1
+timeout: 45m
+
+inputs:
+  - id: build
+    kind: choice
+    label: Which yardsort-host to run
+    options: [debug, package]
+    default: debug
+
+setup:
+  - id: build
+    action: shell
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: a_profile_on_this_runs_port
+    action: shell
+    line: >-
+      mkdir -p "$YS_RUN_DIR/profile" && printf '[dashboard]\nport = %s\n' "$YS_RUN_PORT" >
+      "$YS_RUN_DIR/profile/settings.toml"
+  - id: serve
+    action: shell
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: served
+    action: wait_for
+    url: "http://127.0.0.1:{{ run.port }}/"
+    timeout: 60s
+
+steps:
+  - id: serve_said_where
+    action: run
+    program: grep
+    args: ["Dashboard at http://127.0.0.1:{{ run.port }}", "{{ run.dir }}/serve.log"]
+  - id: nothing_is_told_before_signing_in
+    action: http
+    get: "http://127.0.0.1:{{ run.port }}/api/status"
+    expect:
+      status: 401
+      json: { error: signed_out }
+  - id: a_name_that_is_not_its_own_is_refused
+    action: http
+    get: "http://127.0.0.1:{{ run.port }}/"
+    headers:
+      Host: evil.example.test
+    expect:
+      status: 403
+      json: { error: wrong_address }
+  - id: the_page_asks_for_a_code
+    action: browser
+    do:
+      - goto: "http://127.0.0.1:{{ run.port }}/"
+      - expect_text: "Sign in with a code from this computer"
+      - screenshot: sign-in
+  - id: a_script_is_given_no_link
+    action: shell
+    line: sh .yardsort/tests/support/headless.sh yardsort-host dashboard 2>&1
+    expect:
+      exit: nonzero
+      stdout_contains: opened up only by a person
+  - id: status_says_where_it_is
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, yardsort-host, status]
+    expect:
+      stdout_contains: "Dashboard: http://127.0.0.1:{{ run.port }}, 0 browsers signed in."
+  - id: the_operator_signs_in_and_runs_a_command
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/dashboard.ts, "{{ run.dir }}", "{{ run.port }}"]
+    timeout: 90s
+    expect:
+      stdout_contains: "ran: from-the-dashboard-42"
+  - id: turn_it_off
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, yardsort-host, dashboard, "off"]
+    expect:
+      stdout_contains: The dashboard is off
+  - id: nothing_listens
+    action: shell
+    line: '! curl -s -m 3 -o /dev/null "http://127.0.0.1:$YS_RUN_PORT/"'
+  - id: and_it_is_kept_off
+    action: run
+    program: grep
+    args: ["enabled = false", "{{ run.dir }}/profile/settings.toml"]
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      kill "$(cat "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

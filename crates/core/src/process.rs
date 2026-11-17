@@ -77,6 +77,11 @@ impl Group {
         self.child.stdout.take()
     }
 
+    /// The child's standard error, to read, when it was piped.
+    pub fn stderr(&mut self) -> Option<std::process::ChildStderr> {
+        self.child.stderr.take()
+    }
+
     /// The child's standard input, to write to and then drop, when it was piped.
     pub fn stdin(&mut self) -> Option<std::process::ChildStdin> {
         self.child.stdin.take()

@@ -17,6 +17,7 @@ path = "src/main.rs"
 # No Tauri and no WebKit: this is what runs where there is no display at all.
 [dependencies]
 yardsort-core = { path = "../core" }
+host-dashboard = { path = "../dashboard" }
 pty-host = { path = "../pty-host", features = ["specta"] }
 pty-ipc = { path = "../pty-ipc" }
 remote-client = { path = "../remote-client" }

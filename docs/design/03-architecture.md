@@ -724,6 +724,27 @@ remote ever talks to it directly. Instead:
   a start answers from a thread of its own, and an upload goes to the profile's `uploads` folder,
   outside every worktree ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)).
 
+## The host dashboard (`crates/dashboard/`)
+
+A web page a computer serves to itself for looking after it as a host: its state, its agents, Git
+and GitHub, and the commands that set it up ([47](47-host-dashboard.md)). It is the one part of a
+host that listens for connections for longer than a sign-in takes, and it listens on 127.0.0.1
+alone.
+
+- **One crate, two programs.** `host-dashboard` holds an `axum` server, the sign-in, the jobs, the
+  tunnel and the page, three plain files built into the program. `yardsort-host serve` serves it
+  unless told not to; the app serves it once it is turned on in Settings. Each gives what it
+  knows of itself through one trait, `Source`.
+- **Who gets in.** A browser signs in with a one-time code, made only where a person is: by
+  `yardsort-host dashboard` behind the operator's guard, or by the app's window. Every request is
+  refused unless it is addressed to a loopback name or the tunnel's own, comes from the page
+  itself, and carries a session.
+- **What it adds: nothing beyond that user's own shell.** It runs commands as the host's user,
+  and lets no device in, approves no note and turns no sync on, so the guard on those holds
+  whatever happens to the dashboard.
+- **Beyond the computer**: an SSH forward, or a rustunnel tunnel whose client the host runs as a
+  child and reads by its `--json` events. The tunnel's token is rustunnel's own to keep.
+
 ## The Floor Manager (`crates/core/src/coordinator/`, `src-tauri/src/coordinator.rs`)
 
 One harness session with a `coordinator` label and no `workspace` label. It is started in
@@ -878,6 +899,7 @@ yardsort/
 │  ├─ remote-proto/          # the remote protocol's types and limits; no I/O (M26)
 │  ├─ remote-client/         # a device's side of the server: HTTP and relay sockets (M26)
 │  ├─ remote-host/           # the host's connector to the relay (M26)
+│  ├─ dashboard/             # the host dashboard: its server, sign-in, jobs, tunnel, page (M35)
 │  └─ server/                # the remote server: sign-in, devices, pairing, relay (M26)
 ├─ packages/
 │  └─ remote-client/         # a device's side in TypeScript, for the phone app; MPL-2.0 (R3)

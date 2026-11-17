@@ -1,0 +1,42 @@
+[package]
+name = "host-dashboard"
+description = "Yardsort's host dashboard: a web page a computer serves to itself, for looking after it as a host — its state, its agents, its Git sign-in and the commands that set it up."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# Apart from the app and from `yardsort-host` on purpose: both serve it, and neither's own state
+# is in here. What a program knows of itself comes through `Source`.
+[dependencies]
+yardsort-core = { path = "../core" }
+# The same server the relay's stand-ins use, with nothing but HTTP/1.1: the page polls.
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+# A folder's real path without Windows' `\\?\` in front, to find the disk it is on.
+dunce = "1"
+# Sign-in codes and session tokens.
+getrandom = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# A session is kept by its hash, never by its token.
+sha2 = "0.10"
+# The computer's load, memory and disks, read the same way on every platform.
+sysinfo = { version = "0.39", default-features = false, features = ["disk", "system"] }
+tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
+
+# Ending the tunnel's client with the program that started it, however that program ends.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+yardsort-core = { path = "../core", features = ["testing"] }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+
+# Shows the page with a stand-in host; see the file.
+[[example]]
+name = "dashboard-stand-in"

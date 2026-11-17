@@ -147,6 +147,12 @@ export const DOCS_NAV: DocSection[] = [
           "Run yardsort-host on a Linux server as a host your phone reaches: install it with one line, sign in from another browser, pair a device at a terminal, set up git and GitHub, add projects and start agents with ys.",
       },
       {
+        slug: "guide/host-dashboard",
+        title: "The host dashboard",
+        description:
+          "A web page a Yardsort host serves to itself for setting a server up from a browser: install agents, sign GitHub in, clone repositories and run setup commands. On 127.0.0.1 only, signed in to with a one-time link from a terminal, with an optional rustunnel tunnel.",
+      },
+      {
         slug: "guide/smoke-tests",
         title: "Smoke tests",
         description:

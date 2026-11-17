@@ -29,6 +29,8 @@ pty-ipc = { path = "../crates/pty-ipc" }
 # Remote: this computer as a host on a Yardsort server (src/remote.rs).
 remote-client = { path = "../crates/remote-client" }
 remote-host = { path = "../crates/remote-host" }
+# The host dashboard: the same page `yardsort-host` serves, off here until it is turned on.
+host-dashboard = { path = "../crates/dashboard" }
 remote-proto = { path = "../crates/remote-proto" }
 # The pairing QR code, drawn as SVG.
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }

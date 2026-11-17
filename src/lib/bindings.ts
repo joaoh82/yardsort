@@ -523,6 +523,15 @@ export const commands = {
 	 *  folder is made when the first clone needs it, not here.
 	 */
 	remoteSetProjectsDir: (dir: string | null) => typedError<ProjectsDir, IpcError>(__TAURI_INVOKE("remote_set_projects_dir", { dir })),
+	dashboardStatus: () => typedError<DashboardStatus, IpcError>(__TAURI_INVOKE("dashboard_status")),
+	/**  Serve the dashboard or stop serving it, now and whenever the app starts. */
+	dashboardSetEnabled: (enabled: boolean) => typedError<DashboardStatus, IpcError>(__TAURI_INVOKE("dashboard_set_enabled", { enabled })),
+	/**  Open the dashboard in this computer's browser, signed in. */
+	dashboardOpen: () => typedError<null, IpcError>(__TAURI_INVOKE("dashboard_open")),
+	/**  A one-time link that signs a browser in, for the person at the window to take elsewhere. */
+	dashboardSignInLink: () => typedError<DashboardSignIn, IpcError>(__TAURI_INVOKE("dashboard_sign_in_link")),
+	/**  Sign every browser out of the dashboard, and void the links not yet used. */
+	dashboardSignEveryoneOut: () => typedError<DashboardStatus, IpcError>(__TAURI_INVOKE("dashboard_sign_everyone_out")),
 	/**
 	 *  Watch a terminal on another computer. What it shows comes on `output`; the number it returns
 	 *  asks things of it, until [`remote_terminal_close`].
@@ -1381,6 +1390,32 @@ export type DaemonStatus = {
 	 *  rather than stopped behind the user's back.
 	 */
 	strandedSessions: number | null,
+};
+
+/**  A way in for one browser, once. */
+export type DashboardSignIn = {
+	/**
+	 *  The address through the tunnel while it is up, and otherwise the one on this computer,
+	 *  with the code in it.
+	 */
+	link: string,
+	/**  The code alone, to type. */
+	code: string,
+	goodForMinutes: number,
+};
+
+/**  The dashboard as Settings shows it. */
+export type DashboardStatus = {
+	/**  Turned on in the settings. */
+	enabled: boolean,
+	/**  Where it is served, on this computer, while it is. */
+	address: string | null,
+	/**  Its tunnel, in words, when one is wanted: where it is up, or why it is not. */
+	tunnel: string | null,
+	/**  Browsers signed in. */
+	signedIn: number,
+	/**  Why it is turned on and not served. */
+	problem: string | null,
 };
 
 export type DayUsage = {

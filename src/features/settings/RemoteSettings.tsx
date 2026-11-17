@@ -16,6 +16,7 @@ import { useTerminalStore } from "@/stores/terminals";
 import { buttonClass, Field, inputClass, primaryButtonClass } from "./fields";
 import { ProjectsFolderSettings } from "./ProjectsFolderSettings";
 import { OtherComputersSettings } from "./OtherComputersSettings";
+import { HostDashboardSettings } from "./HostDashboardSettings";
 
 /** How often the open section asks the server who is waiting. */
 const POLL_MS = 3000;
@@ -305,6 +306,7 @@ export function RemoteSettings() {
       )}
 
       <OtherComputersSettings />
+      <HostDashboardSettings />
     </div>
   );
 }

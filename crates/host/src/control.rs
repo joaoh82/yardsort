@@ -1,9 +1,10 @@
 //! The control socket: how this computer's own commands (`pair`, `devices`, `revoke`, `status`,
-//! `sign-out`, `sync`, `memory`) ask the running host, which alone holds the sign-in. One JSON
-//! message per line.
+//! `sign-out`, `sync`, `memory`, `dashboard`) ask the running host, which alone holds the sign-in.
+//! One JSON message per line.
 //!
-//! It is `<data dir>/host.sock`, readable and writable by this user only. Nothing listens on the
-//! network: not this, and not the daemon.
+//! It is `<data dir>/host.sock`, readable and writable by this user only. Neither this nor the
+//! daemon listens on the network. The one thing here that does is the dashboard, on 127.0.0.1
+//! alone (`dashboard.rs`).
 
 use std::path::{Path, PathBuf};
 
@@ -99,7 +100,31 @@ pub enum Ask {
         keep: String,
         text: Option<String>,
     },
+    /// Where the dashboard is, and a one-time way in to it. Refused unless a person at a
+    /// terminal asked: a sign-in code is given to nobody else.
+    Dashboard,
+    /// Serve the dashboard, or stop serving it, and keep that in the settings. Turning it on is
+    /// refused unless a person at a terminal asked.
+    DashboardEnable {
+        enabled: bool,
+    },
+    /// Keep a tunnel to the dashboard, or end it, and keep that in the settings. Turning one on
+    /// is refused unless a person at a terminal asked: it is an address anyone can open.
+    DashboardTunnel {
+        enabled: bool,
+        subdomain: Option<String>,
+        region: Option<String>,
+        server: Option<String>,
+    },
+    /// Sign every browser out of the dashboard. Taking access away needs no check.
+    DashboardSignOut,
 }
+
+/// Why a dashboard command that needs a person was refused. The guard's own words are about
+/// pairing.
+const DASHBOARD_NEEDS_A_PERSON: &str =
+    "The dashboard is opened up only by a person, from a terminal of their own on this computer \
+     (an SSH login, say), on Linux: never by an agent, a script, or a terminal Yardsort started.";
 
 impl Ask {
     /// Only a person at a terminal of their own may ask it (`guard`).
@@ -117,7 +142,20 @@ impl Ask {
                 | Ask::MemoryDecide { .. }
                 | Ask::MemoryEdit { .. }
                 | Ask::MemorySettle { .. }
+                | Ask::Dashboard
+                | Ask::DashboardEnable { enabled: true }
+                | Ask::DashboardTunnel { enabled: true, .. }
         )
+    }
+
+    /// What to say when the guard refused this, given `why` it did.
+    pub fn refused(&self, why: String) -> String {
+        match self {
+            Ask::Dashboard | Ask::DashboardEnable { .. } | Ask::DashboardTunnel { .. } => {
+                DASHBOARD_NEEDS_A_PERSON.into()
+            }
+            _ => why,
+        }
     }
 }
 
@@ -159,6 +197,7 @@ pub enum Reply {
     Memory {
         notes: Vec<Note>,
     },
+    Dashboard(Dashboard),
     /// Done, in words.
     Done {
         message: String,
@@ -224,12 +263,57 @@ pub struct Status {
     /// Set when the daemon is from an earlier release, kept for the agents in it.
     #[serde(default)]
     pub earlier_daemon: Option<EarlierDaemon>,
+    /// The dashboard, while it is served. Absent from a host that has none.
+    #[serde(default)]
+    pub dashboard: Option<DashboardStatus>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EarlierDaemon {
     /// Its release, when it said.
     pub version: Option<String>,
+}
+
+impl EarlierDaemon {
+    /// After an upgrade, while the terminal daemon of the release before still runs agents.
+    pub fn words(&self) -> String {
+        let release = match &self.version {
+            Some(version) => format!("Yardsort {version}"),
+            None => "an earlier release".into(),
+        };
+        format!(
+            "The terminal daemon is from {release}, kept for the agents running in it. \
+             Phones cannot watch its terminals, new ones included, until it is replaced: once \
+             those agents have ended, restart `serve`."
+        )
+    }
+}
+
+/// The dashboard, as `status` shows it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DashboardStatus {
+    /// `http://127.0.0.1:<port>`.
+    pub address: String,
+    pub port: u16,
+    /// The tunnel, in words.
+    pub tunnel: String,
+    /// Browsers signed in.
+    pub signed_in: usize,
+}
+
+/// The dashboard, and a way in to it.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Dashboard {
+    #[serde(flatten)]
+    pub status: DashboardStatus,
+    /// The sign-in code, as typed.
+    pub code: String,
+    /// The address on this computer, with the code in it.
+    pub local: String,
+    /// The address through the tunnel, with the code in it, while the tunnel is up.
+    pub public: Option<String>,
+    /// How long the code is good for, in seconds.
+    pub good_for: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -406,6 +490,37 @@ mod tests {
         for ask in [Ask::SyncStatus, Ask::SyncPreview { project: project() }] {
             assert!(!ask.guarded(), "{ask:?}");
         }
+    }
+
+    #[test]
+    fn opening_the_dashboard_up_is_guarded_and_closing_it_never_is() {
+        let tunnel = |enabled| Ask::DashboardTunnel {
+            enabled,
+            subdomain: Some("build-box".into()),
+            region: None,
+            server: None,
+        };
+        for ask in [
+            Ask::Dashboard,
+            Ask::DashboardEnable { enabled: true },
+            tunnel(true),
+        ] {
+            assert!(ask.guarded(), "{ask:?}");
+            // Said in the dashboard's own words, not pairing's.
+            let said = ask.refused("Pairing is refused.".into());
+            assert!(
+                said.contains("dashboard") && !said.contains("Pairing"),
+                "{said}"
+            );
+        }
+        for ask in [
+            Ask::DashboardEnable { enabled: false },
+            tunnel(false),
+            Ask::DashboardSignOut,
+        ] {
+            assert!(!ask.guarded(), "{ask:?}");
+        }
+        assert_eq!(Ask::Pair.refused("as it was".into()), "as it was");
     }
 
     #[test]
