@@ -133,8 +133,8 @@ the code review on that workspace. At ask first, which is the default, each of t
 only it can tell you the command and cannot run it. A reviewer starts there, reads and runs the
 code without editing it, and posts its review on GitHub. You get a notification when it has.
 
-A pull request from a fork gets a branch named `pr/<number>`. The built-in review finds a pull
-request by its branch name, so it cannot review one of those yet. The Floor Manager says so.
+A pull request from a fork gets a branch named `pr/<number>`, set to follow it. The review finds
+that pull request by the number its branch follows, so it reviews one from a fork the same way.
 
 ### Workflows
 

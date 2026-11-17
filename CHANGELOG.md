@@ -16,6 +16,11 @@ has the downloads and the full commit lists.
   a push token. The phone has it under **Settings → Your account**, and a computer with no screen
   has `yardsort-host account export`. It needs a server of this version. See
   [Exporting your account](docs/guide/remote.md#exporting-your-account).
+- **Pull requests from forks can be code reviewed.** A workspace on a fork's pull request — its
+  branch is `pr/<number>`, from **Start workspace** or `ys pr checkout` — now finds that pull
+  request by the number its branch follows, so **Request code review** and
+  `ys workflow run code-review` work there, and so does the Floor Manager's review of other
+  people's pull requests. The review is posted on the pull request in your project's repository.
 
 ## 0.35.0
 
