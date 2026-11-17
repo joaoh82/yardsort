@@ -52,11 +52,32 @@ pub fn save(export: &AccountExport, path: &Path, replace: bool) -> Result<()> {
         Some(dir) if !dir.as_os_str().is_empty() => dir,
         _ => Path::new("."),
     };
-    let mut file = tempfile::NamedTempFile::new_in(dir).map_err(failed)?;
     // On Unix the temporary file is this user's only already. On Windows it would take the
-    // folder's access, so it is made this user's alone before anything is written to it.
+    // folder's access, so it is opened able to change that and made this user's alone before
+    // anything is written to it.
+    #[cfg(unix)]
+    let mut file = tempfile::NamedTempFile::new_in(dir).map_err(failed)?;
     #[cfg(windows)]
-    owner_only(file.as_file()).map_err(failed)?;
+    let mut file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_GENERIC_READ, FILE_GENERIC_WRITE, WRITE_DAC,
+        };
+        let file = tempfile::Builder::new()
+            .make_in(dir, |path| {
+                // `access_mode` replaces what `read` and `write` ask for, but creating a file
+                // still needs `write` set.
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create_new(true)
+                    .access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE | WRITE_DAC)
+                    .open(path)
+            })
+            .map_err(failed)?;
+        owner_only(file.as_file()).map_err(failed)?;
+        file
+    };
     serde_json::to_writer_pretty(&mut file, export).map_err(|e| failed(e.into()))?;
     file.write_all(b"\n").map_err(failed)?;
     file.as_file().sync_all().map_err(failed)?;

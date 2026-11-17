@@ -26,7 +26,7 @@ url = "2"
 
 # An export made its owner's alone before anything is written to it.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
 
 [dev-dependencies]
 yardsort-core = { path = "../core", features = ["testing"] }
