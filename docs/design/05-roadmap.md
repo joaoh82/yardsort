@@ -1106,6 +1106,10 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       slices are built, and the gate's runs through staging passed on 2026-11-15, this computer
       and the box: offline edits shown as one conflict on both and settled once, a revoke over an
       offline edit holding on both, and nothing made on the box that it did not ask for.
+      R7 planned on 2026-11-16 in [46](46-remote-r7.md): ten slices, four of them (exporting
+      and deleting an account, entitlements and metering, the isolation test) buildable now and
+      the rest waiting on the owner's answers to its eleven questions, production, the stores,
+      billing and a status page among them.
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is
