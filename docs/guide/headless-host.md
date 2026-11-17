@@ -530,6 +530,23 @@ computer out. After restoring, run `yardsort-host sign-in` again: it keeps the s
 devices still paired. A backup of the sign-in is also a copy of this computer's identity, readable by
 anyone who can read the backup.
 
+## Exporting your account
+
+```sh
+yardsort-host account export                        # yardsort-account-<date>.json, here
+yardsort-host account export --out ~/account.json  # or where you say
+```
+
+Saves everything the server keeps of this computer's account as one JSON file: the account, your
+devices and computers, which phones get notifications and your settings for them, and every synced
+project, note and workspace name. Never a credential or a push token. It says what the file holds
+first and asks; `--yes` does not ask. An existing file is kept: name another with `--out`. The file is
+readable by your user only. See [Exporting your account](remote.md#exporting-your-account) for
+everything it holds and leaves out.
+
+Like `pair`, it is refused from any terminal Yardsort started and from anything an agent runs, since
+the file holds every synced note. `serve` has to be running.
+
 ## Signing out
 
 ```sh

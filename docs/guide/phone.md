@@ -31,6 +31,8 @@ the computer, not on the phone, so they keep going whatever happens to the conne
 - **Be told when something needs you.** A task that moved, a review, a failed run, an agent or a
   workflow waiting for an answer. The notification opens that item. See
   [Notifications](remote.md#notifications).
+- **Export your account.** Settings → Your account saves everything the server keeps of it as a
+  file, never a credential. See [Exporting your account](remote.md#exporting-your-account).
 
 ## What it needs
 

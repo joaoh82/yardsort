@@ -143,6 +143,7 @@ impl<R: Records> ControlService<R> {
                 "device.revoke".into(),
                 "host.list".into(),
                 "host.pair".into(),
+                remote_proto::export::EXPORT_CAPABILITY.into(),
             ],
         }
     }

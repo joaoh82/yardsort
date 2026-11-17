@@ -164,6 +164,7 @@ import {
   type RemoteDevice,
   type RemoteEarlierDaemon,
   type RemoteLink,
+  type RemoteExported,
   type RemotePairing,
   type RemoteRequest,
   type RemoteRequests,
@@ -364,6 +365,7 @@ export type {
   RemoteDevice,
   RemoteEarlierDaemon,
   RemoteLink,
+  RemoteExported,
   RemotePairing,
   RemoteRequest,
   RemoteRequests,
@@ -893,6 +895,11 @@ export const ipc = {
   remoteDisable: () => unwrap(commands.remoteDisable()),
   /** A code to type and a QR code, good once for five minutes. */
   remotePair: () => unwrap(commands.remotePair()),
+  /**
+   * Save everything the server keeps of this computer's account at `path`, as JSON. The path is
+   * the one the person chose in the save dialog.
+   */
+  remoteExport: (path: string) => unwrap(commands.remoteExport(path)),
   /** Devices waiting for an answer, and the ones let in. */
   remoteRequests: () => unwrap(commands.remoteRequests()),
   remoteAnswer: (grantId: string, answer: RemoteAnswer) =>

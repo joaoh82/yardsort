@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use remote_proto::account::{DeviceKind, Secret};
+use remote_proto::export::PushRoute;
 use remote_proto::notify::NotificationPreferences;
 use remote_proto::pairing::MAX_OFFER_MISSES;
 use remote_proto::sync::{
@@ -35,6 +36,14 @@ use crate::tokens::{self, TokenHash};
 /// linked to another account by one.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AccountId(pub String);
+
+/// An account's own row, for its export.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountRow {
+    pub issuer: String,
+    pub subject: String,
+    pub created_at: i64,
+}
 
 /// A sign-in between the device starting it and the identity provider answering.
 #[derive(Debug, Clone)]
@@ -206,6 +215,8 @@ pub enum GrantFilter {
     One(GrantId),
     OfHost(HostId),
     ForDevice(DeviceId),
+    /// Every grant of the account, for its export.
+    All,
 }
 
 /// The host's person's answer to a pending grant.
@@ -668,6 +679,27 @@ pub trait Records: Send + Sync {
         now: i64,
     ) -> impl Future<Output = Result<bool>> + Send;
 
+    /// The account's own row. `None` when there is no such account.
+    fn account_row(
+        &self,
+        account: &AccountId,
+    ) -> impl Future<Output = Result<Option<AccountRow>>> + Send;
+
+    /// The account's phones that have a push route, by device: never the token.
+    fn push_routes(
+        &self,
+        account: &AccountId,
+    ) -> impl Future<Output = Result<Vec<PushRoute>>> + Send;
+
+    /// At most `limit` of the account's synced records that have a body, of every project, with
+    /// ids after `after`, by id: no tombstones and no pruned markers. With whether more follow.
+    fn exported_records(
+        &self,
+        account: &AccountId,
+        after: Option<&SyncId>,
+        limit: usize,
+    ) -> impl Future<Output = Result<(Vec<SyncRecord>, bool)>> + Send;
+
     /// Delete at most `batch` of each: tombstones and changes older than `changes_before`
     /// (raising each account's floor past the tombstones), ops older than `ops_before`, and links
     /// to projects whose record is gone. The most any one of them deleted.
@@ -777,6 +809,7 @@ struct PushTokenRow {
     account: String,
     platform: String,
     token: String,
+    updated_at: i64,
 }
 
 struct NoticeRow {
@@ -839,7 +872,8 @@ pub(crate) fn category_allowed(preferences: &NotificationPreferences, category: 
 
 #[derive(Default)]
 struct State {
-    accounts: HashMap<(String, String), AccountId>,
+    /// Each with when it was made.
+    accounts: HashMap<(String, String), (AccountId, i64)>,
     logins: Vec<PendingLogin>,
     handoffs: Vec<Handoff>,
     devices: Vec<Device>,
@@ -994,11 +1028,12 @@ impl State {
 }
 
 impl Records for MemoryRecords {
-    async fn account(&self, issuer: &str, subject: &str, _now: i64) -> Result<AccountId> {
+    async fn account(&self, issuer: &str, subject: &str, now: i64) -> Result<AccountId> {
         self.with(|s| {
             s.accounts
                 .entry((issuer.to_owned(), subject.to_owned()))
-                .or_insert_with(|| AccountId(uuid::Uuid::new_v4().to_string()))
+                .or_insert_with(|| (AccountId(uuid::Uuid::new_v4().to_string()), now))
+                .0
                 .clone()
         })
     }
@@ -1165,6 +1200,7 @@ impl Records for MemoryRecords {
             let account = s
                 .accounts
                 .get(&(issuer.to_owned(), subject.to_owned()))?
+                .0
                 .clone();
             let mut count = 0;
             let mut gone = Vec::new();
@@ -1283,6 +1319,7 @@ impl Records for MemoryRecords {
                     GrantFilter::One(id) => g.id == *id,
                     GrantFilter::OfHost(host) => g.host == *host,
                     GrantFilter::ForDevice(device) => g.device == *device,
+                    GrantFilter::All => true,
                 })
                 .map(|g| s.view(g))
                 .collect();
@@ -1469,7 +1506,7 @@ impl Records for MemoryRecords {
         device: &DeviceId,
         platform: &str,
         token: &str,
-        _now: i64,
+        now: i64,
     ) -> Result<bool> {
         self.with(|s| {
             let live = s.devices.iter().any(|d| {
@@ -1487,6 +1524,7 @@ impl Records for MemoryRecords {
                     account: account.0.clone(),
                     platform: platform.to_owned(),
                     token: token.to_owned(),
+                    updated_at: now,
                 },
             );
             true
@@ -1892,6 +1930,61 @@ impl Records for MemoryRecords {
             }
             sync.links.insert(key);
             true
+        })
+    }
+
+    async fn account_row(&self, account: &AccountId) -> Result<Option<AccountRow>> {
+        self.with(|s| {
+            s.accounts.iter().find(|(_, (id, _))| id == account).map(
+                |((issuer, subject), (_, created_at))| AccountRow {
+                    issuer: issuer.clone(),
+                    subject: subject.clone(),
+                    created_at: *created_at,
+                },
+            )
+        })
+    }
+
+    async fn push_routes(&self, account: &AccountId) -> Result<Vec<PushRoute>> {
+        self.with(|s| {
+            let mut routes: Vec<PushRoute> = s
+                .push_tokens
+                .iter()
+                .filter(|(_, row)| row.account == account.0)
+                .filter_map(|(device, row)| {
+                    Some(PushRoute {
+                        device: DeviceId::new(device.clone()).ok()?,
+                        platform: row.platform.clone(),
+                        updated_at: row.updated_at,
+                    })
+                })
+                .collect();
+            routes.sort_by(|a, b| a.device.as_str().cmp(b.device.as_str()));
+            routes
+        })
+    }
+
+    async fn exported_records(
+        &self,
+        account: &AccountId,
+        after: Option<&SyncId>,
+        limit: usize,
+    ) -> Result<(Vec<SyncRecord>, bool)> {
+        self.with(|s| {
+            let Some(sync) = s.sync.get(&account.0) else {
+                return (Vec::new(), false);
+            };
+            let mut records: Vec<SyncRecord> = sync
+                .records
+                .values()
+                .filter(|r| !r.deleted && r.body.is_some() && !sync.pruned.contains(&r.id))
+                .filter(|r| after.is_none_or(|after| r.id > *after))
+                .take(limit + 1)
+                .cloned()
+                .collect();
+            let more = records.len() > limit;
+            records.truncate(limit);
+            (records, more)
         })
     }
 

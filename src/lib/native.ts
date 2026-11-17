@@ -1,5 +1,5 @@
 /** Native OS affordances: folder pickers, confirmation boxes, the file manager. */
-import { ask, open } from "@tauri-apps/plugin-dialog";
+import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import {
   isPermissionGranted,
   requestPermission,
@@ -12,6 +12,16 @@ export const native = {
   async pickFolder(title: string, defaultPath?: string): Promise<string | null> {
     const picked = await open({ title, defaultPath, directory: true, multiple: false });
     return typeof picked === "string" ? picked : null;
+  },
+
+  /** Resolves to where to save a file, or `null` if the user cancelled. Asks before replacing. */
+  async pickSaveFile(title: string, defaultPath: string): Promise<string | null> {
+    const picked = await save({
+      title,
+      defaultPath,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    return picked ?? null;
   },
 
   confirm: (

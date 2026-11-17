@@ -1,5 +1,5 @@
 //! The control socket: how this computer's own commands (`pair`, `devices`, `revoke`, `status`,
-//! `sign-out`, `sync`, `memory`) ask the running host, which alone holds the sign-in. One JSON
+//! `sign-out`, `sync`, `memory`, `account`) ask the running host, which alone holds the sign-in. One JSON
 //! message per line.
 //!
 //! It is `<data dir>/host.sock`, readable and writable by this user only. Nothing listens on the
@@ -99,6 +99,9 @@ pub enum Ask {
         keep: String,
         text: Option<String>,
     },
+    /// Everything the server keeps of this computer's account, every page put together. Refused
+    /// unless a person at a terminal asked: it holds every synced note and workspace name.
+    AccountExport,
 }
 
 impl Ask {
@@ -130,6 +133,7 @@ impl Ask {
             Ask::MemoryWrite { .. } => ("Writing a note", "memory write"),
             Ask::MemoryEdit { .. } => ("Rewriting a note", "memory edit"),
             Ask::MemorySettle { .. } => ("Settling a note", "memory settle"),
+            Ask::AccountExport => ("Exporting the account", "account export"),
             _ => return None,
         })
     }
@@ -172,6 +176,10 @@ pub enum Reply {
     Preview(yardsort_core::sync::SyncPreview),
     Memory {
         notes: Vec<Note>,
+    },
+    /// The account's export, for the command to save.
+    Export {
+        export: Box<remote_proto::export::AccountExport>,
     },
     /// Done, in words.
     Done {
@@ -414,6 +422,7 @@ mod tests {
                 keep: "other".into(),
                 text: None,
             },
+            Ask::AccountExport,
         ] {
             assert!(ask.guarded(), "{ask:?}");
         }

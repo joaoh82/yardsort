@@ -27,6 +27,7 @@
 
 pub mod account;
 pub mod computer;
+pub mod export;
 pub mod sync;
 
 use std::collections::HashMap;

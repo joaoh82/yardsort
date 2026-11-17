@@ -526,6 +526,33 @@ The usual reason is the server seeing this computer's sign-in used twice, which 
 second copy of Yardsort used to cause that. Now only one copy runs on a profile, and starting it again
 [brings up the window it already has](troubleshooting.md#yardsort-is-already-open).
 
+## Exporting your account
+
+You can save everything the server keeps of your account as one JSON file, to keep or to read:
+
+- your account: the identity provider you sign in with, your id there, and when it was made;
+- your phones and computers, signed out ones the server still lists included, and which devices
+  each computer lets in;
+- which phones get notifications, by device and platform, and your notification settings;
+- every synced project, note and workspace name, in plain text, with a revoked note's text too.
+
+It never holds a credential, a push token or a pairing code. It also leaves out what holds no
+content of yours: records deleted from sync, the server's change log, and notices on their way to a
+phone. Whoever can read the file can read every synced note, so keep it somewhere only you can.
+
+On this computer, **Settings → Remote → Your account → Export my account's data…** says what the file
+holds, then **Choose where to save…** opens a save dialog. The server is asked for nothing until you
+have chosen where it goes. Once saved, the section says how many devices, computers and synced
+records it holds, and **Show in folder** opens it. It is there while this computer is signed in;
+after the server signs it out, sign in again first.
+
+On the phone, **Settings → Your account → Export my account's data** does the same for the server the
+phone is using, then **Export**. On iPhone it opens the share sheet, where **Save to Files** keeps it;
+on Android you pick a folder. On a computer with no screen, see
+[Exporting your account there](headless-host.md#exporting-your-account).
+
+A server too old to export says so. Its operator updates it.
+
 ## The phone app
 
 [The phone app](phone.md) says what it does and what it needs. It is invite only for now, and will
