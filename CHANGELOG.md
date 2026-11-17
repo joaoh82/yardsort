@@ -3,8 +3,12 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.36.0
 
+- **Pull requests on the phone from a computer with no screen.** `yardsort-host` now reads its
+  projects' pull requests with its own `gh` when the phone asks, so the badges, the card and the
+  **Pull requests** list show for it as for a desktop. Those a workspace follows in another
+  repository are not read there yet. See [Pull requests on the phone](docs/guide/remote.md#pull-requests-on-the-phone).
 - **Export your account** (Remote, under development). **Settings → Remote → Your account → Export
   my account's data…** saves everything the server keeps of your account as one JSON file: your
   devices and computers, which phones get notifications, and every synced project, note and
