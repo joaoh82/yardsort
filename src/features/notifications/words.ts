@@ -79,8 +79,17 @@ export function what(item: NotificationItem): string {
   }
 }
 
-/** What pressing the row opens, for its label and its hint. */
+/** What pressing the row opens, for its label and its hint. A row of another computer opens
+ *  its workspace there: the views that answer a workflow, a schedule or a trigger are that
+ *  computer's own. */
 export function opens(item: NotificationItem): string {
+  if (item.hostId !== null) {
+    const where = item.hostName ?? "that computer";
+    if (item.workspaceId === null) return `nothing here: it is changed on ${where}`;
+    return about(item) === "agent" && item.terminalId
+      ? `the agent's terminal on ${where}`
+      : `its workspace on ${where}`;
+  }
   switch (about(item)) {
     case "agent":
       return item.terminalId ? "the agent's terminal" : "its workspace";
@@ -165,14 +174,21 @@ export function sections(items: NotificationItem[], grouping: Grouping, filter: 
       items: waiting.filter((item) => item.part === "finished").sort(newestFirst),
     });
   } else {
+    // A project on another computer is its own, whatever it is called: this computer's first,
+    // then each other computer's.
     const byProject = new Map<string, NotificationItem[]>();
     for (const item of waiting) {
-      const list = byProject.get(item.projectId);
+      const key = `${item.hostId ?? ""}/${item.projectId}`;
+      const list = byProject.get(key);
       if (list) list.push(item);
-      else byProject.set(item.projectId, [item]);
+      else byProject.set(key, [item]);
     }
-    const projects = [...byProject.entries()].sort(([, a], [, b]) =>
-      (a[0]?.projectName ?? "").localeCompare(b[0]?.projectName ?? ""),
+    const there = (rows: NotificationItem[]) => rows[0]?.hostName ?? "";
+    const projects = [...byProject.entries()].sort(
+      ([, a], [, b]) =>
+        Number(a[0]?.hostId != null) - Number(b[0]?.hostId != null) ||
+        there(a).localeCompare(there(b)) ||
+        (a[0]?.projectName ?? "").localeCompare(b[0]?.projectName ?? ""),
     );
     for (const [projectId, rows] of projects) {
       // What needs an answer comes before what only finished.
@@ -181,7 +197,9 @@ export function sections(items: NotificationItem[], grouping: Grouping, filter: 
       );
       out.push({
         id: `project:${projectId}`,
-        title: rows[0]?.projectName ?? "",
+        title: rows[0]?.hostId
+          ? `${rows[0].projectName} on ${there(rows) || "another computer"}`
+          : (rows[0]?.projectName ?? ""),
         note: countWords(rows),
         namesProject: false,
         items: ordered,

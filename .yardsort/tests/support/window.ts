@@ -204,6 +204,9 @@ const chooseThere = async (name: string) => {
 /** A workspace on another computer, in the center panel. */
 const viewThere = (name: string, workspace: string) =>
   `section[aria-label="${workspace} on ${name}"]`;
+/** The Notifications list in the center panel, and its part for what finished unseen. */
+const LIST = `section[aria-label="Notifications"]`;
+const UNSEEN = `${LIST} section[aria-label="Finished, not seen"]`;
 const textOf = (selector: string) =>
   page(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? ""`) as Promise<string>;
 
@@ -912,6 +915,86 @@ switch (doing) {
       60_000,
     );
     console.log(`saw: ${String(asked)}`);
+    break;
+  }
+  case "lists-there": {
+    // Here the last arguments are the host's name and how many of its rows are unseen. The
+    // Notifications row counts them, and the list names the host on each.
+    const name = runDir as string;
+    const count = Number(process.argv[5]);
+    await onlineThere(name);
+    await until(
+      `${count} finished and not seen, on the Notifications row`,
+      async () =>
+        (
+          (await page(
+            `[...document.querySelectorAll('aside[aria-label="Projects"] > button')].map((b) => b.getAttribute("aria-label") ?? "").find((label) => label.startsWith("Notifications")) ?? ""`,
+          )) as string
+        ).includes(`${count} finished and not seen`),
+      60_000,
+    );
+    console.log(`saw: ${count} finished and not seen, on the Notifications row`);
+    if (!(await textOf(LIST))) await page(clickedNamed("Notifications"));
+    await until("the list", async () => (await textOf(LIST)) !== "");
+    const rows = (await page(
+      `[...document.querySelectorAll(${JSON.stringify(`${UNSEEN} li`)})].map((row) => row.textContent)`,
+    )) as string[];
+    if (rows.length !== count) throw new Error(`The list shows: ${rows.join(" | ")}`);
+    for (const row of rows) {
+      if (!row.includes(`on ${name}`)) throw new Error(`A row does not name ${name}: ${row}`);
+    }
+    console.log(`saw: ${count} unseen ${count === 1 ? "row" : "rows"}, each on ${name}`);
+    break;
+  }
+  case "marks-seen-there": {
+    // Here the last arguments are the host's name and one of its workspaces. Its unseen row is
+    // marked seen without going there, and leaves the unseen part here at once.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    if (!(await textOf(LIST))) await page(clickedNamed("Notifications"));
+    await until(`${workspace}'s row, marked seen`, () =>
+      page(`(() => {
+        // A row is named by the button that opens it: "<workspace> in <project> on <computer>: …".
+        const row = [...document.querySelectorAll(${JSON.stringify(`${UNSEEN} li`)})].find((row) =>
+          [...row.querySelectorAll("button")].some((b) => {
+            const label = b.getAttribute("aria-label") ?? "";
+            return label.startsWith(${JSON.stringify(`${workspace} in `)}) && label.includes(${JSON.stringify(` on ${name}:`)});
+          }),
+        );
+        const button = [...(row?.querySelectorAll("button") ?? [])].find(
+          (b) => b.textContent.trim() === "Mark seen",
+        );
+        button?.click();
+        return Boolean(button);
+      })()`),
+    );
+    await until("the row under Earlier", async () =>
+      (await textOf(`${LIST} section[aria-label="Earlier"]`)).includes(workspace),
+    );
+    console.log(`saw: ${workspace} on ${name}, seen`);
+    break;
+  }
+  case "opens-there-from-the-list": {
+    // Here the last arguments are the host's name and one of its workspaces. Pressing its row
+    // closes the list and opens the workspace on that computer.
+    const name = runDir as string;
+    const workspace = process.argv[5] as string;
+    if (!(await textOf(LIST))) await page(clickedNamed("Notifications"));
+    await until(`${workspace}'s row`, () =>
+      page(`(() => {
+        const button = [...document.querySelectorAll(${JSON.stringify(`${LIST} li button`)})].find(
+          (b) => (b.getAttribute("aria-label") ?? "").startsWith(${JSON.stringify(`${workspace} in `)}) && (b.getAttribute("aria-label") ?? "").includes(${JSON.stringify(` on ${name}:`)}),
+        );
+        button?.click();
+        return Boolean(button);
+      })()`),
+    );
+    await until(
+      "the workspace there",
+      async () => (await textOf(viewThere(name, workspace))) !== "",
+    );
+    if (await textOf(LIST)) throw new Error("The list stayed open.");
+    console.log(`saw: ${workspace} on ${name}, opened from its row`);
     break;
   }
   default:

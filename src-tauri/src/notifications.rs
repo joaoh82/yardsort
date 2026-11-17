@@ -1,24 +1,26 @@
-//! The Notifications list's home in the app: what the core is told that only the app hears —
-//! a terminal going quiet, an agent's process ending — when it is asked to look at what else
-//! waits, and the window's commands. The rules, and the list itself, are the core's
+//! The Notifications list's home in the app: the core's keeper of it, told what only the app
+//! hears, and the window's commands. The rules, and the list itself, are the core's
 //! (`yardsort_core::notifications`). See `docs/design/46-notifications.md`.
-
-use std::collections::HashSet;
-use std::sync::{Mutex, PoisonError};
+//!
+//! The window is shown one list: this computer's rows, and with them the rows of each other
+//! computer this one reaches, as last read ([`remote_host::computer::notifications`]). A row
+//! from another computer names it, and marking it seen is said there.
 
 use pty_host::HostEvent;
+use remote_host::computer::notifications as there;
+use remote_proto::notification as wire;
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
-use yardsort_core::notifications::{self, Lines, Notification, NotificationKind, NotificationPart};
+use yardsort_core::notifications::{Keeper, Notification, NotificationKind, NotificationPart};
 use yardsort_core::store::now_ms;
-use yardsort_core::trigger::turns::{Change, Turns};
 
-use crate::error::IpcResult;
+use crate::error::{IpcError, IpcResult};
 use crate::state::{blocking, AppState};
 
-/// The list changed: a row was added, answered or seen. The window reads it again.
+/// The list changed: a row was added, answered or seen, here or on another computer. The
+/// window reads it again.
 #[derive(Debug, Clone, Serialize, Type, tauri_specta::Event)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationsChanged {}
@@ -27,7 +29,12 @@ pub struct NotificationsChanged {}
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationItem {
+    /// The row's id on the computer that keeps it. Two computers may use the same one.
     pub id: String,
+    /// The other computer the row is on, by its id; `None` for this one.
+    pub host_id: Option<String>,
+    /// What that computer is called.
+    pub host_name: Option<String>,
     pub kind: NotificationKind,
     pub part: NotificationPart,
     pub project_id: String,
@@ -44,9 +51,10 @@ pub struct NotificationItem {
     pub title: String,
     /// Which agent: `claude`, `codex`…
     pub harness_id: Option<String>,
-    /// The workflow's run, the smoke test's run, the schedule or the trigger, by its id.
+    /// The workflow's run, the smoke test's run, the schedule or the trigger, by its id. Of
+    /// another computer's, only a workflow's run is known.
     pub subject_id: Option<String>,
-    /// The workflow of a row about a workflow's run.
+    /// The workflow of a row about a workflow's run, on this computer.
     pub workflow_id: Option<String>,
     /// The step that waits, for a workflow's question or approval.
     pub step_id: Option<String>,
@@ -73,6 +81,8 @@ impl From<Notification> for NotificationItem {
     fn from(row: Notification) -> Self {
         Self {
             id: row.id,
+            host_id: None,
+            host_name: None,
             kind: row.kind,
             part: row.part,
             project_id: row.project_id,
@@ -98,108 +108,103 @@ impl From<Notification> for NotificationItem {
     }
 }
 
-/// Managed by Tauri for as long as the app runs.
-#[derive(Default)]
-pub struct Notifications {
-    /// Each terminal's turns, so a quiet terminal and its harness's own report of the same turn
-    /// are one row.
-    turns: Turns,
-    /// What rows are shown with, read when the list is asked for.
-    lines: Lines,
-    /// When the core was last told the list is hearing from the terminals.
-    heard: Mutex<Option<std::time::Instant>>,
-    /// Terminals the window was asked to close. An agent ended that way did not stop with an
-    /// error, whatever its process says on the way out.
-    closing: Mutex<HashSet<String>>,
+/// A row of another computer's list. `None` for a kind or a part this Yardsort does not know:
+/// a newer one there has something this one cannot show.
+fn item_there(there: there::There) -> Option<NotificationItem> {
+    let row = there.row;
+    let kind = match row.kind {
+        wire::NotificationKind::AgentAsks => NotificationKind::AgentAsks,
+        wire::NotificationKind::AgentFinished => NotificationKind::AgentFinished,
+        wire::NotificationKind::AgentFailed => NotificationKind::AgentFailed,
+        wire::NotificationKind::AgentStopped => NotificationKind::AgentStopped,
+        wire::NotificationKind::WorkflowApproval => NotificationKind::WorkflowApproval,
+        wire::NotificationKind::WorkflowQuestion => NotificationKind::WorkflowQuestion,
+        wire::NotificationKind::WorkflowSucceeded => NotificationKind::WorkflowSucceeded,
+        wire::NotificationKind::WorkflowFailed => NotificationKind::WorkflowFailed,
+        wire::NotificationKind::TestWaits => NotificationKind::TestWaits,
+        wire::NotificationKind::ScheduleRefused => NotificationKind::ScheduleRefused,
+        wire::NotificationKind::ScheduleNoWorkspace => NotificationKind::ScheduleNoWorkspace,
+        wire::NotificationKind::TriggerRefused => NotificationKind::TriggerRefused,
+        wire::NotificationKind::TriggerCapped => NotificationKind::TriggerCapped,
+        wire::NotificationKind::TriggerNoWorkspace => NotificationKind::TriggerNoWorkspace,
+        wire::NotificationKind::Other => return None,
+    };
+    let part = match row.part {
+        wire::NotificationPart::Needs => NotificationPart::Needs,
+        wire::NotificationPart::Finished => NotificationPart::Finished,
+        wire::NotificationPart::Earlier => NotificationPart::Earlier,
+        wire::NotificationPart::Other => return None,
+    };
+    Some(NotificationItem {
+        id: row.id,
+        host_id: Some(there.host_id),
+        host_name: Some(there.host_name),
+        kind,
+        part,
+        project_id: row.project.to_string(),
+        project_name: row.project_name,
+        workspace_id: row.workspace.map(|id| id.to_string()),
+        workspace_name: row.workspace_name,
+        branch: row.branch,
+        session_id: row.session.map(|id| id.to_string()),
+        title: row.title,
+        harness_id: row.harness,
+        subject_id: row.run,
+        workflow_id: None,
+        step_id: row.step,
+        terminal_id: row.terminal.map(|id| id.to_string()),
+        at: row.at as f64,
+        settled_at: row.settled_at.map(|at| at as f64),
+        worked_ms: row.worked_ms.map(|ms| ms as f64),
+        exit_code: row.exit_code,
+        command: row.command,
+        said: row.said,
+        note: row.note,
+    })
 }
 
-impl Notifications {
-    /// Every host event passes through here, after the core has settled an exit's record.
-    /// `ended` is the conversation whose process an exit ended, when it was an agent's.
-    pub fn observe(&self, handle: &AppHandle, event: &HostEvent, ended: Option<&str>) {
-        let Some(state) = handle.try_state::<AppState>() else {
-            return;
-        };
-        let now = now_ms();
-        self.hearing(&state, now);
-        let settled = matches!(self.turns.observe(event, now), Some(Change::Settled { .. }));
-        let changed = match event {
-            HostEvent::Quiet { id, busy_ms } if settled => {
-                notifications::settled_terminal(&state.store, &id.0, *busy_ms, now)
-            }
-            HostEvent::Exited { id, exit } => {
-                let closed = self
-                    .closing
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .remove(&id.0);
-                let Some(session) = ended else {
-                    return;
-                };
-                // A signal is a person, or the app, ending it: not a failure to tell of.
-                let error = (!exit.success && exit.signal.is_none() && !closed)
-                    .then(|| i64::from(exit.code));
-                notifications::exited(&state.store, session, error, now)
-            }
-            _ => return,
-        };
-        tell(handle, changed);
-    }
-
-    /// Say, every few seconds at most, that the list is hearing from the terminals: what
-    /// prints after the last such word printed while Yardsort was closed.
-    fn hearing(&self, state: &AppState, now: i64) {
-        let mut heard = self.heard.lock().unwrap_or_else(PoisonError::into_inner);
-        if heard.is_some_and(|at| at.elapsed() < HEARD_EVERY) {
-            return;
-        }
-        *heard = Some(std::time::Instant::now());
-        if let Err(error) = notifications::heard(&state.store, now) {
-            eprintln!("notifications: {error}");
-        }
-    }
-
-    /// The window is closing `terminal` on purpose.
-    pub fn closing(&self, terminal: &str) {
-        self.closing
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(terminal.to_owned());
-    }
+/// Tell the window the list changed.
+pub fn changed(handle: &AppHandle) {
+    let _ = NotificationsChanged {}.emit(handle);
 }
 
-/// How often, at most, the core is told the list is still hearing from the terminals.
-const HEARD_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// The app has just started and found these terminals alive. An agent among them that stopped
-/// printing while the app was closed finished something nobody saw. Before that, what agents'
-/// hooks reported meanwhile is read; after it, what else waits on this computer.
+/// The app has just started: make the list's keeper, and have it catch up with the terminals
+/// found alive and with what was reported and what came to wait while the app was closed.
 pub fn start(handle: &AppHandle) {
     let Some(state) = handle.try_state::<AppState>() else {
         return;
     };
-    handle.manage(Notifications::default());
-    // What their harnesses reported first: a turn told that way is not told again below.
-    read(handle);
-    let waiting: Vec<notifications::Waiting> = state
-        .host
-        .list()
-        .into_iter()
-        .filter(|session| {
-            session.has_output
-                && !session.busy
-                && matches!(session.state, pty_host::SessionState::Running)
-        })
-        .map(|session| notifications::Waiting {
-            terminal: session.id.0,
-            idle_ms: session.idle_ms,
-        })
-        .collect();
-    tell(
-        handle,
-        notifications::catch_up(&state.store, &waiting, now_ms()),
-    );
-    standing(handle, &state);
+    let window = handle.clone();
+    let keeper = Keeper::new(move || changed(&window));
+    keeper.start(&state.store, &state.host.list());
+    handle.manage(keeper);
+}
+
+/// Every host event passes through here, after the core has settled an exit's record. `ended`
+/// is the conversation whose process an exit ended, when it was an agent's.
+pub fn observe(handle: &AppHandle, event: &HostEvent, ended: Option<&str>) {
+    if let (Some(state), Some(keeper)) =
+        (handle.try_state::<AppState>(), handle.try_state::<Keeper>())
+    {
+        keeper.observe(&state.store, event, ended);
+    }
+}
+
+/// The window is closing `terminal` on purpose.
+pub fn closing(handle: &AppHandle, terminal: &str) {
+    if let Some(keeper) = handle.try_state::<Keeper>() {
+        keeper.closing(terminal);
+    }
+}
+
+/// Take in what agents' hooks reported since the last look. Called after every drain of the
+/// inbox, on whichever thread drained it.
+pub fn read(handle: &AppHandle) {
+    if let (Some(state), Some(keeper)) =
+        (handle.try_state::<AppState>(), handle.try_state::<Keeper>())
+    {
+        keeper.read_events(&state.store);
+    }
 }
 
 /// A workflow's run, a smoke test's run, a schedule or a trigger changed, here or from `ys`:
@@ -208,8 +213,10 @@ pub fn start(handle: &AppHandle) {
 pub fn look(handle: &AppHandle) {
     let handle = handle.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        if let Some(state) = handle.try_state::<AppState>() {
-            standing(&handle, &state);
+        if let (Some(state), Some(keeper)) =
+            (handle.try_state::<AppState>(), handle.try_state::<Keeper>())
+        {
+            keeper.look(&state.store);
         }
     });
 }
@@ -218,96 +225,89 @@ pub fn look(handle: &AppHandle) {
 /// there now has nowhere to. The window reads the list again, and reading it looks at where
 /// things stand.
 pub fn reread(handle: &AppHandle) {
-    let _ = NotificationsChanged {}.emit(handle);
-}
-
-fn standing(handle: &AppHandle, state: &AppState) {
-    match notifications::standing::read(&state.store, now_ms()) {
-        Ok(changed) => tell(handle, Ok(changed)),
-        Err(error) => eprintln!("notifications: {}", error.message),
+    if let Some(keeper) = handle.try_state::<Keeper>() {
+        keeper.removed();
     }
 }
 
-/// Take in what agents' hooks reported since the last look. Called after every drain of the
-/// inbox, on whichever thread drained it.
-pub fn read(handle: &AppHandle) {
-    let (Some(state), Some(list)) = (
-        handle.try_state::<AppState>(),
-        handle.try_state::<Notifications>(),
-    ) else {
-        return;
-    };
-    tell(
-        handle,
-        notifications::read_events(&state.store, &list.turns),
-    );
+fn keeper(app: &AppHandle) -> IpcResult<tauri::State<'_, Keeper>> {
+    app.try_state::<Keeper>().ok_or_else(|| {
+        IpcError::new(
+            "notifications_not_ready",
+            "The Notifications list is not ready yet.",
+        )
+    })
 }
 
-fn tell(handle: &AppHandle, changed: yardsort_core::store::StoreResult<bool>) {
-    match changed {
-        Ok(true) => {
-            let _ = NotificationsChanged {}.emit(handle);
-        }
-        Ok(false) => {}
-        Err(error) => eprintln!("notifications: {error}"),
-    }
-}
-
-/// The list: what needs an answer, what finished and was not seen, and the newest of what left.
+/// The list: what needs an answer, what finished and was not seen, and the newest of what
+/// left, on this computer and on each other one it reaches now.
 #[tauri::command]
 #[specta::specta]
 pub async fn notification_list(app: AppHandle) -> IpcResult<Vec<NotificationItem>> {
-    blocking(app.clone(), move |state| {
-        let now = now_ms();
-        // Whoever asks is shown where things stand now, whether or not anyone said they moved.
-        notifications::standing::read(&state.store, now)?;
-        let mut rows = notifications::list(&state.store, now)?;
-        if let Some(list) = app.try_state::<Notifications>() {
-            let sources = crate::conversations::sources(state);
-            list.lines
-                .fill(&state.store, &sources, &state.data_dir, &mut rows, now);
-        }
+    let handle = app.clone();
+    let mut rows: Vec<NotificationItem> = blocking(app.clone(), move |state| {
+        let sources = crate::conversations::sources(state);
+        let rows = keeper(&handle)?.list(
+            &state.store,
+            Some((&sources, state.data_dir.as_path())),
+            now_ms(),
+        )?;
         Ok(rows.into_iter().map(NotificationItem::from).collect())
+    })
+    .await?;
+    rows.extend(
+        there::listed(&crate::computers::home(&app))
+            .into_iter()
+            .filter_map(item_there),
+    );
+    Ok(rows)
+}
+
+/// These finished rows of this computer's list were looked at.
+#[tauri::command]
+#[specta::specta]
+pub async fn notification_seen(app: AppHandle, ids: Vec<String>) -> IpcResult<()> {
+    let handle = app.clone();
+    blocking(app, move |state| {
+        Ok(keeper(&handle)?.seen(&state.store, &ids)?)
     })
     .await
 }
 
-/// These finished rows were looked at.
+/// These finished rows of another computer's list were looked at here. It is said there.
 #[tauri::command]
 #[specta::specta]
-pub async fn notification_seen(app: AppHandle, ids: Vec<String>) -> IpcResult<()> {
-    let left = blocking(app.clone(), move |state| {
-        Ok(notifications::seen(&state.store, &ids, now_ms())?)
-    })
-    .await?;
-    tell(&app, Ok(left > 0));
-    Ok(())
+pub async fn notification_seen_there(
+    app: AppHandle,
+    host_id: String,
+    ids: Vec<String>,
+) -> IpcResult<()> {
+    there::seen(&crate::computers::home(&app), &host_id, ids)
+        .await
+        .map_err(crate::computers::ipc)
 }
 
 /// This terminal is in front of its person: what its agent finished is seen.
 #[tauri::command]
 #[specta::specta]
 pub async fn notification_seen_terminal(app: AppHandle, terminal_id: String) -> IpcResult<()> {
-    let left = blocking(app.clone(), move |state| {
-        Ok(notifications::seen_terminal(
-            &state.store,
-            &terminal_id,
-            now_ms(),
-        )?)
+    let handle = app.clone();
+    blocking(app, move |state| {
+        Ok(keeper(&handle)?.seen_terminal(&state.store, &terminal_id)?)
     })
-    .await?;
-    tell(&app, Ok(left > 0));
-    Ok(())
+    .await
 }
 
-/// Everything finished is seen.
+/// Everything finished is seen: here, and on each other computer that can be told so now.
 #[tauri::command]
 #[specta::specta]
 pub async fn notification_seen_all(app: AppHandle) -> IpcResult<()> {
-    let left = blocking(app.clone(), move |state| {
-        Ok(notifications::seen_all(&state.store, now_ms())?)
+    let handle = app.clone();
+    blocking(app.clone(), move |state| {
+        Ok(keeper(&handle)?.seen_all(&state.store)?)
     })
     .await?;
-    tell(&app, Ok(left > 0));
-    Ok(())
+    there::seen_all(&crate::computers::home(&app))
+        .await
+        .map_err(crate::computers::ipc)
 }

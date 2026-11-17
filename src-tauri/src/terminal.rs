@@ -267,10 +267,7 @@ pub async fn pty_close(app: AppHandle, state: State<'_, AppState>, id: SessionId
 /// The window is ending this session on purpose: its agent did not stop with an error, and the
 /// Notifications list is not to say it did.
 fn closing(app: &AppHandle, id: &SessionId) {
-    use tauri::Manager;
-    if let Some(list) = app.try_state::<crate::notifications::Notifications>() {
-        list.closing(&id.0);
-    }
+    crate::notifications::closing(app, &id.0);
 }
 
 #[tauri::command]

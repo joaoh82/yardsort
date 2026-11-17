@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const core = vi.hoisted(() => ({
   notificationList: vi.fn(),
   notificationSeen: vi.fn(),
+  notificationSeenThere: vi.fn(),
   notificationSeenTerminal: vi.fn(),
   notificationSeenAll: vi.fn(),
   uiStateSave: vi.fn(),
@@ -16,10 +17,11 @@ vi.mock("@/lib/ipc", async (original) => ({
 }));
 
 import { useNotificationsStore } from "@/stores/notifications";
+import { useOtherComputersStore } from "@/stores/otherComputers";
 import { useProjectsStore } from "@/stores/projects";
 import { useTerminalStore, type TerminalTab } from "@/stores/terminals";
 import { useWorkflowStore } from "@/stores/workflows";
-import { notification, standingNotification } from "@/test/fixtures";
+import { notification, notificationThere, standingNotification } from "@/test/fixtures";
 import { NotificationsView } from "./NotificationsView";
 
 const tab = (id: string): TerminalTab => ({
@@ -73,6 +75,7 @@ function show(items = all) {
 beforeEach(() => {
   vi.clearAllMocks();
   core.notificationSeen.mockResolvedValue(null);
+  core.notificationSeenThere.mockResolvedValue(null);
   core.notificationSeenAll.mockResolvedValue(null);
   core.uiStateSave.mockResolvedValue(null);
   useNotificationsStore.setState({
@@ -278,6 +281,82 @@ describe("NotificationsView", () => {
     expect(projects.triggersOpen).toBe(true);
     // On its workspace's triggers, so the one that is held is easy to find.
     expect(projects.triggersFocus).toEqual({ workspaceId: "w-app-fix-login" });
+  });
+
+  it("lists another computer's rows with this one's, each naming its computer", async () => {
+    const user = userEvent.setup();
+    show([
+      finished,
+      notificationThere("there", { said: "The cache is warm." }),
+      // The same id as a row here: it is that computer's own.
+      notificationThere("finished", { terminalId: "t-2", workspaceName: "tidy" }),
+    ]);
+    const done = screen.getByRole("region", { name: "Finished, not seen" });
+    expect(within(done).getAllByRole("listitem")).toHaveLength(3);
+    const there = within(done).getByRole("button", {
+      name: "fix-login in service on Build box: claude finished",
+    });
+    expect(there.closest("li")).toHaveTextContent(
+      "fix-loginon Build boxserviceys/fix-login· Fix the login formclaude finished“The cache is warm.”",
+    );
+
+    // Seen without going there is said to that computer, by its own id for the row.
+    await user.click(within(there.closest("li")!).getByRole("button", { name: "Mark seen" }));
+    expect(core.notificationSeenThere).toHaveBeenCalledWith("h-1", ["there"]);
+    expect(core.notificationSeen).not.toHaveBeenCalled();
+    expect(screen.getByRole("tab", { name: "Finished, 2" })).toBeInTheDocument();
+
+    // Grouped by project, a project there is its own, under its computer's name.
+    await user.click(screen.getByRole("radio", { name: "Project" }));
+    expect(screen.getByRole("region", { name: "service on Build box" })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "app" })).getAllByRole("listitem"),
+    ).toHaveLength(1);
+  });
+
+  it("opens a row of another computer in its workspace there, with the agent's terminal in front", async () => {
+    const user = userEvent.setup();
+    show([
+      notificationThere("there", { terminalId: "t-2" }),
+      notificationThere("waits", {
+        kind: "workflow.approval",
+        part: "needs",
+        title: "Review",
+        terminalId: null,
+        workspaceId: "w-2",
+      }),
+      notificationThere("lost", {
+        kind: "schedule.noWorkspace",
+        part: "needs",
+        title: "Nightly review",
+        workspaceId: null,
+        terminalId: null,
+      }),
+    ]);
+    await user.click(
+      screen.getByRole("button", { name: "fix-login in service on Build box: claude finished" }),
+    );
+    expect(useProjectsStore.getState().remote).toEqual({ hostId: "h-1", workspaceId: "w-1" });
+    expect(useProjectsStore.getState().notificationsOpen).toBe(false);
+    expect(useOtherComputersStore.getState().active["h-1/w-1"]).toBe("t-2");
+
+    // A workflow there is answered there: its workspace is as far as a row here goes.
+    useProjectsStore.getState().openNotifications(true);
+    await user.click(
+      await screen.findByRole("button", {
+        name: "fix-login in service on Build box: Workflow waits for your approval",
+      }),
+    );
+    expect(useProjectsStore.getState().remote).toEqual({ hostId: "h-1", workspaceId: "w-2" });
+
+    // One with no workspace there has nothing to open here, and says where it is changed.
+    useProjectsStore.getState().openNotifications(true);
+    const lost = await screen.findByRole("button", {
+      name: "Nightly review in service on Build box: Schedule has no workspace to run in",
+    });
+    expect(lost).toHaveAttribute("title", "Open nothing here: it is changed on Build box");
+    await user.click(lost);
+    expect(useProjectsStore.getState().notificationsOpen).toBe(true);
   });
 
   it("closes from its header", async () => {

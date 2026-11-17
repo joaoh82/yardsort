@@ -82,8 +82,14 @@ terminal says only that a turn ended.
 ## How it is kept
 
 **The core keeps the list**, in one table of the store (`notifications`, migration `0046`;
-`crates/core/src/notifications.rs`). The window reads it and is told when it changes. The phone
-and another computer will read the same list over Remote.
+`crates/core/src/notifications.rs`). The window reads it and is told when it changes. Another
+computer reads the same list over Remote, and the phone will.
+
+**Whatever runs the terminals keeps it**, with a `Keeper` of the core: the app, and a host with
+no window. The keeper is told what only that process hears (a terminal going quiet, an agent's
+process ending, the activity inbox drained), holds the fold of turns and the lines rows are
+shown with, and says when the list changed. It began in the app and moved into the core with
+slice 3, so `yardsort-host` keeps a list as the app does.
 
 - A row is about an agent's **conversation**, by its session record. Runs are recorded only
   when activity recording is on; a conversation always has a record.
@@ -170,8 +176,8 @@ Each comes with its tests, its guide and changelog lines, and a smoke test.
    the list. A new guide, `docs/guide/notifications.md`.
 2. **Everything else that waits on this computer. Built on 2026-11-17.** Workflows that ask,
    runs that end, smoke tests that wait, and schedules and triggers that could not start.
-3. **Other computers on the desktop.** A new protocol minor: the list, word when it changes, and
-   marking a row seen. Their rows join the list under the computer's name.
+3. **Other computers on the desktop. Built on 2026-11-17.** Protocol minor 15: the list, word
+   when it changes, and marking a row seen. Their rows join the list, each naming its computer.
 4. **The phone.** The bell and its count, the list, the counts on a computer's row and the marks
    on its workspaces, from the same protocol minor.
 5. **The push for an agent that finished.** A new kind of notice on the server, and its switch
@@ -244,13 +250,102 @@ Not done: a smoke test file for this slice, macOS and Windows beyond CI, and the
 Not tried by hand: a workflow's question (the core's and the window's tests cover it), a
 schedule refused at its time (the core's test), and an answer given from the phone.
 
+### Slice 3, as built and as checked
+
+**The protocol, minor 15** (`remote_proto::notification`), carried by the server unread. A host
+that keeps a list says so in its capabilities.
+
+- `notification.list`: the rows the grant is shown, what still waits first, then the newest of
+  what left, with how many need their person and how many finished unseen over all of them. A
+  reply holds at most 100 rows and what one frame carries, and says when it was cut.
+- `notification.seen`: finished rows by their ids, or all of them. A row that waits is not
+  marked. An id the grant is not shown is passed over without a word, as one that is gone.
+- `notification.follow` and `notification.unfollow`: from then on the host sends
+  `notifications.changed` on that connection whenever its list is not what the device was last
+  told of. The event carries nothing: the device reads the list again.
+
+**All four need `terminal:read`.** A row carries the start of what an agent said and the
+command it asks to run, which is what watching its terminal shows. Rows are given only for the
+projects the grant reaches. What a workflow asks, and why its run failed, is said only to a
+grant that also has `workflow:read`. Nothing in this minor answers what waits: a permission, a
+workflow and a smoke test each have their own operation, under their own scope.
+
+**Following is one remembered state of the list per channel.** The channel's poll, which already
+looks for new activity each second, compares how the list stands (`notifications::stamp`: how
+many rows, how many settled, the newest of each) with what the device was told of. On a host
+with no window nothing else looks at workflows, tests, schedules and triggers, so the poll has
+the keeper look first, at most every five seconds.
+
+**The desktop as a client** (`remote_host::computer::notifications`). A host's list is read
+with everything else it shows, kept in memory with it, and read again when the host says it
+changed, as well as when its activity moves and every 20 seconds. A host that is away shows no
+rows. Marking a row seen is said to its host, and shown here at once; the host's next word puts
+right anything it did not take.
+
+**The window.** The list the window asks for is this computer's rows and then each reachable
+host's (`notification_list`). A row from another computer carries its host's id and name; its
+own id is that host's, so a row is told apart by both. It shows **on** and the computer's name,
+groups under `project on computer` when grouped by project, and counts on the Notifications
+row. It does not ring a tab or count on a local project's row.
+
+- **Pressing it** opens its workspace there (`selectRemote`), with the agent's terminal in front
+  for a row about an agent. A workflow, a smoke test, a schedule or a trigger there has no view
+  on this computer ([44](44-other-computers-like-local.md) leaves them out), so its row goes as
+  far as the workspace, and one with no workspace opens nothing and says where it is changed.
+- **Seen** follows the rule for local rows: its agent's terminal there in front, in a window
+  that has the focus (`lookingThere`, told by `RemoteWorkspaceView`), or **Mark seen**, or
+  **Mark all seen**, which is also said to every host that can be told.
+
+**Its tests.** The wire and its bounds in `remote-proto`, pinned by five fixtures that the
+TypeScript client reads too; the host against a real store (what a grant reaches, a device that
+may not watch, seen that touches only what the grant is shown, following, and a workflow's
+question kept from a grant without `workflow:read`) in
+`crates/core/src/remote/serve/tests/notification.rs`; two computers through the real relay
+(read, told of a change well before the next reading, seen there, all seen, away) in
+`crates/server/tests/computer.rs`; the TypeScript client's calls in
+`packages/remote-client/test/channel.test.ts`; the window's store and view.
+
+**Its smoke test.** `notifications-there.yaml`, new, with the window steps `lists-there`,
+`marks-seen-there` and `opens-there-from-the-list`, and `support/work.sh`, an agent that prints
+for ten seconds and then waits.
+
+**Its steps run by hand on 2026-11-17**, on Linux: a `yardsort-host` on the stand-in server,
+and the real window on a profile of its own, kept on a monitor nobody sees. The file itself was
+checked with `ys test validate`; it has not been run through `ys test run`, which needs its
+owner's approval first.
+
+- The host listed its agent that had finished before anything was paired with it.
+- Signed in as a client and let watch at the host's terminal, the window's Notifications row
+  counted the host's row, and the list showed it with **on Smoke box**.
+- A second agent started on the host showed in the window fourteen seconds after it was
+  started, ten of them its work.
+- **Mark seen** on a row in the window settled it in the host's own records, and only it.
+- The other row opened its workspace on the host. With the focus given to the window, that
+  agent's terminal there in front settled its row on the host.
+- With the host stopped, the window showed it offline and no rows of it. An agent that finished
+  on the host meanwhile was listed by the host when it was started again, at the time it had
+  stopped printing, and the window had its rows again once it reached it.
+
+What the run found: nothing in the app. The first `marks-seen-there` looked for a row by the
+start of its text, which is the agent's letter, and now finds it by the button that opens it.
+
+Not run: macOS and Windows, a second real computer, another desktop app as the host (the relay
+test and the core's tests cover a host that keeps workflows' rows), and a host on an earlier
+Yardsort beside this one.
+
 ## Limits, said plainly
 
 - **A system notification cannot open its row.** The notification plugin the app uses does not
   report a click on the desktop. The count on the Notifications row is where to look.
 - An agent that finished within a few seconds of the app closing may not be caught up with:
   the app's last word that it was listening is up to five seconds old.
-- A computer with no window (`yardsort-host`) does not keep the list yet. It runs the same
-  core, and is wired when other computers' rows are (slice 3).
+- A computer with no window (`yardsort-host`) keeps a list of its agents. It carries out no
+  workflows, smoke tests, schedules or triggers, so it has no rows of those.
+- A row of another computer that needs an answer cannot be answered from the list, and for a
+  workflow, a test, a schedule or a trigger there, not from this computer at all.
+- This computer asks another for `workspace:read`, `activity:read`, `memory:read`,
+  `terminal:read` and `terminal:control`, not for `workflow:read`: a workflow's row from another
+  computer says that it waits and names the workflow, without its question.
 - The phone's list covers the computers it can reach. One that is offline shows no rows.
-- A computer on an earlier release sends no list.
+- A computer on an earlier release sends no list, and one that lets this computer see its
+  workspaces but not watch its terminals gives none.

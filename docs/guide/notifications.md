@@ -51,6 +51,28 @@ long ago, and gives one line of substance where there is one:
 A schedule or a trigger whose workspace is gone leads with its own name, and says which
 workspace it was in.
 
+## Other computers
+
+The list also holds the rows of each [other computer this one reaches](remote.md#reaching-another-computer):
+what waits there, and what finished there unseen. Each such row says **on** and that computer's
+name, and they count in the numbers on the Notifications row. Grouped by project, a project
+there is a group of its own, named with its computer.
+
+- **The other computer keeps its own list.** This one reads it, and is told at once when it
+  changes. A computer that is away shows no rows here, and has them again when it is back.
+- **Seen here is seen there.** Mark a row seen, or look at its agent's terminal there from this
+  window, and it moves to **Earlier** on that computer too, for its own window and your phone.
+- **Pressing a row** opens its workspace on that computer, with the agent's terminal in front
+  for a row about an agent. What a workflow, a smoke test, a schedule or a trigger there waits
+  for is answered or changed on that computer: its row here tells you so, and takes you as far
+  as the workspace.
+- **A permission** is answered in the agent's terminal there, once this computer has control.
+
+This needs Yardsort 0.36.0 or later on the other computer, and that computer letting this one
+watch its terminals. A computer with no screen, running [`yardsort-host`](headless-host.md),
+keeps a list too. It carries out no workflows, smoke tests, schedules or triggers, so its rows
+are its agents'.
+
 The dot is the one the sidebar and the tabs use
 ([status dots](terminals-and-sessions.md#status-dots)): solid amber needs you, ringed is finished
 and not seen, red went badly, grey has left.
@@ -148,7 +170,9 @@ agent is listed like any other.
 
 ## What is not here yet
 
-- **Other computers'** agents and **the phone** are coming.
+- **The phone** is coming: the list is not in the phone app yet.
+- A row of another computer does not ring a tab or a workspace in the sidebar's list of that
+  computer. The Notifications row and the list are where it shows.
 - **Pull requests and tasks** are not part of this list. They have their own views.
 - Pressing a **system notification** does not open its row. The count on the Notifications row
   is where to look.

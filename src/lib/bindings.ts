@@ -913,13 +913,18 @@ export const commands = {
 	 *  that does not exist yet, which starts from that repository.
 	 */
 	testListInProject: (projectId: string) => typedError<TestItem[], IpcError>(__TAURI_INVOKE("test_list_in_project", { projectId })),
-	/**  The list: what needs an answer, what finished and was not seen, and the newest of what left. */
+	/**
+	 *  The list: what needs an answer, what finished and was not seen, and the newest of what
+	 *  left, on this computer and on each other one it reaches now.
+	 */
 	notificationList: () => typedError<NotificationItem[], IpcError>(__TAURI_INVOKE("notification_list")),
-	/**  These finished rows were looked at. */
+	/**  These finished rows of this computer's list were looked at. */
 	notificationSeen: (ids: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("notification_seen", { ids })),
+	/**  These finished rows of another computer's list were looked at here. It is said there. */
+	notificationSeenThere: (hostId: string, ids: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("notification_seen_there", { hostId, ids })),
 	/**  This terminal is in front of its person: what its agent finished is seen. */
 	notificationSeenTerminal: (terminalId: string) => typedError<null, IpcError>(__TAURI_INVOKE("notification_seen_terminal", { terminalId })),
-	/**  Everything finished is seen. */
+	/**  Everything finished is seen: here, and on each other computer that can be told so now. */
 	notificationSeenAll: () => typedError<null, IpcError>(__TAURI_INVOKE("notification_seen_all")),
 };
 
@@ -2279,7 +2284,12 @@ export type NewWorkspaceEachRun = {
 
 /**  One row of the list, as the window shows it. Times are epoch milliseconds. */
 export type NotificationItem = {
+	/**  The row's id on the computer that keeps it. Two computers may use the same one. */
 	id: string,
+	/**  The other computer the row is on, by its id; `None` for this one. */
+	hostId: string | null,
+	/**  What that computer is called. */
+	hostName: string | null,
 	kind: NotificationKind,
 	part: NotificationPart,
 	projectId: string,
@@ -2298,9 +2308,12 @@ export type NotificationItem = {
 	title: string,
 	/**  Which agent: `claude`, `codex`… */
 	harnessId: string | null,
-	/**  The workflow's run, the smoke test's run, the schedule or the trigger, by its id. */
+	/**
+	 *  The workflow's run, the smoke test's run, the schedule or the trigger, by its id. Of
+	 *  another computer's, only a workflow's run is known.
+	 */
 	subjectId: string | null,
-	/**  The workflow of a row about a workflow's run. */
+	/**  The workflow of a row about a workflow's run, on this computer. */
 	workflowId: string | null,
 	/**  The step that waits, for a workflow's question or approval. */
 	stepId: string | null,
@@ -2365,7 +2378,10 @@ export type NotificationPart =
 /**  Answered or seen. */
 "earlier";
 
-/**  The list changed: a row was added, answered or seen. The window reads it again. */
+/**
+ *  The list changed: a row was added, answered or seen, here or on another computer. The
+ *  window reads it again.
+ */
 export type NotificationsChanged = Record<string, never>;
 
 /**  One tool call that was executing when the file was last written. */

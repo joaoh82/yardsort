@@ -121,6 +121,7 @@ impl Home for AppHome {
             sources: crate::conversations::sources(state),
             data_dir: state.data_dir.clone(),
         };
+        let notifications = self.app.try_state::<yardsort_core::notifications::Keeper>();
         f(&Context {
             store: &state.store,
             git,
@@ -132,6 +133,7 @@ impl Home for AppHome {
             conversations: Some(&conversations),
             tests: Some(Arc::new(AppTests(self.app.clone())) as Arc<dyn TestGate>),
             pulls: Some(Arc::clone(&self.pulls) as Arc<dyn PullRequests>),
+            notifications: notifications.as_ref().map(|keeper| keeper.inner()),
         });
     }
 

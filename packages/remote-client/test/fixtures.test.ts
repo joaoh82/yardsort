@@ -312,6 +312,45 @@ const FIXTURES: Record<string, (name: string) => void> = {
     expect(page.pulls[0]?.review).toBe("changesRequested");
     expect(page.pulls[1]?.followed).toBe("6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d");
   },
+  "request-notification-list.json": (name) => {
+    const list = pinned<Request>(request, name);
+    expect(list.op).toBe("notification.list");
+    expect(scopeOf(list.op)).toBe("terminal:read");
+  },
+  "request-notification-seen.json": (name) => {
+    const seen = pinned<Request>(request, name);
+    if (seen.op !== "notification.seen") throw new Error("not a seen");
+    expect(seen.params).toEqual({ ids: ["7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f"], all: false });
+    expect(scopeOf(seen.op)).toBe("terminal:read");
+  },
+  "request-notification-follow.json": (name) => {
+    const follow = pinned<Request>(request, name);
+    expect(follow.op).toBe("notification.follow");
+    // Nothing is said with it, as with `harness.list`.
+    expect("params" in follow).toBe(false);
+    expect(scopeOf(follow.op)).toBe("terminal:read");
+    expect(scopeOf("notification.unfollow")).toBe("terminal:read");
+  },
+  "response-notifications.json": (name) => {
+    const page = result(name);
+    if (page.kind !== "notifications") throw new Error("not a list");
+    expect([page.needs, page.finished, page.more]).toEqual([2, 1, false]);
+    expect(page.notifications.map((row) => [row.kind, row.part])).toEqual([
+      ["agent.asks", "needs"],
+      ["workflow.failed", "finished"],
+      ["schedule.noWorkspace", "needs"],
+      ["agent.stopped", "earlier"],
+    ]);
+    expect(page.notifications[0]?.command).toBe("git push --force-with-lease");
+    expect(page.notifications[1]?.run).toBe("5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e");
+    // A schedule that lost its workspace names none, and keeps what it was called.
+    expect(page.notifications[2]?.workspace).toBeUndefined();
+    expect(page.notifications[2]?.workspaceName).toBe("celsius-fahrenheit");
+    expect(page.notifications[3]?.exitCode).toBe(1);
+  },
+  "event-notifications-changed.json": (name) => {
+    expect(pinned(event, name)).toEqual({ event: "notifications.changed" });
+  },
   "response-pull.json": (name) => {
     const detail = result(name);
     if (detail.kind !== "pull") throw new Error("not a pull request");
@@ -715,13 +754,60 @@ const FIXTURES: Record<string, (name: string) => void> = {
 describe("the fixtures", () => {
   test("are each read here, and none is left out", () => {
     const names = readdirSync(DIR).sort();
-    expect(names.length).toBeGreaterThanOrEqual(86);
+    expect(names.length).toBeGreaterThanOrEqual(91);
     expect(names).toEqual(Object.keys(FIXTURES).sort());
   });
 
   for (const [name, check] of Object.entries(FIXTURES)) {
     test(name, () => check(name));
   }
+});
+
+describe("a computer's notifications", () => {
+  const row = () =>
+    (raw("response-notifications.json") as { result: { notifications: Record<string, unknown>[] } })
+      .result.notifications[0]!;
+  const read = (changed: Record<string, unknown>) =>
+    decode(response, {
+      requestId: "r-1",
+      result: {
+        kind: "notifications",
+        notifications: [{ ...row(), ...changed }],
+        needs: 1,
+        finished: 0,
+        more: false,
+      },
+    });
+  const first = (answer: Response) => {
+    if (!("result" in answer) || answer.result.kind !== "notifications") throw new Error("no list");
+    return answer.result.notifications[0]!;
+  };
+
+  test("a kind and a part a newer computer has read as other, for a device to pass over", () => {
+    const newer = first(read({ kind: "deploy.waits", part: "snoozed" }));
+    expect([newer.kind, newer.part]).toEqual(["other", "other"]);
+  });
+
+  test("a line longer than a row carries, or an id that is none, is not taken", () => {
+    expect(() => read({ said: "x".repeat(241) })).toThrow();
+    expect(() => read({ project: "../etc" })).toThrow();
+    expect(() => read({ exitCode: 2 ** 40 })).toThrow();
+    expect(first(read({ exitCode: -1 })).exitCode).toBe(-1);
+  });
+
+  test("seen names rows or says all, and nothing else is sent", () => {
+    const seen = (params: unknown) =>
+      decode(request, {
+        requestId: "r-1",
+        protocol: CURRENT,
+        op: "notification.seen",
+        params,
+      });
+    expect(seen({ all: true })).toMatchObject({ params: { ids: [], all: true } });
+    expect(() => seen({})).toThrow();
+    expect(() => seen({ ids: ["a b"] })).toThrow();
+    expect(() => seen({ ids: Array.from({ length: 201 }, () => "a") })).toThrow();
+  });
 });
 
 describe("what a newer peer sends", () => {

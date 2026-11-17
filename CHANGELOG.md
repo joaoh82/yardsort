@@ -25,6 +25,14 @@ has the downloads and the full commit lists.
   **Triggers**. A row leaves when what it waits for is done, wherever that was done: the window,
   `ys` or the phone. While a workflow run is going, an agent it started is not listed each time
   it finishes a turn, and its tab is not ringed: the run's end is.
+- **Other computers in Notifications** (Remote, under development). The list holds what waits
+  and what finished on each other computer this one reaches, every row saying which computer it
+  is on. That computer keeps its own list: this one reads it and is told at once when it
+  changes, and a row marked seen here, or whose agent's terminal there you look at from this
+  window, is seen there too. Pressing a row opens its workspace on that computer. It needs this
+  version on the other computer, and that computer letting this one watch. A computer with no
+  screen, running `yardsort-host`, keeps a list of its agents too. See
+  [Notifications](docs/guide/notifications.md#other-computers).
 - **The ringed dot is remembered.** An agent that finished and was not looked at keeps its ring
   when Yardsort is closed and opened again, and one that finished while Yardsort was closed gets
   it. Before, every waiting agent was ringed at each start, looked at or not. Coming back to the

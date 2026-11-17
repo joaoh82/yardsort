@@ -492,6 +492,8 @@ export const notification = (
   overrides: Partial<NotificationItem> = {},
 ): NotificationItem => ({
   id,
+  hostId: null,
+  hostName: null,
   kind: "agent.asks",
   part: "needs",
   projectId: "p-app",
@@ -515,6 +517,24 @@ export const notification = (
   note: null,
   ...overrides,
 });
+
+/** A row of another computer's list: claude finished in `fix-login` on `Build box`, unseen,
+ *  unless overridden. */
+export const notificationThere = (
+  id: string,
+  overrides: Partial<NotificationItem> = {},
+): NotificationItem =>
+  notification(id, {
+    hostId: "h-1",
+    hostName: "Build box",
+    kind: "agent.finished",
+    part: "finished",
+    projectId: "p-there",
+    projectName: "service",
+    workspaceId: "w-1",
+    terminalId: "t-1",
+    ...overrides,
+  });
 
 /** A row of the Notifications list that is not about an agent: the workflow `Review` waiting
  *  for an approval in `fix-login`, unless overridden. */

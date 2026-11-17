@@ -24,6 +24,9 @@
 //!   [`POLL_EVERY`] while [`Visitor::following`]. A batch goes only while little waits for the
 //!   device ([`Outbound::activity`]), so catching up never crowds out a terminal's output; what
 //!   did not go is read again at the next poll, because it is on disk, not in a queue.
+//! - **Following the Notifications list** is one remembered state of it, nothing more: each
+//!   [`Visitor::poll`] looks at how the list stands, and says `notifications.changed` when that
+//!   is not what the device was last told of. The device reads the list again.
 //! - **Starting and uploading** (`harness.list`, `workspace.start`, `session.start`,
 //!   `upload.begin`, `upload.chunk`) are answered when the app lends a [`Starting`]: see
 //!   [`start`]. A start runs on a thread of its own, since a workspace's setup can take minutes
@@ -72,6 +75,10 @@ const HOLDER_PREFIX: &str = "device:";
 /// of an event once it is in the store.
 pub const POLL_EVERY: Duration = Duration::from_secs(1);
 
+/// How often, at most, a channel that follows the Notifications list has the host look at what
+/// waits, beyond what the host looks at by itself.
+pub const LOOK_EVERY: Duration = Duration::from_secs(5);
+
 /// How much may wait for a device before activity holds back: a quarter of what it may fall
 /// behind on a terminal, so the rest stays for terminals' output.
 pub const ACTIVITY_WAITING: usize = MAX_QUEUED_OUTPUT / 4;
@@ -111,6 +118,9 @@ pub struct Context<'a> {
     /// What the host last read of its projects' pull requests. Without it those operations are
     /// not answered. A headless host leaves this empty: it reads none.
     pub pulls: Option<Arc<dyn super::PullRequests>>,
+    /// What keeps this host's Notifications list. Without it those operations are not
+    /// answered.
+    pub notifications: Option<&'a crate::notifications::Keeper>,
 }
 
 impl Context<'_> {
@@ -129,6 +139,7 @@ impl Context<'_> {
             conversations: self.conversations,
             tests: self.tests.as_deref(),
             pulls: self.pulls.as_deref(),
+            notifications: self.notifications,
         }
     }
 }
@@ -148,6 +159,8 @@ pub struct Visitor {
     subscriptions: Mutex<HashMap<SubscriptionId, Following>>,
     next_upload: AtomicU32,
     uploads: Mutex<HashMap<UploadId, start::Uploading>>,
+    /// How the Notifications list stood when the device was last told, while it follows it.
+    list_followed: Mutex<Option<ListStamp>>,
     /// The signed-in device. Missing on an old relay, which is [`DeviceKind::Other`] and
     /// cannot decide a workflow.
     kind: remote_proto::account::DeviceKind,
@@ -160,6 +173,9 @@ struct Following {
     session: Option<SessionRecordId>,
     after: i64,
 }
+
+/// One state of the Notifications list ([`crate::notifications::stamp`]).
+type ListStamp = (i64, i64, i64, i64);
 
 /// What this host calls each device it let in, for telling a device who controls a terminal.
 /// Kept here because the daemon's items arrive where the store cannot be asked: a sink must not
@@ -219,6 +235,7 @@ impl Visitor {
                 subscriptions: Mutex::new(HashMap::new()),
                 next_upload: AtomicU32::new(1),
                 uploads: Mutex::new(HashMap::new()),
+                list_followed: Mutex::new(None),
                 kind: remote_proto::account::DeviceKind::Other,
             }),
             Ok(None) => Err(CloseReason::Refused),
@@ -346,6 +363,21 @@ impl Visitor {
                         .ok_or_else(RemoteError::not_found)
                 })
             }
+            Operation::NotificationFollow if context.notifications.is_some() => {
+                facade.check(&grant, &request).and_then(|()| {
+                    // From how the list stands now: the device reads it after this reply.
+                    let stamp = crate::notifications::stamp(context.store)
+                        .map_err(|_| super::unreadable())?;
+                    *lock(&self.list_followed) = Some(stamp);
+                    Ok(Some(Reply::Done))
+                })
+            }
+            Operation::NotificationUnfollow if context.notifications.is_some() => {
+                facade.check(&grant, &request).map(|()| {
+                    *lock(&self.list_followed) = None;
+                    Some(Reply::Done)
+                })
+            }
             _ => {
                 self.respond(&facade.handle(&grant, &request));
                 return Ok(());
@@ -363,10 +395,37 @@ impl Visitor {
         Ok(())
     }
 
-    /// Whether this channel follows any activity: then call [`Self::poll`] about every
-    /// [`POLL_EVERY`].
+    /// Whether this channel follows any activity, or the Notifications list: then call
+    /// [`Self::poll`] about every [`POLL_EVERY`].
     pub fn following(&self) -> bool {
-        !lock(&self.subscriptions).is_empty()
+        !lock(&self.subscriptions).is_empty() || lock(&self.list_followed).is_some()
+    }
+
+    /// Tell a device that follows the Notifications list that it changed, when it did. The
+    /// list is looked at first, so that what a workflow, a test, a schedule or a trigger came
+    /// to since is in it: on a host with no window nothing else looks.
+    fn poll_list(&self, context: &Context<'_>, grant: &Grant) {
+        let Some(keeper) = context.notifications else {
+            return;
+        };
+        let mut followed = lock(&self.list_followed);
+        let Some(before) = *followed else {
+            return;
+        };
+        if !grant.allows(remote_proto::Scope::TerminalRead) {
+            *followed = None;
+            return;
+        }
+        keeper.look_within(context.store, LOOK_EVERY);
+        let Ok(now) = crate::notifications::stamp(context.store) else {
+            return;
+        };
+        if now != before {
+            *followed = Some(now);
+            self.out.text(event(&Event::NotificationsChanged(
+                remote_proto::notification::NotificationsChanged {},
+            )));
+        }
     }
 
     /// Send each subscription what was recorded since its last batch, as much as the device's
@@ -380,6 +439,7 @@ impl Visitor {
         let Ok(Some(grant)) = host::grant_for(context.store, &self.device, &self.grant) else {
             return;
         };
+        self.poll_list(context, &grant);
         let facade = context.facade();
         let mut subscriptions = lock(&self.subscriptions);
         let mut ended = Vec::new();
@@ -432,6 +492,7 @@ impl Visitor {
     /// it was still uploading.
     pub fn close(&self, terminals: &dyn TerminalHost) {
         lock(&self.subscriptions).clear();
+        *lock(&self.list_followed) = None;
         for (_, upload) in lock(&self.uploads).drain() {
             upload.abandon();
         }

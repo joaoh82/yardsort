@@ -21,18 +21,25 @@
 //!
 //! Nothing is read from a terminal: a quiet terminal says only that a turn ended. The words a
 //! row is shown with are not stored either; [`Lines`] reads them when the list is asked for.
+//!
+//! Whatever runs the terminals keeps the list with a [`Keeper`]: the app, and a host with no
+//! window. It is told what only that process hears, and it is what a device is answered from
+//! over Remote (`crate::remote`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
+use pty_host::{HostEvent, SessionInfo, SessionState};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::activity::{asks, digest};
+use crate::error::IpcResult;
 use crate::store::{Store, StoreResult};
-use crate::trigger::turns::Turns;
+use crate::trigger::turns::{Change, Turns};
 use crate::usage::logs::Sources;
 
 /// How long a row that left its part of the list is kept under Earlier.
@@ -978,6 +985,220 @@ fn one_line(text: &str) -> String {
     let mut cut: String = line.chars().take(SAID_CHARS).collect();
     cut.push('…');
     cut
+}
+
+/// How often, at most, the store is told the list is still hearing from the terminals.
+const HEARD_EVERY: Duration = Duration::from_secs(5);
+
+/// What a process that runs the terminals keeps, to keep the list: the app, or a host with no
+/// window. It is told what only that process hears — a terminal going quiet, an agent's process
+/// ending, the activity inbox drained — and it says when the list changed, to whoever it was
+/// made for.
+///
+/// Nothing here fails its caller: the list is not worth stopping a terminal's event for. What
+/// the store would not do is written to the log.
+pub struct Keeper {
+    /// Each terminal's turns, so a quiet terminal and its harness's own report of the same turn
+    /// are one row.
+    turns: Turns,
+    /// What rows are shown with, read when the list is asked for.
+    lines: Lines,
+    /// When the store was last told the list is hearing from the terminals.
+    heard: Mutex<Option<Instant>>,
+    /// Terminals that were asked to close. An agent ended that way did not stop with an error,
+    /// whatever its process says on the way out.
+    closing: Mutex<HashSet<String>>,
+    /// When [`Self::look`] last ran.
+    looked: Mutex<Option<Instant>>,
+    /// Called when the list changed: a row was added, answered or seen.
+    changed: Box<dyn Fn() + Send + Sync>,
+}
+
+impl std::fmt::Debug for Keeper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Keeper").finish_non_exhaustive()
+    }
+}
+
+impl Keeper {
+    /// A keeper that calls `changed` whenever the list changed.
+    pub fn new(changed: impl Fn() + Send + Sync + 'static) -> Self {
+        Self {
+            turns: Turns::default(),
+            lines: Lines::default(),
+            heard: Mutex::new(None),
+            closing: Mutex::new(HashSet::new()),
+            looked: Mutex::new(None),
+            changed: Box::new(changed),
+        }
+    }
+
+    /// The process has just started and found these terminals alive. What agents' hooks
+    /// reported meanwhile is read first, so a turn told that way is not told again; then an
+    /// agent that stopped printing while nothing listened finished something nobody saw; then
+    /// what else waits on this computer.
+    pub fn start(&self, store: &Store, alive: &[SessionInfo]) {
+        self.read_events(store);
+        let waiting: Vec<Waiting> = alive
+            .iter()
+            .filter(|session| {
+                session.has_output
+                    && !session.busy
+                    && matches!(session.state, SessionState::Running)
+            })
+            .map(|session| Waiting {
+                terminal: session.id.0.clone(),
+                idle_ms: session.idle_ms,
+            })
+            .collect();
+        self.tell(catch_up(store, &waiting, crate::store::now_ms()));
+        self.look(store);
+    }
+
+    /// Every event of the terminals passes through here, after an exit's record was settled.
+    /// `ended` is the conversation whose process an exit ended, when it was an agent's.
+    pub fn observe(&self, store: &Store, event: &HostEvent, ended: Option<&str>) {
+        let now = crate::store::now_ms();
+        self.hearing(store, now);
+        let settled = matches!(self.turns.observe(event, now), Some(Change::Settled { .. }));
+        let changed = match event {
+            HostEvent::Quiet { id, busy_ms } if settled => {
+                settled_terminal(store, &id.0, *busy_ms, now)
+            }
+            HostEvent::Exited { id, exit } => {
+                let closed = self
+                    .closing
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(&id.0);
+                let Some(session) = ended else {
+                    return;
+                };
+                // A signal is a person, or the program that runs it, ending it: not a failure
+                // to tell of.
+                let error = (!exit.success && exit.signal.is_none() && !closed)
+                    .then(|| i64::from(exit.code));
+                exited(store, session, error, now)
+            }
+            _ => return,
+        };
+        self.tell(changed);
+    }
+
+    /// Say, every few seconds at most, that the list is hearing from the terminals: what
+    /// prints after the last such word printed while nothing listened.
+    fn hearing(&self, store: &Store, now: i64) {
+        let mut last = self.heard.lock().unwrap_or_else(PoisonError::into_inner);
+        if last.is_some_and(|at| at.elapsed() < HEARD_EVERY) {
+            return;
+        }
+        *last = Some(Instant::now());
+        if let Err(error) = heard(store, now) {
+            eprintln!("notifications: {error}");
+        }
+    }
+
+    /// `terminal` is being closed on purpose.
+    pub fn closing(&self, terminal: &str) {
+        self.closing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(terminal.to_owned());
+    }
+
+    /// Take in what agents' hooks reported since the last look. Call it after every drain of
+    /// the activity inbox.
+    pub fn read_events(&self, store: &Store) {
+        self.tell(read_events(store, &self.turns));
+    }
+
+    /// A workflow's run, a smoke test's run, a schedule or a trigger changed, here or from
+    /// `ys`: have the list agree with where they stand now ([`standing::read`]).
+    pub fn look(&self, store: &Store) {
+        *self.looked.lock().unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
+        match standing::read(store, crate::store::now_ms()) {
+            Ok(changed) => self.tell(Ok(changed)),
+            Err(error) => eprintln!("notifications: {}", error.message),
+        }
+    }
+
+    /// [`Self::look`], unless it ran within `every`: for a caller that asks often and is told
+    /// nothing, as a host with no window is.
+    pub fn look_within(&self, store: &Store, every: Duration) {
+        let recent = self
+            .looked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some_and(|at| at.elapsed() < every);
+        if !recent {
+            self.look(store);
+        }
+    }
+
+    /// The list as it stands now, with the lines its rows are shown with. `conversations` is
+    /// where agents keep theirs: the sources of their session files, and this profile's data
+    /// folder. Without it rows come without those lines.
+    pub fn list(
+        &self,
+        store: &Store,
+        conversations: Option<(&Sources, &Path)>,
+        now: i64,
+    ) -> IpcResult<Vec<Notification>> {
+        // Whoever asks is shown where things stand now, whether or not anyone said they moved.
+        standing::read(store, now)?;
+        let mut rows = list(store, now)?;
+        if let Some((sources, data_dir)) = conversations {
+            self.lines.fill(store, sources, data_dir, &mut rows, now);
+        }
+        Ok(rows)
+    }
+
+    /// These finished rows were looked at.
+    pub fn seen(&self, store: &Store, ids: &[String]) -> StoreResult<()> {
+        let left = seen(store, ids, crate::store::now_ms())?;
+        self.tell(Ok(left > 0));
+        Ok(())
+    }
+
+    /// `terminal` is in front of its person: what its agent finished is seen.
+    pub fn seen_terminal(&self, store: &Store, terminal: &str) -> StoreResult<()> {
+        let left = seen_terminal(store, terminal, crate::store::now_ms())?;
+        self.tell(Ok(left > 0));
+        Ok(())
+    }
+
+    /// Everything finished is seen.
+    pub fn seen_all(&self, store: &Store) -> StoreResult<()> {
+        let left = seen_all(store, crate::store::now_ms())?;
+        self.tell(Ok(left > 0));
+        Ok(())
+    }
+
+    /// A workspace or a project went away, and its rows with it; a schedule or a trigger that
+    /// ran there now has nowhere to. Whoever shows the list reads it again.
+    pub fn removed(&self) {
+        (self.changed)();
+    }
+
+    fn tell(&self, changed: StoreResult<bool>) {
+        match changed {
+            Ok(true) => (self.changed)(),
+            Ok(false) => {}
+            Err(error) => eprintln!("notifications: {error}"),
+        }
+    }
+}
+
+/// What tells one state of the list from another: enough that any row added, answered, seen or
+/// deleted changes it. For telling a device that follows the list that it changed.
+pub fn stamp(store: &Store) -> StoreResult<(i64, i64, i64, i64)> {
+    Ok(store.conn().query_row(
+        "SELECT count(*), count(settled_at), COALESCE(max(created_at), 0),
+                COALESCE(max(settled_at), 0)
+         FROM notifications",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    )?)
 }
 
 pub mod standing;

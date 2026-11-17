@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const core = vi.hoisted(() => ({
   notificationList: vi.fn(),
   notificationSeen: vi.fn(),
+  notificationSeenThere: vi.fn(),
   notificationSeenTerminal: vi.fn(),
   notificationSeenAll: vi.fn(),
   uiStateSave: vi.fn(),
@@ -13,7 +14,7 @@ vi.mock("@/lib/ipc", async (original) => ({
   ipc: core,
 }));
 
-import { notification, standingNotification } from "@/test/fixtures";
+import { notification, notificationThere, standingNotification } from "@/test/fixtures";
 import { counts, GROUPING_KEY, listedIn, useNotificationsStore } from "./notifications";
 import { useTerminalStore, type TerminalTab } from "./terminals";
 
@@ -50,9 +51,11 @@ beforeEach(() => {
     grouping: "kind",
     inFront: null,
     runInFront: null,
+    thereInFront: null,
   });
   useTerminalStore.setState({ tabs: [tab("pty-a"), tab("pty-b"), tab("pty-c")], active: {} });
   core.notificationSeen.mockResolvedValue(null);
+  core.notificationSeenThere.mockResolvedValue(null);
   core.notificationSeenTerminal.mockResolvedValue(null);
   core.notificationSeenAll.mockResolvedValue(null);
   core.uiStateSave.mockResolvedValue(null);
@@ -136,7 +139,8 @@ describe("the notifications store", () => {
   it("moves a finished row to Earlier when it is marked seen, and never a question", async () => {
     useNotificationsStore.setState({ items: [asks, finishedB, finishedC] });
     await useNotificationsStore.getState().seen(["a", "b"]);
-    expect(core.notificationSeen).toHaveBeenCalledWith(["a", "b"]);
+    // The question is not even asked about: it leaves when it is answered.
+    expect(core.notificationSeen).toHaveBeenCalledWith(["b"]);
     const parts = useNotificationsStore.getState().items.map((item) => item.part);
     expect(parts).toEqual(["needs", "earlier", "finished"]);
     await useNotificationsStore.getState().seenAll();
@@ -188,6 +192,61 @@ describe("the notifications store", () => {
     await useNotificationsStore.getState().load();
     expect(core.notificationSeen).toHaveBeenCalledWith(["ended"]);
     expect(counts(useNotificationsStore.getState().items)).toEqual({ needs: 0, finished: 1 });
+  });
+
+  it("keeps another computer's rows apart from this one's tabs, projects and seen", async () => {
+    // A row there that happens to name a terminal and a project as ones here are named.
+    const there = notificationThere("a", { terminalId: "pty-a", projectId: "p-app" });
+    const here = notification("a", {
+      kind: "agent.finished",
+      part: "finished",
+      terminalId: "pty-b",
+    });
+    core.notificationList.mockResolvedValue([there, here]);
+    await useNotificationsStore.getState().load();
+    expect(counts(useNotificationsStore.getState().items)).toEqual({ needs: 0, finished: 2 });
+    // Only this computer's tab is ringed, and only its row counts on its project.
+    expect(ringed()).toEqual(["pty-b"]);
+    expect(listedIn(useNotificationsStore.getState().items, "p-app")).toBe(1);
+
+    // This computer's terminal of that name in front is not that computer's.
+    useNotificationsStore.getState().looking("pty-a");
+    expect(core.notificationSeenTerminal).not.toHaveBeenCalled();
+    expect(counts(useNotificationsStore.getState().items).finished).toBe(2);
+
+    // Marked seen, each is said where it is kept, though both have the id `a`.
+    await useNotificationsStore.getState().seen(["h-1/a"]);
+    expect(core.notificationSeenThere).toHaveBeenCalledWith("h-1", ["a"]);
+    expect(core.notificationSeen).not.toHaveBeenCalled();
+    await useNotificationsStore.getState().seen(["a"]);
+    expect(core.notificationSeen).toHaveBeenCalledWith(["a"]);
+    expect(counts(useNotificationsStore.getState().items).finished).toBe(0);
+  });
+
+  it("marks a row there seen when its terminal there is the one on screen", async () => {
+    core.notificationList.mockResolvedValue([
+      notificationThere("one", { terminalId: "t-1" }),
+      notificationThere("two", { terminalId: "t-2" }),
+      notificationThere("elsewhere", { hostId: "h-2", terminalId: "t-1" }),
+    ]);
+    await useNotificationsStore.getState().load();
+
+    focused = false;
+    useNotificationsStore.getState().lookingThere("h-1", "t-1");
+    expect(core.notificationSeenThere).not.toHaveBeenCalled();
+
+    focused = true;
+    useNotificationsStore.getState().lookingThere("h-1", "t-1");
+    // That terminal on that computer, and no other of that name.
+    expect(core.notificationSeenThere).toHaveBeenCalledTimes(1);
+    expect(core.notificationSeenThere).toHaveBeenCalledWith("h-1", ["one"]);
+    expect(counts(useNotificationsStore.getState().items).finished).toBe(2);
+
+    // One that finishes while it is on screen is seen as it is read.
+    core.notificationList.mockResolvedValue([notificationThere("three", { terminalId: "t-1" })]);
+    await useNotificationsStore.getState().load();
+    expect(core.notificationSeenThere).toHaveBeenLastCalledWith("h-1", ["three"]);
+    expect(counts(useNotificationsStore.getState().items).finished).toBe(0);
   });
 
   it("remembers how the view is grouped", () => {

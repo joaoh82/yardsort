@@ -5,6 +5,7 @@ import { ComputerIcon } from "@/features/sidebar/OtherComputersTree";
 import { clock } from "@/features/sidebar/otherComputersText";
 import { StatusDot } from "@/features/terminal/StatusDot";
 import { timeAgo } from "@/features/terminal/sessionText";
+import { useNotificationsStore } from "@/stores/notifications";
 import {
   findThere,
   tabsThere,
@@ -50,6 +51,23 @@ export function RemoteWorkspaceView({
   useEffect(() => {
     if (mayStart) void useOtherComputersStore.getState().loadHarnesses(hostId);
   }, [mayStart, hostId]);
+
+  // The terminal on screen there is being looked at: the Notifications list marks what its
+  // agent finished seen, and that computer is told. Coming back to the window is looking, too.
+  const inFront = there
+    ? (tabsThere(there.workspace).find((tab) => tab.id === activeId) ??
+      tabsThere(there.workspace)[0])
+    : undefined;
+  const lookedAt = inFront?.id ?? null;
+  useEffect(() => {
+    const look = () => useNotificationsStore.getState().lookingThere(hostId, lookedAt);
+    look();
+    window.addEventListener("focus", look);
+    return () => {
+      window.removeEventListener("focus", look);
+      useNotificationsStore.getState().lookingThere(null, null);
+    };
+  }, [hostId, lookedAt]);
 
   if (!there) {
     return (

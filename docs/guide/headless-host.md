@@ -307,6 +307,12 @@ commit, push and open or merge its pull request: see
 name and email (`git config --global user.name` and `user.email`), credentials that can push, and
 `gh auth login` if pull requests should be opened and merged from it.
 
+The host keeps a [Notifications](notifications.md#other-computers) list of its agents: one that
+asks for a permission, finishes a stretch of work, or stops with an error. The desktop app on
+another computer that may watch here shows those rows in its own list, and what is marked seen
+there is marked here. An agent that finished while `yardsort-host` was stopped is listed when it
+starts again.
+
 It is cloned with this host's own Git sign-in, from an HTTPS or SSH address, and never to a path a
 device names. In a container, point `projects_dir` at a folder in a volume if clones should outlast
 the container.

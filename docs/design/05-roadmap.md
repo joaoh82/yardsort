@@ -1407,7 +1407,10 @@ looking.
       approval is the test's row only; a run its person cancelled or rejected is no row; and
       an agent a running workflow started is not a finished row each turn. Found by running it:
       a rejected approval ends its run as failed, which was listed as news until it was tried.
-- [ ] Slice 3: other computers' rows on the desktop, over a new protocol minor.
+- [x] Slice 3: other computers' rows on the desktop, over protocol minor 15: the list, marking
+      rows seen, and being told when the list changes. The keeper of the list moved into the
+      core, so `yardsort-host` keeps one too. A row there opens its workspace there; what a
+      workflow, a test, a schedule or a trigger there waits for is answered on that computer.
 - [ ] Slice 4: the phone: the bell, the list, counts on computers and marks on workspaces.
 - [ ] Slice 5: a push when an agent finishes, with its own switch.
 

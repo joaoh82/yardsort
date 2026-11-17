@@ -146,8 +146,10 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   not a project yet is cloned on the way. See [Projects](docs/guide/projects.md#clone-a-repository).
 - **Know who needs you.** Status dots show which agents are working and which are waiting; a
   desktop notification tells you when one finishes while you are elsewhere, and
-  [Notifications](docs/guide/notifications.md) lists, over every project, the agents that ask
-  for a permission and the ones that finished or stopped while you were not looking.
+  [Notifications](docs/guide/notifications.md) lists, over every project, what waits for you
+  and what finished while you were not looking: agents that ask for a permission or are done,
+  workflows waiting for an approval or an answer, smoke tests waiting to be let run, and
+  schedules and triggers that could not start. Other computers you reach are in the same list.
 - **Careful with your work.** Deleting or archiving a workspace always keeps the branch, and
   never discards uncommitted changes without a second, explicit confirmation.
 - **A second pair of eyes, if you want one.** [Assist](docs/guide/assist.md) asks

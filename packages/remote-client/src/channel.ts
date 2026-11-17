@@ -78,6 +78,8 @@ import {
   type SessionPage,
   type SessionResumeParams,
   type SessionStartParams,
+  type NotificationPage,
+  type NotificationSeenParams,
   type PullDetail,
   type PullListParams,
   type PullPage,
@@ -217,6 +219,8 @@ export class Channel {
   #pending = new Map<RequestId, Pending>();
   #attachments = new Map<StreamId, Attachment>();
   #subscriptions = new Map<SubscriptionId, Subscription>();
+  /** Who is told that the computer's Notifications list changed, while it is followed. */
+  #listChanged: (() => void) | null = null;
   #controls = new Set<Control>();
   #probeTimer: ReturnType<typeof setTimeout> | undefined;
   #silentTimer: ReturnType<typeof setTimeout> | undefined;
@@ -703,6 +707,43 @@ export class Channel {
     return detail;
   }
 
+  /**
+   * The computer's Notifications list, as much of it as this device may see: what waits for its
+   * person, what finished and was not seen, and the newest of what left. Minor 15.
+   */
+  async notifications(): Promise<NotificationPage> {
+    const { kind: _, ...page } = expect(
+      await this.ask({ op: "notification.list", params: {} }),
+      "notifications",
+    );
+    return page;
+  }
+
+  /**
+   * These finished rows of the computer's list were looked at, or with `all` every one this
+   * device may see. A row that waits for an answer is not marked: it leaves when it gets one.
+   */
+  async notificationsSeen(params: Partial<NotificationSeenParams>): Promise<void> {
+    const full: NotificationSeenParams = { ids: [], all: false, ...params };
+    expect(await this.ask({ op: "notification.seen", params: full }), "done");
+  }
+
+  /**
+   * Have the computer say when its Notifications list changes, for as long as this channel is
+   * open or until the returned function is called. `changed` is then called once for each word
+   * of it: read the list again there. Following again replaces the one who is told.
+   */
+  async followNotifications(changed: () => void): Promise<() => Promise<void>> {
+    expect(await this.ask({ op: "notification.follow" }), "done");
+    this.#listChanged = changed;
+    return async () => {
+      if (this.#listChanged === changed) this.#listChanged = null;
+      if (this.#phase === "open") {
+        expect(await this.ask({ op: "notification.unfollow" }), "done");
+      }
+    };
+  }
+
   /** An ended conversation again, under its own record: one whose summary says `resumable`. */
   async resumeSession(params: SessionResumeParams): Promise<Started> {
     const { kind: _, ...started } = expect(
@@ -991,6 +1032,9 @@ export class Channel {
       }
       case "activity.ended":
         this.#subscriptions.get(event.subscription)?.end({ kind: "ended", error: event.error });
+        return;
+      case "notifications.changed":
+        this.#listChanged?.();
         return;
     }
   }

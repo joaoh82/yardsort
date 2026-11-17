@@ -141,6 +141,15 @@ pub const TEST_OPERATIONS: &[&str] = &["test.waiting", "test.decide"];
 /// ([`PullRequests`]).
 pub const PULL_OPERATIONS: &[&str] = &["pull.list", "pull.describe"];
 
+/// The Notifications list, answered when whatever runs this host's terminals keeps it
+/// ([`crate::notifications::Keeper`]).
+pub const NOTIFICATION_OPERATIONS: &[&str] = &["notification.list", "notification.seen"];
+
+/// Being told when the list changes, answered by [`serve::Visitor`] and advertised when the
+/// facade serves a device's channel and the list is kept.
+pub const NOTIFICATION_FOLLOW_OPERATIONS: &[&str] =
+    &["notification.follow", "notification.unfollow"];
+
 /// Who this host is, to remote clients. Supplied by whoever builds the facade: no host identity
 /// is stored before Remote is enabled, so nothing is created for people who never use it.
 #[derive(Debug, Clone)]
@@ -180,6 +189,9 @@ pub struct HostFacade<'a> {
     /// What the host last read of its projects' pull requests. Without it — a host with no
     /// window, which reads none — `pull.list` and `pull.describe` are unsupported.
     pub pulls: Option<&'a dyn PullRequests>,
+    /// What keeps this host's Notifications list. Without it the `notification.*` operations
+    /// are unsupported.
+    pub notifications: Option<&'a crate::notifications::Keeper>,
 }
 
 /// What a device is told of terminals in a daemon from before leases, which the app keeps for the
@@ -281,6 +293,18 @@ impl HostFacade<'_> {
             Operation::PullDescribe(params) => self
                 .pull(grant, params)
                 .map(|detail| Reply::Pull(Box::new(detail))),
+            Operation::NotificationList(_) => {
+                self.notification_list(grant).map(Reply::Notifications)
+            }
+            Operation::NotificationSeen(params) => {
+                self.notifications_seen(grant, params).map(|()| Reply::Done)
+            }
+            Operation::NotificationFollow | Operation::NotificationUnfollow => {
+                Err(RemoteError::new(
+                    ErrorCode::Unsupported,
+                    "Following the Notifications list is not available on this host yet.",
+                ))
+            }
             Operation::ApprovalAnswer(params) => {
                 self.answer_ask(grant, params).map(|()| Reply::Done)
             }
@@ -380,6 +404,16 @@ impl HostFacade<'_> {
                 })
                 .chain(if self.pulls.is_some() {
                     PULL_OPERATIONS
+                } else {
+                    &[]
+                })
+                .chain(if self.notifications.is_some() {
+                    NOTIFICATION_OPERATIONS
+                } else {
+                    &[]
+                })
+                .chain(if self.notifications.is_some() && self.subscriptions {
+                    NOTIFICATION_FOLLOW_OPERATIONS
                 } else {
                     &[]
                 })
@@ -1218,6 +1252,7 @@ fn encoded_len(value: &impl Serialize) -> usize {
 mod activity;
 mod conversation;
 pub mod host;
+mod notification;
 pub mod publish;
 pub mod pull;
 pub mod serve;

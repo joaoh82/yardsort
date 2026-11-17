@@ -1365,12 +1365,15 @@ export const ipc = {
   /** What needs an answer, what finished and was not seen, and the newest of what left. */
   notificationList: (): Promise<NotificationItem[]> =>
     unwrap(commands.notificationList()) as Promise<NotificationItem[]>,
-  /** These finished rows were looked at. */
+  /** These finished rows of this computer's list were looked at. */
   notificationSeen: (ids: string[]) => unwrap(commands.notificationSeen(ids)),
+  /** These finished rows of another computer's list were looked at here: it is said there. */
+  notificationSeenThere: (hostId: string, ids: string[]) =>
+    unwrap(commands.notificationSeenThere(hostId, ids)),
   /** This terminal is in front of its person: what its agent finished is seen. */
   notificationSeenTerminal: (terminalId: string) =>
     unwrap(commands.notificationSeenTerminal(terminalId)),
-  /** Everything finished is seen. */
+  /** Everything finished is seen, here and on each other computer that can be told so now. */
   notificationSeenAll: () => unwrap(commands.notificationSeenAll()),
   /** The list changed: a row was added, answered or seen. */
   onNotificationsChanged: (handler: () => void) =>

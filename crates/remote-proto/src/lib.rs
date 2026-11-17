@@ -33,7 +33,9 @@
 //! an effort and a branch, and a client that may type may also look after projects and
 //! workspaces: see [`manage`]. Since minor 13 such a client may read a workspace's changes and
 //! files: see [`look`]. Since minor 14 it may commit, push, and open and merge a pull request
-//! there: see [`publish`]. A host lists what it answers in [`HostDescription::capabilities`].
+//! there: see [`publish`]. Since minor 15 a client that may watch terminals may read the
+//! host's Notifications list, mark what finished seen, and be told when the list changes: see
+//! [`notification`]. A host lists what it answers in [`HostDescription::capabilities`].
 //!
 //! Sync between hosts ([`sync`]) is not part of this protocol: it is between a host and the
 //! server, over HTTPS, with its own schema version. Only its hint to a host is a relay notice.
@@ -45,6 +47,7 @@ pub mod ids;
 pub mod look;
 pub mod manage;
 pub mod model;
+pub mod notification;
 pub mod notify;
 pub mod pairing;
 pub mod publish;
@@ -108,7 +111,9 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// - 13: `workspace.changes`, `workspace.files` and `file.read`.
 /// - 14: `workspace.publish`, `workspace.commit`, `workspace.push`, `pull_request.open` and
 ///   `pull_request.merge`.
-pub const PROTOCOL_MINOR: u16 = 14;
+/// - 15: `notification.list`, `notification.seen`, `notification.follow` and
+///   `notification.unfollow`, and the `notifications.changed` event ([`notification`]).
+pub const PROTOCOL_MINOR: u16 = 15;
 /// `workflow:read` and `workflow:decide` arrived in this minor. A host is shown
 /// those scope names when it stated this minor or a newer minor of this major.
 pub const WORKFLOW_SCOPES_MINOR: u16 = 7;
@@ -201,6 +206,9 @@ pub enum Event {
     /// A subscription ended, and nothing more comes on it: its error says why. Since minor 3.
     #[serde(rename = "activity.ended")]
     ActivityEnded(SubscriptionEnded),
+    /// The Notifications list this client follows changed. Since minor 15.
+    #[serde(rename = "notifications.changed")]
+    NotificationsChanged(notification::NotificationsChanged),
 }
 
 /// Pick the protocol to speak with a client, or say why there is none.
@@ -548,6 +556,19 @@ pub enum Operation {
     /// Since minor 14.
     #[serde(rename = "pull_request.merge")]
     PullRequestMerge(publish::PullRequestMergeParams),
+    /// Since minor 15.
+    #[serde(rename = "notification.list")]
+    NotificationList(notification::NotificationListParams),
+    /// Since minor 15.
+    #[serde(rename = "notification.seen")]
+    NotificationSeen(notification::NotificationSeenParams),
+    /// Since minor 15. From then on the host sends `notifications.changed` on this connection
+    /// whenever its list changes, until `notification.unfollow` or the connection's end.
+    #[serde(rename = "notification.follow")]
+    NotificationFollow,
+    /// Since minor 15.
+    #[serde(rename = "notification.unfollow")]
+    NotificationUnfollow,
 }
 
 /// Every operation's wire name, in [`Operation`]'s order.
@@ -597,6 +618,10 @@ pub const OPERATIONS: &[&str] = &[
     "workspace.push",
     "pull_request.open",
     "pull_request.merge",
+    "notification.list",
+    "notification.seen",
+    "notification.follow",
+    "notification.unfollow",
 ];
 
 impl Operation {
@@ -647,6 +672,10 @@ impl Operation {
             Self::WorkspacePush(_) => 42,
             Self::PullRequestOpen(_) => 43,
             Self::PullRequestMerge(_) => 44,
+            Self::NotificationList(_) => 45,
+            Self::NotificationSeen(_) => 46,
+            Self::NotificationFollow => 47,
+            Self::NotificationUnfollow => 48,
         };
         OPERATIONS[index]
     }
@@ -670,7 +699,11 @@ impl Operation {
             Self::TerminalAttach(_)
             | Self::TerminalDetach(_)
             | Self::ConversationRead(_)
-            | Self::TestWaiting(_) => Scope::TerminalRead,
+            | Self::TestWaiting(_)
+            | Self::NotificationList(_)
+            | Self::NotificationSeen(_)
+            | Self::NotificationFollow
+            | Self::NotificationUnfollow => Scope::TerminalRead,
             Self::TerminalAcquire(_)
             | Self::TerminalRenew(_)
             | Self::TerminalRelease(_)
@@ -771,6 +804,10 @@ impl Operation {
                 Some(message) => invalid(message),
                 None => Ok(()),
             },
+            Self::NotificationSeen(params) => match params.invalid() {
+                Some(message) => invalid(message),
+                None => Ok(()),
+            },
             _ => Ok(()),
         }
     }
@@ -841,6 +878,8 @@ pub enum Reply {
     Publish(publish::PublishState),
     /// Since minor 14.
     PullRequestOpened(publish::PullRequestOpened),
+    /// Since minor 15.
+    Notifications(notification::NotificationPage),
     Done,
 }
 

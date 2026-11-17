@@ -1088,3 +1088,71 @@ describe("sending a workspace's work on", () => {
     channel.close();
   });
 });
+
+describe("a computer's notifications", () => {
+  const LIST = {
+    kind: "notifications",
+    notifications: [
+      {
+        id: "n-1",
+        kind: "agent.finished",
+        part: "finished",
+        project: "p",
+        projectName: "weather-cli",
+        workspace: "w",
+        workspaceName: "fix",
+        title: "Cover half-hour zones",
+        at: 1_700_000_000_000,
+      },
+    ],
+    needs: 0,
+    finished: 1,
+    more: false,
+  };
+
+  test("the list is read, a row is marked seen, and all of them", async () => {
+    const { client, asked } = relay((request, socket) =>
+      answer(socket, request, request.op === "notification.list" ? LIST : { kind: "done" }),
+    );
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const page = await channel.notifications();
+    expect(page.finished).toBe(1);
+    expect(page.notifications[0]?.id).toBe("n-1");
+    await channel.notificationsSeen({ ids: ["n-1"] });
+    await channel.notificationsSeen({ all: true });
+    expect(asked).toMatchObject([
+      { op: "notification.list", params: {} },
+      { op: "notification.seen", params: { ids: ["n-1"], all: false } },
+      { op: "notification.seen", params: { ids: [], all: true } },
+    ]);
+    // Nothing named and not all is refused here, and never sent.
+    const refused = await channel.notificationsSeen({}).catch((e: unknown) => e);
+    expect((refused as ClientError).kind).toBe("invalid");
+    expect(asked).toHaveLength(3);
+    channel.close();
+  });
+
+  test("following is told of each change until it is stopped", async () => {
+    let host: ServerWebSocket<Stage> | null = null;
+    const { client, asked } = relay((request, socket) => {
+      host = socket;
+      answer(socket, request, { kind: "done" });
+    });
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    let told = 0;
+    const stop = await channel.followNotifications(() => (told += 1));
+    const changed = () => host?.send(JSON.stringify({ event: "notifications.changed" }));
+    changed();
+    await until(() => told === 1);
+    changed();
+    await until(() => told === 2);
+
+    await stop();
+    expect(asked.map((r) => r.op)).toEqual(["notification.follow", "notification.unfollow"]);
+    // A word that was already on its way is not passed on.
+    changed();
+    await Bun.sleep(30);
+    expect(told).toBe(2);
+    channel.close();
+  });
+});

@@ -2,7 +2,8 @@
 //!
 //! It holds the profile's lock (as the app does, so the two never share a sign-in), connects to
 //! the profile's terminal daemon or starts one, settles the records, drains the activity inbox as
-//! it fills, keeps the link to the server's relay when signed in, and answers this computer's own
+//! it fills, keeps the Notifications list (`yardsort_core::notifications`) for the devices that
+//! read it, keeps the link to the server's relay when signed in, and answers this computer's own
 //! commands on the control socket. Stopped (`SIGTERM`, `SIGINT`), it closes the link and the
 //! socket and exits; the daemon and the programs in it carry on, and the next `serve` finds them.
 
@@ -42,14 +43,18 @@ pub async fn run(profile: Profile) -> Result<(), String> {
         yardsort_core::daemon::connect(
             &data_dir,
             Arc::new(move |event| {
-                let HostEvent::Exited { id, exit } = &event else {
+                let Some(home) = events.get() else {
                     return;
                 };
-                if let Some(home) = events.get() {
-                    runtime::exited(&home.store, &home.profile.data_dir, &id.0, exit);
+                let mut ended = None;
+                if let HostEvent::Exited { id, exit } = &event {
+                    ended = runtime::exited(&home.store, &home.profile.data_dir, &id.0, exit);
                     // An agent's last hooks ran just before it exited.
                     home.look_again();
                 }
+                // The Notifications list hears of a turn that ended and of an agent that stopped.
+                home.notifications
+                    .observe(&home.store, &event, ended.as_deref());
             }),
         )
     })
@@ -65,14 +70,16 @@ pub async fn run(profile: Profile) -> Result<(), String> {
                 .into(),
         );
     }
-    let alive: Vec<String> = connected
-        .host
-        .list()
-        .into_iter()
-        .map(|session| session.id.0)
+    let sessions = connected.host.list();
+    let alive: Vec<String> = sessions
+        .iter()
+        .map(|session| session.id.0.clone())
         .collect();
     let home = HostHome::open(profile, Some(connected))?;
     let settled = runtime::settle_at_start(&home.store, &home.profile.data_dir, &alive)?;
+    // After the records are settled: an agent that stopped printing while nothing served, and
+    // whatever came to wait meanwhile, is listed from the start.
+    home.notifications.start(&home.store, &sessions);
     runtime::track_seen(&home.store, &settled.pull_requests, || {
         yardsort_core::git::Git::new(home.env()).ok()
     });
@@ -91,10 +98,13 @@ pub async fn run(profile: Profile) -> Result<(), String> {
                 .capture_grok
                 .then(|| runtime::grok_home(home.env()))
                 .flatten();
-            runtime::drain(&home.store, &dir, grok_home.as_deref(), cursors, || {
+            let pending = runtime::drain(&home.store, &dir, grok_home.as_deref(), cursors, || {
                 yardsort_core::git::Git::new(home.env()).ok()
             })
-            .pending
+            .pending;
+            // What agents' hooks reported: a permission asked for, a turn that ended.
+            home.notifications.read_events(&home.store);
+            pending
         })
     };
     match watching {

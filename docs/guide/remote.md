@@ -441,6 +441,10 @@ tabs there. With a workspace there in view, the new workspace shortcut composes 
 in the same project, and the new shell shortcut opens that computer's shell in it. Closing a tab
 there is not offered: its terminals are ended at that computer, or by the program in them.
 
+**In Notifications.** What waits on that computer, and what finished there while nobody looked, is
+listed in this computer's [Notifications](notifications.md#other-computers), each row naming the
+computer. Marking one seen here marks it there. It needs 0.36.0 or later on the other computer.
+
 **This is a device of its own.** Signing in here makes a second device at the server, apart from this
 computer as a host: turning Remote on or off above leaves it signed in, and **Sign out** under Other
 computers leaves this computer's host as it is. Its sign-in is kept in the same credential store. The

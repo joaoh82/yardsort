@@ -36,6 +36,9 @@ pub struct HostHome {
     pub watcher: OnceLock<InboxWatcher>,
     /// What a paired device that may type starts agents with.
     starting: Arc<HostStarting>,
+    /// What keeps this host's Notifications list, for the devices that read it. It has nobody
+    /// here to tell: a device that follows the list is told by its own channel.
+    pub notifications: yardsort_core::notifications::Keeper,
 }
 
 impl HostHome {
@@ -55,6 +58,7 @@ impl HostHome {
             asked: tokio::sync::broadcast::channel(8).0,
             watcher: OnceLock::new(),
             starting: Arc::new(HostStarting(home.clone())),
+            notifications: yardsort_core::notifications::Keeper::new(|| {}),
         }))
     }
 
@@ -132,6 +136,7 @@ impl Home for HostHome {
             conversations: Some(&conversations),
             tests: None,
             pulls: None,
+            notifications: Some(&self.notifications),
         });
     }
 

@@ -616,6 +616,7 @@ impl Serving for Here {
             conversations: None,
             tests: None,
             pulls: None,
+            notifications: None,
         });
     }
 }

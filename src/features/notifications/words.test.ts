@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { notification, standingNotification } from "@/test/fixtures";
+import { notification, notificationThere, standingNotification } from "@/test/fixtures";
 import {
   about,
   chip,
@@ -170,5 +170,44 @@ describe("a row that is not about an agent", () => {
     // A schedule that makes its own workspaces never had one to name.
     const own = { ...refused, workspaceId: null, workspaceName: "" };
     expect([leadName(own), detailName(own)]).toEqual(["Nightly review", null]);
+  });
+});
+
+describe("a row of another computer", () => {
+  const there = notificationThere("there");
+  const waits = notificationThere("waits", {
+    kind: "workflow.approval",
+    part: "needs",
+    title: "Review",
+    terminalId: null,
+    subjectId: "run-9",
+  });
+  const lost = notificationThere("lost", {
+    kind: "trigger.noWorkspace",
+    part: "needs",
+    title: "Review when done",
+    workspaceId: null,
+    terminalId: null,
+  });
+
+  it("opens its workspace there, and says so when there is nothing here to open", () => {
+    expect(opens(there)).toBe("the agent's terminal on Build box");
+    // What a workflow there waits for is answered on that computer: its workspace is the way.
+    expect(opens(waits)).toBe("its workspace on Build box");
+    expect(opens(lost)).toBe("nothing here: it is changed on Build box");
+  });
+
+  it("groups by its own project, after this computer's, and names its computer", () => {
+    const here = notification("here", { kind: "agent.finished", part: "finished" });
+    // A project there called as one here is still another project.
+    const sameName = notificationThere("same", { projectName: "app", projectId: "p-app" });
+    const grouped = sections([there, sameName, here, waits], "project", "all");
+    expect(grouped.map((section) => [section.title, section.items.map((item) => item.id)])).toEqual(
+      [
+        ["app", ["here"]],
+        ["app on Build box", ["same"]],
+        ["service on Build box", ["waits", "there"]],
+      ],
+    );
   });
 });

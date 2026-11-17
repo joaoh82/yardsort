@@ -324,6 +324,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             smoke::commands::test_list_in_project,
             notifications::notification_list,
             notifications::notification_seen,
+            notifications::notification_seen_there,
             notifications::notification_seen_terminal,
             notifications::notification_seen_all,
         ])
@@ -548,9 +549,7 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
                 }
             }
             // The Notifications list hears of a turn that ended and of an agent that stopped.
-            if let Some(list) = handle.try_state::<notifications::Notifications>() {
-                list.observe(&handle, &event, ended.as_deref());
-            }
+            notifications::observe(&handle, &event, ended.as_deref());
             // A workflow waiting for an agent to settle hears it here, before the window.
             if let Some(driver) = handle.try_state::<workflows::Driver>() {
                 driver.observe(&event);

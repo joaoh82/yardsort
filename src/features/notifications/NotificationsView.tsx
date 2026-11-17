@@ -6,7 +6,8 @@ import { TestsIcon } from "@/features/tests/TestsRow";
 import { TriggersIcon } from "@/features/triggers/TriggersRow";
 import { WorkflowsIcon } from "@/features/workflows/WorkflowsRow";
 import type { NotificationItem } from "@/lib/ipc";
-import { counts, useNotificationsStore, type Grouping } from "@/stores/notifications";
+import { counts, rowKey, useNotificationsStore, type Grouping } from "@/stores/notifications";
+import { useOtherComputersStore } from "@/stores/otherComputers";
 import { useProjectsStore } from "@/stores/projects";
 import { useTerminalStore } from "@/stores/terminals";
 import { useWorkflowStore } from "@/stores/workflows";
@@ -35,6 +36,9 @@ const GROUPINGS: { id: Grouping; label: string }[] = [
  * The core keeps the list and says when a row leaves. A row here is a way to what it is about:
  * pressing it opens the agent's terminal, the workflow's run, or the view a schedule or a
  * trigger is changed in, and looking at a terminal or a run is what marks its row seen.
+ *
+ * Rows of the other computers this one reaches are in the same list, each naming its computer.
+ * One opens its workspace there, and marking it seen is said there.
  */
 export function NotificationsView() {
   const items = useNotificationsStore((s) => s.items);
@@ -193,7 +197,7 @@ function SectionRows({ section, now }: { section: Section; now: number }) {
       </h2>
       <ul>
         {section.items.map((item) => (
-          <Row key={item.id} item={item} namesProject={section.namesProject} now={now} />
+          <Row key={rowKey(item)} item={item} namesProject={section.namesProject} now={now} />
         ))}
       </ul>
     </section>
@@ -207,6 +211,15 @@ function SectionRows({ section, now }: { section: Section; now: number }) {
 function open(item: NotificationItem) {
   const projects = useProjectsStore.getState();
   const kind = about(item);
+  if (item.hostId !== null) {
+    // On another computer: its workspace there, with the agent's terminal in front. What a
+    // workflow, a schedule or a trigger there waits for is answered on that computer.
+    if (!item.workspaceId) return;
+    if (kind === "agent" && item.terminalId)
+      useOtherComputersStore.getState().activate(item.hostId, item.workspaceId, item.terminalId);
+    projects.selectRemote(item.hostId, item.workspaceId);
+    return;
+  }
   if (kind === "workflow" && item.workflowId && item.subjectId) {
     useWorkflowStore.getState().showRun(item.workflowId, item.subjectId);
     projects.openWorkflow(item.workflowId);
@@ -259,12 +272,17 @@ function Row(props: { item: NotificationItem; namesProject: boolean; now: number
       <button
         type="button"
         onClick={() => open(item)}
-        aria-label={`${name} in ${item.projectName}: ${words}`}
+        aria-label={`${name} in ${item.projectName}${item.hostId !== null ? ` on ${item.hostName ?? "another computer"}` : ""}: ${words}`}
         title={`Open ${opens(item)}`}
         className="min-w-0 flex-1 py-2 text-left"
       >
         <span className="flex min-w-0 items-baseline gap-2">
           <span className={`truncate font-medium ${left ? "text-ink-muted" : ""}`}>{name}</span>
+          {item.hostId !== null && (
+            <span className="shrink-0 rounded bg-raised px-1.5 text-small text-ink-muted group-hover:bg-line">
+              on {item.hostName ?? "another computer"}
+            </span>
+          )}
           {namesProject && (
             <span className="shrink-0 text-small text-ink-muted">{item.projectName}</span>
           )}
@@ -288,7 +306,7 @@ function Row(props: { item: NotificationItem; namesProject: boolean; now: number
         <button
           type="button"
           title="Move it to Earlier without opening it"
-          onClick={() => void useNotificationsStore.getState().seen([item.id])}
+          onClick={() => void useNotificationsStore.getState().seen([rowKey(item)])}
           className="shrink-0 rounded border border-line px-2 py-0.5 text-small text-ink-muted opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-canvas hover:text-ink focus-visible:opacity-100"
         >
           Mark seen
