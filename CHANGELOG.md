@@ -21,6 +21,10 @@ has the downloads and the full commit lists.
   request by the number its branch follows, so **Request code review** and
   `ys workflow run code-review` work there, and so does the Floor Manager's review of other
   people's pull requests. The review is posted on the pull request in your project's repository.
+- **A review of a checked-out pull request reads the right diff.** In a workspace from
+  **Start workspace** or `ys pr checkout`, `{{ workspace.base_branch }}` is now the branch the
+  pull request merges into, where it was empty, so the code review compares against it. When it
+  is still empty, the note says why, instead of calling the branch the default one.
 
 ## 0.35.0
 

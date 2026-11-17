@@ -647,6 +647,7 @@ pub(crate) fn for_a_run(
             clone,
             opened_by: row.session_id,
         }),
+        base: None,
     })
 }
 

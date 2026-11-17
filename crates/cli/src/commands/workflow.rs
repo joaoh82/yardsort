@@ -518,7 +518,13 @@ fn start_run(
             ) {
                 (Some(found), Some(place)) => {
                     let shared = ys.store.memory_shared(&workspace.project_id)?;
-                    runs::empty_variables(found, &place, shared)
+                    // As the run will see it: with the pull request it was queued with.
+                    let facts = ys
+                        .store
+                        .workflow_run(&run_id)?
+                        .map(|run| runs::Facts::parse(&run.context))
+                        .unwrap_or_default();
+                    runs::empty_variables(found, &place.in_run(&facts), shared)
                 }
                 _ => Vec::new(),
             };
