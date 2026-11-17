@@ -35,6 +35,7 @@ import {
   CHALLENGE_METHOD,
 } from "./account.ts";
 import { challengeFor, type Crypto, newVerifier, webCrypto } from "./crypto.ts";
+import { type AccountDeleted, accountDeleted } from "./delete.ts";
 import { type AccountExport, EXPORT_FORMAT, exportPage, type ExportPage } from "./export.ts";
 import { DecodeError, type Decoder, parse } from "./decode.ts";
 import type { DeviceId, GrantId, HostId, RemoteError } from "./protocol.ts";
@@ -89,6 +90,11 @@ export class ClientError extends Error {
   /** The server's reason, when it gave one. */
   get code(): RemoteError["code"] | undefined {
     return this.remote?.code;
+  }
+
+  /** Whether the server said this device's account was deleted. */
+  get accountDeleted(): boolean {
+    return this.remote?.reason === "accountDeleted";
   }
 
   static from(error: RemoteError): ClientError {
@@ -200,9 +206,11 @@ export class Client {
   /**
    * Start signing in: a verifier to keep, and the address that sends the browser to the server's
    * identity provider and back to `redirect` (`yardsort://signed-in` for the app, a loopback
-   * address for a computer).
+   * address for a computer). With `confirm`, the person is asked to sign in again at the
+   * provider, whatever session it has, and the code that comes back is good for
+   * {@link Client.deleteAccount} alone.
    */
-  async beginSignIn(redirect: string): Promise<SignIn> {
+  async beginSignIn(redirect: string, purpose?: "confirm"): Promise<SignIn> {
     if (!validRedirect(redirect))
       throw new ClientError("invalid", "The redirect is missing or too long.");
     const crypto = this.#needCrypto();
@@ -212,6 +220,7 @@ export class Client {
       challenge,
       challengeMethod: CHALLENGE_METHOD,
       redirect,
+      ...(purpose ? { purpose } : {}),
     })}`;
     return { url, verifier: new Secret(verifier) };
   }
@@ -219,6 +228,17 @@ export class Client {
   /** `POST /v1/token`: redeem the code the browser brought back, enrolling this device. */
   signIn(code: Secret, verifier: Secret, device: NewDevice): Promise<Credentials> {
     return this.#token({ grant: "signIn", code, verifier, device });
+  }
+
+  /**
+   * `POST /v1/account/delete`: delete the account of the device holding `access`, with the code a
+   * confirming sign-in brought back and the verifier that started it.
+   */
+  deleteAccount(access: Secret, code: Secret, verifier: Secret): Promise<AccountDeleted> {
+    return this.#send("POST", "v1/account/delete", accountDeleted, {
+      access,
+      body: { code, verifier },
+    });
   }
 
   /** `POST /v1/token` with a refresh credential. The answer's refresh credential replaces it. */

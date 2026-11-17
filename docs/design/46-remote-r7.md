@@ -1,7 +1,8 @@
 # Remote, R7: the managed launch
 
 **Status:** planned on 2026-11-16, with the questions in §3 open for the owner. Slice 1, exporting
-an account, built on 2026-11-17 (§9), on question 8's lean.
+an account, built on 2026-11-17 (§9), on question 8's lean. Slice 2, deleting an account, built the
+same day (§10), on question 5's lean.
 
 This is the plan for the last phase of the proposal ([25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)
 §13): what it has to show, what it starts from, the decisions it needs, and the slices in the order
@@ -266,3 +267,71 @@ refused from a shell that is not a terminal and saved from one; the window's sec
 the save dialog's answer goes to asked with a place, since a page cannot answer that dialog; the phone's every page; each file with the
 account, both computers and a synced note, readable by its owner only, and none of the sign-ins
 those computers keep.
+
+## 10 · Slice 2, deleting an account
+
+Built on 2026-11-17, on question 5's lean, which the owner has not answered yet.
+
+**Confirming.** A sign-in started with `purpose=confirm` (`remote_proto::account::LoginPurpose`)
+sends the browser to the provider with `prompt=login` and `max_age=0`, so the person signs in
+there and then, whatever session the browser has. Its ID token must carry `auth_time` within the
+last five minutes (`FRESH_SIGN_IN_MS`), or the browser goes back with an error and no code. It
+makes no account: a person with none here gets an error too. Its handoff is marked `confirm`, lapses
+five minutes after that sign-in, and is good for a deletion only: `POST /v1/token` refuses it, and a
+deletion refuses an ordinary sign-in's. Clients ask for the typed confirmation, `delete`, before
+they start that sign-in, so the code comes back to a deletion that goes at once.
+
+**The server.** `POST /v1/account/delete {code, verifier}` (`remote_proto::delete`), listed as
+`account.delete`, with the caller's access: the code is taken in the same step it is read, a wrong
+verifier spends it, and it has to be the caller's own account (`forbidden` otherwise, and nothing
+goes). It answers how many devices, hosts and synced records went. In one transaction, with the
+account's row locked: the hashes of its devices' access and refresh credentials go into
+`deleted_credentials` with when each would have lapsed, linked to nothing, then the row is deleted
+and everything else cascades. Then every instance rechecks its links, so the account's relay
+sockets close at once. A device that asks afterwards, with access or a refresh credential, is told
+`unauthenticated` with the new `reason: accountDeleted` (`remote_proto::ErrorReason`, absent from
+an older server, read as `unknown` from a newer one), and words saying nothing on it was deleted.
+Migration 0011 adds the `confirm` columns and `deleted_credentials`. Two store methods,
+`find_account` and `delete_account`, and `deleted_credential`, on both stores. The log says that
+an account was deleted, with its counts and nothing that names it.
+
+**The web page**, for the stores and for a person with no device to hand: `/account/delete` on the
+server itself (`crates/server/src/delete_page.rs`). It says what goes and what stays; **Sign in
+again to delete** keeps a verifier in a `HttpOnly`, `SameSite=Lax` cookie scoped to those pages and
+starts a confirming sign-in back to `/account/delete/confirm`, which asks for `delete` typed, and
+the form deletes the account signed in as. A post from another site carries neither the cookie nor
+this server's `Origin`, and deletes nothing. The pages load nothing and run no script. The website
+has a guide page for the stores' links, [Deleting your account](../guide/delete-account.md).
+
+**The clients.** Each says what goes and what stays, takes `delete` typed, then the browser:
+
+- The desktop: **Settings → Remote → Your account → Delete my account…**
+  (`remote_delete_account`, `remote_host::delete`), waiting for the browser until **Cancel**. It
+  then forgets the account here: the link, the row and the kept sign-in, and nothing remembered
+  for signing in again, since the host is gone too.
+- The phone: **Settings → Your account → Delete my account**, a screen of its own. The profile goes
+  from the phone, and the notice says so. A confirmation the server refuses does not sign the
+  phone out.
+- A computer with no screen has no command for it: the guide sends its person to the other two or
+  the page.
+
+Every client words `accountDeleted` as its account having been deleted, not as being signed out:
+the desktop's and the host's link line, and the phone's notice. Local work is never touched.
+
+**Proof.** The store tests (`tests/records.rs`), on both stores: a confirming sign-in and handoff
+kept as such, `find_account` making nothing; an account with a phone, a push route, a host, a
+grant, an offer, a link place, preferences and synced records deleted, nothing of it readable
+afterwards, its credentials' hashes kept until each would have lapsed, and another account's
+holdings the same before and after. The HTTP tests (`tests/delete.rs`), on both: deleted from a
+phone after the provider was asked to sign in again; the phone, the host and a computer each told
+why, by access and by refresh; another account untouched; signing in again starts empty. Refused:
+an ordinary sign-in's code, a confirming code at `/v1/token`, a sign-in again as someone else, a
+wrong verifier (which spends the code), a stale or missing `auth_time`, a person with no account,
+a malformed request and one with no access. The page deletes in the browser that started it and
+not from another, another site, or with the confirmation mistyped. And on PostgreSQL, every table
+holding anything of an account cascades from it, and no row naming the account, its devices or its
+hosts is left in any table after a deletion. The desktop's, the phone's and both clients' own
+tests. The smoke test `account-delete`: the window, a computer with no screen running a shell and
+a pretend phone on one account against the stand-in; deleted from the window through the browser;
+the computer with no screen and the phone each told; the shell still running; and signing in
+again finding an empty account.

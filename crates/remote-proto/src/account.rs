@@ -16,6 +16,9 @@
 //! device   POST /v1/devices/{id}/revoke                              → (nothing)
 //! ```
 //!
+//! A sign-in started with `purpose=confirm` enrolls nothing: it asks the provider to have the
+//! person sign in again, there and then, and its code confirms a deletion ([`crate::delete`]).
+//!
 //! The device proves it is the one that started a sign-in with PKCE ([RFC 7636]): it keeps a
 //! random verifier, sends only its SHA-256 (`challenge`) when it starts, and the verifier when it
 //! redeems the one-time code the server sent to its redirect. A code read from a log, a history or
@@ -68,6 +71,20 @@ pub struct LoginParams {
     /// Where the browser goes back to the device: one of the redirects the server allows, such
     /// as the app's own scheme, or a loopback address on any port for a computer.
     pub redirect: String,
+    /// Absent to sign in. [`LoginPurpose::Confirm`] to have the person sign in again now, to
+    /// confirm deleting the account. A server that does not know it signs in as usual, and its
+    /// code then confirms nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<LoginPurpose>,
+}
+
+/// What a sign-in is for, beyond signing in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LoginPurpose {
+    /// The person signs in again at the provider, whatever session it already has, and the code
+    /// that comes back is good for [`crate::delete::DeleteRequest`] only.
+    Confirm,
 }
 
 impl LoginParams {
@@ -263,6 +280,7 @@ mod tests {
             challenge: challenge.into(),
             challenge_method: method.into(),
             redirect: "yardsort://signed-in".into(),
+            purpose: None,
         };
         let good = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
         assert!(params(good, "S256").validate().is_ok());

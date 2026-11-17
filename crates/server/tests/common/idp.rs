@@ -64,6 +64,10 @@ pub enum Tamper {
     AlgNone,
     HmacWithThePublicKey,
     RsaSignatureUnderAnEcKeyId,
+    /// The person last signed in ten minutes ago: a provider that kept its session.
+    StaleAuthTime,
+    /// No `auth_time` at all.
+    NoAuthTime,
 }
 
 #[derive(Clone)]
@@ -315,6 +319,12 @@ pub fn id_token(s: &IdpState, grant: &Grant) -> String {
         Tamper::FromTheFuture => {
             c.insert("iat".into(), json!(now + 3600));
             c.insert("exp".into(), json!(now + 7200));
+        }
+        Tamper::StaleAuthTime => {
+            c.insert("auth_time".into(), json!(now - 600));
+        }
+        Tamper::NoAuthTime => {
+            c.remove("auth_time");
         }
         _ => {}
     }

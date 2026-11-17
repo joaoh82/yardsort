@@ -36,11 +36,11 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_postgres::{AsyncMessage, Client, IsolationLevel, Row};
 
 use crate::records::{
-    allowance, category_allowed, AccountId, AccountRow, Allowance, Decision, DeliveryEnd, Device,
-    GrantFilter, GrantRecord, GrantStatus, GrantView, Handoff, Host, HostOffer, IncomingNotice,
-    Issued, LinkPlace, NoticePage, NoticeRecord, NoticeToSend, PendingLogin, Records, RecordsError,
-    Redemption, Result, RevokeReason, Revoked, Rotation, Signal, CLAIM_LEASE_MS, OPEN_NOTICE_CAP,
-    SEEN_RESOLUTION_MS, SIGNALS_KEPT,
+    allowance, category_allowed, AccountId, AccountRow, Allowance, Decision, Deleted, DeliveryEnd,
+    Device, GrantFilter, GrantRecord, GrantStatus, GrantView, Handoff, Host, HostOffer,
+    IncomingNotice, Issued, LinkPlace, NoticePage, NoticeRecord, NoticeToSend, PendingLogin,
+    Records, RecordsError, Redemption, Result, RevokeReason, Revoked, Rotation, Signal,
+    CLAIM_LEASE_MS, OPEN_NOTICE_CAP, SEEN_RESOLUTION_MS, SIGNALS_KEPT,
 };
 use crate::sync::{
     decide, kind_of, kind_spelled, Applied, ProjectState, Pulled, Snapshot, Verdict,
@@ -95,6 +95,11 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         include_str!("../migrations/0009_agent_notices.sql"),
     ),
     (10, "sync", include_str!("../migrations/0010_sync.sql")),
+    (
+        11,
+        "account_deletion",
+        include_str!("../migrations/0011_account_deletion.sql"),
+    ),
 ];
 
 /// Held while migrating, so instances starting together take turns. Any constant will do, as
@@ -386,6 +391,83 @@ impl Records for PgRecords {
         Ok(AccountId(row.get(0)))
     }
 
+    async fn find_account(&self, issuer: &str, subject: &str) -> Result<Option<AccountId>> {
+        Ok(self
+            .client()
+            .await?
+            .query_opt(
+                "SELECT id FROM accounts WHERE issuer = $1 AND subject = $2",
+                &[&issuer, &subject],
+            )
+            .await
+            .map_err(failed)?
+            .map(|row| AccountId(row.get(0))))
+    }
+
+    async fn delete_account(&self, account: &AccountId, now: i64) -> Result<Option<Deleted>> {
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        // Locked first: a device enrolling or a host registering on it meanwhile waits, then
+        // finds no account.
+        let found = tx
+            .query_opt(
+                "SELECT id FROM accounts WHERE id = $1 FOR UPDATE",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?;
+        if found.is_none() {
+            return Ok(None);
+        }
+        let counts = tx
+            .query_one(
+                "SELECT (SELECT count(*) FROM devices WHERE account = $1),
+                        (SELECT count(*) FROM hosts WHERE account = $1),
+                        (SELECT count(*) FROM sync_records WHERE account = $1)",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?;
+        tx.execute(
+            "WITH lapsed AS (DELETE FROM deleted_credentials WHERE expires_at <= $2)
+             INSERT INTO deleted_credentials (hash, expires_at)
+             SELECT c.hash, c.expires_at FROM access_credentials c
+                 JOIN devices d ON d.id = c.device WHERE d.account = $1
+             UNION ALL
+             SELECT c.hash, c.expires_at FROM refresh_credentials c
+                 JOIN devices d ON d.id = c.device WHERE d.account = $1
+             ON CONFLICT (hash) DO NOTHING",
+            &[&account.0, &now],
+        )
+        .await
+        .map_err(failed)?;
+        // Everything else of the account cascades from its row: tests/records.rs checks that
+        // every table naming an account, a device or a host does.
+        tx.execute("DELETE FROM accounts WHERE id = $1", &[&account.0])
+            .await
+            .map_err(failed)?;
+        tx.commit().await.map_err(failed)?;
+        let count = |at: usize| usize::try_from(counts.get::<_, i64>(at)).unwrap_or(usize::MAX);
+        Ok(Some(Deleted {
+            devices: count(0),
+            hosts: count(1),
+            records: count(2),
+        }))
+    }
+
+    async fn deleted_credential(&self, credential: &TokenHash, now: i64) -> Result<bool> {
+        Ok(self
+            .client()
+            .await?
+            .query_opt(
+                "SELECT 1 FROM deleted_credentials WHERE hash = $1 AND expires_at > $2",
+                &[&bytes(credential), &now],
+            )
+            .await
+            .map_err(failed)?
+            .is_some())
+    }
+
     async fn put_login(&self, login: PendingLogin, now: i64) -> Result<()> {
         self.client()
             .await?
@@ -393,8 +475,8 @@ impl Records for PgRecords {
                 "WITH lapsed AS (DELETE FROM pending_logins WHERE expires_at <= $7)
                  INSERT INTO pending_logins
                      (state, nonce, provider_verifier, device_challenge, device_redirect,
-                      expires_at)
-                 VALUES ($1, $2, $3, $4, $5, $6)",
+                      expires_at, confirm)
+                 VALUES ($1, $2, $3, $4, $5, $6, $8)",
                 &[
                     &bytes(&login.state),
                     &bytes(&login.nonce),
@@ -403,6 +485,7 @@ impl Records for PgRecords {
                     &login.device_redirect,
                     &login.expires_at,
                     &now,
+                    &login.confirm,
                 ],
             )
             .await
@@ -417,7 +500,7 @@ impl Records for PgRecords {
             .query_opt(
                 "DELETE FROM pending_logins WHERE state = $1
                  RETURNING nonce, provider_verifier, device_challenge, device_redirect,
-                           expires_at",
+                           expires_at, confirm",
                 &[&bytes(state)],
             )
             .await
@@ -430,6 +513,7 @@ impl Records for PgRecords {
                 device_challenge: row.get(2),
                 device_redirect: row.get(3),
                 expires_at: row.get(4),
+                confirm: row.get(5),
             })
         })
         .transpose()
@@ -440,14 +524,15 @@ impl Records for PgRecords {
             .await?
             .execute(
                 "WITH lapsed AS (DELETE FROM handoffs WHERE expires_at <= $5)
-                 INSERT INTO handoffs (code, account, device_challenge, expires_at)
-                 VALUES ($1, $2, $3, $4)",
+                 INSERT INTO handoffs (code, account, device_challenge, expires_at, confirm)
+                 VALUES ($1, $2, $3, $4, $6)",
                 &[
                     &bytes(&handoff.code),
                     &handoff.account.0,
                     &handoff.device_challenge,
                     &handoff.expires_at,
                     &now,
+                    &handoff.confirm,
                 ],
             )
             .await
@@ -461,7 +546,7 @@ impl Records for PgRecords {
             .await?
             .query_opt(
                 "DELETE FROM handoffs WHERE code = $1
-                 RETURNING account, device_challenge, expires_at",
+                 RETURNING account, device_challenge, expires_at, confirm",
                 &[&bytes(code)],
             )
             .await
@@ -471,6 +556,7 @@ impl Records for PgRecords {
             account: AccountId(row.get(0)),
             device_challenge: row.get(1),
             expires_at: row.get(2),
+            confirm: row.get(3),
         }))
     }
 

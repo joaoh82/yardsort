@@ -17,7 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 remote-proto = { path = "../remote-proto" }
-axum = { version = "0.8", default-features = false, features = ["http1", "http2", "json", "query", "tokio", "ws"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "http2", "form", "json", "query", "tokio", "ws"] }
 base64 = "0.22"
 getrandom = "0.3"
 # Checks the identity provider's ID tokens. The algorithm is pinned to each key's own type, so a

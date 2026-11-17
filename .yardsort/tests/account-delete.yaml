@@ -1,0 +1,147 @@
+id: account-delete
+name: Deleting the account from the window signs every device out and keeps everything local
+description: >-
+  R7 slice 2 (docs/design/46-remote-r7.md §10). Against the stand-in server, one account on three
+  clients: the real window as a host, a computer with no screen running a shell, and a pretend
+  phone. The computer with no screen syncs a project with a note in it. The window deletes the
+  account: it says what goes and what stays, the confirmation is typed, and the browser the window
+  opens signs in again, which the stand-in answers as a person would. The window says the account
+  is gone and Remote is off; the computer with no screen and the phone are each told their account
+  was deleted; the shell on the computer with no screen is still running; and signing in again as
+  the same person finds an empty account. Linux only, since it stands in for the browser with
+  xdg-open. A window opens while it runs; nothing needs clicking.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_app
+    action: run
+    program: bun
+    args: [tauri, build, --debug, --no-bundle]
+    timeout: 20m
+  - id: build_host
+    action: shell
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 20m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: seed
+    action: shell
+    line: sh .yardsort/tests/support/app.sh seed
+  - id: a_repository_for_the_computer_with_no_screen
+    action: shell
+    line: >-
+      mkdir -p "$YS_RUN_DIR/host" && cp .yardsort/tests/support/headless-settings.toml
+      "$YS_RUN_DIR/host/settings.toml" && git init -q "$YS_RUN_DIR/widgets" && git -C "$YS_RUN_DIR/widgets"
+      -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false commit -q
+      --allow-empty -m first
+  - id: open_app
+    action: shell
+    line: sh .yardsort/tests/support/app.sh open
+  - id: window_up
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+
+steps:
+  - id: turn_on_in_the_window
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", turn-on, "{{ run.dir }}"]
+    timeout: 90s
+  - id: sign_in_the_computer_with_no_screen
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/host" bun .yardsort/tests/support/host.ts "$YS_RUN_DIR" sign-in "Smoke host"
+    expect:
+      stdout_contains: Signed in as Smoke host
+  - id: serve_it
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/host" setsid sh .yardsort/tests/support/headless.sh yardsort-host serve >
+      "$YS_RUN_DIR/host.log" 2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/host.pid"
+  - id: it_is_linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        YS_PROFILE="$YS_RUN_DIR/host" sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q
+        "Link: connected"
+    timeout: 60s
+  - id: a_project_syncs_with_a_note
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/host" sh .yardsort/tests/support/headless.sh ys project add "$YS_RUN_DIR/widgets"
+      && printf 'y\n' | YS_PROFILE="$YS_RUN_DIR/host" script -qefc "sh .yardsort/tests/support/headless.sh
+      yardsort-host sync on widgets" /dev/null > /dev/null && YS_PROFILE="$YS_RUN_DIR/host" script -qefc "sh
+      .yardsort/tests/support/headless.sh yardsort-host memory write widgets 'A note to delete.'" /dev/null <
+      /dev/null && for i in $(seq 60); do YS_PROFILE="$YS_RUN_DIR/host" sh .yardsort/tests/support/headless.sh
+      ys sync status > "$YS_RUN_DIR/sync-status" && grep -Eq "widgets +syncing" "$YS_RUN_DIR/sync-status" &&
+      ! grep -q "Waiting to go up" "$YS_RUN_DIR/sync-status" && exit 0; sleep 1; done; exit 1
+  - id: a_shell_runs_there
+    action: shell
+    line: >-
+      YS_PROFILE="$YS_RUN_DIR/host" sh .yardsort/tests/support/headless.sh ys workspace new widgets smoke
+      --harness sh
+    expect:
+      stdout_contains: agent  sh
+  - id: a_phone_signs_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", signs-in]
+    expect:
+      stdout_contains: signed in
+  - id: deleted_from_the_window
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", deletes, "{{ run.dir }}"]
+    timeout: 120s
+    expect:
+      stdout_contains: "saw: Turn on and sign in"
+  - id: the_computer_with_no_screen_is_told
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        YS_PROFILE="$YS_RUN_DIR/host" sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q
+        "account was deleted at the server"
+    timeout: 120s
+  - id: the_phone_is_told
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", told-deleted]
+    expect:
+      stdout_contains: "told: This account was deleted from the server"
+  - id: the_shell_kept_running
+    action: shell
+    line: YS_PROFILE="$YS_RUN_DIR/host" sh .yardsort/tests/support/headless.sh ys session list
+    expect:
+      stdout_contains: running
+  - id: the_server_kept_nothing
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", starts-empty]
+    expect:
+      stdout_contains: "an empty account: this phone, no computers, no records"
+
+teardown:
+  - id: stop_the_computer_with_no_screen
+    action: shell
+    line: >-
+      kill "$(cat "$YS_RUN_DIR/host.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon
+      .*$YS_RUN_DIR/host"; pkill -f "yardsort-daemon .*$YS_RUN_DIR/host"; true
+  - id: close_everything
+    action: shell
+    line: sh .yardsort/tests/support/app.sh stop-everything

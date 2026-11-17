@@ -75,6 +75,11 @@ pub enum ClientError {
 }
 
 impl ClientError {
+    /// Whether the server said this device's account was deleted.
+    pub fn account_deleted(&self) -> bool {
+        matches!(self, Self::Remote(e) if e.reason == Some(remote_proto::ErrorReason::AccountDeleted))
+    }
+
     /// The server's reason, when it gave one.
     pub fn code(&self) -> Option<ErrorCode> {
         match self {
@@ -139,6 +144,17 @@ impl Client {
     /// Start signing in: listen on a free loopback port, and make the address to open in the
     /// browser. [`SignIn::finish`] waits for it to come back.
     pub async fn begin_sign_in(&self) -> Result<SignIn> {
+        self.begin(None).await
+    }
+
+    /// Start signing in again to confirm deleting the account: the provider is asked to have the
+    /// person sign in whatever session it has, and the code that comes back is good for
+    /// [`SignIn::delete_account`] alone.
+    pub async fn begin_confirm(&self) -> Result<SignIn> {
+        self.begin(Some("confirm")).await
+    }
+
+    async fn begin(&self, purpose: Option<&str>) -> Result<SignIn> {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .map_err(|e| ClientError::Invalid(format!("listening for the sign-in: {e}")))?;
@@ -152,6 +168,9 @@ impl Client {
             .append_pair("challenge", &s256(&verifier))
             .append_pair("challengeMethod", CHALLENGE_METHOD)
             .append_pair("redirect", &format!("http://127.0.0.1:{port}/signed-in"));
+        if let Some(purpose) = purpose {
+            url.query_pairs_mut().append_pair("purpose", purpose);
+        }
         Ok(SignIn {
             url,
             listener,
@@ -499,6 +518,31 @@ impl SignIn {
             return Err(not_it());
         }
         came_back(&url).unwrap_or_else(|| Err(not_it()))
+    }
+
+    /// Delete the account of the device holding `access`, with the code a confirming sign-in
+    /// ([`Client::begin_confirm`]) brought back. A server too old to delete answers `not_found`.
+    pub async fn delete_account(
+        self,
+        client: &Client,
+        access: &Secret,
+        code: String,
+    ) -> Result<remote_proto::delete::AccountDeleted> {
+        let request = remote_proto::delete::DeleteRequest {
+            code: Secret::new(code),
+            verifier: self.verifier,
+        };
+        client
+            .send(
+                client.authed(
+                    client
+                        .http
+                        .post(client.url("v1/account/delete")?)
+                        .json(&request),
+                    access,
+                ),
+            )
+            .await
     }
 
     /// Redeem the code the browser brought back as `device`.
@@ -922,6 +966,63 @@ mod tests {
             Client::new(&format!("http://127.0.0.1:{port}")).unwrap(),
             asked,
         )
+    }
+
+    /// A confirming sign-in asks for one, and its code goes to the deletion with this sign-in's
+    /// verifier and the device's access; the server's word that the account is gone is read.
+    #[tokio::test]
+    async fn a_confirming_sign_in_deletes_with_its_own_verifier() {
+        use axum::http::HeaderMap;
+        use axum::routing::post;
+        let seen: Arc<Mutex<Option<(String, serde_json::Value)>>> = Arc::default();
+        let kept = Arc::clone(&seen);
+        let app = axum::Router::new().route(
+            "/v1/account/delete",
+            post(
+                move |headers: HeaderMap, axum::Json(body): axum::Json<serde_json::Value>| async move {
+                    let bearer = headers["authorization"].to_str().unwrap().to_owned();
+                    *kept.lock().unwrap() = Some((bearer, body));
+                    axum::Json(serde_json::json!({ "devices": 3, "hosts": 1, "records": 2 }))
+                },
+            ),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = Client::new(&format!("http://127.0.0.1:{port}")).unwrap();
+
+        let confirm = client.begin_confirm().await.unwrap();
+        let purpose = |sign_in: &SignIn| {
+            sign_in
+                .url()
+                .query_pairs()
+                .find(|(k, _)| k == "purpose")
+                .map(|(_, v)| v.into_owned())
+        };
+        assert_eq!(purpose(&confirm).as_deref(), Some("confirm"));
+        assert_eq!(purpose(&client.begin_sign_in().await.unwrap()), None);
+        let verifier = confirm.verifier.expose().to_owned();
+        let deleted = confirm
+            .delete_account(&client, &Secret::new("the-access"), "the-code".into())
+            .await
+            .unwrap();
+        assert_eq!((deleted.devices, deleted.hosts, deleted.records), (3, 1, 2));
+        let (bearer, body) = seen.lock().unwrap().take().unwrap();
+        assert_eq!(bearer, "Bearer the-access");
+        assert_eq!(
+            body,
+            serde_json::json!({ "code": "the-code", "verifier": verifier })
+        );
+
+        let deleted = ClientError::Remote(
+            RemoteError::new(ErrorCode::Unauthenticated, "Gone.")
+                .because(remote_proto::ErrorReason::AccountDeleted),
+        );
+        assert!(deleted.account_deleted());
+        assert!(
+            !ClientError::Remote(RemoteError::new(ErrorCode::Unauthenticated, "Out."))
+                .account_deleted()
+        );
     }
 
     #[tokio::test]

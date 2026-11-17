@@ -1111,7 +1111,9 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       the rest waiting on the owner's answers to its eleven questions, production, the stores,
       billing and a status page among them. Slice 1 built on 2026-11-17: an account's export, from
       the desktop's Settings → Remote, the phone's Settings and `yardsort-host account export`, of
-      everything the server keeps of it but credentials and push tokens (46 §9).
+      everything the server keeps of it but credentials and push tokens (46 §9). Slice 2 built
+      the same day: deleting an account, from the desktop, the phone or the server's own page,
+      after the person signs in again; every device told, nothing local touched (46 §10).
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is

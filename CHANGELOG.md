@@ -29,6 +29,13 @@ has the downloads and the full commit lists.
   a push token. The phone has it under **Settings → Your account**, and a computer with no screen
   has `yardsort-host account export`. It needs a server of this version. See
   [Exporting your account](docs/guide/remote.md#exporting-your-account).
+- **Delete your account** (Remote, under development). **Settings → Remote → Your account → Delete
+  my account…** deletes everything the server keeps of your account, for every device, once you have
+  typed delete and signed in again in the browser. Nothing on your computers or phones is deleted,
+  and Remote turns off here. Your other devices say the account was deleted the next time they
+  reach the server. The phone has it under **Settings → Your account**, and the server has a web
+  page for it, `/account/delete`. It needs a server of this version. See
+  [Deleting your account](docs/guide/delete-account.md).
 - **Pull requests from forks can be code reviewed.** A workspace on a fork's pull request — its
   branch is `pr/<number>`, from **Start workspace** or `ys pr checkout` — now finds that pull
   request by the number its branch follows, so **Request code review** and

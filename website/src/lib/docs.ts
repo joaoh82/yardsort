@@ -147,6 +147,12 @@ export const DOCS_NAV: DocSection[] = [
           "Yardsort's phone app reaches the agents on your computer: workspaces, pull requests, conversations as a chat, permission questions and new work. Invite only for now, in the app stores in a few weeks.",
       },
       {
+        slug: "guide/delete-account",
+        title: "Deleting your account",
+        description:
+          "Delete your Yardsort Remote account from a computer, the phone or the server's web page: everything the server keeps of it goes, and nothing on your devices.",
+      },
+      {
         slug: "guide/headless-host",
         title: "A computer with no screen",
         description:
