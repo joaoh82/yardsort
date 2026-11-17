@@ -55,6 +55,12 @@ import { Secret } from "./secret.ts";
 const TIMEOUT_MS = 30_000;
 /** The most a JSON answer may hold. The server's are far smaller. */
 const MAX_ANSWER = 1024 * 1024;
+/**
+ * How many times a page of an export is asked for again after the server's rate limit, and the
+ * first wait before it; each wait is twice the one before. The pages already read are kept.
+ */
+const EXPORT_RETRIES = 6;
+const EXPORT_BACKOFF_MS = 500;
 
 export type ClientErrorKind =
   /** The server refused, with its reason: {@link ClientError.remote}. */
@@ -298,14 +304,14 @@ export class Client {
    */
   async exportAccount(access: Secret, exportedAt: number): Promise<AccountExport> {
     const server = await this.describe();
-    const first = await this.exportPage(access);
+    const first = await this.#exportPagePatiently(access);
     if (!first.account) {
       throw new ClientError("unexpected", "The export's first page had no account.");
     }
     const records = [...first.records];
     let next = first.next;
     while (next !== undefined) {
-      const page = await this.exportPage(access, next);
+      const page = await this.#exportPagePatiently(access, next);
       // Pages go by id: one that does not move on would never end.
       const head = page.records[0];
       if (!head || head.id <= next) {
@@ -322,6 +328,24 @@ export class Client {
       account: first.account,
       records,
     };
+  }
+
+  /**
+   * A page of the export, asked for again after a wait while the server says it is asked too
+   * often: its limit is shared with sync, and a large account has many pages.
+   */
+  async #exportPagePatiently(access: Secret, after?: string): Promise<ExportPage> {
+    let wait = EXPORT_BACKOFF_MS;
+    for (let tries = 0; tries < EXPORT_RETRIES; tries++) {
+      try {
+        return await this.exportPage(access, after);
+      } catch (error) {
+        if (!(error instanceof ClientError) || error.code !== "rate_limited") throw error;
+        await new Promise((waited) => setTimeout(waited, wait));
+        wait *= 2;
+      }
+    }
+    return this.exportPage(access, after);
   }
 
   /** `POST /v1/relay/tickets`: a ticket to reach `host`, under the grant the server has in force. */

@@ -53,14 +53,96 @@ pub fn save(export: &AccountExport, path: &Path, replace: bool) -> Result<()> {
         _ => Path::new("."),
     };
     let mut file = tempfile::NamedTempFile::new_in(dir).map_err(failed)?;
+    // On Unix the temporary file is this user's only already. On Windows it would take the
+    // folder's access, so it is made this user's alone before anything is written to it.
+    #[cfg(windows)]
+    owner_only(file.as_file()).map_err(failed)?;
     serde_json::to_writer_pretty(&mut file, export).map_err(|e| failed(e.into()))?;
     file.write_all(b"\n").map_err(failed)?;
     file.as_file().sync_all().map_err(failed)?;
-    // The temporary file is this user's only already; persisting keeps that.
+    // Renaming it into place keeps its own access, whatever the file it replaces had.
     if replace {
         file.persist(path).map_err(|e| failed(e.error))?;
     } else {
         file.persist_noclobber(path).map_err(|e| failed(e.error))?;
+    }
+    Ok(())
+}
+
+/// Make `file` its owner's alone: a protected DACL, inheriting nothing, with one entry giving the
+/// user this process runs as full access. Done before anything is written to it.
+#[cfg(windows)]
+fn owner_only(file: &std::fs::File) -> std::io::Result<()> {
+    use std::io::Error;
+    use std::os::windows::io::AsRawHandle;
+    use std::ptr::{null, null_mut};
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, LocalFree, ERROR_SUCCESS, GENERIC_ALL, HANDLE,
+    };
+    use windows_sys::Win32::Security::Authorization::{
+        SetEntriesInAclW, SetSecurityInfo, EXPLICIT_ACCESS_W, NO_MULTIPLE_TRUSTEE, SET_ACCESS,
+        SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
+    };
+    use windows_sys::Win32::Security::{
+        GetTokenInformation, TokenUser, ACL, DACL_SECURITY_INFORMATION, NO_INHERITANCE,
+        PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    // SAFETY: each pointer handed over is to memory this function owns for the length of the
+    // call: the token, the buffer holding the user, and the ACL, which is freed after use.
+    unsafe {
+        let mut token: HANDLE = null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return Err(Error::last_os_error());
+        }
+        let mut length = 0u32;
+        GetTokenInformation(token, TokenUser, null_mut(), 0, &mut length);
+        // Aligned for the TOKEN_USER at its start.
+        let mut buffer = vec![0u64; (length as usize).div_ceil(8)];
+        let read = GetTokenInformation(
+            token,
+            TokenUser,
+            buffer.as_mut_ptr().cast(),
+            length,
+            &mut length,
+        );
+        let failed = Error::last_os_error();
+        CloseHandle(token);
+        if read == 0 {
+            return Err(failed);
+        }
+        let user = &*buffer.as_ptr().cast::<TOKEN_USER>();
+        let entry = EXPLICIT_ACCESS_W {
+            grfAccessPermissions: GENERIC_ALL,
+            grfAccessMode: SET_ACCESS,
+            grfInheritance: NO_INHERITANCE,
+            Trustee: TRUSTEE_W {
+                pMultipleTrustee: null_mut(),
+                MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_USER,
+                ptstrName: user.User.Sid.cast(),
+            },
+        };
+        let mut acl: *mut ACL = null_mut();
+        let made = SetEntriesInAclW(1, &entry, null(), &mut acl);
+        if made != ERROR_SUCCESS {
+            return Err(Error::from_raw_os_error(made as i32));
+        }
+        let set = SetSecurityInfo(
+            file.as_raw_handle() as HANDLE,
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            acl,
+            null(),
+        );
+        LocalFree(acl.cast());
+        if set != ERROR_SUCCESS {
+            return Err(Error::from_raw_os_error(set as i32));
+        }
     }
     Ok(())
 }
@@ -146,6 +228,40 @@ mod tests {
         save(&sample(), &path, false).unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    /// What Windows says of a file's access: one entry, this user's, and nothing inherited.
+    #[cfg(windows)]
+    #[test]
+    fn an_export_is_this_users_alone_on_windows_whatever_the_folder_allows() {
+        let dir = tempfile::tempdir().unwrap();
+        // The folder lets everyone read what is made in it.
+        let granted = std::process::Command::new("icacls")
+            .arg(dir.path())
+            .args(["/grant", "*S-1-1-0:(OI)(CI)R"])
+            .output()
+            .unwrap();
+        assert!(granted.status.success(), "{granted:?}");
+        let path = dir.path().join("export.json");
+        let entries = || {
+            let shown = std::process::Command::new("icacls")
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(shown.status.success(), "{shown:?}");
+            String::from_utf8_lossy(&shown.stdout)
+                .lines()
+                .filter(|line| line.contains(":("))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        save(&sample(), &path, false).unwrap();
+        let first = entries();
+        assert_eq!(first.len(), 1, "{first:?}");
+        assert!(!first[0].contains("(I)"), "inherited: {first:?}");
+        // Replacing it keeps that.
+        save(&sample(), &path, true).unwrap();
+        assert_eq!(entries(), first);
     }
 
     #[test]

@@ -318,6 +318,30 @@ describe("exporting an account", () => {
     });
   });
 
+  test("a rate-limited page is asked for again, and the pages before it are kept", async () => {
+    const asked: (string | null)[] = [];
+    let refusals = 2;
+    const base = serve((request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/v1/server") return Response.json(server);
+      const after = url.searchParams.get("after");
+      asked.push(after);
+      if (after === null) {
+        return Response.json({ account: { subject: "ada" }, records: [note("a")], next: "a" });
+      }
+      if (refusals-- > 0) {
+        return Response.json(
+          { code: "rate_limited", message: "Too many.", retryable: true },
+          { status: 429, headers: { "retry-after": "1" } },
+        );
+      }
+      return Response.json({ records: [note("b")] });
+    });
+    const exported = await new Client(base).exportAccount(new Secret("x"), 1);
+    expect(exported.records.map((r) => r.id)).toEqual(["a", "b"]);
+    expect(asked).toEqual([null, "a", "a", "a"]);
+  });
+
   test("a page that does not move on stops it, and an older server says so", async () => {
     const base = serve((request) => {
       const url = new URL(request.url);

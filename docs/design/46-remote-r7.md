@@ -232,7 +232,9 @@ store methods, `account_row`, `push_routes` and `exported_records`, and `GrantFi
 stores; the memory store now keeps when each account was made, and when each push token was saved.
 
 **The clients.** Each puts the pages together as one `AccountExport`, the format 1 file, with the
-server's id and name and when it was made, and checks that each page moves on.
+server's id and name and when it was made, and checks that each page moves on. A page the
+server refuses as asked too often, its limit shared with sync, is asked for again after a wait
+that doubles each time, six times at most, and the pages before it are kept.
 
 - The desktop: **Settings → Remote → Your account → Export my account's data…** says what the file
   holds; **Choose where to save…** opens the system's save dialog (the new `dialog:allow-save`
@@ -246,7 +248,9 @@ server's id and name and when it was made, and checks that each page moves on.
   existing file is kept.
 
 The desktop and the host write through `remote_host::export::save`: beside its place, then put
-there whole, readable by its owner only. A server too old to export answers `not_found`, which each
+there whole, readable by its owner only: mode 600 on Unix, and on Windows a protected access
+list with one entry, this user's, set before anything is written, so a folder others may read
+gives the file nothing. A server too old to export answers `not_found`, which each
 client words as the server not exporting yet.
 
 **Proof.** The store test (`tests/records.rs`), on memory and PostgreSQL: one account's row, push
