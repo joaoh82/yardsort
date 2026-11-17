@@ -114,7 +114,8 @@ The variable is a marker of which process is the Floor Manager, not a secret. Th
 
 Reviewing someone else's pull request then takes two commands: `ys pr checkout`, then
 `ys workflow run code-review`. At ask first each waits for Allow. A fork's `pr/<number>` branch
-is not one the review can find by branch name, which is open question 54.
+cannot be found by its name; the review finds it by the number the branch follows (open question
+54, settled 2026-11-17).
 
 ## Not in this slice
 

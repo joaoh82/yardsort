@@ -607,17 +607,12 @@ fn checkout(
             );
         }
         if fork {
-            sayln!(
-                "\nIt comes from a fork, so its branch follows the pull request. The built-in \
-                 code review finds a pull request by its branch and cannot review this one; \
-                 start a reviewer in the workspace instead."
-            );
-        } else {
-            sayln!(
-                "\nTo have an agent review it:\n  ys workflow run code-review --workspace {}",
-                made.name
-            );
+            sayln!("\nIt comes from a fork, so its branch follows the pull request.");
         }
+        sayln!(
+            "\nTo have an agent review it:\n  ys workflow run code-review --workspace {}",
+            made.name
+        );
     })
 }
 

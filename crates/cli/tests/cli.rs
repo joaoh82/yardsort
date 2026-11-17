@@ -6019,6 +6019,79 @@ fn a_pull_request_is_checked_out_into_a_workspace_once() {
     assert!(refused.contains("not a pull request number"), "{refused}");
 }
 
+/// A fork's pull request, as `gh` recorded one: checked out as `pr/7`, and reviewed by the
+/// built-in code review, which finds it by the number the branch follows. Asked by its branch,
+/// the forge has nothing: the head on the fork is `patch-1`.
+#[cfg(unix)]
+#[test]
+fn a_forks_pull_request_is_checked_out_and_its_review_finds_it() {
+    let remote = tempfile::tempdir().unwrap();
+    let git = git();
+    git.run(remote.path(), &["init", "--bare", "-q"]).unwrap();
+    let prs = Tasks::new(
+        Some(&remote.path().to_string_lossy()),
+        Some(
+            "case \"$*\" in\n\
+             'pr view 7 '*) cat \"$fixtures/pr-view-fork.json\" ;;\n\
+             'pr list --head pr/7 '*) echo '[]' ;;\n\
+             *) echo \"not recorded: $*\" >&2; exit 1 ;;\nesac",
+        ),
+    );
+    let fx = &prs.fx;
+    // A stand-in reviewer, so the harness can be picked; nothing starts it here.
+    yardsort_core::program::testing::executable(
+        prs.bin.path().join("claude"),
+        "#!/bin/sh\nexit 0\n",
+    );
+    // The forge keeps a fork's head at `refs/pull/<n>/head` in the parent repository.
+    git.run(&fx.repo, &["push", "-q", "origin", "HEAD:refs/pull/7/head"])
+        .unwrap();
+
+    let said = prs
+        .ys(None, &["pr", "checkout", "7", "--project", "Demo"])
+        .ok();
+    assert!(said.contains("It comes from a fork"), "{said}");
+    assert!(
+        said.contains("ys workflow run code-review --workspace pr-7"),
+        "{said}"
+    );
+    assert!(!said.contains("cannot review"), "{said}");
+
+    let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .unwrap();
+    let queued = prs.ys(
+        None,
+        &[
+            "workflow",
+            "run",
+            "code-review",
+            "--workspace",
+            "pr-7",
+            "--input",
+            "reviewer=claude",
+            "--json",
+        ],
+    );
+    let queued: serde_json::Value = serde_json::from_str(&queued.ok()).unwrap();
+    let run = queued["run"].as_str().expect("a run id").to_owned();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let facts = yardsort_core::workflow::runs::Facts::parse(
+        &store.workflow_run(&run).unwrap().expect("the run").context,
+    );
+    let pr = facts.pr.expect("the run knows its pull request");
+    assert_eq!(pr.number, 7);
+    assert_eq!(
+        pr.url, "https://github.com/o/r/pull/7",
+        "the parent's, not the fork's"
+    );
+    assert!(
+        prs.asked().iter().all(|asked| !asked.contains("--repo")),
+        "gh is asked in the workspace, so it answers for the project's own repository: {:?}",
+        prs.asked()
+    );
+}
+
 /// `ys session resume` and `fork` find a session by the start of its id, as `ys session list`
 /// prints it, and start nothing that would end with the command: without a daemon to keep it,
 /// they say so and leave the record as it was.

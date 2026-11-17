@@ -9,6 +9,11 @@ has the downloads and the full commit lists.
   projects' pull requests with its own `gh` when the phone asks, so the badges, the card and the
   **Pull requests** list show for it as for a desktop. Those a workspace follows in another
   repository are not read there yet. See [Pull requests on the phone](docs/guide/remote.md#pull-requests-on-the-phone).
+- **Pull requests from forks can be code reviewed.** A workspace on a fork's pull request — its
+  branch is `pr/<number>`, from **Start workspace** or `ys pr checkout` — now finds that pull
+  request by the number its branch follows, so **Request code review** and
+  `ys workflow run code-review` work there, and so does the Floor Manager's review of other
+  people's pull requests. The review is posted on the pull request in your project's repository.
 
 ## 0.35.0
 
