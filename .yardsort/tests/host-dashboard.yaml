@@ -68,7 +68,7 @@ steps:
     line: sh .yardsort/tests/support/headless.sh yardsort-host dashboard 2>&1
     expect:
       exit: nonzero
-      stdout_contains: opened up only by a person
+      stdout_contains: Signing in to the dashboard needs a person at a terminal
   - id: status_says_where_it_is
     action: run
     program: sh

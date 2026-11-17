@@ -289,7 +289,7 @@ fn nothing_but_a_person_at_a_terminal_opens_the_dashboard_up() {
         assert!(!refused.status.success(), "{opens:?}");
         let why = said(&refused);
         assert!(
-            why.contains("opened up only by a person"),
+            why.contains("needs a person at a terminal") && why.contains("dashboard"),
             "{opens:?}: {why}"
         );
         // No code, and no address with one in it.
@@ -404,7 +404,10 @@ fn a_command_the_dashboard_runs_is_refused_what_only_a_person_may_ask() {
         &format!("script -qefc '{exe} dashboard' /dev/null"),
         &cookie,
     );
-    assert!(through.contains("opened up only by a person"), "{through}");
+    assert!(
+        through.contains("Signing in to the dashboard is refused to a command the dashboard ran"),
+        "{through}"
+    );
     assert!(
         !through.contains("#code="),
         "the dashboard minted itself a session: {through}"
@@ -415,7 +418,7 @@ fn a_command_the_dashboard_runs_is_refused_what_only_a_person_may_ask() {
         &cookie,
     );
     assert!(
-        unmarked.contains("opened up only by a person"),
+        unmarked.contains("is refused to a command the dashboard ran"),
         "{unmarked}"
     );
     assert!(!unmarked.contains("#code="), "{unmarked}");
@@ -426,7 +429,7 @@ fn a_command_the_dashboard_runs_is_refused_what_only_a_person_may_ask() {
             &cookie,
         );
         assert!(
-            refused.contains("Refused to a command the dashboard ran"),
+            refused.contains("is refused to a command the dashboard ran"),
             "{guarded}: {refused}"
         );
     }
@@ -434,7 +437,12 @@ fn a_command_the_dashboard_runs_is_refused_what_only_a_person_may_ask() {
         &format!("script -qefc '{exe} dashboard tunnel on --subdomain x' /dev/null"),
         &cookie,
     );
-    assert!(tunnel.contains("opened up only by a person"), "{tunnel}");
+    assert!(
+        tunnel.contains(
+            "Opening a tunnel to the dashboard is refused to a command the dashboard ran"
+        ),
+        "{tunnel}"
+    );
     let settings = std::fs::read_to_string(host.data().join("settings.toml")).unwrap();
     assert!(!settings.contains("tunnel"), "{settings}");
 }

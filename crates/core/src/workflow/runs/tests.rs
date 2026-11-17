@@ -643,6 +643,61 @@ fn an_open_pull_request_behind_fifty_newer_ones_is_still_found() {
     assert_eq!(found.map(|pr| pr.number), Some(3));
 }
 
+/// A fork's pull request, checked out as `pr/7` and set to follow it: found by the number its
+/// branch follows, as `gh` recorded one. On the forge its head is `patch-1`, so asking by the
+/// branch's name finds none of it.
+#[cfg(unix)]
+#[test]
+fn a_forks_pull_request_is_found_by_the_number_its_branch_follows() {
+    let dir = tempfile::tempdir().unwrap();
+    let git = crate::git::testing::git();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    git.init(&repo).unwrap();
+    git.initial_commit(&repo).unwrap();
+    git.run(&repo, &["checkout", "-b", "pr/7"]).unwrap();
+    git.follow_pull_request(&repo, "pr/7", "origin", 7).unwrap();
+
+    let recorded = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures/gh/2.102.0/pr-view-fork.json");
+    let answer = dir.path().join("pr-7.json");
+    std::fs::copy(&recorded, &answer).unwrap();
+    let script = dir.path().join("gh");
+    crate::program::testing::executable(&script, format!(
+            "#!/bin/sh\ncase \"$*\" in\n  \"pr view 7 \"*) cat '{}' ;;\n  \"pr list \"*) cat '{}' ;;\n  *) exit 1 ;;\nesac\n",
+            answer.display(),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/gh/2.102.0/pr-list.json").display()
+        ),
+    );
+    let env = crate::env::ShellEnv {
+        vars: std::env::vars().collect(),
+        source: crate::env::EnvSource::Process,
+        warning: None,
+    };
+    let gh = crate::forge::Gh::at(script, &env);
+    let store = Store::in_memory();
+    store
+        .add_project("app", &repo.display().to_string())
+        .unwrap();
+    let workspace = store.workspaces().unwrap().remove(0);
+
+    let found = pull_request_of(Some(&gh), &git, &workspace)
+        .unwrap()
+        .expect("the pull request its branch follows");
+    assert_eq!(found.number, 7);
+    assert_eq!(found.url, "https://github.com/o/r/pull/7");
+    assert_eq!(found.branch, "patch-1", "its name on the fork");
+    assert!(found.details.is_some_and(|d| d.cross_repository));
+
+    // Merged since: no open pull request, rather than one found by the branch's name.
+    let merged = std::fs::read_to_string(&recorded)
+        .unwrap()
+        .replace("\"state\": \"OPEN\"", "\"state\": \"MERGED\"");
+    assert!(merged.contains("MERGED"));
+    std::fs::write(&answer, merged).unwrap();
+    assert_eq!(pull_request_of(Some(&gh), &git, &workspace).unwrap(), None);
+}
+
 #[test]
 fn without_gh_the_pull_request_cannot_be_looked_for_and_it_says_so() {
     let fx = Fixture::new();

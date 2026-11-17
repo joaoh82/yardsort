@@ -788,6 +788,10 @@ Add `--input focus="…"` for anything to look at in particular. What happens:
    workspace, is told the review is there once it is quiet, with the link, and asked to address
    it, push, and answer each comment.
 
+The workspace's pull request is the open one for its branch. A workspace on a
+[fork's pull request](pull-requests.md#from-a-fork) has the branch `pr/<number>`, which is not the
+fork's branch name; it follows that pull request, and the review finds it by that number.
+
 GitHub does not let the author of a pull request approve it or request changes. When the reviewer
 posts as the same GitHub account as the author, as it does when both use your `gh` login, it is
 told to post its review as comments.

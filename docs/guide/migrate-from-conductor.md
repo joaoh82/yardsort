@@ -127,7 +127,7 @@ Yes. Use separate workspaces for separate branches, or multiple agent tabs in on
 
 ### Does this replace Conductor Cloud or its phone app?
 
-No. This guide is for local Git worktrees. [Remote](remote.md) is still under development, and its phone app is not in the app stores. Do not treat it as a finished Cloud migration.
+No. This guide is for local Git worktrees. [Remote](remote.md) is still under development, and [its phone app](phone.md) is invite only until it reaches the app stores in a few weeks. Do not treat it as a finished Cloud migration.
 
 ### Is Yardsort free?
 

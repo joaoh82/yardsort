@@ -85,7 +85,10 @@ console.log("ran: from-the-dashboard-42");
 // itself a terminal: the host must not take it for a person.
 const bin = (await Bun.file(`${dir}/bin`).text()).trim();
 const through = await ran(`script -qefc '${bin}/yardsort-host dashboard' /dev/null`);
-if (through.output.includes("#code=") || !through.output.includes("opened up only by a person"))
+if (
+  through.output.includes("#code=") ||
+  !through.output.includes("is refused to a command the dashboard ran")
+)
   fail(`A command the dashboard ran was not refused a sign-in link:\n${through.output}`);
 console.log("refused: a command the dashboard ran, asking for a sign-in link");
 

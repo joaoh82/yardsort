@@ -120,43 +120,42 @@ pub enum Ask {
     DashboardSignOut,
 }
 
-/// Why a dashboard command that needs a person was refused. The guard's own words are about
-/// pairing.
-const DASHBOARD_NEEDS_A_PERSON: &str =
-    "The dashboard is opened up only by a person, from a terminal of their own on this computer \
-     (an SSH login, say), on Linux: never by an agent, a script, a terminal Yardsort started, or \
-     a command the dashboard itself ran.";
-
 impl Ask {
     /// Only a person at a terminal of their own may ask it (`guard`).
     pub fn guarded(&self) -> bool {
-        matches!(
-            self,
-            Ask::Pair
-                | Ask::SyncOn { .. }
-                | Ask::SyncLink { .. }
-                | Ask::SyncStop { .. }
-                | Ask::SyncRemove { .. }
-                | Ask::SyncCheckout { .. }
-                | Ask::MemoryList { .. }
-                | Ask::MemoryWrite { .. }
-                | Ask::MemoryDecide { .. }
-                | Ask::MemoryEdit { .. }
-                | Ask::MemorySettle { .. }
-                | Ask::Dashboard
-                | Ask::DashboardEnable { enabled: true }
-                | Ask::DashboardTunnel { enabled: true, .. }
-        )
+        self.person_only().is_some()
     }
 
-    /// What to say when the guard refused this, given `why` it did.
-    pub fn refused(&self, why: String) -> String {
-        match self {
-            Ask::Dashboard | Ask::DashboardEnable { .. } | Ask::DashboardTunnel { .. } => {
-                DASHBOARD_NEEDS_A_PERSON.into()
+    /// What it is, in words, and the command that asks it, for a guarded ask: what the guard says
+    /// when it refuses one. `None` for one anybody may ask.
+    pub fn person_only(&self) -> Option<(&'static str, &'static str)> {
+        Some(match self {
+            Ask::MemoryDecide { decision, .. } => (
+                "Deciding about a note",
+                match decision.as_str() {
+                    "reject" => "memory reject",
+                    "revoke" => "memory revoke",
+                    "restore" => "memory restore",
+                    _ => "memory approve",
+                },
+            ),
+            Ask::Pair => ("Pairing", "pair"),
+            Ask::SyncOn { .. } => ("Turning sync on", "sync on"),
+            Ask::SyncLink { .. } => ("Linking a project", "sync link"),
+            Ask::SyncStop { .. } => ("Stopping sync", "sync stop"),
+            Ask::SyncRemove { .. } => ("Removing a project from the server", "sync remove"),
+            Ask::SyncCheckout { .. } => ("Checking a workspace out", "sync checkout"),
+            Ask::MemoryList { .. } => ("Reading a project's memory", "memory list"),
+            Ask::MemoryWrite { .. } => ("Writing a note", "memory write"),
+            Ask::MemoryEdit { .. } => ("Rewriting a note", "memory edit"),
+            Ask::MemorySettle { .. } => ("Settling a note", "memory settle"),
+            Ask::Dashboard => ("Signing in to the dashboard", "dashboard"),
+            Ask::DashboardEnable { enabled: true } => ("Turning the dashboard on", "dashboard on"),
+            Ask::DashboardTunnel { enabled: true, .. } => {
+                ("Opening a tunnel to the dashboard", "dashboard tunnel on")
             }
-            _ => why,
-        }
+            _ => return None,
+        })
     }
 }
 
@@ -495,6 +494,7 @@ mod tests {
 
     #[test]
     fn opening_the_dashboard_up_is_guarded_and_closing_it_never_is() {
+        use crate::guard::Refusal;
         let tunnel = |enabled| Ask::DashboardTunnel {
             enabled,
             subdomain: Some("build-box".into()),
@@ -508,7 +508,9 @@ mod tests {
         ] {
             assert!(ask.guarded(), "{ask:?}");
             // Said in the dashboard's own words, not pairing's.
-            let said = ask.refused("Pairing is refused.".into());
+            let (act, command) = ask.person_only().unwrap();
+            assert!(command.starts_with("dashboard"), "{command}");
+            let said = Refusal::Job.say(act, command);
             assert!(
                 said.contains("dashboard") && !said.contains("Pairing"),
                 "{said}"
@@ -521,7 +523,33 @@ mod tests {
         ] {
             assert!(!ask.guarded(), "{ask:?}");
         }
-        assert_eq!(Ask::Pair.refused("as it was".into()), "as it was");
+        assert_eq!(
+            Refusal::Job.say("Signing in to the dashboard", "dashboard"),
+            "Signing in to the dashboard is refused to a command the dashboard ran. Only a \
+             person may do it, from a terminal of their own on this computer (an SSH login, \
+             say), never through the dashboard."
+        );
+    }
+
+    #[test]
+    fn a_refusal_names_what_was_asked_and_the_command_to_run() {
+        use crate::guard::Refusal;
+        let ask = Ask::SyncCheckout {
+            project: "widgets".into(),
+            workspace: "fix-login".into(),
+        };
+        let (act, command) = ask.person_only().unwrap();
+        let said = Refusal::NoTerminal.say(act, command);
+        assert_eq!(
+            said,
+            "Checking a workspace out needs a person at a terminal: run `yardsort-host sync \
+             checkout` in one, not from a script."
+        );
+        assert!(!said.contains("Pairing"));
+        assert!(Refusal::Launched
+            .say("Pairing", "pair")
+            .contains("Pairing is refused from a terminal Yardsort started"));
+        assert!(Ask::SyncStatus.person_only().is_none());
     }
 
     #[test]

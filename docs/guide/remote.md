@@ -1,8 +1,8 @@
 # Remote
 
 > **Remote is still under development, and will be until the whole plan for it is finished.** Expect it
-> to change. It stays off, and connects to nothing, unless you turn it on. The phone app is not in the
-> app stores yet.
+> to change. It stays off, and connects to nothing, unless you turn it on. [The phone app](phone.md)
+> is invite only for now, and will be in the app stores in a few weeks.
 
 Remote lets your phone reach the agents on this computer through a Yardsort server you sign in to. Look
 at a workspace, watch a terminal, or take control of one and type, away from your desk. A computer with no
@@ -109,9 +109,11 @@ background. Nothing of them is kept on the phone, so they show only while this c
 reached.
 
 Without `gh`, or signed out of it, the phone shows no badges and no card, and says nothing about
-it, as here. The same goes for a computer on a version before this one, and for
-[a computer with no screen](headless-host.md), which reads no pull requests yet. A notification
-when a check fails or a review arrives is not built yet.
+it, as here. The same goes for a computer on a version before this one.
+[A computer with no screen](headless-host.md) reads them too, with its own `gh`, when the phone
+asks, so the first look at one starts the reading and the list fills in a moment later. It does
+not yet read the pull requests a workspace follows in another repository. A notification when a
+check fails or a review arrives is not built yet.
 
 ## Starting work from the phone
 
@@ -531,8 +533,9 @@ second copy of Yardsort used to cause that. Now only one copy runs on a profile,
 
 ## The phone app
 
-It is in [`apps/mobile`](https://github.com/joaoh82/yardsort/tree/main/apps/mobile), and is not in the
-app stores yet. To run a server of your own, see the
+[The phone app](phone.md) says what it does and what it needs. It is invite only for now, and will
+be in the app stores in a few weeks. Its code is in
+[`apps/mobile`](https://github.com/joaoh82/yardsort/tree/main/apps/mobile). To run a server of your own, see the
 [self-host recipe](https://github.com/joaoh82/yardsort/tree/main/crates/server/self-host).
 
 ## Notifications

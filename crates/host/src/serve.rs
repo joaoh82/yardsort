@@ -164,11 +164,16 @@ async fn answer(home: &Arc<HostHome>, stream: UnixStream) {
     let reply = match line.next::<Ask>().await {
         Ok(Some(Ask::Pair)) => match refusal {
             None => return pair(home, &mut line).await,
-            Some(message) => Reply::Failed { message },
+            Some(why) => Reply::Failed {
+                message: why.say("Pairing", "pair"),
+            },
         },
-        Ok(Some(ask)) if ask.guarded() && refusal.is_some() => Reply::Failed {
-            message: ask.refused(refusal.unwrap_or_default()),
-        },
+        Ok(Some(ask)) if refusal.is_some() && ask.guarded() => {
+            let (act, command) = ask.person_only().unwrap_or(("That", "help"));
+            Reply::Failed {
+                message: refusal.expect("checked").say(act, command),
+            }
+        }
         Ok(Some(ask)) => one(home, ask)
             .await
             .unwrap_or_else(|f| Reply::Failed { message: f.message }),

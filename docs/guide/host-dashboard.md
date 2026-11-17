@@ -236,9 +236,12 @@ from an image of your own with `rustunnel` in it. This has not been tried yet.
   `rustunnel` on that user's `PATH`: install it. No token, or a wrong one: `rustunnel setup`.
   When the host runs as a service, the client is found on the `PATH` that user's login shell
   has, as agents are.
-- **"The dashboard is opened up only by a person…"** You ran `yardsort-host dashboard` from an
-  agent's terminal, a script, the dashboard's own **Commands**, or a computer that is not Linux.
-  Run it in an SSH login of your own.
+- **"Signing in to the dashboard needs a person at a terminal"**, or **"… is refused from a
+  terminal Yardsort started"**, or **"… is refused to a command the dashboard ran"**. You ran
+  `yardsort-host dashboard` from a script, an agent's terminal or the dashboard's own
+  **Commands**. Run it in an SSH login of your own. Turning the dashboard on and opening a
+  tunnel are refused the same way, each named for what was asked. On a computer that is not
+  Linux it says it needs Linux, where the host can check who asks.
 - **"Signed out for now, but … could be neither written nor deleted"** The profile's
   `dashboard` folder cannot be changed, so the sign-out holds only until the host restarts. Fix
   the folder's owner or the full disk, or delete the file it names.

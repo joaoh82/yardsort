@@ -177,8 +177,8 @@ pub struct HostFacade<'a> {
     /// What is told once a device decided a waiting smoke test run. Without it — a headless
     /// host, which queues no runs — `test.waiting` and `test.decide` are unsupported.
     pub tests: Option<&'a dyn TestGate>,
-    /// What the host last read of its projects' pull requests. Without it — a host with no
-    /// window, which reads none — `pull.list` and `pull.describe` are unsupported.
+    /// What the host last read of its projects' pull requests. Without it `pull.list` and
+    /// `pull.describe` are unsupported.
     pub pulls: Option<&'a dyn PullRequests>,
 }
 

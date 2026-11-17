@@ -141,6 +141,12 @@ export const DOCS_NAV: DocSection[] = [
           "Reach this computer from your phone or another computer through a Yardsort server, and sync a project between your computers. The phone can be told about tasks, reviews, failures, desktop updates, and workflow questions, and can answer or approve a workflow while the computer is online. Still under development, and off until you turn it on.",
       },
       {
+        slug: "guide/phone",
+        title: "The phone app",
+        description:
+          "Yardsort's phone app reaches the agents on your computer: workspaces, pull requests, conversations as a chat, permission questions and new work. Invite only for now, in the app stores in a few weeks.",
+      },
+      {
         slug: "guide/headless-host",
         title: "A computer with no screen",
         description:

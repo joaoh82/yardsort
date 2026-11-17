@@ -402,9 +402,14 @@ From the first slice in [37-floor-manager](37-floor-manager.md), 2026-11-09.
     says so. It is not a sandbox, and the harness's own prompts are a second line, not the
     only one. The owner
     called trusted "god mode"; the setting is named Trusted.
-54. **How should a fork's pull request be reviewed?** `ys pr checkout` makes `pr/<number>`, and
-    the built-in review finds a pull request by its branch name. The review could take a pull
-    request number as an input instead.
+54. ~~**How should a fork's pull request be reviewed?**~~ **Settled 2026-11-17: by the number its
+    branch follows.** `ys pr checkout` and **Start workspace** make `pr/<number>` and record the
+    pull request in git (`branch.pr/<n>.merge` is `refs/pull/<n>/head`, see 25). Finding a
+    workspace's pull request reads that first and asks `gh pr view <n>`, falling back to the
+    branch's name only when the branch follows nothing. So the review needed no new input, and
+    every other user of the lookup (triggers, `{{ pr.* }}`) gets the same answer. `gh` in the
+    worktree resolves the project's own remote, so the review is posted on the parent
+    repository.
 55. **What is it called?** _Floor Manager_ and _Floor Planner_ were offered. The code calls it
     `coordinator` so that a rename touches only the words.
 
