@@ -543,11 +543,8 @@ fn the_commit_identity_is_read_from_git_and_set_in_this_users_own_config() {
         .unwrap()
         .starts_with("git version"));
     assert_eq!(before["name"], Value::Null);
-    assert_eq!(
-        before["github"]["version"],
-        Value::Null,
-        "no gh in this home's PATH"
-    );
+    // Whether there is a GitHub CLI is the machine's to say (a CI runner has one in /usr/bin).
+    assert_eq!(before["github"]["signedIn"], false);
     assert_eq!(before["projectsDir"], "~/Projects");
 
     let saved = served.post(

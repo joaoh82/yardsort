@@ -292,7 +292,8 @@ mod tests {
             .as_deref()
             .is_some_and(|v| v.starts_with("git version")));
         assert_eq!((before.name, before.email), (None, None));
-        assert_eq!(before.github.version, None, "no gh in this PATH");
+        // Whether there is a GitHub CLI is the machine's to say here (a CI runner has one in
+        // /usr/bin); in a new home, nobody is signed in to it either way.
         assert!(!before.github.signed_in);
 
         set_identity(&env, "  Build Box ", "box@example.invalid").unwrap();
@@ -376,13 +377,16 @@ mod tests {
     }
 
     #[test]
-    fn without_the_github_cli_signing_in_says_where_to_get_it() {
+    fn without_the_github_cli_there_is_none_to_read_and_signing_in_says_where_to_get_it() {
         let dir = tempfile::tempdir().unwrap();
         let empty = ShellEnv {
             vars: BTreeMap::from([("PATH".to_owned(), dir.path().display().to_string())]),
             source: EnvSource::Process,
             warning: None,
         };
+        let there = read(&empty);
+        assert_eq!((there.version, there.github.version), (None, None));
+        assert!(!there.github.signed_in);
         let Err(why) = sign_in(&empty) else {
             panic!("no gh there");
         };
