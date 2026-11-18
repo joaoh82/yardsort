@@ -30,13 +30,15 @@ import TerminalScreen from "../../src/app/terminal";
 import Pair from "../../src/app/pair";
 import Servers from "../../src/app/servers";
 import Settings from "../../src/app/settings";
+import ExportScreen from "../../src/app/export";
+import DeleteAccountScreen from "../../src/app/delete-account";
 import StartWork from "../../src/app/start";
 import PullScreen from "../../src/app/pull";
 import PullsScreen from "../../src/app/pulls";
 import WorkspaceScreen from "../../src/app/workspace";
 import { Accounts, type Browser, type Env } from "../../src/lib/accounts";
 import type { PickImage } from "../../src/lib/attach";
-import { AppProvider } from "../../src/lib/context";
+import { AppProvider, type SaveFile } from "../../src/lib/context";
 import { Diagnostics } from "../../src/lib/diagnostics";
 import { folds } from "../../src/lib/folds";
 import { Incoming } from "../../src/lib/pairing";
@@ -55,6 +57,7 @@ async function start({
   env = envFor(server),
   incoming = new Incoming(),
   pickImage = async () => null,
+  saveFile = async () => true,
   diagnostics = new Diagnostics(),
 }: {
   server?: FakeServer;
@@ -63,6 +66,7 @@ async function start({
   env?: Env;
   incoming?: Incoming;
   pickImage?: PickImage;
+  saveFile?: SaveFile;
   diagnostics?: Diagnostics;
 } = {}) {
   const accounts = new Accounts({ diagnostics, ...env }, vault);
@@ -72,6 +76,7 @@ async function start({
     deviceName: "iPhone",
     incoming,
     pickImage,
+    saveFile,
     diagnostics,
     about: { app: "0.1.5", system: "ios 18.1" },
   };
@@ -90,6 +95,8 @@ async function start({
       account: Account,
       servers: Servers,
       settings: Settings,
+      export: ExportScreen,
+      "delete-account": DeleteAccountScreen,
       pair: Pair,
       computer: ComputerScreen,
       pull: PullScreen,
@@ -349,6 +356,118 @@ describe("Account", () => {
 
     await act(async () => answer());
     await screen.findByText("Other workstation");
+  });
+});
+
+describe("Exporting the account", () => {
+  async function onExport(saveFile: SaveFile, server = new FakeServer()) {
+    const app = await start({ server, saveFile });
+    await signIn();
+    await act(async () => router.push("/settings"));
+    await fireEvent.press(await screen.findByRole("button", { name: "Export my account’s data" }));
+    await screen.findByText("Never a credential. Keep the file somewhere only you can read.");
+    return app;
+  }
+
+  test("says what the file holds, then saves every page of it, and no credential", async () => {
+    const saved: { name: string; text: string }[] = [];
+    const { server } = await onExport(async (name, text) => {
+      saved.push({ name, text });
+      return true;
+    });
+    expect(server.asked).not.toContain("GET /v1/account/export");
+    await fireEvent.press(screen.getByRole("button", { name: "Export" }));
+    await screen.findByText(/^Saved yardsort-account-\d{4}-\d{2}-\d{2}\.json: 3 synced records/);
+    expect(saved).toHaveLength(1);
+    const file = JSON.parse(saved[0]!.text);
+    expect(file.format).toBe(1);
+    expect(file.serverName).toBe("Example Remote");
+    expect(file.account.subject).toBe("ana");
+    expect(file.records.map((r: { id: string }) => r.id)).toEqual(["a", "b", "c"]);
+    expect(saved[0]!.text).not.toMatch(/access-|refresh-/);
+  });
+
+  test("a save the person backed out of says nothing, and an older server says why", async () => {
+    const server = new FakeServer();
+    await onExport(async () => false, server);
+    await fireEvent.press(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(server.asked).toContain("GET /v1/account/export"));
+    expect(screen.queryByText(/^Saved /)).toBeNull();
+
+    server.exports = false;
+    await fireEvent.press(screen.getByRole("button", { name: "Export" }));
+    await screen.findByText(
+      "Example Remote cannot export an account yet. Its operator has to update it.",
+    );
+  });
+});
+
+describe("Deleting the account", () => {
+  async function onDelete(server = new FakeServer(), browser: Browser = signedInBrowser) {
+    const opened: string[] = [];
+    let signedIn = false;
+    const app = await start({
+      server,
+      browser: async (url, redirect) => {
+        if (!signedIn) return signedInBrowser(url, redirect);
+        opened.push(url);
+        return browser(url, redirect);
+      },
+    });
+    await signIn();
+    signedIn = true;
+    await act(async () => router.push("/settings"));
+    await fireEvent.press(await screen.findByRole("button", { name: "Delete my account" }));
+    await screen.findByText("• every synced project, note and workspace name");
+    return { ...app, opened };
+  }
+
+  test("says what goes and what stays, then signs in again and deletes, and the phone forgets it", async () => {
+    const { server, opened, vault, accounts } = await onDelete();
+    expect(screen.getByText(/Everything on your computers/)).toBeTruthy();
+    const go = screen.getByRole("button", { name: "Sign in again and delete" });
+    expect(go).toBeDisabled();
+    await fireEvent.changeText(screen.getByLabelText("Type delete to confirm"), "delet");
+    expect(go).toBeDisabled();
+    expect(opened).toHaveLength(0);
+    await fireEvent.changeText(screen.getByLabelText("Type delete to confirm"), "Delete");
+    await fireEvent.press(go);
+    await screen.findByText(
+      "Your account at Example Remote was deleted, and every device signed out. Everything on your computers is still there.",
+    );
+    expect(new URL(opened[0]!).searchParams.get("purpose")).toBe("confirm");
+    expect(server.deletions).toEqual([{ code: "a-code", verifier: expect.any(String) }]);
+    expect(accounts.getSnapshot().profiles).toHaveLength(0);
+    expect([...vault.kept.values()].join("\n")).not.toContain("refresh-");
+  });
+
+  test("closing the browser deletes nothing, and an older server says why first", async () => {
+    const server = new FakeServer();
+    await onDelete(server, async () => null);
+    await fireEvent.changeText(screen.getByLabelText("Type delete to confirm"), "delete");
+    await fireEvent.press(screen.getByRole("button", { name: "Sign in again and delete" }));
+    await screen.findByText("You did not sign in again, so nothing was deleted.");
+    expect(server.deletions).toHaveLength(0);
+
+    server.deletes = false;
+    await fireEvent.press(screen.getByRole("button", { name: "Sign in again and delete" }));
+    await screen.findByText(
+      "Example Remote cannot delete an account yet. Its operator has to update it.",
+    );
+    expect(server.deletions).toHaveLength(0);
+  });
+
+  test("deleted from another device, the phone says so when it next asks", async () => {
+    const server = new FakeServer();
+    await start({ server });
+    await signIn();
+    server.deleted = true;
+    await act(async () => router.push("/settings"));
+    await fireEvent.press(await screen.findByRole("button", { name: "Export my account’s data" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Export" }));
+    await screen.findByText(
+      "Your account at Example Remote was deleted, so this phone is signed out. Everything on your computers is still there.",
+    );
   });
 });
 

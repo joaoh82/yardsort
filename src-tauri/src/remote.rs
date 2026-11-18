@@ -461,6 +461,39 @@ fn link(app: &AppHandle) -> RemoteLink {
     }
 }
 
+/// Remote as the host dashboard shows it: the server, this computer's name there, the link in
+/// words and how many devices are let in. `None` while Remote is off.
+pub(crate) fn for_dashboard(app: &AppHandle) -> Option<host_dashboard::RemoteLink> {
+    let state = app.state::<AppState>();
+    let row = state.store.remote_host().ok().flatten()?;
+    Some(host_dashboard::RemoteLink {
+        server_url: row.server_url,
+        name: row.name,
+        link: match link(app) {
+            RemoteLink::Off => "not kept".into(),
+            RemoteLink::Connecting => "connecting".into(),
+            RemoteLink::Connected { devices } => {
+                format!("connected, {devices} device(s) on it now")
+            }
+            RemoteLink::Waiting { why, retry_in_ms } => {
+                format!("waiting ({why}); trying again in {}s", retry_in_ms / 1000)
+            }
+            RemoteLink::Stopped { why } => {
+                format!("stopped: {why} Sign in again in Yardsort, under Settings → Remote.")
+            }
+        },
+        devices: host::local_grants(&state.store)
+            .map(|grants| grants.len())
+            .unwrap_or(0),
+    })
+}
+
+/// Clone a repository into the folder for clones and add it as a project, as a device let in
+/// with typing can ask for: its id and its name. The window reads its projects again.
+pub(crate) fn clone_for_dashboard(app: &AppHandle, remote: &str) -> IpcResult<(String, String)> {
+    AppStarting(app.clone()).clone_project(remote, None)
+}
+
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDevice {
@@ -481,6 +514,25 @@ pub struct RemotePairing {
     /// An SVG image of the QR code: the server's address and the offer's secret.
     pub qr_svg: String,
     pub expires_in_ms: u32,
+}
+
+/// An account's export, saved: where, and how much it holds.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteExported {
+    pub path: String,
+    pub devices: u32,
+    pub hosts: u32,
+    pub records: u32,
+}
+
+/// An account, deleted at its server: how much went with it.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDeleted {
+    pub devices: u32,
+    pub hosts: u32,
+    pub records: u32,
 }
 
 /// A device that redeemed this host's code and waits for an answer.
@@ -775,6 +827,75 @@ pub async fn remote_pair(app: AppHandle) -> IpcResult<RemotePairing> {
     })
 }
 
+/// Save everything the server keeps of this computer's account at `path`, as JSON. The person
+/// chose `path` in the save dialog, which asked before replacing a file there.
+#[tauri::command]
+#[specta::specta]
+pub async fn remote_export(app: AppHandle, path: String) -> IpcResult<RemoteExported> {
+    let export = remote_host::export::export(&AppHome::new(&app))
+        .await
+        .map_err(ipc)?;
+    remote_host::export::save(&export, std::path::Path::new(&path), true).map_err(ipc)?;
+    let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+    Ok(RemoteExported {
+        path,
+        devices: count(export.account.devices.len()),
+        hosts: count(export.account.hosts.len()),
+        records: count(export.records.len()),
+    })
+}
+
+/// Delete this computer's account at its server, for every device: the person typed the
+/// confirmation in the window, and now signs in again in the browser, which is what deletes.
+/// Waits for the browser, for up to ten minutes, unless [`remote_cancel`] is called. Afterwards
+/// Remote is off here; nothing on this computer is touched.
+#[tauri::command]
+#[specta::specta]
+pub async fn remote_delete_account(app: AppHandle) -> IpcResult<RemoteDeleted> {
+    let home = AppHome::new(&app);
+    let (_client, sign_in) = remote_host::delete::begin(&home).await.map_err(ipc)?;
+    let (cancel, cancelled) = tokio::sync::oneshot::channel();
+    {
+        let state = app.state::<AppState>();
+        let mut signing_in = state
+            .remote
+            .signing_in
+            .lock()
+            .map_err(|_| IpcError::internal("poisoned"))?;
+        if signing_in.is_some() {
+            return Err(IpcError::new(
+                "remote_busy",
+                "A sign-in is already waiting for the browser.",
+            ));
+        }
+        *signing_in = Some(cancel);
+    }
+    let returned = async {
+        app.opener()
+            .open_url(sign_in.url().as_str(), None::<&str>)
+            .map_err(|e| IpcError::new("remote_browser", e.to_string()))?;
+        tokio::select! {
+            code = sign_in.returned(SIGN_IN_TIMEOUT) => code.map_err(|e| ipc(account::failed(e))),
+            _ = cancelled => Err(IpcError::new(
+                "remote_cancelled",
+                "Deleting was cancelled. Nothing was deleted.",
+            )),
+        }
+    }
+    .await;
+    if let Ok(mut signing_in) = app.state::<AppState>().remote.signing_in.lock() {
+        signing_in.take();
+    }
+    let deleted = remote_host::delete::finish(&home, sign_in, returned?)
+        .await
+        .map_err(ipc)?;
+    Ok(RemoteDeleted {
+        devices: deleted.devices,
+        hosts: deleted.hosts,
+        records: deleted.records,
+    })
+}
+
 /// Devices waiting for an answer, and the devices let in here once the server has said which
 /// are still in force. The server can take a device off this list, never put one on it.
 #[tauri::command]
@@ -838,7 +959,7 @@ pub async fn remote_replace_daemon(app: AppHandle) -> IpcResult<()> {
     })
     .await?;
     quit::past_the_question();
-    updates::restart(&restarting)
+    updates::restart(&restarting).await
 }
 
 /// Take a device's grant away. Refused here at once; the server is told too.

@@ -1,4 +1,5 @@
-//! Who may approve a device here: a person at a terminal on this computer, not an agent.
+//! Who may approve a device here, or do anything else only a person may: a person at a terminal on
+//! this computer, not an agent.
 //!
 //! **A guard, not a boundary.** A process running as this user can read everything the host can,
 //! its kept sign-in included. What this stops is an agent approving a device by accident, or
@@ -10,14 +11,67 @@
 //! launched session has; its standard input is a terminal, and not one of the daemon's; and it
 //! does not descend from the daemon. Linux only, where `/proc` says all that. Elsewhere approving
 //! is refused, since none of it could be checked.
+//!
+//! **A command the dashboard ran is not a person either.** The dashboard runs commands for a
+//! signed-in browser, as children of this host and outside the daemon, and such a command can
+//! make itself a terminal (`script`). So the caller must also not carry the mark every dashboard
+//! job is given, and must not descend from this host. That keeps the dashboard's sign-in out of
+//! what guards pairing, at the strength the rest of this has: a job that sheds both its mark and
+//! its ancestry gets past, as an agent that sheds its own does.
 
 use std::os::fd::AsRawFd;
 
 use tokio::net::UnixStream;
 
-/// Why the process at the other end of `stream` may not approve, or `None` if it may.
-/// `daemon` is the daemon's process id, when there is one.
-pub fn refusal(stream: &UnixStream, daemon: Option<u32>) -> Option<String> {
+/// Why the process at the other end of a connection may not do what only a person may. Linux makes
+/// every one but `Unchecked`; elsewhere only `Unchecked` is made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum Refusal {
+    /// Not Linux, where none of it could be checked.
+    Unchecked,
+    /// The system would not say who is at the other end.
+    Unknown,
+    /// Another user.
+    OtherUser,
+    /// A terminal Yardsort started, or a program running in one: an agent's.
+    Launched,
+    /// A command the dashboard ran for a signed-in browser, or a program that command started.
+    Job,
+    /// Not a terminal at all: a script, or a pipe.
+    NoTerminal,
+}
+
+impl Refusal {
+    /// The refusal in words, for `act` ("Pairing", "Turning sync on") asked as `command`
+    /// ("pair", "sync on").
+    pub fn say(self, act: &str, command: &str) -> String {
+        match self {
+            Refusal::Unchecked => {
+                format!("{act} from a terminal needs Linux, where the host can check who asks.")
+            }
+            Refusal::Unknown => "Cannot tell who is asking.".into(),
+            Refusal::OtherUser => format!("Only this host's own user may do that ({act})."),
+            Refusal::Launched => format!(
+                "{act} is refused from a terminal Yardsort started. Only a person may do it, from a \
+                 terminal of their own on this computer (an SSH login, say), never an agent."
+            ),
+            Refusal::Job => format!(
+                "{act} is refused to a command the dashboard ran. Only a person may do it, from a \
+                 terminal of their own on this computer (an SSH login, say), never through the \
+                 dashboard."
+            ),
+            Refusal::NoTerminal => format!(
+                "{act} needs a person at a terminal: run `yardsort-host {command}` in one, not from \
+                 a script."
+            ),
+        }
+    }
+}
+
+/// Why the process at the other end of `stream` may not do what only a person may, or `None` if
+/// it may. `daemon` is the daemon's process id, when there is one.
+pub fn refusal(stream: &UnixStream, daemon: Option<u32>) -> Option<Refusal> {
     #[cfg(target_os = "linux")]
     {
         linux::refusal(stream.as_raw_fd(), daemon)
@@ -25,7 +79,7 @@ pub fn refusal(stream: &UnixStream, daemon: Option<u32>) -> Option<String> {
     #[cfg(not(target_os = "linux"))]
     {
         let _ = (stream.as_raw_fd(), daemon);
-        Some("Pairing from a terminal needs Linux, where the host can check who asks.".into())
+        Some(Refusal::Unchecked)
     }
 }
 
@@ -34,34 +88,34 @@ mod linux {
     use std::collections::BTreeSet;
     use std::path::PathBuf;
 
+    use super::Refusal;
     use yardsort_core::activity::{RECORD_ENV, RUN_ENV, WORKSPACE_ENV};
 
-    const AGENT: &str = "Pairing is refused from a terminal Yardsort started. A device is let in \
-                         only by a person, from a terminal of their own on this computer \
-                         (an SSH login, say), never by an agent.";
-
-    pub fn refusal(fd: i32, daemon: Option<u32>) -> Option<String> {
+    pub fn refusal(fd: i32, daemon: Option<u32>) -> Option<Refusal> {
         let Some((pid, uid)) = peer(fd) else {
-            return Some("Cannot tell who is asking.".into());
+            return Some(Refusal::Unknown);
         };
         // SAFETY: `geteuid` cannot fail.
         if uid != unsafe { libc::geteuid() } {
-            return Some("Only this host's own user may pair a device.".into());
+            return Some(Refusal::OtherUser);
         }
         let environ = std::fs::read(format!("/proc/{pid}/environ")).unwrap_or_default();
         if launched(&environ) {
-            return Some(AGENT.into());
+            return Some(Refusal::Launched);
+        }
+        // The dashboard's jobs are this host's own children, each given a mark.
+        let above = ancestors(pid);
+        if carries(&environ, &[host_dashboard::jobs::JOB_ENV])
+            || above.contains(&std::process::id())
+        {
+            return Some(Refusal::Job);
         }
         let Some(tty) = terminal_of(pid) else {
-            return Some(
-                "Pairing needs a person at a terminal: run `yardsort-host pair` in one, not \
-                 from a script."
-                    .into(),
-            );
+            return Some(Refusal::NoTerminal);
         };
         if let Some(daemon) = daemon {
-            if ancestors(pid).contains(&daemon) || daemons_terminals(daemon).contains(&tty) {
-                return Some(AGENT.into());
+            if above.contains(&daemon) || daemons_terminals(daemon).contains(&tty) {
+                return Some(Refusal::Launched);
             }
         }
         None
@@ -90,8 +144,13 @@ mod linux {
 
     /// Whether an environment (`/proc/<pid>/environ`) carries a launched session's markers.
     pub(super) fn launched(environ: &[u8]) -> bool {
+        carries(environ, &[RUN_ENV, WORKSPACE_ENV, RECORD_ENV])
+    }
+
+    /// Whether an environment sets any of `names` to something.
+    pub(super) fn carries(environ: &[u8], names: &[&str]) -> bool {
         environ.split(|b| *b == 0).any(|entry| {
-            [RUN_ENV, WORKSPACE_ENV, RECORD_ENV].iter().any(|name| {
+            names.iter().any(|name| {
                 entry
                     .strip_prefix(name.as_bytes())
                     .and_then(|rest| rest.strip_prefix(b"="))
@@ -162,6 +221,15 @@ mod tests {
         assert!(launched(b"YARDSORT_RUN_ID=1\0"));
         assert!(!launched(b"HOME=/home/a\0YARDSORT_RUN_ID=\0"));
         assert!(!launched(b"NOT_YARDSORT_RUN_ID=1\0YARDSORT_RUN_IDS=2\0"));
+    }
+
+    #[test]
+    fn a_dashboard_jobs_mark_is_seen_and_is_not_a_launched_sessions() {
+        let job = [host_dashboard::jobs::JOB_ENV];
+        assert!(carries(b"HOME=/home/a\0YARDSORT_DASHBOARD_JOB=1\0", &job));
+        assert!(!carries(b"HOME=/home/a\0YARDSORT_DASHBOARD_JOB=\0", &job));
+        assert!(!carries(b"NOT_YARDSORT_DASHBOARD_JOB=1\0", &job));
+        assert!(!launched(b"YARDSORT_DASHBOARD_JOB=1\0"));
     }
 
     #[test]

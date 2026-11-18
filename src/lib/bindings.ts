@@ -382,6 +382,18 @@ export const commands = {
 	/**  Make a pairing offer: a code to type, and a QR code, good once for five minutes. */
 	remotePair: () => typedError<RemotePairing, IpcError>(__TAURI_INVOKE("remote_pair")),
 	/**
+	 *  Save everything the server keeps of this computer's account at `path`, as JSON. The person
+	 *  chose `path` in the save dialog, which asked before replacing a file there.
+	 */
+	remoteExport: (path: string) => typedError<RemoteExported, IpcError>(__TAURI_INVOKE("remote_export", { path })),
+	/**
+	 *  Delete this computer's account at its server, for every device: the person typed the
+	 *  confirmation in the window, and now signs in again in the browser, which is what deletes.
+	 *  Waits for the browser, for up to ten minutes, unless [`remote_cancel`] is called. Afterwards
+	 *  Remote is off here; nothing on this computer is touched.
+	 */
+	remoteDeleteAccount: () => typedError<RemoteDeleted, IpcError>(__TAURI_INVOKE("remote_delete_account")),
+	/**
 	 *  Devices waiting for an answer, and the devices let in here once the server has said which
 	 *  are still in force. The server can take a device off this list, never put one on it.
 	 */
@@ -523,6 +535,15 @@ export const commands = {
 	 *  folder is made when the first clone needs it, not here.
 	 */
 	remoteSetProjectsDir: (dir: string | null) => typedError<ProjectsDir, IpcError>(__TAURI_INVOKE("remote_set_projects_dir", { dir })),
+	dashboardStatus: () => typedError<DashboardStatus, IpcError>(__TAURI_INVOKE("dashboard_status")),
+	/**  Serve the dashboard or stop serving it, now and whenever the app starts. */
+	dashboardSetEnabled: (enabled: boolean) => typedError<DashboardStatus, IpcError>(__TAURI_INVOKE("dashboard_set_enabled", { enabled })),
+	/**  Open the dashboard in this computer's browser, signed in. */
+	dashboardOpen: () => typedError<null, IpcError>(__TAURI_INVOKE("dashboard_open")),
+	/**  A one-time link that signs a browser in, for the person at the window to take elsewhere. */
+	dashboardSignInLink: () => typedError<DashboardSignIn, IpcError>(__TAURI_INVOKE("dashboard_sign_in_link")),
+	/**  Sign every browser out of the dashboard, and void the links not yet used. */
+	dashboardSignEveryoneOut: () => typedError<DashboardStatus, IpcError>(__TAURI_INVOKE("dashboard_sign_everyone_out")),
 	/**
 	 *  Watch a terminal on another computer. What it shows comes on `output`; the number it returns
 	 *  asks things of it, until [`remote_terminal_close`].
@@ -1395,6 +1416,32 @@ export type DaemonStatus = {
 	 *  rather than stopped behind the user's back.
 	 */
 	strandedSessions: number | null,
+};
+
+/**  A way in for one browser, once. */
+export type DashboardSignIn = {
+	/**
+	 *  The address through the tunnel while it is up, and otherwise the one on this computer,
+	 *  with the code in it.
+	 */
+	link: string,
+	/**  The code alone, to type. */
+	code: string,
+	goodForMinutes: number,
+};
+
+/**  The dashboard as Settings shows it. */
+export type DashboardStatus = {
+	/**  Turned on in the settings. */
+	enabled: boolean,
+	/**  Where it is served, on this computer, while it is. */
+	address: string | null,
+	/**  Its tunnel, in words, when one is wanted: where it is up, or why it is not. */
+	tunnel: string | null,
+	/**  Browsers signed in. */
+	signedIn: number,
+	/**  Why it is turned on and not served. */
+	problem: string | null,
 };
 
 export type DayUsage = {
@@ -2694,6 +2741,11 @@ export type PrFacts_Deserialize = {
 	title: string,
 	/**  Set when it is one the workspace tracks in another repository: asked about by its link. */
 	elsewhere?: Elsewhere_Deserialize | null,
+	/**
+	 *  The branch it would merge into, when the forge said. For the workspace's own pull
+	 *  request it is what the branch is based on, if Yardsort did not start the branch.
+	 */
+	base?: string | null,
 };
 
 export type PrFacts_Serialize = {
@@ -2702,6 +2754,11 @@ export type PrFacts_Serialize = {
 	title: string,
 	/**  Set when it is one the workspace tracks in another repository: asked about by its link. */
 	elsewhere?: Elsewhere_Serialize | null,
+	/**
+	 *  The branch it would merge into, when the forge said. For the workspace's own pull
+	 *  request it is what the branch is based on, if Yardsort did not start the branch.
+	 */
+	base?: string | null,
 };
 
 export type Preflight = {
@@ -3183,6 +3240,13 @@ export type RemoteController = { kind: "nobody" } |
 /**  The person at that computer. */
 { kind: "local" } | { kind: "device"; device: string; name: string };
 
+/**  An account, deleted at its server: how much went with it. */
+export type RemoteDeleted = {
+	devices: number,
+	hosts: number,
+	records: number,
+};
+
 export type RemoteDevice = {
 	grantId: string,
 	name: string,
@@ -3201,6 +3265,14 @@ export type RemoteEarlierDaemon = {
 	agents: string[],
 	/**  How many running sessions are not agents. */
 	shells: number,
+};
+
+/**  An account's export, saved: where, and how much it holds. */
+export type RemoteExported = {
+	path: string,
+	devices: number,
+	hosts: number,
+	records: number,
 };
 
 export type RemoteHost = {

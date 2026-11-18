@@ -497,16 +497,9 @@ pub async fn workflow_preview(
                 }
             } else if needs_pull_request {
                 match AppLook(state).pull_request(&workspace) {
-                    Ok(Some(pr)) if pr.state == yardsort_core::forge::PullRequestState::Open => (
-                        Some(PrFacts {
-                            number: pr.number,
-                            url: pr.url,
-                            title: pr.title,
-                            elsewhere: None,
-                        }),
-                        None,
-                        None,
-                    ),
+                    Ok(Some(pr)) if pr.state == yardsort_core::forge::PullRequestState::Open => {
+                        (Some(PrFacts::own(pr)), None, None)
+                    }
                     Ok(_) => {
                         let (problem, note) =
                             runs::missing_pull_request_preview(&workflow, &workspace.name);
@@ -521,6 +514,7 @@ pub async fn workflow_preview(
         let empty = match runs::Place::load(&state.store, &workspace.id, &git)? {
             Some(place) => {
                 let shared = state.store.memory_shared(&workspace.project_id)?;
+                let place = place.with_pull_request(pull_request.as_ref());
                 runs::empty_variables(&workflow, &place, shared)
             }
             None => Vec::new(),

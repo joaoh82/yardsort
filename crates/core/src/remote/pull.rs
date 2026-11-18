@@ -5,12 +5,15 @@
 //! is read for it that the host would not read for itself: no credential is held here or passed
 //! on.
 //!
-//! Who reads, and when, is the host's to say, so the reading is lent ([`PullRequests`]). A host
-//! without it — one with no window, today — does not answer these operations, and a device
-//! then shows nothing of pull requests, as for a host from before them.
+//! Who reads, and when, is the host's to say, so the reading is lent ([`PullRequests`]): the
+//! desktop app lends what its window read, and a host with no window reads for itself
+//! ([`polled`]). A host that lends nothing does not answer these operations, and a device then
+//! shows nothing of pull requests, as for a host from before them.
 //!
 //! What is said keeps to the grant, as a workspace list does: only the projects it reaches, and
 //! of a project's workspaces only those on show.
+
+pub mod polled;
 
 use std::collections::{BTreeMap, HashSet};
 

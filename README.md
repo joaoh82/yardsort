@@ -206,14 +206,19 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   finished, on every computer the phone reaches.
   Installing a desktop update stays on the computer.
   Whoever runs the server
-  can see what passes through it, and the phone app is not in the app stores yet. Expect it to
+  can see what passes through it, and [the phone app](docs/guide/phone.md) is invite only until it
+  reaches the app stores in a few weeks. Expect it to
   change until the whole plan is finished. See [Remote](docs/guide/remote.md). A Linux computer with
   no screen, such as a server you reach over SSH, can be one your phone reaches too, with
   `yardsort-host`, installed with one line or run from a container image that comes with the tools
   agents use: see
   [A computer with no screen](docs/guide/headless-host.md). Its agents keep
   running when the host restarts, and when a reboot ends them, `ys session resume` brings their
-  conversations back. The desktop app can
+  conversations back. It serves a [dashboard](docs/guide/host-dashboard.md) for setting the server
+  up from a browser, installing agents, signing GitHub in, cloning and running commands: on that
+  computer's own `127.0.0.1`, signed in to with a one-time link from a terminal there, reached
+  over an SSH forward or a rustunnel tunnel you turn on. The app can serve the same page, and
+  does not until you turn it on. The desktop app can
   reach another computer the same way: its projects and workspaces in the sidebar under that
   computer, opened like your own, with its terminals to watch and, once you have control, to type
   into. New work starts there from the same composer, by choosing the computer in its title, and
@@ -509,6 +514,24 @@ ys event emit migration-written --note "0042 adds users.last_seen"
 
 See [Triggers](docs/guide/triggers.md).
 
+## On your phone
+
+![The phone app: a computer's workspaces with their pull requests, one pull request's checks, a conversation as a chat, and an agent's permission question](docs/images/phone.png)
+
+Yardsort has a phone app that reaches the agents on your computer. See what each workspace is
+doing and how its pull request stands, read a conversation as a chat at the phone's width, answer
+Claude Code when it asks to run a command, let a waiting smoke test run, and start new work, away
+from your desk. A bell lists what needs you and what finished on every computer, and the phone is
+told when an agent finishes while nobody is looking. The agents run on the computer, so they keep going whatever happens to the
+connection. The phone gets in only through a server you sign in to, and only after you say yes at
+the computer.
+
+**The app is invite only for now, and will be in the app stores in a few weeks.**
+[Write to us](mailto:hello@yardsort.sh) if you would like to try it before then. It is part of
+[Remote](docs/guide/remote.md), which is still under development.
+
+See [The phone app](docs/guide/phone.md).
+
 ## Supported agents
 
 Yardsort starts any coding agent that runs in a terminal. These work out of the box:
@@ -585,7 +608,7 @@ what the number means. That keeps the interesting part in code: the questions ar
 property each), the thresholds live in your settings, and the model is pinned (`jev-1.13.0`) so a
 new version cannot quietly move under them.
 
-![Settings → Assist, with the API key, its switches and the three thresholds](docs/images/assist.png)
+![Settings → Assist, with the API key and the switches for what Assist may do](docs/images/assist.png)
 
 **On the changes list**, shortly after an agent stops writing, each changed file is checked
 against what the workspace was asked to do, and flagged files get a badge:
@@ -628,32 +651,34 @@ says no.
 
 ## Documentation
 
-|                                                                                                  |                                                                                      |
-| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| [Quick start](docs/quick-start.md)                                                               | Download to first agent in five minutes                                              |
-| [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving                                         |
-| [Migrate from Conductor](docs/guide/migrate-from-conductor.md)                                   | Import existing local worktrees and reconfigure scripts by hand                      |
-| [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off, shared conversations |
-| [Notifications](docs/guide/notifications.md)                                                     | One list of what needs you and what finished unseen, over every project              |
-| [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                                          |
-| [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file                             |
-| [Memory](docs/guide/memory.md)                                                                   | Lessons for a project's agents, approved by you                                      |
-| [Outcomes](docs/guide/outcomes.md)                                                               | What became of each attempt, and each agent's history                                |
-| [Pull requests](docs/guide/pull-requests.md)                                                     | Every project's pull requests: filter, start a workspace, merge                      |
-| [Tasks](docs/guide/tasks.md)                                                                     | Every project's GitHub issues: which need an answer, hand one to an agent            |
-| [Workflows](docs/guide/workflows.md)                                                             | Named agent work in YAML: the built-in code review, your own                         |
-| [Smoke tests](docs/guide/smoke-tests.md)                                                         | A file an agent writes and Yardsort runs: steps, browser, approval, the Tests view   |
-| [Schedules](docs/guide/schedules.md)                                                             | A workflow or a smoke test at a set time, or on a routine                            |
-| [Triggers](docs/guide/triggers.md)                                                               | A workflow or a smoke test when something happens: done, a review, failing checks    |
-| [Remote](docs/guide/remote.md)                                                                   | Your phone and your other computers, through a server. Still under development       |
-| [A computer with no screen](docs/guide/headless-host.md)                                         | `yardsort-host`: a Linux server your phone reaches. Still under development          |
-| [Usage](docs/guide/usage.md)                                                                     | Tokens spent and their cost; CPU and memory per agent                                |
-| [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                                           |
-| [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                                       |
-| [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints                                    |
-| [The `ys` command line](docs/guide/cli.md)                                                       | Installing it; workspaces, agents, `attach`, `logs`, handoffs                        |
-| [Keyboard shortcuts](docs/guide/shortcuts.md) · [Troubleshooting](docs/guide/troubleshooting.md) |                                                                                      |
-| [Design docs](docs/design/README.md)                                                             | Architecture, harness model, roadmap, open questions                                 |
+|                                                                                                  |                                                                                       |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| [Quick start](docs/quick-start.md)                                                               | Download to first agent in five minutes                                               |
+| [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving                                          |
+| [Migrate from Conductor](docs/guide/migrate-from-conductor.md)                                   | Import existing local worktrees and reconfigure scripts by hand                       |
+| [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off, shared conversations  |
+| [Notifications](docs/guide/notifications.md)                                                     | One list of what needs you and what finished unseen, over every project               |
+| [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                                           |
+| [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file                              |
+| [Memory](docs/guide/memory.md)                                                                   | Lessons for a project's agents, approved by you                                       |
+| [Outcomes](docs/guide/outcomes.md)                                                               | What became of each attempt, and each agent's history                                 |
+| [Pull requests](docs/guide/pull-requests.md)                                                     | Every project's pull requests: filter, start a workspace, merge                       |
+| [Tasks](docs/guide/tasks.md)                                                                     | Every project's GitHub issues: which need an answer, hand one to an agent             |
+| [Workflows](docs/guide/workflows.md)                                                             | Named agent work in YAML: the built-in code review, your own                          |
+| [Smoke tests](docs/guide/smoke-tests.md)                                                         | A file an agent writes and Yardsort runs: steps, browser, approval, the Tests view    |
+| [Schedules](docs/guide/schedules.md)                                                             | A workflow or a smoke test at a set time, or on a routine                             |
+| [Triggers](docs/guide/triggers.md)                                                               | A workflow or a smoke test when something happens: done, a review, failing checks     |
+| [Remote](docs/guide/remote.md)                                                                   | Your phone and your other computers, through a server. Still under development        |
+| [The phone app](docs/guide/phone.md)                                                             | What it does and what it needs. Invite only for now, in the app stores in a few weeks |
+| [A computer with no screen](docs/guide/headless-host.md)                                         | `yardsort-host`: a Linux server your phone reaches. Still under development           |
+| [The host dashboard](docs/guide/host-dashboard.md)                                               | A web page for setting a host up from a browser: agents, Git, setup commands          |
+| [Usage](docs/guide/usage.md)                                                                     | Tokens spent and their cost; CPU and memory per agent                                 |
+| [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                                            |
+| [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                                        |
+| [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints                                     |
+| [The `ys` command line](docs/guide/cli.md)                                                       | Installing it; workspaces, agents, `attach`, `logs`, handoffs                         |
+| [Keyboard shortcuts](docs/guide/shortcuts.md) · [Troubleshooting](docs/guide/troubleshooting.md) |                                                                                       |
+| [Design docs](docs/design/README.md)                                                             | Architecture, harness model, roadmap, open questions                                  |
 
 ## Build from source
 

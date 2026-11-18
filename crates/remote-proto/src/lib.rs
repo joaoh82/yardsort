@@ -42,6 +42,8 @@
 
 pub mod account;
 pub mod conversation;
+pub mod delete;
+pub mod export;
 pub mod grant;
 pub mod ids;
 pub mod look;
@@ -288,6 +290,27 @@ pub struct RemoteError {
     /// With `protocol_incompatible`: the majors this side speaks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supported_protocols: Option<Vec<u16>>,
+    /// Why the request was refused, when that is something a client says in its own words:
+    /// with `unauthenticated`, why the credential stopped working; with `forbidden`, a plan's
+    /// limit. Absent from an older server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<ErrorReason>,
+}
+
+/// Why a request was refused, beyond its code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ErrorReason {
+    /// The account this device signed in to was deleted, from this device or another. Nothing
+    /// of it is left at the server; everything on the device is still there.
+    AccountDeleted,
+    /// With `forbidden`: the account's plan does not cover this: another device, another
+    /// connection to a host, or more synced data. The message says which, in the operator's
+    /// words. Nothing already there is affected.
+    PlanLimit,
+    /// A reason from a newer server this build does not know.
+    #[serde(other)]
+    Unknown,
 }
 
 impl RemoteError {
@@ -297,6 +320,15 @@ impl RemoteError {
             message: message.into(),
             retryable: code.retryable(),
             supported_protocols: None,
+            reason: None,
+        }
+    }
+
+    /// This error, with `reason`.
+    pub fn because(self, reason: ErrorReason) -> Self {
+        Self {
+            reason: Some(reason),
+            ..self
         }
     }
 

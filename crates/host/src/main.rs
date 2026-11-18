@@ -11,6 +11,8 @@
 #[cfg(unix)]
 mod control;
 #[cfg(unix)]
+mod dashboard;
+#[cfg(unix)]
 mod guard;
 #[cfg(unix)]
 mod home;
@@ -106,6 +108,18 @@ mod cli {
         /// A project's memory: its notes for agents, and your decisions about them.
         #[command(subcommand)]
         Memory(Memory),
+        /// The host dashboard: where it is, and a one-time link to sign a browser in to it.
+        ///
+        /// A web page this computer serves on 127.0.0.1, for looking after it: its state, its
+        /// agents, Git, and the commands that set it up. With no subcommand, prints its address
+        /// and a sign-in link, only at a terminal on this computer that no agent runs in.
+        Dashboard {
+            #[command(subcommand)]
+            command: Option<Dashboard>,
+        },
+        /// Your account at the server.
+        #[command(subcommand)]
+        Account(Account),
         /// Install an agent, or bring it up to date, into ~/.local, as you.
         ///
         /// Claude Code, Cursor's CLI and Grok come from each vendor's own installer, under the
@@ -119,6 +133,41 @@ mod cli {
             #[arg(long, value_name = "FILE")]
             installer: Option<PathBuf>,
         },
+    }
+
+    #[derive(Subcommand)]
+    enum Dashboard {
+        /// Serve the dashboard, now and whenever the host starts. Only from a terminal on this
+        /// computer that no agent runs in.
+        On,
+        /// Stop serving the dashboard, now and whenever the host starts.
+        Off,
+        /// A rustunnel tunnel, which gives the dashboard an https address beyond this computer.
+        #[command(subcommand)]
+        Tunnel(Tunnel),
+        /// Sign every browser out of the dashboard, and void the codes not yet used.
+        SignOut,
+    }
+
+    #[derive(Subcommand)]
+    enum Tunnel {
+        /// Keep a tunnel to the dashboard, now and whenever the host starts. Needs the
+        /// `rustunnel` client installed for this user, with its token set by `rustunnel setup`.
+        /// Only from a terminal on this computer that no agent runs in.
+        On {
+            /// The subdomain to ask for, such as build-box. Without one the tunnel's server
+            /// picks one, new each time.
+            #[arg(long)]
+            subdomain: Option<String>,
+            /// auto, eu, us or ap. Without one, what rustunnel's own config says.
+            #[arg(long)]
+            region: Option<String>,
+            /// A rustunnel server of your own, as host:port.
+            #[arg(long, value_name = "HOST:PORT")]
+            server: Option<String>,
+        },
+        /// End the tunnel, now and whenever the host starts.
+        Off,
     }
 
     /// Every one but `status` only from a terminal on this computer that no agent runs in.
@@ -189,6 +238,22 @@ mod cli {
         },
     }
 
+    /// Only from a terminal on this computer that no agent runs in.
+    #[derive(Subcommand)]
+    enum Account {
+        /// Save everything the server keeps of your account as a JSON file: says what it holds
+        /// first, and asks.
+        Export {
+            /// Where to save it. Defaults to yardsort-account-<date>.json here. An existing file
+            /// is kept.
+            #[arg(long, value_name = "FILE")]
+            out: Option<PathBuf>,
+            /// Do not ask.
+            #[arg(long)]
+            yes: bool,
+        },
+    }
+
     pub fn main() -> i32 {
         let cli = Cli::parse();
         // Needs no profile, and no runtime: it runs the vendor's installer and waits.
@@ -219,6 +284,8 @@ mod cli {
                 Command::SignOut => crate::sign_in::sign_out(profile).await,
                 Command::Sync(command) => sync(&profile, command).await,
                 Command::Memory(command) => memory(&profile, command).await,
+                Command::Dashboard { command } => dashboard(&profile, command).await,
+                Command::Account(command) => account(&profile, command).await,
                 Command::InstallAgent { .. } => unreachable!("handled before the profile"),
             }
         });
@@ -233,17 +300,58 @@ mod cli {
         1
     }
 
-    /// After an upgrade, while the terminal daemon of the release before still runs agents.
-    fn earlier_daemon(version: Option<&str>) -> String {
-        let release = match version {
-            Some(version) => format!("Yardsort {version}"),
-            None => "an earlier release".into(),
+    async fn dashboard(profile: &Profile, command: Option<Dashboard>) -> Result<(), String> {
+        let ask = match command {
+            None => return dashboard_sign_in(profile).await,
+            Some(Dashboard::On) => Ask::DashboardEnable { enabled: true },
+            Some(Dashboard::Off) => Ask::DashboardEnable { enabled: false },
+            Some(Dashboard::SignOut) => Ask::DashboardSignOut,
+            Some(Dashboard::Tunnel(Tunnel::On {
+                subdomain,
+                region,
+                server,
+            })) => Ask::DashboardTunnel {
+                enabled: true,
+                subdomain,
+                region,
+                server,
+            },
+            Some(Dashboard::Tunnel(Tunnel::Off)) => Ask::DashboardTunnel {
+                enabled: false,
+                subdomain: None,
+                region: None,
+                server: None,
+            },
         };
-        format!(
-            "The terminal daemon is from {release}, kept for the agents running in it. \
-             Phones cannot watch its terminals, new ones included, until it is replaced: once \
-             those agents have ended, restart `serve`."
-        )
+        done(profile, ask).await
+    }
+
+    async fn dashboard_sign_in(profile: &Profile) -> Result<(), String> {
+        let Reply::Dashboard(dashboard) = control::ask_once(profile, Ask::Dashboard).await? else {
+            return Err("The host answered something else.".into());
+        };
+        let status = &dashboard.status;
+        println!("Dashboard: {}", status.address);
+        println!("Tunnel: {}", status.tunnel);
+        println!(
+            "\nSign a browser in, within {} minutes, by opening:\n",
+            dashboard.good_for / 60
+        );
+        if let Some(public) = &dashboard.public {
+            println!("  {public}\n");
+            println!("or, on this computer or through a forwarded port:\n");
+        }
+        println!("  {}\n", dashboard.local);
+        println!(
+            "Or open the address alone and type the code: {}\n",
+            dashboard.code
+        );
+        println!(
+            "From another computer, without a tunnel, forward the port first:\n  \
+             ssh -L {port}:127.0.0.1:{port} <this computer>",
+            port = status.port
+        );
+        Ok(())
     }
 
     async fn devices(profile: &Profile) -> Result<(), String> {
@@ -365,6 +473,43 @@ mod cli {
                 done(profile, Ask::SyncRemove { project }).await
             }
         }
+    }
+
+    async fn account(profile: &Profile, command: Account) -> Result<(), String> {
+        let Account::Export { out, yes } = command;
+        let path = out.unwrap_or_else(|| {
+            remote_host::export::file_name(remote_host::account::now_ms()).into()
+        });
+        println!("An export is a file of everything the server keeps of your account:");
+        println!("  Your account: the identity provider, your id there, and when it was made");
+        println!("  Your devices and computers, and which devices each lets in");
+        println!("  Which phones get notifications, never their tokens, and your settings");
+        println!("  Every synced project, note and workspace name, in plain text");
+        println!(
+            "  How much you used each day: devices, connections and bytes, never their content"
+        );
+        println!("Never a credential. Keep the file somewhere only you can read.");
+        if path.exists() {
+            return Err(format!(
+                "{} is there already. Name another with --out.",
+                path.display()
+            ));
+        }
+        if !yes && !confirmed(&format!("Export your account to {}?", path.display())) {
+            return Err("Nothing was exported.".into());
+        }
+        let Reply::Export { export } = control::ask_once(profile, Ask::AccountExport).await? else {
+            return Err("The host answered something else.".into());
+        };
+        remote_host::export::save(&export, &path, false).map_err(|f| f.message)?;
+        println!(
+            "Saved {}: {} devices, {} computers, {} synced records.",
+            path.display(),
+            export.account.devices.len(),
+            export.account.hosts.len(),
+            export.records.len()
+        );
+        Ok(())
     }
 
     async fn memory(profile: &Profile, command: Memory) -> Result<(), String> {
@@ -527,20 +672,41 @@ mod cli {
             }
         }
         println!("Terminals: {}", status.terminals);
+        match status.dashboard {
+            None => println!("Dashboard: off. Turn it on with `yardsort-host dashboard on`."),
+            Some(dashboard) => {
+                println!(
+                    "Dashboard: {}, {} signed in. Sign in with `yardsort-host dashboard`.",
+                    dashboard.address,
+                    match dashboard.signed_in {
+                        1 => "1 browser".to_owned(),
+                        n => format!("{n} browsers"),
+                    }
+                );
+                println!("Tunnel: {}", dashboard.tunnel);
+            }
+        }
         if let Some(earlier) = status.earlier_daemon {
-            println!("{}", earlier_daemon(earlier.version.as_deref()));
+            println!("{}", earlier.words());
         }
         Ok(())
     }
 
     #[cfg(test)]
     mod tests {
-        use super::*;
+        use crate::control::EarlierDaemon;
 
         #[test]
         fn an_earlier_daemon_that_gave_no_version_is_still_named() {
-            assert!(earlier_daemon(Some("0.22.2")).contains("from Yardsort 0.22.2, kept"));
-            assert!(earlier_daemon(None).contains("from an earlier release, kept"));
+            let daemon = |version: Option<&str>| EarlierDaemon {
+                version: version.map(str::to_owned),
+            };
+            assert!(daemon(Some("0.22.2"))
+                .words()
+                .contains("from Yardsort 0.22.2, kept"));
+            assert!(daemon(None)
+                .words()
+                .contains("from an earlier release, kept"));
         }
     }
 }

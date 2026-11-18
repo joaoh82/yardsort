@@ -5,10 +5,11 @@ day. Slice 1, the server's records, was built on 2026-11-14 (§9); its tests and
 passed, and so did its staging run on 2026-11-15. Slice 2, turning a project on and linking it, was
 built the same day (§10); its local smoke test passed, and so did its owner run through staging,
 this computer and the box, on 2026-11-15. Slice 3, approved notes, was built on 2026-11-15 (§11);
-its local smoke test passed, and its owner run through staging is the owner's to make. Slice 4,
+its local smoke test passed. Slice 4,
 workspaces seen elsewhere, was built the same day (§12); its local smoke test passed. Slice 5,
-checking a branch out here, was built the same day too (§13): all five slices are built, and the
-gate's runs through staging (§5) are the owner's to make.
+checking a branch out here, was built the same day too (§13): all five slices are built. Their
+staging runs, the gate's three checks among them (§5), passed on 2026-11-15, this computer and the
+box (§11 to §13).
 
 This is the plan for the phase after R4 and R5 ([35](35-remote-r4-r5.md)): what it has to show, what
 it starts from, the decisions taken before any code, the slices in the order they are built, and
@@ -237,6 +238,8 @@ staging.
   two-machine test, and the owner's run: revoke here while the box is offline with an edit pending.
 - **No files or processes silently migrate:** slices 4 and 5, and the owner's look at the box after
   each run: no new worktree, branch, directory or terminal there.
+
+**Met on 2026-11-15**: each check passed through staging with this computer and the box (§11 to §13).
 
 Nothing in the gate needs a phone. A Mac as the second desktop is welcome, not required: the box is
 an installation as good as any.
@@ -583,10 +586,27 @@ go up. Passed on 2026-11-15 with its steps run by hand, all 24, and again after 
 stand-in's log or either host's. Like the others, it waits for the owner's approval in the app
 before `ys test run` runs it.
 
-**The owner run**, this computer and the box through staging. It needs no deploy, since the server
-reads nothing in a record, but a build of this branch on both, and a way to take each offline from
-staging while its host runs: on the box, a firewall rule, as root; here, the app with the network
-off. That is the gate's run (§5), and the owner's to make.
+**How the staging runs of slices 3 to 5 were made**, on 2026-11-15, `main` at `04db9da` built here
+and on the box, staging as deployed that morning (its sync routes unchanged since; it takes newer
+hosts). A throwaway `yardsort-host` profile on each, signed in through the browser here, the box's
+over a forwarded port. **Offline** was a small HTTPS proxy in front of each host, given as
+`HTTPS_PROXY`, and stopped: every request to the server then fails, "Could not reach the server",
+while the relay's link, which takes no proxy, stays up, so only the hint to pass gets through and
+nothing syncs. No root, no firewall. The Git remote both used was a bare repository on the box,
+reached from here over SSH. At the end the project was removed from staging and both hosts signed
+out, which removes them from the account.
+
+**The owner run through staging**, the gate's (§5), passed on 2026-11-15:
+
+- **Approved here, approved there, in an agent's first message.** A note written here reached the
+  box approved, "from the user, on Sync smoke here", and was in the first message of an agent the box
+  started.
+- **Offline edits converge or surface conflicts.** Both offline, the note edited on each, each with
+  one op waiting and the server unreachable. Back online, the same conflict on both: the box's text
+  standing, this computer's beside it. Settled once, on the box, keeping the other: both ended with
+  that text and no conflict.
+- **Revocations do not resurrect.** Revoked here while the box, offline, had an edit waiting: back
+  online, revoked on both, nothing left to go up, and the box's edit kept in the note's history.
 
 ## 12 · Slice 4: workspaces, seen elsewhere
 
@@ -667,8 +687,11 @@ second, and the second is still unchanged. Passed on 2026-11-15 with its steps r
 15, and no workspace's name was in the stand-in's log or either host's. Like the others, it waits
 for the owner's approval in the app.
 
-**The owner run**, this computer and the box through staging: needs no deploy, only a build of this
-branch on both, and the owner's look at the box afterwards (§5).
+**The owner run through staging** passed on 2026-11-15, as §11 says it was made: a workspace made
+here with `ys` and its branch pushed was listed on the box within seconds, with its computer and
+branch, while the box's workspaces, branches, worktrees and worktree folder stayed byte for byte as
+they were; deleted here, it was gone from the box. Renaming and archiving, the window's, were not
+run.
 
 ## 13 · Slice 5: checking a branch out here
 
@@ -730,6 +753,14 @@ of the second's own on the branch, checking out again is refused and the branch 
 Passed on 2026-11-15 with its steps run by hand, all 18. It waits for the owner's approval in the
 app.
 
-**The owner run**, this computer and the box through staging, with a repository both can push to
-and fetch from: needs no deploy, only a build of this branch on both, and the owner's look at the
-box after (§5).
+**The owner run through staging** passed on 2026-11-15, as §11 says it was made. On the box,
+checking this computer's workspace out was refused from a shell that is not a terminal; at one, it
+made a workspace at the commit pushed from here, tracking `origin`, and this computer's was still
+listed as its own. With a commit only the box had on the branch, checking out again was refused and
+the branch left where it was. **The owner's look at the box** after slices 4 and 5: since before
+them, the box had gained only that branch, from the checkout asked for at its terminal and kept when
+its workspace was deleted. No worktree, folder, workspace or terminal appeared there unasked.
+
+The run found the guard's refusals worded for pairing whatever was asked, "Pairing needs a person at
+a terminal: run `yardsort-host pair`…" for a checkout; each now names what was asked and the command
+to run (`guard::Refusal`, `Ask::person_only`), and a test pins it.

@@ -12,9 +12,11 @@ use yardsort_core::env::ShellEnv;
 use yardsort_core::error::IpcResult;
 use yardsort_core::git::Git;
 use yardsort_core::remote::host::{CredentialStore, FileCredentials};
+use yardsort_core::remote::pull::polled::{self, Polled};
 use yardsort_core::remote::serve::Context;
 use yardsort_core::remote::start::{Starter, Starting};
 use yardsort_core::remote::HostIdentity;
+use yardsort_core::remote::PullRequests;
 use yardsort_core::runtime::InboxWatcher;
 use yardsort_core::settings::SettingsFile;
 use yardsort_core::store::Store;
@@ -39,6 +41,10 @@ pub struct HostHome {
     /// What keeps this host's Notifications list, for the devices that read it. It has nobody
     /// here to tell: a device that follows the list is told by its own channel.
     pub notifications: yardsort_core::notifications::Keeper,
+    /// The dashboard, while it is served (`dashboard.rs`).
+    pub dashboard: std::sync::Mutex<Option<host_dashboard::Dashboard>>,
+    /// The projects' pull requests, read here when a device asks about them.
+    pulls: Arc<yardsort_core::remote::pull::polled::Polled>,
 }
 
 impl HostHome {
@@ -59,6 +65,8 @@ impl HostHome {
             watcher: OnceLock::new(),
             starting: Arc::new(HostStarting(home.clone())),
             notifications: yardsort_core::notifications::Keeper::new(|| {}),
+            dashboard: std::sync::Mutex::new(None),
+            pulls: Arc::new(pulls(home.clone())),
         }))
     }
 
@@ -82,6 +90,12 @@ impl HostHome {
 
     pub fn asking(&self) -> tokio::sync::broadcast::Receiver<Request> {
         self.asked.subscribe()
+    }
+
+    /// Clone a repository into the folder for clones and add it as a project, as a paired
+    /// device's asking does: its id and its name.
+    pub fn clone_project(&self, remote: &str) -> IpcResult<(String, String)> {
+        self.starting.clone_project(remote, None)
     }
 }
 
@@ -135,7 +149,7 @@ impl Home for HostHome {
             workflow: None,
             conversations: Some(&conversations),
             tests: None,
-            pulls: None,
+            pulls: Some(Arc::clone(&self.pulls) as Arc<dyn PullRequests>),
             notifications: Some(&self.notifications),
         });
     }
@@ -144,6 +158,17 @@ impl Home for HostHome {
         // Nobody waiting is fine: the device's request waits at the server for the next `pair`.
         let _ = self.asked.send(request);
     }
+}
+
+/// Pull requests read with this computer's `gh` and its sign-in, in each project's checkout, as
+/// the desktop app's window reads them.
+fn pulls(home: Weak<HostHome>) -> Polled {
+    Polled::new(Arc::new(move |project_id: &str, every_open: bool| {
+        let home = home.upgrade()?;
+        let git = home.git()?;
+        let gh = yardsort_core::forge::Gh::find(home.env());
+        polled::read(&home.store, git, gh.as_ref(), project_id, every_open)
+    }))
 }
 
 /// A device's channel starting agents here, with this host's settings, worktree folder and

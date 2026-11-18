@@ -567,9 +567,9 @@ which and makes nothing, but it still fetches the pull request and says how many
 workspace is behind it, so a second review does not read old code unnoticed. The workspace is
 left as it is. With `--json`, `existing` is `true` and `behind` the count, or `null` when the
 remote could not be reached, with the reason on standard error. A merged or closed pull request is refused. Then
-`ys workflow run code-review --workspace <name>` has an agent review it. That does not work yet for
-a pull request from a fork, because the review finds a pull request by its branch name. It is how
-the [Floor Manager](floor-manager.md) reviews other people's pull requests.
+`ys workflow run code-review --workspace <name>` has an agent review it, a pull request from a fork
+too: its workspace finds it by the number `pr/<number>` follows. It is how the
+[Floor Manager](floor-manager.md) reviews other people's pull requests.
 
 #### Pull requests in other repositories
 

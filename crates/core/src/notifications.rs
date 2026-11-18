@@ -1,5 +1,5 @@
 //! The Notifications list: what waits for a person, and what finished while they were not
-//! looking. See `docs/design/46-notifications.md`.
+//! looking. See `docs/design/48-notifications.md`.
 //!
 //! One row is one thing that happened. A row about an agent's conversation is written here when
 //! the thing happens, and it leaves its part of the list by itself:

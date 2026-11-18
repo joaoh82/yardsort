@@ -188,7 +188,8 @@ process holds the credential, so it does the deciding; the operator asks it to, 
 only the host's user can reach:
 
 - `<data dir>/host.sock`, created `0600` in the private data directory, Unix only. Never a TCP port,
-  never the network. The daemon's socket is not exposed either; nothing listens on the network at all.
+  never the network. The daemon's socket is not exposed either; nothing listens on the network at all. (Since [47](47-host-dashboard.md) the host serves its
+  dashboard, on 127.0.0.1 alone: still nothing another computer can connect to.)
 - `yardsort-host pair` asks the host for an offer and prints its code to type and a QR code drawn
   in the terminal, then waits. When a device asks, it shows the device's name and what it asks for,
   and asks **Allow viewing / Allow viewing and typing / Deny**, and, if the host has more than one

@@ -1,9 +1,10 @@
 //! The control socket: how this computer's own commands (`pair`, `devices`, `revoke`, `status`,
-//! `sign-out`, `sync`, `memory`) ask the running host, which alone holds the sign-in. One JSON
-//! message per line.
+//! `sign-out`, `sync`, `memory`, `account`, `dashboard`) ask the running host, which alone holds the
+//! sign-in. One JSON message per line.
 //!
-//! It is `<data dir>/host.sock`, readable and writable by this user only. Nothing listens on the
-//! network: not this, and not the daemon.
+//! It is `<data dir>/host.sock`, readable and writable by this user only. Neither this nor the
+//! daemon listens on the network. The one thing here that does is the dashboard, on 127.0.0.1
+//! alone (`dashboard.rs`).
 
 use std::path::{Path, PathBuf};
 
@@ -99,25 +100,66 @@ pub enum Ask {
         keep: String,
         text: Option<String>,
     },
+    /// Where the dashboard is, and a one-time way in to it. Refused unless a person at a
+    /// terminal asked: a sign-in code is given to nobody else.
+    Dashboard,
+    /// Serve the dashboard, or stop serving it, and keep that in the settings. Turning it on is
+    /// refused unless a person at a terminal asked.
+    DashboardEnable {
+        enabled: bool,
+    },
+    /// Keep a tunnel to the dashboard, or end it, and keep that in the settings. Turning one on
+    /// is refused unless a person at a terminal asked: it is an address anyone can open.
+    DashboardTunnel {
+        enabled: bool,
+        subdomain: Option<String>,
+        region: Option<String>,
+        server: Option<String>,
+    },
+    /// Sign every browser out of the dashboard. Taking access away needs no check.
+    DashboardSignOut,
+    /// Everything the server keeps of this computer's account, every page put together. Refused
+    /// unless a person at a terminal asked: it holds every synced note and workspace name.
+    AccountExport,
 }
 
 impl Ask {
     /// Only a person at a terminal of their own may ask it (`guard`).
     pub fn guarded(&self) -> bool {
-        matches!(
-            self,
-            Ask::Pair
-                | Ask::SyncOn { .. }
-                | Ask::SyncLink { .. }
-                | Ask::SyncStop { .. }
-                | Ask::SyncRemove { .. }
-                | Ask::SyncCheckout { .. }
-                | Ask::MemoryList { .. }
-                | Ask::MemoryWrite { .. }
-                | Ask::MemoryDecide { .. }
-                | Ask::MemoryEdit { .. }
-                | Ask::MemorySettle { .. }
-        )
+        self.person_only().is_some()
+    }
+
+    /// What it is, in words, and the command that asks it, for a guarded ask: what the guard says
+    /// when it refuses one. `None` for one anybody may ask.
+    pub fn person_only(&self) -> Option<(&'static str, &'static str)> {
+        Some(match self {
+            Ask::MemoryDecide { decision, .. } => (
+                "Deciding about a note",
+                match decision.as_str() {
+                    "reject" => "memory reject",
+                    "revoke" => "memory revoke",
+                    "restore" => "memory restore",
+                    _ => "memory approve",
+                },
+            ),
+            Ask::Pair => ("Pairing", "pair"),
+            Ask::SyncOn { .. } => ("Turning sync on", "sync on"),
+            Ask::SyncLink { .. } => ("Linking a project", "sync link"),
+            Ask::SyncStop { .. } => ("Stopping sync", "sync stop"),
+            Ask::SyncRemove { .. } => ("Removing a project from the server", "sync remove"),
+            Ask::SyncCheckout { .. } => ("Checking a workspace out", "sync checkout"),
+            Ask::MemoryList { .. } => ("Reading a project's memory", "memory list"),
+            Ask::MemoryWrite { .. } => ("Writing a note", "memory write"),
+            Ask::MemoryEdit { .. } => ("Rewriting a note", "memory edit"),
+            Ask::MemorySettle { .. } => ("Settling a note", "memory settle"),
+            Ask::Dashboard => ("Signing in to the dashboard", "dashboard"),
+            Ask::DashboardEnable { enabled: true } => ("Turning the dashboard on", "dashboard on"),
+            Ask::DashboardTunnel { enabled: true, .. } => {
+                ("Opening a tunnel to the dashboard", "dashboard tunnel on")
+            }
+            Ask::AccountExport => ("Exporting the account", "account export"),
+            _ => return None,
+        })
     }
 }
 
@@ -158,6 +200,11 @@ pub enum Reply {
     Preview(yardsort_core::sync::SyncPreview),
     Memory {
         notes: Vec<Note>,
+    },
+    Dashboard(Dashboard),
+    /// The account's export, for the command to save.
+    Export {
+        export: Box<remote_proto::export::AccountExport>,
     },
     /// Done, in words.
     Done {
@@ -224,12 +271,57 @@ pub struct Status {
     /// Set when the daemon is from an earlier release, kept for the agents in it.
     #[serde(default)]
     pub earlier_daemon: Option<EarlierDaemon>,
+    /// The dashboard, while it is served. Absent from a host that has none.
+    #[serde(default)]
+    pub dashboard: Option<DashboardStatus>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EarlierDaemon {
     /// Its release, when it said.
     pub version: Option<String>,
+}
+
+impl EarlierDaemon {
+    /// After an upgrade, while the terminal daemon of the release before still runs agents.
+    pub fn words(&self) -> String {
+        let release = match &self.version {
+            Some(version) => format!("Yardsort {version}"),
+            None => "an earlier release".into(),
+        };
+        format!(
+            "The terminal daemon is from {release}, kept for the agents running in it. \
+             Phones cannot watch its terminals, new ones included, until it is replaced: once \
+             those agents have ended, restart `serve`."
+        )
+    }
+}
+
+/// The dashboard, as `status` shows it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DashboardStatus {
+    /// `http://127.0.0.1:<port>`.
+    pub address: String,
+    pub port: u16,
+    /// The tunnel, in words.
+    pub tunnel: String,
+    /// Browsers signed in.
+    pub signed_in: usize,
+}
+
+/// The dashboard, and a way in to it.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Dashboard {
+    #[serde(flatten)]
+    pub status: DashboardStatus,
+    /// The sign-in code, as typed.
+    pub code: String,
+    /// The address on this computer, with the code in it.
+    pub local: String,
+    /// The address through the tunnel, with the code in it, while the tunnel is up.
+    pub public: Option<String>,
+    /// How long the code is good for, in seconds.
+    pub good_for: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -400,12 +492,73 @@ mod tests {
                 keep: "other".into(),
                 text: None,
             },
+            Ask::AccountExport,
         ] {
             assert!(ask.guarded(), "{ask:?}");
         }
         for ask in [Ask::SyncStatus, Ask::SyncPreview { project: project() }] {
             assert!(!ask.guarded(), "{ask:?}");
         }
+    }
+
+    #[test]
+    fn opening_the_dashboard_up_is_guarded_and_closing_it_never_is() {
+        use crate::guard::Refusal;
+        let tunnel = |enabled| Ask::DashboardTunnel {
+            enabled,
+            subdomain: Some("build-box".into()),
+            region: None,
+            server: None,
+        };
+        for ask in [
+            Ask::Dashboard,
+            Ask::DashboardEnable { enabled: true },
+            tunnel(true),
+        ] {
+            assert!(ask.guarded(), "{ask:?}");
+            // Said in the dashboard's own words, not pairing's.
+            let (act, command) = ask.person_only().unwrap();
+            assert!(command.starts_with("dashboard"), "{command}");
+            let said = Refusal::Job.say(act, command);
+            assert!(
+                said.contains("dashboard") && !said.contains("Pairing"),
+                "{said}"
+            );
+        }
+        for ask in [
+            Ask::DashboardEnable { enabled: false },
+            tunnel(false),
+            Ask::DashboardSignOut,
+        ] {
+            assert!(!ask.guarded(), "{ask:?}");
+        }
+        assert_eq!(
+            Refusal::Job.say("Signing in to the dashboard", "dashboard"),
+            "Signing in to the dashboard is refused to a command the dashboard ran. Only a \
+             person may do it, from a terminal of their own on this computer (an SSH login, \
+             say), never through the dashboard."
+        );
+    }
+
+    #[test]
+    fn a_refusal_names_what_was_asked_and_the_command_to_run() {
+        use crate::guard::Refusal;
+        let ask = Ask::SyncCheckout {
+            project: "widgets".into(),
+            workspace: "fix-login".into(),
+        };
+        let (act, command) = ask.person_only().unwrap();
+        let said = Refusal::NoTerminal.say(act, command);
+        assert_eq!(
+            said,
+            "Checking a workspace out needs a person at a terminal: run `yardsort-host sync \
+             checkout` in one, not from a script."
+        );
+        assert!(!said.contains("Pairing"));
+        assert!(Refusal::Launched
+            .say("Pairing", "pair")
+            .contains("Pairing is refused from a terminal Yardsort started"));
+        assert!(Ask::SyncStatus.person_only().is_none());
     }
 
     #[test]

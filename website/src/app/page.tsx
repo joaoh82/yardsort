@@ -7,6 +7,7 @@ import { Hero } from "@/components/landing/hero";
 import { Ideas } from "@/components/landing/ideas";
 import { Install } from "@/components/landing/install";
 import { OpenSource } from "@/components/landing/open-source";
+import { Phone } from "@/components/landing/phone";
 import { Questions } from "@/components/landing/questions";
 import { Usage } from "@/components/landing/usage";
 import { JsonLd } from "@/components/json-ld";
@@ -23,6 +24,7 @@ export default function Home() {
       <Install />
       <Ideas />
       <Usage />
+      <Phone />
       <Cli />
       <Assist />
       <Harnesses />

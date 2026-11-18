@@ -16,11 +16,19 @@ const core = vi.hoisted(() => ({
   onRemotePairingRequested: vi.fn(),
   remoteProjectsDir: vi.fn(),
   remoteSetProjectsDir: vi.fn(),
+  dashboardStatus: vi.fn(),
+  remoteExport: vi.fn(),
+  remoteDeleteAccount: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
   ipc: core,
 }));
+const native = vi.hoisted(() => ({
+  pickSaveFile: vi.fn(),
+  revealInFileManager: vi.fn(),
+}));
+vi.mock("@/lib/native", () => ({ native }));
 
 import { useProjectsStore } from "@/stores/projects";
 import { useRemoteStore } from "@/stores/remote";
@@ -59,6 +67,13 @@ beforeEach(() => {
   core.remoteRequests.mockResolvedValue({ requests: [], status: on });
   core.onRemotePairingRequested.mockResolvedValue(() => {});
   core.remoteProjectsDir.mockResolvedValue({ set: null, used: "/home/me/Projects" });
+  core.dashboardStatus.mockResolvedValue({
+    enabled: false,
+    address: null,
+    tunnel: null,
+    signedIn: 0,
+    problem: null,
+  });
   useRemoteStore.setState({ asking: [] });
   useProjectsStore.setState({
     projects: [
@@ -535,5 +550,137 @@ describe("where a project cloned for a device goes", () => {
     await userEvent.click(within(section).getByRole("button", { name: "Use the default" }));
     expect(core.remoteSetProjectsDir).toHaveBeenLastCalledWith(null);
     await vi.waitFor(() => expect(section).toHaveTextContent("(the default)"));
+  });
+});
+
+describe("exporting the account", () => {
+  const exported = { path: "/home/me/yardsort-account.json", devices: 3, hosts: 1, records: 42 };
+
+  it("says what the file holds first, and makes nothing until a place is chosen", async () => {
+    core.remoteStatus.mockResolvedValue(on);
+    native.pickSaveFile.mockResolvedValueOnce(null);
+    render(<RemoteSettings />);
+    const section = await screen.findByRole("region", { name: "Your account" });
+    await userEvent.click(
+      within(section).getByRole("button", { name: "Export my account's data…" }),
+    );
+    expect(section).toHaveTextContent("every synced project, note and workspace name");
+    expect(section).toHaveTextContent("never their tokens");
+    expect(section).toHaveTextContent("Never a credential.");
+    expect(core.remoteExport).not.toHaveBeenCalled();
+
+    // The save dialog closed without a place: nothing is asked of the server.
+    await userEvent.click(within(section).getByRole("button", { name: "Choose where to save…" }));
+    expect(native.pickSaveFile).toHaveBeenCalledWith(
+      "Export your account",
+      expect.stringMatching(/^yardsort-account-\d{4}-\d{2}-\d{2}\.json$/),
+    );
+    expect(core.remoteExport).not.toHaveBeenCalled();
+    await userEvent.click(within(section).getByRole("button", { name: "Cancel" }));
+    expect(within(section).queryByText("Never a credential.", { exact: false })).toBeNull();
+    expect(core.remoteExport).not.toHaveBeenCalled();
+  });
+
+  it("saves where the person chose, and says what it holds", async () => {
+    core.remoteStatus.mockResolvedValue(on);
+    native.pickSaveFile.mockResolvedValue(exported.path);
+    core.remoteExport
+      .mockRejectedValueOnce({
+        code: "remote_refused",
+        message: "This server cannot export an account yet. Its operator has to update it.",
+      })
+      .mockResolvedValueOnce(exported);
+    render(<RemoteSettings />);
+    const section = await screen.findByRole("region", { name: "Your account" });
+    await userEvent.click(
+      within(section).getByRole("button", { name: "Export my account's data…" }),
+    );
+    const choose = within(section).getByRole("button", { name: "Choose where to save…" });
+    await userEvent.click(choose);
+    expect(await within(section).findByRole("alert")).toHaveTextContent("cannot export");
+    await userEvent.click(choose);
+    expect(core.remoteExport).toHaveBeenLastCalledWith(exported.path);
+    const saved = await within(section).findByRole("status");
+    expect(saved).toHaveTextContent(
+      "Saved /home/me/yardsort-account.json: 3 devices, 1 computer, 42 synced records.",
+    );
+    await userEvent.click(within(saved).getByRole("button", { name: "Show in folder" }));
+    expect(native.revealInFileManager).toHaveBeenCalledWith(exported.path);
+  });
+
+  it("is not offered while this computer is signed out at the server", async () => {
+    const stopped: RemoteStatus = {
+      ...on,
+      host: {
+        ...on.host!,
+        link: { kind: "stopped", why: "This computer was signed out at the server." },
+      },
+    };
+    core.remoteStatus.mockResolvedValue(stopped);
+    core.remoteRequests.mockResolvedValue({ requests: [], status: stopped });
+    render(<RemoteSettings />);
+    await screen.findByRole("button", { name: "Sign in again" });
+    expect(screen.queryByRole("region", { name: "Your account" })).toBeNull();
+  });
+});
+
+describe("deleting the account", () => {
+  const open = async () => {
+    render(<RemoteSettings />);
+    const section = await screen.findByRole("region", { name: "Your account" });
+    await userEvent.click(within(section).getByRole("button", { name: "Delete my account…" }));
+    return within(section).getByRole("group", { name: "Delete your account" });
+  };
+
+  it("says what goes and what stays, and asks nothing of the server until delete is typed", async () => {
+    core.remoteStatus.mockResolvedValue(on);
+    const asked = await open();
+    expect(asked).toHaveTextContent("every phone and computer signed in to it");
+    expect(asked).toHaveTextContent("every synced project, note and workspace name");
+    expect(asked).toHaveTextContent("everything on this computer and on your other devices");
+    expect(asked).toHaveTextContent("It cannot be undone.");
+    const go = within(asked).getByRole("button", { name: "Sign in again and delete" });
+    expect(go).toBeDisabled();
+    const typed = within(asked).getByRole("textbox", { name: "Type delete to confirm" });
+    await userEvent.type(typed, "delet");
+    expect(go).toBeDisabled();
+    await userEvent.click(within(asked).getByRole("button", { name: "Keep my account" }));
+    expect(screen.queryByRole("group", { name: "Delete your account" })).toBeNull();
+    expect(core.remoteDeleteAccount).not.toHaveBeenCalled();
+  });
+
+  it("waits for the browser, can be cancelled, and once deleted says so with Remote off", async () => {
+    core.remoteStatus.mockResolvedValue(on);
+    let cancelled: (reason: unknown) => void = () => {};
+    core.remoteDeleteAccount.mockImplementationOnce(
+      () => new Promise((_, reject) => (cancelled = reject)),
+    );
+    core.remoteCancel.mockImplementation(async () => {
+      cancelled({
+        code: "remote_cancelled",
+        message: "Deleting was cancelled. Nothing was deleted.",
+      });
+      return on;
+    });
+    const asked = await open();
+    await userEvent.type(
+      within(asked).getByRole("textbox", { name: "Type delete to confirm" }),
+      " Delete",
+    );
+    await userEvent.click(within(asked).getByRole("button", { name: "Sign in again and delete" }));
+    expect(asked).toHaveTextContent("Waiting for the browser…");
+    await userEvent.click(within(asked).getByRole("button", { name: "Cancel" }));
+    expect(await within(asked).findByRole("alert")).toHaveTextContent("Nothing was deleted.");
+
+    core.remoteDeleteAccount.mockResolvedValueOnce({ devices: 3, hosts: 1, records: 42 });
+    core.remoteStatus.mockResolvedValue(off);
+    await userEvent.click(within(asked).getByRole("button", { name: "Sign in again and delete" }));
+    const told = await screen.findByText(/Your account was deleted at the server/);
+    expect(told).toHaveTextContent(
+      "with 3 devices, 1 computer and 42 synced records. Every device was signed out.",
+    );
+    expect(told).toHaveTextContent("everything on it is still here");
+    expect(await screen.findByRole("button", { name: "Turn on and sign in" })).toBeVisible();
+    expect(core.remoteDeleteAccount).toHaveBeenCalledTimes(2);
   });
 });

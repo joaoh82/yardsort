@@ -1,8 +1,10 @@
 //! The control service over HTTP. See [`remote_proto::account`] for the routes and messages.
 //!
 //! Two routes are for a browser, not an app: `/v1/login` and its callback answer with redirects,
-//! and with a short plain-text page when there is nowhere to send the browser. Everything else is
-//! JSON, and a failure is a [`RemoteError`] with the HTTP status that matches its code.
+//! and with a short plain-text page when there is nowhere to send the browser. So are the pages
+//! under `/account/delete` ([`crate::delete_page`]), for deleting an account without an app.
+//! Everything else is JSON, and a failure is a [`RemoteError`] with the HTTP status that matches
+//! its code.
 //!
 //! Starting a sign-in, `/v1/token`, making a pairing offer, redeeming one and asking for a relay
 //! ticket are limited per client address, across every instance ([`crate::limit`]). Behind a
@@ -30,6 +32,8 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use remote_proto::account::{LoginParams, TokenRequest};
+use remote_proto::delete::DeleteRequest;
+use remote_proto::export::ExportQuery;
 use remote_proto::notify::{NoticeSubmission, NotificationPreferences, PushRegistration};
 use remote_proto::pairing::{GrantDecision, HostRegistration, PairingRequest};
 use remote_proto::relay::{TicketRequest, MAX_MESSAGE};
@@ -66,7 +70,8 @@ pub const PAIRINGS_PER_MINUTE: u32 = 10;
 pub const TICKETS_PER_MINUTE: u32 = 60;
 /// Notices, token registrations and reachable calls one device may make a minute.
 pub const NOTICES_PER_MINUTE: u32 = 60;
-/// Sync calls one host may make a minute. A host pushes after each change and pulls when told,
+/// Sync calls one host may make a minute, and pages of an export one device may ask for. A host
+/// pushes after each change and pulls when told,
 /// in batches; catching up after a long time offline is a few dozen pages.
 pub const SYNC_PER_MINUTE: u32 = 120;
 
@@ -98,7 +103,7 @@ impl Default for Options {
     }
 }
 
-type Service<R> = Arc<ControlService<R>>;
+pub(crate) type Service<R> = Arc<ControlService<R>>;
 
 pub fn router<R: Records + Clone + 'static>(
     service: ControlService<R>,
@@ -118,6 +123,9 @@ pub fn router<R: Records + Clone + 'static>(
     };
     let logins = gate("logins", options.logins_per_minute, Answer::Page, false);
     let tokens = gate("tokens", options.tokens_per_minute, Answer::Json, false);
+    // Deleting counts against the same as signing in: through a browser, or with a code.
+    let pages = Arc::clone(&logins);
+    let deletions = Arc::clone(&tokens);
     let offers = gate("offers", options.offers_per_minute, Answer::Json, false);
     let pairings = gate("pairings", options.pairings_per_minute, Answer::Json, false);
     let tickets = gate("tickets", options.tickets_per_minute, Answer::Json, false);
@@ -132,6 +140,7 @@ pub fn router<R: Records + Clone + 'static>(
     crate::relay::start_rechecks(Arc::clone(&service));
     crate::limit::start_sweeping(Arc::downgrade(&service));
     crate::sync::start_pruning(Arc::downgrade(&service));
+    crate::usage::start_flushing(Arc::downgrade(&service));
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/v1/server", get(describe::<R>))
@@ -197,6 +206,37 @@ pub fn router<R: Records + Clone + 'static>(
         )
         .route("/v1/sync/pull", synced(get(sync_pull::<R>)))
         .route("/v1/sync/snapshot", synced(get(sync_snapshot::<R>)))
+        .route("/v1/account/export", synced(get(export::<R>)))
+        .route(
+            "/v1/account/delete",
+            post(delete_account::<R>).route_layer(middleware::from_fn_with_state(
+                Arc::clone(&deletions),
+                limited::<R>,
+            )),
+        )
+        .route(
+            "/account/delete",
+            get(crate::delete_page::intro::<R>).route_layer(middleware::from_fn_with_state(
+                Arc::clone(&pages),
+                limited::<R>,
+            )),
+        )
+        .route(
+            "/account/delete/start",
+            get(crate::delete_page::start::<R>).route_layer(middleware::from_fn_with_state(
+                Arc::clone(&pages),
+                limited::<R>,
+            )),
+        )
+        .route(
+            "/account/delete/confirm",
+            get(crate::delete_page::confirm::<R>)
+                .post(crate::delete_page::delete::<R>)
+                .route_layer(middleware::from_fn_with_state(
+                    Arc::clone(&pages),
+                    limited::<R>,
+                )),
+        )
         .route("/v1/sync/projects", synced(get(sync_projects::<R>)))
         .route("/v1/sync/projects/{id}/link", synced(post(sync_link::<R>)))
         .route(
@@ -907,6 +947,44 @@ async fn sync_pull<R: Records>(
         ));
     };
     answer(service.sync_pull(&caller, query.after.unwrap_or(0)).await)
+}
+
+async fn delete_account<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    body: Result<Json<DeleteRequest>, JsonRejection>,
+) -> Response {
+    let caller = match caller(&service, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    let request = match body_of(body, "The request is not a deletion request.") {
+        Ok(request) => request,
+        Err(not) => return not.into_response(),
+    };
+    answer(service.delete_account(&caller, &request, now_ms()).await)
+}
+
+async fn export<R: Records>(
+    State(service): State<Service<R>>,
+    known: Option<Extension<Caller>>,
+    headers: HeaderMap,
+    query: Result<Query<ExportQuery>, QueryRejection>,
+) -> Response {
+    let caller = match known_caller(&service, known, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    let after = query
+        .ok()
+        .map(|Query(q)| q.after.map(SyncId::new).transpose());
+    let Some(Ok(after)) = after else {
+        return failure(RemoteError::new(
+            ErrorCode::InvalidRequest,
+            "An export's next page starts after a record's sync id.",
+        ));
+    };
+    answer(service.export(&caller, after, now_ms()).await)
 }
 
 #[derive(Deserialize)]

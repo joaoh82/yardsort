@@ -1,7 +1,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// The Notifications list on the phone (46): the bell and its count, the counts on a computer's
+// The Notifications list on the phone (48): the bell and its count, the counts on a computer's
 // row, the list in its three parts, the marks on a computer's workspaces, and seen said back to
 // the computer. Through the real router and the real protocol client, against the fake server.
 
@@ -51,6 +51,7 @@ async function paired(server = new FakeServer()) {
     deviceName: "iPhone",
     incoming: new Incoming(),
     pickImage: async () => null,
+    saveFile: async () => true,
     diagnostics,
     about: { app: "0.1.5", system: "ios 18.1" },
   };

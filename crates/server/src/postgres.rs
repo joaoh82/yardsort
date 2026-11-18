@@ -25,6 +25,7 @@ use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod, Transacti
 use std::collections::BTreeSet;
 
 use remote_proto::account::{DeviceKind, Secret};
+use remote_proto::export::PushRoute;
 use remote_proto::notify::{NotificationPreferences, FLUSH_CAP};
 use remote_proto::pairing::MAX_OFFER_MISSES;
 use remote_proto::sync::{
@@ -35,16 +36,17 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_postgres::{AsyncMessage, Client, IsolationLevel, Row};
 
 use crate::records::{
-    allowance, refused_notices, AccountId, Allowance, Decision, DeliveryEnd, Device, GrantFilter,
-    GrantRecord, GrantStatus, GrantView, Handoff, Host, HostOffer, IncomingNotice, Issued,
-    LinkPlace, NoticePage, NoticeRecord, NoticeToSend, PendingLogin, Records, RecordsError,
-    Redemption, Result, RevokeReason, Revoked, Rotation, Signal, CLAIM_LEASE_MS, OPEN_NOTICE_CAP,
-    SEEN_RESOLUTION_MS, SIGNALS_KEPT,
+    allowance, refused_notices, AccountId, AccountRow, Allowance, Decision, Deleted, DeliveryEnd,
+    Device, GrantFilter, GrantRecord, GrantStatus, GrantView, Handoff, Host, HostOffer,
+    IncomingNotice, Issued, LinkPlace, NoticePage, NoticeRecord, NoticeToSend, PendingLogin,
+    Records, RecordsError, Redemption, Result, RevokeReason, Revoked, Rotation, Signal,
+    CLAIM_LEASE_MS, OPEN_NOTICE_CAP, SEEN_RESOLUTION_MS, SIGNALS_KEPT,
 };
 use crate::sync::{
     decide, kind_of, kind_spelled, Applied, ProjectState, Pulled, Snapshot, Verdict,
 };
 use crate::tokens::TokenHash;
+use crate::usage::{UsageDay, UsageDelta};
 
 /// The schema, in the order it is applied. Append only.
 const MIGRATIONS: &[(i32, &str, &str)] = &[
@@ -96,8 +98,14 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
     (10, "sync", include_str!("../migrations/0010_sync.sql")),
     (
         11,
+        "account_deletion",
+        include_str!("../migrations/0011_account_deletion.sql"),
+    ),
+    (12, "usage", include_str!("../migrations/0012_usage.sql")),
+    (
+        13,
         "agent_finished",
-        include_str!("../migrations/0011_agent_finished.sql"),
+        include_str!("../migrations/0013_agent_finished.sql"),
     ),
 ];
 
@@ -390,6 +398,183 @@ impl Records for PgRecords {
         Ok(AccountId(row.get(0)))
     }
 
+    async fn find_account(&self, issuer: &str, subject: &str) -> Result<Option<AccountId>> {
+        Ok(self
+            .client()
+            .await?
+            .query_opt(
+                "SELECT id FROM accounts WHERE issuer = $1 AND subject = $2",
+                &[&issuer, &subject],
+            )
+            .await
+            .map_err(failed)?
+            .map(|row| AccountId(row.get(0))))
+    }
+
+    async fn delete_account(&self, account: &AccountId, now: i64) -> Result<Option<Deleted>> {
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        // Locked first: a device enrolling or a host registering on it meanwhile waits, then
+        // finds no account.
+        let found = tx
+            .query_opt(
+                "SELECT id FROM accounts WHERE id = $1 FOR UPDATE",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?;
+        if found.is_none() {
+            return Ok(None);
+        }
+        let counts = tx
+            .query_one(
+                "SELECT (SELECT count(*) FROM devices WHERE account = $1),
+                        (SELECT count(*) FROM hosts WHERE account = $1),
+                        (SELECT count(*) FROM sync_records WHERE account = $1)",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?;
+        tx.execute(
+            "WITH lapsed AS (DELETE FROM deleted_credentials WHERE expires_at <= $2)
+             INSERT INTO deleted_credentials (hash, expires_at)
+             SELECT c.hash, c.expires_at FROM access_credentials c
+                 JOIN devices d ON d.id = c.device WHERE d.account = $1
+             UNION ALL
+             SELECT c.hash, c.expires_at FROM refresh_credentials c
+                 JOIN devices d ON d.id = c.device WHERE d.account = $1
+             ON CONFLICT (hash) DO NOTHING",
+            &[&account.0, &now],
+        )
+        .await
+        .map_err(failed)?;
+        // Everything else of the account cascades from its row: tests/records.rs checks that
+        // every table naming an account, a device or a host does.
+        tx.execute("DELETE FROM accounts WHERE id = $1", &[&account.0])
+            .await
+            .map_err(failed)?;
+        tx.commit().await.map_err(failed)?;
+        let count = |at: usize| usize::try_from(counts.get::<_, i64>(at)).unwrap_or(usize::MAX);
+        Ok(Some(Deleted {
+            devices: count(0),
+            hosts: count(1),
+            records: count(2),
+        }))
+    }
+
+    async fn deleted_credential(&self, credential: &TokenHash, now: i64) -> Result<bool> {
+        Ok(self
+            .client()
+            .await?
+            .query_opt(
+                "SELECT 1 FROM deleted_credentials WHERE hash = $1 AND expires_at > $2",
+                &[&bytes(credential), &now],
+            )
+            .await
+            .map_err(failed)?
+            .is_some())
+    }
+
+    async fn add_usage(&self, deltas: &[UsageDelta], now: i64) -> Result<()> {
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        for delta in deltas {
+            let n = |v: u64| i64::try_from(v).unwrap_or(i64::MAX);
+            // An account deleted since it was counted adds nothing.
+            tx.execute(
+                "INSERT INTO usage_days (account, day, relay_bytes, peak_streams, sync_bytes)
+                 SELECT $1, $2, $3, $4, $5 WHERE EXISTS (SELECT 1 FROM accounts WHERE id = $1)
+                 ON CONFLICT (account, day) DO UPDATE SET
+                     relay_bytes = usage_days.relay_bytes + EXCLUDED.relay_bytes,
+                     peak_streams = GREATEST(usage_days.peak_streams, EXCLUDED.peak_streams),
+                     sync_bytes = usage_days.sync_bytes + EXCLUDED.sync_bytes",
+                &[
+                    &delta.account.0,
+                    &delta.day,
+                    &n(delta.relay_bytes),
+                    &n(delta.peak_streams),
+                    &n(delta.sync_bytes),
+                ],
+            )
+            .await
+            .map_err(failed)?;
+            if delta.devices.is_empty() {
+                continue;
+            }
+            let devices: Vec<&str> = delta.devices.iter().map(DeviceId::as_str).collect();
+            tx.execute(
+                "INSERT INTO usage_devices (account, day, device)
+                 SELECT $1, $2, d.id FROM devices d
+                     WHERE d.account = $1 AND d.id = ANY($3)
+                 ON CONFLICT DO NOTHING",
+                &[&delta.account.0, &delta.day, &devices],
+            )
+            .await
+            .map_err(failed)?;
+            tx.execute(
+                "UPDATE usage_days SET active_devices = (
+                     SELECT count(*) FROM usage_devices WHERE account = $1 AND day = $2)
+                 WHERE account = $1 AND day = $2",
+                &[&delta.account.0, &delta.day],
+            )
+            .await
+            .map_err(failed)?;
+        }
+        let today = crate::usage::day_of(now);
+        tx.execute("DELETE FROM usage_devices WHERE day < $1", &[&(today - 1)])
+            .await
+            .map_err(failed)?;
+        tx.execute(
+            "DELETE FROM usage_days WHERE day < $1",
+            &[&(today - crate::usage::USAGE_RETENTION_DAYS)],
+        )
+        .await
+        .map_err(failed)?;
+        tx.commit().await.map_err(failed)
+    }
+
+    async fn usage(&self, from: i64, to: i64) -> Result<Vec<UsageDay>> {
+        let rows = self
+            .client()
+            .await?
+            .query(
+                "SELECT account, day, relay_bytes, peak_streams, sync_bytes, active_devices
+                 FROM usage_days WHERE day BETWEEN $1 AND $2 ORDER BY day, account",
+                &[&from, &to],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(rows.iter().map(usage_day).collect())
+    }
+
+    async fn account_usage(&self, account: &AccountId) -> Result<Vec<UsageDay>> {
+        let rows = self
+            .client()
+            .await?
+            .query(
+                "SELECT account, day, relay_bytes, peak_streams, sync_bytes, active_devices
+                 FROM usage_days WHERE account = $1 ORDER BY day",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(rows.iter().map(usage_day).collect())
+    }
+
+    async fn sync_bytes(&self, account: &AccountId) -> Result<u64> {
+        let row = self
+            .client()
+            .await?
+            .query_one(
+                "SELECT COALESCE(SUM(octet_length(body)), 0)::BIGINT FROM sync_records
+                 WHERE account = $1 AND body IS NOT NULL",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(u64::try_from(row.get::<_, i64>(0)).unwrap_or(0))
+    }
+
     async fn put_login(&self, login: PendingLogin, now: i64) -> Result<()> {
         self.client()
             .await?
@@ -397,8 +582,8 @@ impl Records for PgRecords {
                 "WITH lapsed AS (DELETE FROM pending_logins WHERE expires_at <= $7)
                  INSERT INTO pending_logins
                      (state, nonce, provider_verifier, device_challenge, device_redirect,
-                      expires_at)
-                 VALUES ($1, $2, $3, $4, $5, $6)",
+                      expires_at, confirm)
+                 VALUES ($1, $2, $3, $4, $5, $6, $8)",
                 &[
                     &bytes(&login.state),
                     &bytes(&login.nonce),
@@ -407,6 +592,7 @@ impl Records for PgRecords {
                     &login.device_redirect,
                     &login.expires_at,
                     &now,
+                    &login.confirm,
                 ],
             )
             .await
@@ -421,7 +607,7 @@ impl Records for PgRecords {
             .query_opt(
                 "DELETE FROM pending_logins WHERE state = $1
                  RETURNING nonce, provider_verifier, device_challenge, device_redirect,
-                           expires_at",
+                           expires_at, confirm",
                 &[&bytes(state)],
             )
             .await
@@ -434,6 +620,7 @@ impl Records for PgRecords {
                 device_challenge: row.get(2),
                 device_redirect: row.get(3),
                 expires_at: row.get(4),
+                confirm: row.get(5),
             })
         })
         .transpose()
@@ -444,14 +631,15 @@ impl Records for PgRecords {
             .await?
             .execute(
                 "WITH lapsed AS (DELETE FROM handoffs WHERE expires_at <= $5)
-                 INSERT INTO handoffs (code, account, device_challenge, expires_at)
-                 VALUES ($1, $2, $3, $4)",
+                 INSERT INTO handoffs (code, account, device_challenge, expires_at, confirm)
+                 VALUES ($1, $2, $3, $4, $6)",
                 &[
                     &bytes(&handoff.code),
                     &handoff.account.0,
                     &handoff.device_challenge,
                     &handoff.expires_at,
                     &now,
+                    &handoff.confirm,
                 ],
             )
             .await
@@ -465,7 +653,7 @@ impl Records for PgRecords {
             .await?
             .query_opt(
                 "DELETE FROM handoffs WHERE code = $1
-                 RETURNING account, device_challenge, expires_at",
+                 RETURNING account, device_challenge, expires_at, confirm",
                 &[&bytes(code)],
             )
             .await
@@ -475,6 +663,7 @@ impl Records for PgRecords {
             account: AccountId(row.get(0)),
             device_challenge: row.get(1),
             expires_at: row.get(2),
+            confirm: row.get(3),
         }))
     }
 
@@ -974,6 +1163,8 @@ impl Records for PgRecords {
             GrantFilter::One(id) => ("g.id", id.as_str()),
             GrantFilter::OfHost(host) => ("g.host", host.as_str()),
             GrantFilter::ForDevice(device) => ("g.device", device.as_str()),
+            // Every grant has its account in `g.account`, which the query matches already.
+            GrantFilter::All => ("g.account", account.0.as_str()),
         };
         self.client()
             .await?
@@ -2026,6 +2217,72 @@ impl Records for PgRecords {
         Ok(true)
     }
 
+    async fn account_row(&self, account: &AccountId) -> Result<Option<AccountRow>> {
+        Ok(self
+            .client()
+            .await?
+            .query_opt(
+                "SELECT issuer, subject, created_at FROM accounts WHERE id = $1",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?
+            .map(|row| AccountRow {
+                issuer: row.get(0),
+                subject: row.get(1),
+                created_at: row.get(2),
+            }))
+    }
+
+    async fn push_routes(&self, account: &AccountId) -> Result<Vec<PushRoute>> {
+        self.client()
+            .await?
+            .query(
+                "SELECT device, platform, updated_at FROM push_tokens
+                 WHERE account = $1 ORDER BY device",
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(|row| {
+                Ok(PushRoute {
+                    device: DeviceId::new(row.get::<_, String>(0)).map_err(failed)?,
+                    platform: row.get(1),
+                    updated_at: row.get(2),
+                })
+            })
+            .collect()
+    }
+
+    async fn exported_records(
+        &self,
+        account: &AccountId,
+        after: Option<&SyncId>,
+        limit: usize,
+    ) -> Result<(Vec<SyncRecord>, bool)> {
+        let mut records = self
+            .client()
+            .await?
+            .query(
+                &format!(
+                    "SELECT {RECORD} FROM sync_records r
+                     WHERE r.account = $1 AND NOT r.pruned AND NOT r.deleted
+                       AND r.body IS NOT NULL AND ($2::TEXT IS NULL OR r.id > $2)
+                     ORDER BY r.id LIMIT $3"
+                ),
+                &[&account.0, &after.map(SyncId::as_str), &(limit as i64 + 1)],
+            )
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(sync_record)
+            .collect::<Result<Vec<_>>>()?;
+        let more = records.len() > limit;
+        records.truncate(limit);
+        Ok((records, more))
+    }
+
     async fn prune_sync(
         &self,
         changes_before: i64,
@@ -2423,4 +2680,16 @@ fn failed(error: impl std::error::Error) -> RecordsError {
         cause = next.source();
     }
     RecordsError(text)
+}
+
+fn usage_day(row: &Row) -> UsageDay {
+    let n = |v: i64| u64::try_from(v).unwrap_or(0);
+    UsageDay {
+        account: AccountId(row.get(0)),
+        day: row.get(1),
+        relay_bytes: n(row.get(2)),
+        peak_streams: n(row.get(3)),
+        sync_bytes: n(row.get(4)),
+        active_devices: n(row.get(5)),
+    }
 }

@@ -388,7 +388,7 @@ fn workflow_scope(scope: remote_proto::Scope) -> bool {
     )
 }
 
-fn host_summary(host: Host, caller: &Caller) -> HostSummary {
+pub(crate) fn host_summary(host: Host, caller: &Caller) -> HostSummary {
     HostSummary {
         current: host.device == caller.device,
         id: host.id,
@@ -400,7 +400,7 @@ fn host_summary(host: Host, caller: &Caller) -> HostSummary {
 
 /// A grant as the wire shows it. "Expired" and "revoked by signing its device out" are worked
 /// out here, at `now`, rather than kept.
-fn grant_summary(view: GrantView, now: i64) -> GrantSummary {
+pub(crate) fn grant_summary(view: GrantView, now: i64) -> GrantSummary {
     let grant = view.grant;
     let state = match grant.status {
         GrantStatus::Pending | GrantStatus::Approved if view.device_revoked => GrantState::Revoked,

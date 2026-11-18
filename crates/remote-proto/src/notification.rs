@@ -1,7 +1,7 @@
 //! A host's Notifications list: what waits for its person, and what finished while they were
 //! not looking. Since minor 15.
 //!
-//! The host keeps the list (`docs/design/46-notifications.md`). `notification.list` gives it to
+//! The host keeps the list (`docs/design/48-notifications.md`). `notification.list` gives it to
 //! a device, `notification.seen` says its person has looked, and `notification.follow` has the
 //! host say when the list changes (the [`crate::Event::NotificationsChanged`] event), so a
 //! device reads it again then and not on a clock.

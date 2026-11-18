@@ -55,6 +55,57 @@ has the downloads and the full commit lists.
   when Yardsort is closed and opened again, and one that finished while Yardsort was closed gets
   it. Before, every waiting agent was ringed at each start, looked at or not. Coming back to the
   window with the agent's terminal showing now clears the ring, as switching to its tab does.
+- **A dashboard for setting a server up from a browser** (Remote, under development).
+  **`yardsort-host serve` now serves a web page on `127.0.0.1:28680`, and a host upgraded to this
+  release starts doing so without being asked**; `yardsort-host dashboard off` turns it off for
+  good. The page shows how the host and the computer stand, installs agents, gives Git a name,
+  signs the GitHub CLI in from a browser or with a token, clones repositories as projects, and
+  runs setup commands, each with its output as it comes. It listens on that computer alone: reach
+  it over an SSH forward, or turn on a [rustunnel](https://github.com/joaoh82/rustunnel) tunnel
+  with `yardsort-host dashboard tunnel on --subdomain <name>` for an `https://` address, whose
+  server can read what passes through it. A browser signs in with a one-time link that
+  `yardsort-host dashboard` prints only at a terminal of your own, as `pair` does, and whoever
+  signs in can run commands there as you. It is not another Yardsort and lets no device in. The
+  app can serve the same page for this computer: **Settings → Remote → Host dashboard**, off
+  until you tick it. See [The host dashboard](docs/guide/host-dashboard.md).
+- **Pull requests on the phone from a computer with no screen.** `yardsort-host` now reads its
+  projects' pull requests with its own `gh` when the phone asks, so the badges, the card and the
+  **Pull requests** list show for it as for a desktop. Those a workspace follows in another
+  repository are not read there yet. See [Pull requests on the phone](docs/guide/remote.md#pull-requests-on-the-phone).
+- **Export your account** (Remote, under development). **Settings → Remote → Your account → Export
+  my account's data…** saves everything the server keeps of your account as one JSON file: your
+  devices and computers, which phones get notifications, and every synced project, note and
+  workspace name. It says what the file holds before it is made, and it never holds a credential or
+  a push token. The phone has it under **Settings → Your account**, and a computer with no screen
+  has `yardsort-host account export`. It needs a server of this version. See
+  [Exporting your account](docs/guide/remote.md#exporting-your-account).
+- **Delete your account** (Remote, under development). **Settings → Remote → Your account → Delete
+  my account…** deletes everything the server keeps of your account, for every device, once you have
+  typed delete and signed in again in the browser. Nothing on your computers or phones is deleted,
+  and Remote turns off here. Your other devices say the account was deleted the next time they
+  reach the server. The phone has it under **Settings → Your account**, and the server has a web
+  page for it, `/account/delete`. It needs a server of this version. See
+  [Deleting your account](docs/guide/delete-account.md).
+- **A server counts what each account uses, and can ask about plans** (Remote, under development).
+  The server now keeps, for each account and day, how many of its devices made a request, the most
+  connections they had open, and the bytes the relay carried and its computers synced: counts,
+  never what passed through. `yardsort-server usage` prints them for its operator, and your
+  account's export includes them. A server can be set to ask a plans service before another device
+  signs in, a phone connects to a computer, or more notes sync (`YARDSORT_ENTITLEMENTS_URL`); one
+  you run yourself asks nothing and allows everything, as before. Where a plan has no room, the
+  app, the phone and `ys sync status` say so in the plan's words, a note waits queued until there
+  is room, and nothing already working stops. See
+  [When a server's plan has no room](docs/guide/remote.md#when-a-servers-plan-has-no-room) and
+  [Running the Yardsort server yourself](crates/server/self-host/README.md#plans-and-entitlements).
+- **Pull requests from forks can be code reviewed.** A workspace on a fork's pull request — its
+  branch is `pr/<number>`, from **Start workspace** or `ys pr checkout` — now finds that pull
+  request by the number its branch follows, so **Request code review** and
+  `ys workflow run code-review` work there, and so does the Floor Manager's review of other
+  people's pull requests. The review is posted on the pull request in your project's repository.
+- **A review of a checked-out pull request reads the right diff.** In a workspace from
+  **Start workspace** or `ys pr checkout`, `{{ workspace.base_branch }}` is now the branch the
+  pull request merges into, where it was empty, so the code review compares against it. When it
+  is still empty, the note says why, instead of calling the branch the default one.
 
 ## 0.35.0
 

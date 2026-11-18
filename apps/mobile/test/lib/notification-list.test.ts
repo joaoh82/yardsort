@@ -1,7 +1,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// The Notifications list read from a computer (46), against the real server, relay and host
+// The Notifications list read from a computer (48), against the real server, relay and host
 // through the stand-in (`crates/server/examples/stand-in.rs`), whose host keeps a list as the
 // app does. The words and the three parts are tested without a server in `notifications.test.ts`.
 

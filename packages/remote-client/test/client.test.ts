@@ -10,6 +10,7 @@ import {
   Client,
   ClientError,
   codeFromRedirect,
+  confirmsDeletion,
   type DeviceId,
   NotKept,
   Secret,
@@ -276,5 +277,166 @@ describe("a session", () => {
     expect((await session.access()).expose()).toBe("ys1.at.1");
     expect(presented).toEqual(["ys1.rt.0"]);
     expect(checks).toEqual([0, 0, 0, 0]);
+  });
+});
+
+describe("exporting an account", () => {
+  const server = {
+    server: "4b3c2d1e-0f9a-4b8c-9d7e-6f5a4b3c2d1e",
+    name: "Example",
+    protocol: { major: 1, minor: 0 },
+    issuer: "https://id.example",
+    capabilities: ["account.export"],
+  };
+  const note = (id: string) => ({ kind: "note", id, body: { text: id }, aNewerField: 1 });
+
+  test("every page is put together, by id, and what it holds is kept as sent", async () => {
+    const asked: (string | null)[] = [];
+    const base = serve((request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/v1/server") return Response.json(server);
+      expect(request.headers.get("authorization")).toBe("Bearer the-access");
+      const after = url.searchParams.get("after");
+      asked.push(after);
+      if (after === null) {
+        return Response.json({
+          account: { subject: "ada", devices: [] },
+          records: [note("a"), note("b")],
+          next: "b",
+        });
+      }
+      return Response.json({ records: [note("c")] });
+    });
+    const exported = await new Client(base).exportAccount(new Secret("the-access"), 7);
+    expect(asked).toEqual([null, "b"]);
+    expect(exported).toEqual({
+      format: 1,
+      server: server.server,
+      serverName: "Example",
+      exportedAt: 7,
+      account: { subject: "ada", devices: [] },
+      records: [note("a"), note("b"), note("c")],
+    });
+  });
+
+  test("a rate-limited page is asked for again, and the pages before it are kept", async () => {
+    const asked: (string | null)[] = [];
+    let refusals = 2;
+    const base = serve((request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/v1/server") return Response.json(server);
+      const after = url.searchParams.get("after");
+      asked.push(after);
+      if (after === null) {
+        return Response.json({ account: { subject: "ada" }, records: [note("a")], next: "a" });
+      }
+      if (refusals-- > 0) {
+        return Response.json(
+          { code: "rate_limited", message: "Too many.", retryable: true },
+          { status: 429, headers: { "retry-after": "1" } },
+        );
+      }
+      return Response.json({ records: [note("b")] });
+    });
+    const exported = await new Client(base).exportAccount(new Secret("x"), 1);
+    expect(exported.records.map((r) => r.id)).toEqual(["a", "b"]);
+    expect(asked).toEqual([null, "a", "a", "a"]);
+  });
+
+  test("a page that does not move on stops it, and an older server says so", async () => {
+    const base = serve((request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/v1/server") return Response.json(server);
+      return Response.json({ account: {}, records: [note("a")], next: "a" });
+    });
+    const stuck = await new Client(base).exportAccount(new Secret("x"), 1).catch((e: unknown) => e);
+    expect((stuck as ClientError).kind).toBe("unexpected");
+
+    const older = serve((request) =>
+      new URL(request.url).pathname === "/v1/server"
+        ? Response.json(server)
+        : Response.json(
+            { code: "not_found", message: "Nothing is there.", retryable: false },
+            { status: 404 },
+          ),
+    );
+    const refused = await new Client(older)
+      .exportAccount(new Secret("x"), 1)
+      .catch((e: unknown) => e);
+    expect((refused as ClientError).code).toBe("not_found");
+  });
+});
+
+describe("deleting an account", () => {
+  test("a confirming sign-in says so, and its code deletes with its verifier and the access", async () => {
+    const asked: { request?: { authorization: string | null; body: unknown } } = {};
+    const base = serve(async (request) => {
+      if (new URL(request.url).pathname !== "/v1/account/delete" || request.method !== "POST") {
+        return new Response(null, { status: 404 });
+      }
+      asked.request = {
+        authorization: request.headers.get("authorization"),
+        body: await request.json(),
+      };
+      return Response.json({ devices: 3, hosts: 1, records: 42 });
+    });
+    const client = new Client(base);
+    const confirm = await client.beginSignIn("yardsort://signed-in", "confirm");
+    expect(new URL(confirm.url).searchParams.get("purpose")).toBe("confirm");
+    const plain = await client.beginSignIn("yardsort://signed-in");
+    expect(new URL(plain.url).searchParams.has("purpose")).toBe(false);
+
+    const deleted = await client.deleteAccount(
+      new Secret("the-access"),
+      new Secret("the-code"),
+      confirm.verifier,
+    );
+    expect(deleted).toEqual({ devices: 3, hosts: 1, records: 42 });
+    expect(asked.request).toEqual({
+      authorization: "Bearer the-access",
+      body: { code: "the-code", verifier: confirm.verifier.expose() },
+    });
+    expect(confirmsDeletion(" Delete ")).toBe(true);
+    expect(confirmsDeletion("delet")).toBe(false);
+  });
+
+  test("a device of a deleted account is told why; a reason it does not know reads as unknown", async () => {
+    const base = serve((request) =>
+      Response.json(
+        {
+          code: "unauthenticated",
+          message: "This account was deleted from the server.",
+          retryable: false,
+          reason: new URL(request.url).pathname === "/v1/devices" ? "accountDeleted" : "later",
+        },
+        { status: 401 },
+      ),
+    );
+    const client = new Client(base);
+    const deleted = (await client.devices(new Secret("a")).catch((e: unknown) => e)) as ClientError;
+    expect(deleted.accountDeleted).toBe(true);
+    const later = (await client.hosts(new Secret("a")).catch((e: unknown) => e)) as ClientError;
+    expect(later.remote?.reason).toBe("unknown");
+    expect(later.accountDeleted).toBe(false);
+  });
+
+  test("a plan with no room says so in the operator's words", async () => {
+    const base = serve(() =>
+      Response.json(
+        {
+          code: "forbidden",
+          message: "Your plan has one device.",
+          retryable: false,
+          reason: "planLimit",
+        },
+        { status: 403 },
+      ),
+    );
+    const refused = (await new Client(base)
+      .devices(new Secret("a"))
+      .catch((e: unknown) => e)) as ClientError;
+    expect(refused.planLimit).toBe(true);
+    expect(refused.accountDeleted).toBe(false);
+    expect(refused.message).toBe("Your plan has one device.");
   });
 });

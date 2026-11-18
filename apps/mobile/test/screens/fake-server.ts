@@ -228,6 +228,14 @@ export class FakeServer {
   releases = 0;
   inputs: { data: string; paste: boolean }[] = [];
   resizes: { cols: number; rows: number }[] = [];
+  /** Answer `GET /v1/account/export`, as a server that can export does. */
+  exports = true;
+  /** List `account.delete` and answer `POST /v1/account/delete`, as a server that can delete does. */
+  deletes = true;
+  /** The bodies of each deletion asked for. */
+  deletions: unknown[] = [];
+  /** The account was deleted: every credential is refused, saying why. */
+  deleted = false;
   /** Answer requests for control as if someone else held it. */
   refuseControl = false;
   /** Operations taken and never answered, as when a link goes quiet just after one. */
@@ -256,8 +264,19 @@ export class FakeServer {
         name: this.name,
         protocol: { major: 1, minor: 4 },
         issuer: "https://auth.example.com",
-        capabilities: [],
+        capabilities: this.deletes ? ["account.export", "account.delete"] : ["account.export"],
       });
+    }
+    if (this.deleted && (access || url.pathname === "/v1/token")) {
+      return Response.json(
+        {
+          code: "unauthenticated",
+          message: "This account was deleted from the server.",
+          retryable: false,
+          reason: "accountDeleted",
+        },
+        { status: 401 },
+      );
     }
     if (method === "POST" && url.pathname === "/v1/token") {
       const body = JSON.parse(String(init?.body));
@@ -282,6 +301,11 @@ export class FakeServer {
     }
     if (!signedIn) return refused("Sign in first.");
     if (this.refuseAccess) return refused("It has lapsed.");
+    if (method === "POST" && url.pathname === "/v1/account/delete" && this.deletes) {
+      this.deletions.push(JSON.parse(String(init?.body)));
+      this.deleted = true;
+      return Response.json({ devices: this.devices.length, hosts: this.hosts.length, records: 3 });
+    }
     if (method === "GET" && url.pathname === "/v1/devices") {
       await this.devicesAfter;
       return Response.json({
@@ -307,6 +331,29 @@ export class FakeServer {
         this.preferences = { ...this.preferences, ...sent };
         return new Response(null, { status: 204 });
       }
+    }
+    if (method === "GET" && url.pathname === "/v1/account/export") {
+      if (!this.exports) {
+        return Response.json(
+          { code: "not_found", message: "Nothing is there.", retryable: false },
+          { status: 404 },
+        );
+      }
+      const after = url.searchParams.get("after");
+      const note = (id: string) => ({ kind: "note", id, body: { text: `note ${id}` } });
+      return Response.json(
+        after === null
+          ? {
+              account: {
+                subject: "ana",
+                devices: this.devices.map((d) => ({ ...d, current: d.id === signedIn.id })),
+                hosts: this.hosts,
+              },
+              records: [note("a"), note("b")],
+              next: "b",
+            }
+          : { records: [note("c")] },
+      );
     }
     if (method === "GET" && url.pathname === "/v1/hosts") {
       return Response.json({ hosts: this.hosts });

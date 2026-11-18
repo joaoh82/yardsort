@@ -149,6 +149,8 @@ import {
   type OtherPublishState,
   type OtherPullRequest,
   type ProjectsDir,
+  type DashboardSignIn,
+  type DashboardStatus,
   type OtherHostView,
   type OtherLink,
   type RemoteController,
@@ -164,6 +166,8 @@ import {
   type RemoteDevice,
   type RemoteEarlierDaemon,
   type RemoteLink,
+  type RemoteDeleted,
+  type RemoteExported,
   type RemotePairing,
   type RemoteRequest,
   type RemoteRequests,
@@ -354,6 +358,8 @@ export type {
   OtherPublishState,
   OtherPullRequest,
   ProjectsDir,
+  DashboardSignIn,
+  DashboardStatus,
   OtherHostView,
   OtherLink,
   OtherPairing,
@@ -369,6 +375,8 @@ export type {
   RemoteDevice,
   RemoteEarlierDaemon,
   RemoteLink,
+  RemoteDeleted,
+  RemoteExported,
   RemotePairing,
   RemoteRequest,
   RemoteRequests,
@@ -901,6 +909,17 @@ export const ipc = {
   remoteDisable: () => unwrap(commands.remoteDisable()),
   /** A code to type and a QR code, good once for five minutes. */
   remotePair: () => unwrap(commands.remotePair()),
+  /**
+   * Save everything the server keeps of this computer's account at `path`, as JSON. The path is
+   * the one the person chose in the save dialog.
+   */
+  remoteExport: (path: string) => unwrap(commands.remoteExport(path)),
+  /**
+   * Delete this computer's account at its server, for every device, once the person signs in
+   * again in the browser. Waits for the browser until {@link ipc.remoteCancel}. Remote is off here
+   * afterwards; nothing on this computer is touched.
+   */
+  remoteDeleteAccount: () => unwrap(commands.remoteDeleteAccount()),
   /** Devices waiting for an answer, and the ones let in. */
   remoteRequests: () => unwrap(commands.remoteRequests()),
   remoteAnswer: (grantId: string, answer: RemoteAnswer) =>
@@ -1026,6 +1045,17 @@ export const ipc = {
   /** Where a repository another device has this computer clone goes. */
   remoteProjectsDir: () => unwrap(commands.remoteProjectsDir()),
   remoteSetProjectsDir: (dir: string | null) => unwrap(commands.remoteSetProjectsDir(dir)),
+  /**
+   * The host dashboard: a web page this computer serves to itself, on 127.0.0.1, for looking
+   * after it from a browser. Off until turned on. See `src-tauri/src/dashboard.rs`.
+   */
+  dashboardStatus: () => unwrap(commands.dashboardStatus()),
+  dashboardSetEnabled: (enabled: boolean) => unwrap(commands.dashboardSetEnabled(enabled)),
+  /** Open it in this computer's browser, signed in. */
+  dashboardOpen: () => done(commands.dashboardOpen()),
+  /** A link that signs one browser in, once, for a short while. */
+  dashboardSignInLink: () => unwrap(commands.dashboardSignInLink()),
+  dashboardSignEveryoneOut: () => unwrap(commands.dashboardSignEveryoneOut()),
   /** A device through Remote renamed, archived or deleted a workspace here, or cloned a project. */
   onRemoteChangedProjects: (handler: () => void) =>
     events.remoteChangedProjects.listen(() => handler()),

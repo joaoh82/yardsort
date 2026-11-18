@@ -64,8 +64,8 @@ failure. A file from a repository never runs until you have approved it, new or 
 
 ## Can I use Yardsort from my phone?
 
-Not as a finished feature yet. [Remote](remote.md) is still under development, and the phone app is
-not in the app stores. It stays off, and connects to nothing, until you turn it on in Settings, and
+Not as a finished feature yet. [Remote](remote.md) is still under development, and
+[the phone app](phone.md) is invite only for now: it will be in the app stores in a few weeks. Remote stays off, and connects to nothing, until you turn it on in Settings, and
 whoever runs the server you sign in to can see what passes through it.
 
 ## Will my agents keep running if I close the window?

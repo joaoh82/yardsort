@@ -112,6 +112,10 @@ pub struct PrFacts {
     /// Set when it is one the workspace tracks in another repository: asked about by its link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elsewhere: Option<Elsewhere>,
+    /// The branch it would merge into, when the forge said. For the workspace's own pull
+    /// request it is what the branch is based on, if Yardsort did not start the branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
 }
 
 /// Where a tracked pull request is: its repository, and the project's nested clone of it.
@@ -129,6 +133,17 @@ pub struct Elsewhere {
 }
 
 impl PrFacts {
+    /// The workspace's own pull request, as a run knows it.
+    pub fn own(pr: PullRequest) -> Self {
+        Self {
+            number: pr.number,
+            url: pr.url,
+            title: pr.title,
+            elsewhere: None,
+            base: pr.details.map(|details| details.base),
+        }
+    }
+
     /// What `gh pr …` is given to name it: its number in the workspace's repository, or the
     /// link to one elsewhere, which needs no repository around it.
     pub fn selector(&self) -> String {
@@ -252,12 +267,7 @@ pub fn queue(
             .pull_request(&workspace)
             .map_err(|why| IpcError::new("pull_request_unknown", why))?;
         if let Some(pr) = found.filter(|pr| pr.state == crate::forge::PullRequestState::Open) {
-            facts.pr = Some(PrFacts {
-                number: pr.number,
-                url: pr.url,
-                title: pr.title,
-                elsewhere: None,
-            });
+            facts.pr = Some(PrFacts::own(pr));
         } else if !defers_pull_request(workflow) {
             return Err(IpcError::new(
                 "pull_request_missing",
@@ -596,7 +606,8 @@ fn not_failed(short: &str, status: &str) -> IpcError {
 
 /// The open pull request for the branch `workspace` has checked out: the branch as git says,
 /// the pull request as `gh` says when asked about that branch, the newest when there are more.
-/// For [`Look::pull_request`] implementations.
+/// A branch that follows a pull request (a fork's `pr/<number>`) is that pull request, asked
+/// for by its number. For [`Look::pull_request`] implementations.
 ///
 /// `gh` is given [`PULL_REQUEST_LIMIT`] to answer, and not answering is an error like any
 /// other. Queuing waits on this, and the schedules thread queues: one workflow on a network
@@ -631,6 +642,18 @@ fn pull_request_within(
             ))
         }
     };
+    // A branch made for a pull request — a fork's `pr/<number>`, or one `gh pr checkout` set
+    // up — says which one in git's config. On the forge its head has another name, one that
+    // many forks may share, so asking by name finds nothing, or somebody else's.
+    let followed = git
+        .followed_pull_request(root, &branch)
+        .map_err(|e| e.to_string())?;
+    if let Some(number) = followed {
+        let pr = gh
+            .pull_request_within(root, number, limit)
+            .map_err(|error| asked_error(&error, &workspace.name))?;
+        return Ok((pr.state == crate::forge::PullRequestState::Open).then_some(pr));
+    }
     let listed = gh
         .open_pull_requests_for(root, &branch, limit)
         .map_err(|error| asked_error(&error, &workspace.name))?;
@@ -688,9 +711,18 @@ pub fn empty_variables(workflow: &Workflow, place: &Place, memory_shared: bool) 
         ));
     }
     if used.contains("workspace.base_branch") && place.base_branch.is_none() {
+        let why = match (&place.branch, &place.default_branch) {
+            (None, _) => format!("`{name}` is not on a branch"),
+            (Some(branch), Some(default)) if branch == default => {
+                format!("`{name}` is on the default branch, which is based on nothing")
+            }
+            (Some(branch), _) => format!(
+                "Yardsort did not start `{branch}`, and git does not say which branch is the \
+                 repository's default"
+            ),
+        };
         empty.push(format!(
-            "`{{{{ workspace.base_branch }}}}` will be empty: `{name}` is on the default branch, \
-             which is based on nothing."
+            "`{{{{ workspace.base_branch }}}}` will be empty: {why}."
         ));
     }
     if used.contains("memory") && !memory_shared {
@@ -930,9 +962,12 @@ pub struct Place {
     /// The branch checked out: the workspace's own, or, for the project's own checkout, which
     /// has no branch of Yardsort's making, whatever git has checked out there.
     pub branch: Option<String>,
-    /// What the branch was started from, or, when Yardsort did not start it, the repository's
-    /// default branch — unless that is the branch itself, which is based on nothing.
+    /// What the branch was started from, or, when Yardsort did not start it, the base of its
+    /// pull request or else the repository's default branch — unless that is the branch
+    /// itself, which is based on nothing.
     pub base_branch: Option<String>,
+    /// The repository's default branch, as git says in the project's own checkout.
+    pub default_branch: Option<String>,
 }
 
 impl Place {
@@ -951,10 +986,16 @@ impl Place {
             Ok(crate::git::Head::Branch(name)) => Some(name),
             _ => None,
         });
+        // Asked in the project's checkout, as a new workspace's base is: in a worktree git
+        // falls back to the worktree's own branch, which would make every branch the default.
+        let default_branch = git
+            .default_branch(Path::new(&project.root_path))
+            .ok()
+            .flatten();
         let base_branch = workspace
             .base_branch
             .clone()
-            .or_else(|| git.default_branch(root).ok().flatten())
+            .or_else(|| default_branch.clone())
             .filter(|base| Some(base) != branch.as_ref());
         Ok(Some(Self {
             project,
@@ -962,7 +1003,24 @@ impl Place {
             task,
             branch,
             base_branch,
+            default_branch,
         }))
+    }
+
+    /// The place with the workspace's pull request known. A branch Yardsort did not start, a
+    /// pull request's checked out by `ys pr checkout` or **Start workspace**, is based on what
+    /// the pull request merges into, which need not be the default branch.
+    #[must_use]
+    pub fn with_pull_request(mut self, pr: Option<&PrFacts>) -> Self {
+        let own_base = pr
+            .filter(|pr| pr.elsewhere.is_none())
+            .and_then(|pr| pr.base.clone());
+        if let (None, Some(base)) = (&self.workspace.base_branch, own_base) {
+            if Some(&base) != self.branch.as_ref() {
+                self.base_branch = Some(base);
+            }
+        }
+        self
     }
 
     /// The place as a run with these `facts` sees it. A workspace made for the run was started
@@ -973,7 +1031,7 @@ impl Place {
         if facts.new_workspace {
             self.task = None;
         }
-        self
+        self.with_pull_request(facts.pr.as_ref())
     }
 
     /// A `project.…` or `workspace.…` variable. Others are the caller's.

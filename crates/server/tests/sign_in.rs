@@ -55,6 +55,7 @@ fn params(verifier: &str, redirect: &str) -> LoginParams {
         challenge: tokens::s256(verifier),
         challenge_method: "S256".into(),
         redirect: redirect.into(),
+        purpose: None,
     }
 }
 

@@ -305,6 +305,9 @@ A fork's branch is not in your project's remote, so the workspace gets a local b
   `git push` in a terminal is refused by git for the same reason.
 - The pull request still shows on the workspace's row and toolbar, as it would for a branch of
   your own.
+- [**Request code review**](workflows.md#requesting-a-code-review) works there too. It finds the
+  pull request by the number the branch follows, not by its name, and the reviewer posts on the
+  pull request in your project's repository, not on the fork.
 
 If you have push access to the fork and want to update the pull request, push by hand from a
 shell tab to the fork's URL and branch.

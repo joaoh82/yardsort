@@ -75,7 +75,7 @@ no terminal left to open.
 
 ### An agent that finished
 
-Added with the Notifications list ([46](46-notifications.md), its slice 5). The list has a row
+Added with the Notifications list ([48](48-notifications.md), its slice 5). The list has a row
 for an agent that finished a stretch of work and was not looked at. A row that stays unseen is
 told to the phone: the `agent` category's second kind, `finished`.
 
@@ -161,7 +161,7 @@ each for `task`, `review`, `failure`, `desktopUpdate`, `workflow`, and `agent`. 
 in to the account may read or replace them. The default is all on, and not muted.
 
 The `agent` category has two flags, one for each of its kinds: `agent` for an agent that needs
-you, and `agentFinished` for one that finished (migration `0011`). Every other category has one.
+you, and `agentFinished` for one that finished (migration `0013`). Every other category has one.
 
 `agent` and `agentFinished` came later than the rest, so each may be absent both ways. A phone
 from before one saves without it, and the stored value is kept. A server from before one does

@@ -3058,6 +3058,7 @@ fn a_run_queued_without_a_pull_request_waits_then_follows_the_one_it_finds() {
         url: "https://github.com/o/r/pull/9".into(),
         title: "Add a logout button".into(),
         elsewhere: None,
+        base: None,
     });
     *hands.posts.lock().unwrap() = vec![post(
         crate::forge::PrPostKind::Review,

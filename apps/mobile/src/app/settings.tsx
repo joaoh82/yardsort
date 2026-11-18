@@ -35,6 +35,18 @@ export default function Settings() {
           </Body>
         </Section>
       )}
+      {snapshot.active && (
+        <Section title="Your account">
+          <Group>
+            <Row title="Export my account’s data" onPress={() => router.push("/export")} />
+            <Row title="Delete my account" onPress={() => router.push("/delete-account")} />
+          </Group>
+          <Body muted>
+            Everything {snapshot.active.serverName} keeps of your account, as a file you keep, or
+            gone for every device. Nothing on your computers is deleted.
+          </Body>
+        </Section>
+      )}
       <Section title="Notifications">
         <Group>
           <Row title="Notifications" onPress={() => router.push("/notifications")} />

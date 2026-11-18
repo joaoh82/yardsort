@@ -10,6 +10,7 @@ mod commands;
 mod computers;
 mod conversations;
 mod coordinator;
+mod dashboard;
 #[cfg(target_os = "linux")]
 mod display;
 mod draft;
@@ -175,6 +176,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             remote::remote_cancel,
             remote::remote_disable,
             remote::remote_pair,
+            remote::remote_export,
+            remote::remote_delete_account,
             remote::remote_requests,
             remote::remote_answer,
             remote::remote_revoke,
@@ -207,6 +210,11 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             computers::project_repository,
             computers::remote_projects_dir,
             computers::remote_set_projects_dir,
+            dashboard::dashboard_status,
+            dashboard::dashboard_set_enabled,
+            dashboard::dashboard_open,
+            dashboard::dashboard_sign_in_link,
+            dashboard::dashboard_sign_everyone_out,
             remote_terminal::remote_terminal_open,
             remote_terminal::remote_terminal_close,
             remote_terminal::remote_terminal_take_control,
@@ -440,6 +448,7 @@ pub fn run() {
         .expect("error while running Yardsort")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                dashboard::leaving(app);
                 one_copy::leaving();
             }
             // A start that failed has no window left, only its dialog. Stay until it is closed.
@@ -612,6 +621,8 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
     // And the other computers this one reaches as a client, when it is signed in as one.
     let handle = app.handle().clone();
     tauri::async_runtime::spawn(async move { computers::start(&handle) });
+    // The host dashboard, when it was turned on.
+    dashboard::start_if_wanted(app.handle());
 
     // Warm the login-shell environment now, so the first terminal doesn't wait for it.
     // Then bring a `ys` an older version installed up to this one. Not from a development

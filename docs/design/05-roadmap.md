@@ -1103,7 +1103,20 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       passed. Slice 5, checking a branch out here, was built the same day (42 §13): **Check out
       here** and `yardsort-host sync checkout`, fetching from the remote and never moving a branch
       with commits of its own; its local smoke test, `sync-checkout.yaml`, passed. All five
-      slices are built; the gate's runs through staging are the owner's.
+      slices are built, and the gate's runs through staging passed on 2026-11-15, this computer
+      and the box: offline edits shown as one conflict on both and settled once, a revoke over an
+      offline edit holding on both, and nothing made on the box that it did not ask for.
+      R7 planned on 2026-11-16 in [46](46-remote-r7.md): ten slices, four of them (exporting
+      and deleting an account, entitlements and metering, the isolation test) buildable now and
+      the rest waiting on the owner's answers to its eleven questions, production, the stores,
+      billing and a status page among them. Slice 1 built on 2026-11-17: an account's export, from
+      the desktop's Settings → Remote, the phone's Settings and `yardsort-host account export`, of
+      everything the server keeps of it but credentials and push tokens (46 §9). Slice 2 built
+      the same day: deleting an account, from the desktop, the phone or the server's own page,
+      after the person signs in again; every device told, nothing local touched (46 §10). Slice 4
+      built the same day: an entitlements service asked before another device, a connection or
+      more synced data, unset on a self-hosted server, with a day's grace when it cannot be
+      reached; and each account's daily usage, with `yardsort-server usage` (46 §11).
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is
@@ -1362,8 +1375,10 @@ history a line at a time.
 - [x] Its smoke test, `remote-phone-sees-pull-requests`, passed on Linux (2026-11-15): the real
       window, a stand-in `gh`, a pretend phone.
 - [ ] See it on a phone.
-- [ ] A notification when a check fails or a review arrives (issue #263); merging from the phone;
-      pull requests of a computer with no window.
+- [x] Pull requests of a computer with no window (2026-11-17): `yardsort-host` reads them with
+      its own `gh` when a device asks (`remote::pull::polled`). Not yet those a workspace follows
+      in another repository.
+- [ ] A notification when a check fails or a review arrives (issue #263); merging from the phone.
 
 _Exit:_ on a phone, a person reads an agent's whole conversation without scrolling sideways,
 answers its permission question, and sends it the next message, while the computer's terminal
@@ -1390,7 +1405,7 @@ screen.
 
 ## M34 — Notifications
 
-Proposed in Figma and answered on 2026-11-17 ([46-notifications](46-notifications.md)): one list,
+Proposed in Figma and answered on 2026-11-17 ([48-notifications](48-notifications.md)): one list,
 on the desktop and on the phone, of what needs a person and what finished while they were not
 looking.
 
@@ -1428,6 +1443,27 @@ looking.
 
 _Exit:_ with agents at work in several projects and on more than one computer, a person learns
 from one place, at the desk or on the phone, which of them wait for an answer and which finished.
+
+## M35 — The host dashboard
+
+Asked for by the owner on 2026-11-17, after the one-line install
+([#267](https://github.com/joaoh82/yardsort/pull/267)) left the rest of a server's setup to SSH.
+Built the same day, in one piece: [47-host-dashboard](47-host-dashboard.md).
+
+- [x] A web page a host serves to itself on 127.0.0.1, port 28680: how the host and the computer
+      stand, installing agents, Git and GitHub, cloning, and running setup commands as jobs.
+- [x] A browser signs in with a one-time code that only a person is given, by
+      `yardsort-host dashboard` behind the operator's guard or by the app's window. It can do
+      nothing that guard is there to stop.
+- [x] On by default in `yardsort-host serve`; off in the app, under **Settings → Remote**.
+- [x] A rustunnel tunnel, with a subdomain, for an address beyond that computer. Off until asked
+      for, and the token is rustunnel's to keep.
+- [ ] Run on a real server, and through a real tunnel, by the owner.
+- [ ] Reachable in a container (47, open question 1).
+
+_Exit:_ a person installs `yardsort-host` on a new server with one line, signs it in, opens the
+dashboard and finishes the rest there, an agent, GitHub and their repositories, without typing
+another command over SSH but the agent's own sign-in.
 
 ## Later (unordered)
 

@@ -49,6 +49,10 @@ const REFRESH_MARGIN_MS: u64 = 60_000;
 /// How long a connection to the loopback listener has to send its request. Connections are
 /// served one at a time, so one that sends nothing must not hold up the browser's.
 const RETURN_READ_TIMEOUT: Duration = Duration::from_secs(5);
+/// How many times a page of an export is asked for again after the server's rate limit, and the
+/// first wait before it; each wait is twice the one before. The pages already read are kept.
+const EXPORT_RETRIES: u32 = 6;
+const EXPORT_BACKOFF: Duration = Duration::from_millis(500);
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -71,6 +75,11 @@ pub enum ClientError {
 }
 
 impl ClientError {
+    /// Whether the server said this device's account was deleted.
+    pub fn account_deleted(&self) -> bool {
+        matches!(self, Self::Remote(e) if e.reason == Some(remote_proto::ErrorReason::AccountDeleted))
+    }
+
     /// The server's reason, when it gave one.
     pub fn code(&self) -> Option<ErrorCode> {
         match self {
@@ -135,6 +144,17 @@ impl Client {
     /// Start signing in: listen on a free loopback port, and make the address to open in the
     /// browser. [`SignIn::finish`] waits for it to come back.
     pub async fn begin_sign_in(&self) -> Result<SignIn> {
+        self.begin(None).await
+    }
+
+    /// Start signing in again to confirm deleting the account: the provider is asked to have the
+    /// person sign in whatever session it has, and the code that comes back is good for
+    /// [`SignIn::delete_account`] alone.
+    pub async fn begin_confirm(&self) -> Result<SignIn> {
+        self.begin(Some("confirm")).await
+    }
+
+    async fn begin(&self, purpose: Option<&str>) -> Result<SignIn> {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .map_err(|e| ClientError::Invalid(format!("listening for the sign-in: {e}")))?;
@@ -148,6 +168,9 @@ impl Client {
             .append_pair("challenge", &s256(&verifier))
             .append_pair("challengeMethod", CHALLENGE_METHOD)
             .append_pair("redirect", &format!("http://127.0.0.1:{port}/signed-in"));
+        if let Some(purpose) = purpose {
+            url.query_pairs_mut().append_pair("purpose", purpose);
+        }
         Ok(SignIn {
             url,
             listener,
@@ -312,6 +335,74 @@ impl Client {
         self.send(self.authed(self.http.get(url), access)).await
     }
 
+    /// `GET /v1/account/export`: one page of the account's export, the first without `after`.
+    pub async fn export_page(
+        &self,
+        access: &Secret,
+        after: Option<&remote_proto::sync::SyncId>,
+    ) -> Result<remote_proto::export::ExportPage> {
+        let mut url = self.url("v1/account/export")?;
+        if let Some(after) = after {
+            url.query_pairs_mut().append_pair("after", after.as_str());
+        }
+        self.send(self.authed(self.http.get(url), access)).await
+    }
+
+    /// The whole of the account's export, every page put together, as the file a person keeps.
+    /// A server too old to export answers `not_found`.
+    pub async fn export(
+        &self,
+        access: &Secret,
+        exported_at: i64,
+    ) -> Result<remote_proto::export::AccountExport> {
+        let server = self.describe().await?;
+        let first = self.export_page_patiently(access, None).await?;
+        let account = first.account.ok_or_else(|| {
+            ClientError::Unexpected("the export's first page had no account".into())
+        })?;
+        let mut records = first.records;
+        let mut next = first.next;
+        while let Some(after) = next {
+            let page = self.export_page_patiently(access, Some(&after)).await?;
+            // Pages go by id: one that does not move on would never end.
+            if page.records.first().is_none_or(|r| r.id <= after) {
+                return Err(ClientError::Unexpected(
+                    "the export's pages did not move on".into(),
+                ));
+            }
+            records.extend(page.records);
+            next = page.next;
+        }
+        Ok(remote_proto::export::AccountExport {
+            format: remote_proto::export::EXPORT_FORMAT,
+            server: server.server,
+            server_name: server.name,
+            exported_at,
+            account,
+            records,
+        })
+    }
+
+    /// A page of the export, asked for again after a wait while the server says it is asked too
+    /// often: its limit is shared with sync, and a large account has many pages.
+    async fn export_page_patiently(
+        &self,
+        access: &Secret,
+        after: Option<&remote_proto::sync::SyncId>,
+    ) -> Result<remote_proto::export::ExportPage> {
+        let mut wait = EXPORT_BACKOFF;
+        for _ in 0..EXPORT_RETRIES {
+            match self.export_page(access, after).await {
+                Err(error) if error.code() == Some(ErrorCode::RateLimited) => {
+                    tokio::time::sleep(wait).await;
+                    wait *= 2;
+                }
+                answer => return answer,
+            }
+        }
+        self.export_page(access, after).await
+    }
+
     /// `GET /v1/sync/projects`: the account's synced projects, to link one.
     pub async fn sync_projects(&self, access: &Secret) -> Result<remote_proto::sync::SyncProjects> {
         self.send(self.authed(self.http.get(self.url("v1/sync/projects")?), access))
@@ -427,6 +518,31 @@ impl SignIn {
             return Err(not_it());
         }
         came_back(&url).unwrap_or_else(|| Err(not_it()))
+    }
+
+    /// Delete the account of the device holding `access`, with the code a confirming sign-in
+    /// ([`Client::begin_confirm`]) brought back. A server too old to delete answers `not_found`.
+    pub async fn delete_account(
+        self,
+        client: &Client,
+        access: &Secret,
+        code: String,
+    ) -> Result<remote_proto::delete::AccountDeleted> {
+        let request = remote_proto::delete::DeleteRequest {
+            code: Secret::new(code),
+            verifier: self.verifier,
+        };
+        client
+            .send(
+                client.authed(
+                    client
+                        .http
+                        .post(client.url("v1/account/delete")?)
+                        .json(&request),
+                    access,
+                ),
+            )
+            .await
     }
 
     /// Redeem the code the browser brought back as `device`.
@@ -620,6 +736,7 @@ pub(crate) fn chain(error: &dyn std::error::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn only_https_or_a_loopback_address_is_spoken_to() {
@@ -780,6 +897,150 @@ mod tests {
 
     /// A stand-in for `POST /v1/token` that answers each refresh with the next credentials,
     /// lapsing at once, and reports each refresh credential presented to it.
+    /// An export of two pages, the second refused as too often `refusals` times first.
+    async fn export_server(refusals: usize) -> (Client, Arc<Mutex<Vec<String>>>) {
+        use axum::extract::{RawQuery, State};
+        use axum::http::StatusCode;
+        use axum::response::IntoResponse;
+        use axum::routing::get;
+        type Shared = (Arc<Mutex<Vec<String>>>, Arc<Mutex<usize>>);
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let state: Shared = (Arc::clone(&asked), Arc::new(Mutex::new(refusals)));
+        let note = |id: &str| {
+            serde_json::json!({
+                "kind": "note", "id": id, "project": id, "revision": 1, "schema": 1,
+                "body": { "text": id }, "host": "5c4d3e2f-1a0b-4c9d-8e7f-6a5b4c3d2e1f",
+                "changedAt": 1,
+            })
+        };
+        const A: &str = "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e";
+        const B: &str = "2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f";
+        let page = move |State((asked, refusals)): State<Shared>, RawQuery(query): RawQuery| async move {
+            asked
+                .lock()
+                .unwrap()
+                .push(query.clone().unwrap_or_default());
+            if query.is_none() {
+                return axum::Json(serde_json::json!({
+                    "account": {
+                        "id": "account", "issuer": "https://id.example", "subject": "ada",
+                        "createdAt": 1, "devices": [], "hosts": [], "grants": [], "pushRoutes": [],
+                        "notifications": {
+                            "muted": false, "task": true, "review": true, "failure": true,
+                            "desktopUpdate": true, "workflow": true,
+                        },
+                    },
+                    "records": [note(A)],
+                    "next": A,
+                }))
+                .into_response();
+            }
+            let mut left = refusals.lock().unwrap();
+            if *left > 0 {
+                *left -= 1;
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    axum::Json(RemoteError::new(ErrorCode::RateLimited, "Too many.")),
+                )
+                    .into_response();
+            }
+            axum::Json(serde_json::json!({ "records": [note(B)] })).into_response()
+        };
+        let app = axum::Router::new()
+            .route(
+                "/v1/server",
+                get(|| async {
+                    axum::Json(serde_json::json!({
+                        "server": "4b3c2d1e-0f9a-4b8c-9d7e-6f5a4b3c2d1e", "name": "Example",
+                        "protocol": { "major": 1, "minor": 0 }, "issuer": "https://id.example",
+                        "capabilities": ["account.export"],
+                    }))
+                }),
+            )
+            .route("/v1/account/export", get(page))
+            .with_state(state);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (
+            Client::new(&format!("http://127.0.0.1:{port}")).unwrap(),
+            asked,
+        )
+    }
+
+    /// A confirming sign-in asks for one, and its code goes to the deletion with this sign-in's
+    /// verifier and the device's access; the server's word that the account is gone is read.
+    #[tokio::test]
+    async fn a_confirming_sign_in_deletes_with_its_own_verifier() {
+        use axum::http::HeaderMap;
+        use axum::routing::post;
+        let seen: Arc<Mutex<Option<(String, serde_json::Value)>>> = Arc::default();
+        let kept = Arc::clone(&seen);
+        let app = axum::Router::new().route(
+            "/v1/account/delete",
+            post(
+                move |headers: HeaderMap, axum::Json(body): axum::Json<serde_json::Value>| async move {
+                    let bearer = headers["authorization"].to_str().unwrap().to_owned();
+                    *kept.lock().unwrap() = Some((bearer, body));
+                    axum::Json(serde_json::json!({ "devices": 3, "hosts": 1, "records": 2 }))
+                },
+            ),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = Client::new(&format!("http://127.0.0.1:{port}")).unwrap();
+
+        let confirm = client.begin_confirm().await.unwrap();
+        let purpose = |sign_in: &SignIn| {
+            sign_in
+                .url()
+                .query_pairs()
+                .find(|(k, _)| k == "purpose")
+                .map(|(_, v)| v.into_owned())
+        };
+        assert_eq!(purpose(&confirm).as_deref(), Some("confirm"));
+        assert_eq!(purpose(&client.begin_sign_in().await.unwrap()), None);
+        let verifier = confirm.verifier.expose().to_owned();
+        let deleted = confirm
+            .delete_account(&client, &Secret::new("the-access"), "the-code".into())
+            .await
+            .unwrap();
+        assert_eq!((deleted.devices, deleted.hosts, deleted.records), (3, 1, 2));
+        let (bearer, body) = seen.lock().unwrap().take().unwrap();
+        assert_eq!(bearer, "Bearer the-access");
+        assert_eq!(
+            body,
+            serde_json::json!({ "code": "the-code", "verifier": verifier })
+        );
+
+        let deleted = ClientError::Remote(
+            RemoteError::new(ErrorCode::Unauthenticated, "Gone.")
+                .because(remote_proto::ErrorReason::AccountDeleted),
+        );
+        assert!(deleted.account_deleted());
+        assert!(
+            !ClientError::Remote(RemoteError::new(ErrorCode::Unauthenticated, "Out."))
+                .account_deleted()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_export_waits_out_the_rate_limit_and_keeps_the_pages_it_has() {
+        let (client, asked) = export_server(2).await;
+        let export = client.export(&Secret::new("access"), 7).await.unwrap();
+        assert_eq!(export.records.len(), 2);
+        assert_eq!(export.account.subject, "ada");
+        let asked = asked.lock().unwrap().clone();
+        assert_eq!(
+            asked.len(),
+            4,
+            "the first page once, the second three times: {asked:?}"
+        );
+        assert_eq!(asked[0], "", "the first page is never asked again");
+        assert!(asked[1..].iter().all(|q| q.starts_with("after=")));
+    }
+
     async fn token_server() -> (Client, tokio::sync::mpsc::UnboundedReceiver<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();

@@ -402,8 +402,35 @@ From the first slice in [37-floor-manager](37-floor-manager.md), 2026-11-09.
     says so. It is not a sandbox, and the harness's own prompts are a second line, not the
     only one. The owner
     called trusted "god mode"; the setting is named Trusted.
-54. **How should a fork's pull request be reviewed?** `ys pr checkout` makes `pr/<number>`, and
-    the built-in review finds a pull request by its branch name. The review could take a pull
-    request number as an input instead.
+54. ~~**How should a fork's pull request be reviewed?**~~ **Settled 2026-11-17: by the number its
+    branch follows.** `ys pr checkout` and **Start workspace** make `pr/<number>` and record the
+    pull request in git (`branch.pr/<n>.merge` is `refs/pull/<n>/head`, see 25). Finding a
+    workspace's pull request reads that first and asks `gh pr view <n>`, falling back to the
+    branch's name only when the branch follows nothing. So the review needed no new input, and
+    every other user of the lookup (triggers, `{{ pr.* }}`) gets the same answer. `gh` in the
+    worktree resolves the project's own remote, so the review is posted on the parent
+    repository.
 55. **What is it called?** _Floor Manager_ and _Floor Planner_ were offered. The code calls it
     `coordinator` so that a rename touches only the words.
+
+## The host dashboard
+
+From its one slice in [47-host-dashboard](47-host-dashboard.md), 2026-11-17. None of these was
+put to the owner before it was built.
+
+56. **How is the dashboard reached in a container?** It listens on the container's own
+    127.0.0.1, which a published port does not reach, and the images carry no `rustunnel`. A
+    listen address the image sets, published on the computer's loopback alone, or `rustunnel` in
+    the full image.
+57. **Should the page have a terminal?** An agent's own sign-in, `sudo` with a password and
+    `rustunnel setup` want one, and a job has none. It would finish the setup without SSH, and
+    make the dashboard a shell on the internet behind one cookie.
+58. **Should a device be paired from the dashboard?** Left out on purpose: as it is, a signed-in
+    browser can do nothing the operator's guard is there to stop. With pairing in it, the
+    dashboard's sign-in becomes part of what guards pairing.
+59. **Should the dashboard sign the host in to a Yardsort server?** Today that is
+    `yardsort-host sign-in`, with `serve` stopped.
+60. **Other tunnels, and a reverse proxy of one's own.** Only rustunnel's host name is taken as
+    the dashboard's address.
+61. **Should what was run be recorded?** Jobs are forgotten when the host stops, and nothing is
+    logged.

@@ -1,5 +1,5 @@
 //! Other computers' Notifications lists, as this one last read them, and saying there that a
-//! row was seen. See docs/design/46-notifications.md.
+//! row was seen. See docs/design/48-notifications.md.
 //!
 //! **Read, not kept.** A host's list is read with everything else it shows
 //! ([`super::Shown::notifications`]) and again as soon as the host says it changed. Nothing of

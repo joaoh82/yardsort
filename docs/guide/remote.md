@@ -1,8 +1,8 @@
 # Remote
 
 > **Remote is still under development, and will be until the whole plan for it is finished.** Expect it
-> to change. It stays off, and connects to nothing, unless you turn it on. The phone app is not in the
-> app stores yet.
+> to change. It stays off, and connects to nothing, unless you turn it on. [The phone app](phone.md)
+> is invite only for now, and will be in the app stores in a few weeks.
 
 Remote lets your phone reach the agents on this computer through a Yardsort server you sign in to. Look
 at a workspace, watch a terminal, or take control of one and type, away from your desk. A computer with no
@@ -17,12 +17,18 @@ other too: see [Syncing projects](#syncing-projects).
 
 Neither end listens for connections: this computer and your phone each reach out to the server.
 
+Apart from all of that, a computer can serve a page for looking after it from a browser, its agents,
+its Git sign-in and the commands that set it up: [The host dashboard](host-dashboard.md). It is on
+for a computer with no screen and off in the app, listens on that computer alone, and needs no
+server.
+
 ## What the server can see
 
 **Whoever runs the server can see what passes through it**, your terminals, your agents'
 conversations as Chat shows them, and what you type into them included. The connection is encrypted on the way, but not end to end. Use a server you run yourself, or
 one run by someone you trust with that. A project you [sync](#syncing-projects) is kept on the
-server too, in plain text.
+server too, in plain text. The server also counts how much each account uses a day: devices,
+connections and bytes, never what they carried.
 
 Neither the server nor this computer writes any of it in a log: not what a terminal shows or is sent,
 not what a conversation says or its title, and not a memory note. Their logs say which device and which computer, and
@@ -117,9 +123,11 @@ background. Nothing of them is kept on the phone, so they show only while this c
 reached.
 
 Without `gh`, or signed out of it, the phone shows no badges and no card, and says nothing about
-it, as here. The same goes for a computer on a version before this one, and for
-[a computer with no screen](headless-host.md), which reads no pull requests yet. A notification
-when a check fails or a review arrives is not built yet.
+it, as here. The same goes for a computer on a version before this one.
+[A computer with no screen](headless-host.md) reads them too, with its own `gh`, when the phone
+asks, so the first look at one starts the reading and the list fills in a moment later. It does
+not yet read the pull requests a workspace follows in another repository. A notification when a
+check fails or a review arrives is not built yet.
 
 ## Starting work from the phone
 
@@ -494,7 +502,8 @@ Yardsort syncs while it runs with Remote on: right after a change here, when the
 another computer changed something, and every five minutes otherwise. When the server cannot be
 reached, it tries again by itself, waiting longer each time, up to five minutes, and the section
 says why the last attempt failed. When the server refuses something, the section says why, and it
-is not sent again.
+is not sent again. What a server's plan has no room for is different: it waits here and goes once
+there is room ([When a server's plan has no room](#when-a-servers-plan-has-no-room)).
 
 **Your other computers' workspaces** of the project are listed under it in the sidebar, folded into
 **on other computers (n)**: each with its name, the computer it is on, its branch and the task it was
@@ -532,6 +541,23 @@ disk, and conversations can be [resumed](terminals-and-sessions.md#resume). If y
 what is running first, Yardsort does the same by itself when it next starts with nothing running. It only
 has to happen once: as long as a daemon can share terminals, later updates keep that working.
 
+## When a server's plan has no room
+
+A server you run yourself allows everything, up to its own limits such as 50 devices an account.
+A server that sells plans may not: it can refuse another phone or computer signing in, another
+connection to a computer, or more synced notes and workspaces. Each says so in the plan's own
+words where it happens: signing in, the phone connecting, or, for what waits to sync, the
+project's **Project settings…** → **Sync** and `ys sync status`.
+
+Only what is new waits. Devices already signed in keep working, other synced changes still come
+down, and nothing on your computers stops or is deleted. Reading what the server holds, signing
+devices out, removing a computer, [exporting your account](#exporting-your-account) and
+[deleting it](#deleting-your-account) are never refused for a plan. A note held back stays queued
+on its computer and goes up once the plan has room, without you doing anything.
+
+If the server cannot check the plan for a while, what your account did in the last day carries on,
+and only something it never did waits, saying the server cannot check the plan right now.
+
 ## If this computer is signed out
 
 If the server signs this computer out, **Settings → Remote** says so and offers **Sign in again**. It
@@ -542,10 +568,59 @@ The usual reason is the server seeing this computer's sign-in used twice, which 
 second copy of Yardsort used to cause that. Now only one copy runs on a profile, and starting it again
 [brings up the window it already has](troubleshooting.md#yardsort-is-already-open).
 
+## Exporting your account
+
+You can save everything the server keeps of your account as one JSON file, to keep or to read:
+
+- your account: the identity provider you sign in with, your id there, and when it was made;
+- your phones and computers, signed out ones the server still lists included, and which devices
+  each computer lets in;
+- which phones get notifications, by device and platform, and your notification settings;
+- every synced project, note and workspace name, in plain text, with a revoked note's text too;
+- how much you used each day: how many of your devices made a request, the most connections they
+  had open to your computers at once, and the bytes the relay carried and your computers synced.
+  Counts only, never what passed through, kept for 400 days.
+
+It never holds a credential, a push token or a pairing code. It also leaves out what holds no
+content of yours: records deleted from sync, the server's change log, and notices on their way to a
+phone. Whoever can read the file can read every synced note, so keep it somewhere only you can.
+
+On this computer, **Settings → Remote → Your account → Export my account's data…** says what the file
+holds, then **Choose where to save…** opens a save dialog. The server is asked for nothing until you
+have chosen where it goes. Once saved, the section says how many devices, computers and synced
+records it holds, and **Show in folder** opens it. It is there while this computer is signed in;
+after the server signs it out, sign in again first.
+
+On the phone, **Settings → Your account → Export my account's data** does the same for the server the
+phone is using, then **Export**. On iPhone it opens the share sheet, where **Save to Files** keeps it;
+on Android you pick a folder. On a computer with no screen, see
+[Exporting your account there](headless-host.md#exporting-your-account).
+
+A server too old to export says so. Its operator updates it.
+
+## Deleting your account
+
+**Settings → Remote → Your account → Delete my account…** deletes everything the server keeps of
+your account, for every device: the account, its phones and computers, which devices each lets in,
+notification settings, and every synced project, note and workspace name. Nothing on this computer
+or your other devices is deleted, and Yardsort keeps working without an account.
+
+It says what goes and what stays first. Type **delete**, press **Sign in again and delete**, and
+sign in again in the browser. Nothing is deleted until that sign-in comes back, and **Cancel** stops
+waiting for it. Afterwards Settings → Remote says how many devices, computers and synced records went,
+and Remote is off here. Every other device is signed out, and says the account was deleted the next
+time it reaches the server. Export your account first to keep a copy, since deleting cannot be
+undone.
+
+The phone has it under **Settings → Your account → Delete my account**, and the server has a web
+page for it, `/account/delete`. See [Deleting your account](delete-account.md) for both, and for
+the little the server keeps afterwards.
+
 ## The phone app
 
-It is in [`apps/mobile`](https://github.com/joaoh82/yardsort/tree/main/apps/mobile), and is not in the
-app stores yet. To run a server of your own, see the
+[The phone app](phone.md) says what it does and what it needs. It is invite only for now, and will
+be in the app stores in a few weeks. Its code is in
+[`apps/mobile`](https://github.com/joaoh82/yardsort/tree/main/apps/mobile). To run a server of your own, see the
 [self-host recipe](https://github.com/joaoh82/yardsort/tree/main/crates/server/self-host).
 
 ## Notifications

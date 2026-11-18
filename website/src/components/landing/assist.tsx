@@ -77,7 +77,7 @@ export function Assist() {
         <div className="md:order-1">
           <Shot
             name="assist"
-            alt="Settings → Assist: the API key, its switches and the three thresholds"
+            alt="Settings → Assist: the API key and the switches for what Assist may do"
           />
           <dl className="mt-6 grid gap-2.5 text-[15px]">
             {BADGES.map((item) => (

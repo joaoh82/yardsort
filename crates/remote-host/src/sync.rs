@@ -24,7 +24,7 @@ use remote_proto::account::Secret;
 use remote_proto::sync::{
     PushRequest, SyncId, SyncRecord, MAX_PUSH_OPS, MAX_SYNC_BODY, SYNC_SCHEMA,
 };
-use remote_proto::ErrorCode;
+use remote_proto::{ErrorCode, RemoteError};
 use tokio::sync::Notify;
 use yardsort_core::store::now_ms;
 use yardsort_core::sync::ProjectBody;
@@ -215,7 +215,8 @@ pub async fn pass(home: &impl Home) -> Result<bool> {
 
     // What an earlier version did not sync yet, as notes and workspaces were not.
     store.backfill_sync(now_ms()).map_err(store_failed)?;
-    changed |= push(home, &client, &access).await?;
+    let (pushed, mut held) = push(home, &client, &access).await?;
+    changed |= pushed;
 
     let fresh = store.fresh_synced_projects().map_err(store_failed)?;
     for project in &fresh {
@@ -240,8 +241,10 @@ pub async fn pass(home: &impl Home) -> Result<bool> {
         }
     }
     // A project just linked has this host's own notes for it to send.
-    if !fresh.is_empty() {
-        changed |= push(home, &client, &access).await?;
+    if !fresh.is_empty() && held.is_none() {
+        let (pushed, also) = push(home, &client, &access).await?;
+        changed |= pushed;
+        held = also;
     }
 
     let mut after = store.sync_state().map_err(store_failed)?.cursor;
@@ -270,6 +273,11 @@ pub async fn pass(home: &impl Home) -> Result<bool> {
         }
     }
     store.note_sync_pass(None, now_ms()).map_err(store_failed)?;
+    // Everything else went both ways; what the server held back waits, said as the problem, and
+    // the loop tries again as after a failed pass rather than at once.
+    if let Some(why) = held {
+        return Err(Failure::new("remote_held", why.message));
+    }
     Ok(changed)
 }
 
@@ -278,7 +286,13 @@ pub async fn pass(home: &impl Home) -> Result<bool> {
 const MAX_PUSHES: usize = 20;
 
 /// Push the outbox, a batch at a time, each under the server's limits.
-async fn push(home: &impl Home, client: &Client, access: &Secret) -> Result<bool> {
+/// The outbox, a batch at a time: whether anything a person sees changed, and why the server
+/// held back the rest when it did (`PushReply::held`).
+async fn push(
+    home: &impl Home,
+    client: &Client,
+    access: &Secret,
+) -> Result<(bool, Option<RemoteError>)> {
     let store = home.store();
     let mut changed = false;
     for _ in 0..MAX_PUSHES {
@@ -294,7 +308,7 @@ async fn push(home: &impl Home, client: &Client, access: &Secret) -> Result<bool
             ops.push(op);
         }
         if ops.is_empty() {
-            return Ok(changed);
+            return Ok((changed, None));
         }
         let full = ops.len() == MAX_PUSH_OPS;
         let sent = ops.len();
@@ -306,13 +320,16 @@ async fn push(home: &impl Home, client: &Client, access: &Secret) -> Result<bool
         changed |= store
             .settle_sync(&reply.results, now_ms())
             .map_err(store_failed)?;
+        if reply.held.is_some() {
+            return Ok((changed, reply.held));
+        }
         // A short answer, or a batch that was all there was and queued nothing more: the rest
         // waits for the next pass.
         if settled < sent || !full && store.sync_outbox(1).map_err(store_failed)?.is_empty() {
-            return Ok(changed);
+            return Ok((changed, None));
         }
     }
-    Ok(changed)
+    Ok((changed, None))
 }
 
 /// Every page of a snapshot, and the head the first was read at.
