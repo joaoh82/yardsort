@@ -81,6 +81,22 @@ export class FakeServer {
   grants: Grant[] = [];
   /** The notices a phone may open, by id, as the server's read answers them. */
   notices = new Map<string, Record<string, unknown>>();
+  /**
+   * What the account is set to receive, as the server answers it. A server from before a
+   * switch leaves it out: delete the field. Null for one from before any of this.
+   */
+  preferences: Record<string, boolean> | null = {
+    muted: false,
+    task: true,
+    review: true,
+    failure: true,
+    desktopUpdate: true,
+    workflow: true,
+    agent: true,
+    agentFinished: true,
+  };
+  /** Each replacement of them a phone sent, as it came. */
+  savedPreferences: Record<string, boolean>[] = [];
   /** What a pairing may redeem, by what it presents. Each goes once. */
   offers = new Set<string>(["ABCD2345"]);
   /** Every offer presented to this server, as it was presented. */
@@ -281,6 +297,16 @@ export class FakeServer {
             { code: "not_found", message: "Not found.", retryable: false },
             { status: 404 },
           );
+    }
+    if (url.pathname === "/v1/notifications/preferences" && this.preferences) {
+      if (method === "GET") return Response.json(this.preferences);
+      if (method === "POST") {
+        const sent = JSON.parse(String(init?.body)) as Record<string, boolean>;
+        this.savedPreferences.push(sent);
+        // What a phone leaves out, the server keeps as it was.
+        this.preferences = { ...this.preferences, ...sent };
+        return new Response(null, { status: 204 });
+      }
     }
     if (method === "GET" && url.pathname === "/v1/hosts") {
       return Response.json({ hosts: this.hosts });

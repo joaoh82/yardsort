@@ -1418,7 +1418,13 @@ looking.
       person, which it could not know.
 - [x] Its smoke test, `remote-phone-sees-notifications`: its steps passed by hand on Linux
       (2026-11-17), a pretend phone against the real window. Not yet run through `ys test run`.
-- [ ] Slice 5: a push when an agent finishes, with its own switch.
+- [x] Slice 5: a push when an agent finishes, with its own switch. A second kind of the
+      `agent` notice, `finished`, queued for a row of the list that stayed unseen: the
+      computer looks each time it hands over its outbox, and tells only of what it found
+      unseen the time before too. Found while building it: on PostgreSQL, a notice already
+      queued for an agent that needs you was still sent after its switch was turned off.
+- [x] Its smoke test, `remote-push-finished`: its steps passed by hand on Linux (2026-11-17),
+      a headless host and a pretend phone. Not yet run through `ys test run`.
 
 _Exit:_ with agents at work in several projects and on more than one computer, a person learns
 from one place, at the desk or on the phone, which of them wait for an answer and which finished.

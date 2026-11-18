@@ -116,6 +116,13 @@ server and are chosen under Settings → Notifications on the phone, which the f
 also opens ([Remote](remote.md#notifications)). The list is read from the computers, and nothing
 of it passes through the push service.
 
+**An agent that finished and went unseen is one of those notifications.** Within a minute
+of an agent finishing, if its row is still under **Finished, not seen**, the phone is told:
+_An agent finished_. It says nothing more; opening it opens that agent's conversation and
+marks the row seen. An agent you were looking at when it finished, at the computer or on the
+phone, sends nothing. Turn it off with **Agents that finish**, under Settings → Notifications
+on the phone. It needs this version on the computer and on the server.
+
 ## Opening a row
 
 Pressing a row closes the list and opens what the row is about:
@@ -209,8 +216,11 @@ agent is listed like any other.
 
 ## What is not here yet
 
-- **The phone is not told when an agent finishes.** It lists it, and marks its workspace, the
-  next time you look. A push for it is coming.
+- **The phone is told that an agent finished, and of nothing else the list adds.** A turn that
+  failed and an agent that stopped with an error are listed and not sent. A workflow's
+  question, an agent's permission and a failed run already had notifications of their own.
+- An agent that finished while Yardsort was closed is listed when it starts again, and is not
+  sent to the phone.
 - On the phone, the list shows a computer's newest hundred rows. One with more says so.
 - A row of another computer does not ring a tab or a workspace in the sidebar's list of that
   computer. The Notifications row and the list are where it shows.

@@ -588,3 +588,97 @@ fn a_long_reply_is_cut_to_its_first_line() {
     assert!(cut.ends_with('…'));
     assert_eq!(one_line("   "), "");
 }
+
+fn signed_in(store: &Store) {
+    store
+        .set_remote_host(&crate::store::RemoteHostRow {
+            server_url: "https://remote.example.com".into(),
+            server_id: "server-1".into(),
+            host_id: "host-1".into(),
+            device_id: "device-host".into(),
+            name: "Workstation".into(),
+            enabled_at: 1,
+        })
+        .unwrap();
+}
+
+/// What waits in the outbox for the phone, as (category, kind, workspace, terminal).
+fn queued(store: &Store, now: i64) -> Vec<(String, String, Option<String>, Option<String>)> {
+    crate::notify::pending(store, now)
+        .unwrap()
+        .into_iter()
+        .map(|n| (n.category, n.kind, n.workspace_id, n.terminal_id))
+        .collect()
+}
+
+#[test]
+fn an_agent_that_finished_and_went_unseen_is_told_to_the_phone_once() {
+    use crate::notify::{agents_finished, UNSEEN_FOR_MS};
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    let t = now_ms();
+    assert!(settled_terminal(&f.store, "pty-1", 45_000, t).unwrap());
+
+    // A computer not signed in to a server tells nobody.
+    assert!(agents_finished(&f.store, t + 60_000).unwrap().is_empty());
+    assert!(queued(&f.store, t + 60_000).is_empty());
+
+    signed_in(&f.store);
+    // The first look only notes that the row is unseen: whoever is watching has a moment.
+    assert!(agents_finished(&f.store, t + 1_000).unwrap().is_empty());
+    assert!(agents_finished(&f.store, t + UNSEEN_FOR_MS)
+        .unwrap()
+        .is_empty());
+    // Still unseen that long after, the phone is told, with the workspace and the terminal.
+    let told = agents_finished(&f.store, t + 1_000 + UNSEEN_FOR_MS).unwrap();
+    assert_eq!(told.len(), 1);
+    assert!(told[0].event_key.starts_with("agent:"));
+    assert_eq!(
+        queued(&f.store, t + 20_000),
+        vec![(
+            "agent".to_owned(),
+            "finished".to_owned(),
+            Some(f.workspace.clone()),
+            Some("pty-1".to_owned()),
+        )]
+    );
+    // Looked at again and again, the same finish is one notice.
+    assert!(agents_finished(&f.store, t + 40_000).unwrap().is_empty());
+    assert_eq!(queued(&f.store, t + 40_000).len(), 1);
+
+    // It finishes again before anyone looked: its row moves to the later time, and that
+    // finish is told of too.
+    assert!(settled_terminal(&f.store, "pty-1", 30_000, t + 60_000).unwrap());
+    assert!(agents_finished(&f.store, t + 61_000).unwrap().is_empty());
+    assert_eq!(agents_finished(&f.store, t + 81_000).unwrap().len(), 1);
+    assert_eq!(queued(&f.store, t + 81_000).len(), 2);
+}
+
+#[test]
+fn an_agent_that_was_looked_at_in_time_is_not_told_to_the_phone() {
+    use crate::notify::{agents_finished, FINISHED_WITHIN_MS};
+    let f = Fixture::new();
+    signed_in(&f.store);
+    f.agent("s1", "pty-1");
+    f.agent("s2", "pty-2");
+    let t = now_ms();
+
+    // Its terminal is on screen: the window says seen within a second of the row.
+    assert!(settled_terminal(&f.store, "pty-1", 45_000, t).unwrap());
+    assert!(agents_finished(&f.store, t + 500).unwrap().is_empty());
+    assert_eq!(seen_terminal(&f.store, "pty-1", t + 800).unwrap(), 1);
+    assert!(agents_finished(&f.store, t + 30_000).unwrap().is_empty());
+
+    // One that finished long before the list was looked at here, as while Yardsort was
+    // closed, is in the list and is not news to push.
+    assert!(settled_terminal(&f.store, "pty-2", 45_000, t - FINISHED_WITHIN_MS - 1).unwrap());
+    assert!(agents_finished(&f.store, t).unwrap().is_empty());
+    assert!(agents_finished(&f.store, t + 30_000).unwrap().is_empty());
+    assert!(queued(&f.store, t + 30_000).is_empty());
+
+    // A permission it asks for, or its stopping with an error, is not this notice either.
+    assert!(exited(&f.store, "s2", Some(3), t + 40_000).unwrap());
+    assert!(agents_finished(&f.store, t + 41_000).unwrap().is_empty());
+    assert!(agents_finished(&f.store, t + 70_000).unwrap().is_empty());
+    assert!(queued(&f.store, t + 70_000).is_empty());
+}

@@ -18,9 +18,23 @@ pub enum NoticeCategory {
     Failure,
     DesktopUpdate,
     Workflow,
-    /// An agent asked for something only a person can give it: a permission, so far.
+    /// An agent asked for something only a person can give it (a permission, so far), or
+    /// finished a stretch of work that nobody has looked at.
     Agent,
 }
+
+/// Every notice Yardsort sends: a category and one of its kinds.
+pub const NOTICES: &[(NoticeCategory, &str)] = &[
+    (NoticeCategory::Task, "progress"),
+    (NoticeCategory::Task, "complete"),
+    (NoticeCategory::Review, "attention"),
+    (NoticeCategory::Failure, "failed"),
+    (NoticeCategory::DesktopUpdate, "available"),
+    (NoticeCategory::Workflow, "question"),
+    (NoticeCategory::Workflow, "approval"),
+    (NoticeCategory::Agent, "approval"),
+    (NoticeCategory::Agent, "finished"),
+];
 
 impl NoticeCategory {
     /// The path segment of its deep link.
@@ -49,15 +63,7 @@ impl NoticeCategory {
 
     /// Whether `kind` is one this category sends.
     pub fn allows(self, kind: &str) -> bool {
-        matches!(
-            (self, kind),
-            (Self::Task, "progress" | "complete")
-                | (Self::Review, "attention")
-                | (Self::Failure, "failed")
-                | (Self::DesktopUpdate, "available")
-                | (Self::Workflow, "question" | "approval")
-                | (Self::Agent, "approval")
-        )
+        NOTICES.contains(&(self, kind))
     }
 }
 
@@ -134,6 +140,11 @@ pub struct NotificationPreferences {
     /// without it keeps what was stored. An older server never sends it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<bool>,
+    /// Agents that finished and were not looked at: the `agent` category's `finished` kind,
+    /// with a switch of its own. Absent both ways as `agent` is, from a phone or a server
+    /// from before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_finished: Option<bool>,
 }
 
 impl Default for NotificationPreferences {
@@ -146,13 +157,15 @@ impl Default for NotificationPreferences {
             desktop_update: true,
             workflow: true,
             agent: Some(true),
+            agent_finished: Some(true),
         }
     }
 }
 
 impl NotificationPreferences {
-    /// Whether a notice of `category` is delivered.
-    pub fn allows(&self, category: NoticeCategory) -> bool {
+    /// Whether a notice of `category` and `kind` is delivered. One switch covers a category,
+    /// but for an agent: one that needs a person and one that finished each have their own.
+    pub fn allows(&self, category: NoticeCategory, kind: &str) -> bool {
         if self.muted {
             return false;
         }
@@ -162,6 +175,7 @@ impl NotificationPreferences {
             NoticeCategory::Failure => self.failure,
             NoticeCategory::DesktopUpdate => self.desktop_update,
             NoticeCategory::Workflow => self.workflow,
+            NoticeCategory::Agent if kind == "finished" => self.agent_finished.unwrap_or(true),
             NoticeCategory::Agent => self.agent.unwrap_or(true),
         }
     }
@@ -205,4 +219,71 @@ pub struct NoticeView {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReachableReceipt {
     pub sent: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_category_sends_only_its_own_kinds() {
+        for (category, kind) in NOTICES {
+            assert!(category.allows(kind), "{category:?} {kind}");
+        }
+        assert!(NoticeCategory::Agent.allows("approval"));
+        assert!(NoticeCategory::Agent.allows("finished"));
+        assert!(!NoticeCategory::Agent.allows("question"));
+        assert!(!NoticeCategory::Task.allows("finished"));
+        assert!(!NoticeCategory::Workflow.allows(""));
+    }
+
+    #[test]
+    fn an_agents_two_switches_are_each_their_own() {
+        let all = NotificationPreferences::default();
+        for (category, kind) in NOTICES {
+            assert!(all.allows(*category, kind), "on from the start: {kind}");
+        }
+        let quiet = NotificationPreferences {
+            agent_finished: Some(false),
+            ..all.clone()
+        };
+        assert!(!quiet.allows(NoticeCategory::Agent, "finished"));
+        assert!(quiet.allows(NoticeCategory::Agent, "approval"));
+        let unasked = NotificationPreferences {
+            agent: Some(false),
+            ..all.clone()
+        };
+        assert!(unasked.allows(NoticeCategory::Agent, "finished"));
+        assert!(!unasked.allows(NoticeCategory::Agent, "approval"));
+        // Mute covers every one of them.
+        let muted = NotificationPreferences { muted: true, ..all };
+        for (category, kind) in NOTICES {
+            assert!(!muted.allows(*category, kind));
+        }
+    }
+
+    #[test]
+    fn a_phone_or_a_server_from_before_a_switch_leaves_it_out() {
+        let older: NotificationPreferences = serde_json::from_str(
+            r#"{"muted":false,"task":true,"review":true,"failure":true,
+                "desktopUpdate":true,"workflow":true,"agent":false}"#,
+        )
+        .unwrap();
+        assert_eq!(older.agent, Some(false));
+        assert_eq!(older.agent_finished, None);
+        // Not said, it is on: what the server keeps decides, and it starts on.
+        assert!(older.allows(NoticeCategory::Agent, "finished"));
+        // And what is not known is not sent back, to one that would refuse the field.
+        let said = serde_json::to_string(&older).unwrap();
+        assert!(!said.contains("agentFinished"), "{said}");
+        assert!(serde_json::to_string(&NotificationPreferences::default())
+            .unwrap()
+            .contains(r#""agentFinished":true"#));
+        // A field nobody knows is refused, so a code cannot ride in on one.
+        assert!(serde_json::from_str::<NotificationPreferences>(
+            r#"{"muted":false,"task":true,"review":true,"failure":true,
+                "desktopUpdate":true,"workflow":true,"code":"ABCD2345"}"#,
+        )
+        .is_err());
+    }
 }

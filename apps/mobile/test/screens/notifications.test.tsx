@@ -422,3 +422,44 @@ describe("Notifications on the phone", () => {
     await waitFor(() => expect(server.decisions.map((d) => d.decision)).toEqual(["refuse"]));
   });
 });
+
+describe("Choosing what reaches this phone", () => {
+  const open = async () => {
+    await fireEvent.press(await bell());
+    await fireEvent.press(
+      await screen.findByRole("button", { name: "Choose what reaches this phone" }),
+    );
+    return screen.findByRole("radio", { name: "Agents that need you" });
+  };
+  const switchFor = (name: string) => screen.getByRole("radio", { name });
+
+  test("an agent that finishes has a switch of its own, on from the start", async () => {
+    const { server } = await paired();
+    await open();
+    const finished = switchFor("Agents that finish");
+    expect(finished.props.accessibilityState.checked).toBe(true);
+    expect(switchFor("Agents that need you").props.accessibilityState.checked).toBe(true);
+
+    await fireEvent.press(finished);
+    await waitFor(() => expect(server.savedPreferences).toHaveLength(1));
+    // Only that switch moved: an agent that needs you still reaches the phone.
+    expect(server.savedPreferences[0]).toMatchObject({ agent: true, agentFinished: false });
+    expect(switchFor("Agents that finish").props.accessibilityState.checked).toBe(false);
+    expect(switchFor("Agents that need you").props.accessibilityState.checked).toBe(true);
+    expect(screen.getByText(/One that finished opens its conversation/)).toBeTruthy();
+  });
+
+  test("a server from before it shows no such switch, and is sent no such word", async () => {
+    const server = new FakeServer();
+    delete server.preferences?.agentFinished;
+    await paired(server);
+    await open();
+    expect(screen.queryByRole("radio", { name: "Agents that finish" })).toBeNull();
+
+    await fireEvent.press(switchFor("Agents that need you"));
+    await waitFor(() => expect(server.savedPreferences).toHaveLength(1));
+    // It would refuse a field it does not know.
+    expect(server.savedPreferences[0]).not.toHaveProperty("agentFinished");
+    expect(server.savedPreferences[0]).toMatchObject({ agent: false });
+  });
+});

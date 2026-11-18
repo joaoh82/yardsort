@@ -35,7 +35,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_postgres::{AsyncMessage, Client, IsolationLevel, Row};
 
 use crate::records::{
-    allowance, category_allowed, AccountId, Allowance, Decision, DeliveryEnd, Device, GrantFilter,
+    allowance, refused_notices, AccountId, Allowance, Decision, DeliveryEnd, Device, GrantFilter,
     GrantRecord, GrantStatus, GrantView, Handoff, Host, HostOffer, IncomingNotice, Issued,
     LinkPlace, NoticePage, NoticeRecord, NoticeToSend, PendingLogin, Records, RecordsError,
     Redemption, Result, RevokeReason, Revoked, Rotation, Signal, CLAIM_LEASE_MS, OPEN_NOTICE_CAP,
@@ -94,6 +94,11 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         include_str!("../migrations/0009_agent_notices.sql"),
     ),
     (10, "sync", include_str!("../migrations/0010_sync.sql")),
+    (
+        11,
+        "agent_finished",
+        include_str!("../migrations/0011_agent_finished.sql"),
+    ),
 ];
 
 /// Held while migrating, so instances starting together take turns. Any constant will do, as
@@ -1307,7 +1312,8 @@ impl Records for PgRecords {
             .client()
             .await?
             .query_opt(
-                "SELECT muted, task, review, failure, desktop_update, workflow, agent
+                "SELECT muted, task, review, failure, desktop_update, workflow, agent,
+                        agent_finished
                  FROM notification_preferences WHERE account = $1",
                 &[&account.0],
             )
@@ -1322,6 +1328,7 @@ impl Records for PgRecords {
                 desktop_update: row.get(4),
                 workflow: row.get(5),
                 agent: Some(row.get(6)),
+                agent_finished: Some(row.get(7)),
             },
             None => NotificationPreferences::default(),
         })
@@ -1336,8 +1343,9 @@ impl Records for PgRecords {
             .await?
             .execute(
                 "INSERT INTO notification_preferences
-                     (account, muted, task, review, failure, desktop_update, workflow, agent)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, TRUE))
+                     (account, muted, task, review, failure, desktop_update, workflow, agent,
+                      agent_finished)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, TRUE), COALESCE($9, TRUE))
                  ON CONFLICT (account) DO UPDATE SET
                      muted = EXCLUDED.muted,
                      task = EXCLUDED.task,
@@ -1345,7 +1353,8 @@ impl Records for PgRecords {
                      failure = EXCLUDED.failure,
                      desktop_update = EXCLUDED.desktop_update,
                      workflow = EXCLUDED.workflow,
-                     agent = COALESCE($8, notification_preferences.agent)",
+                     agent = COALESCE($8, notification_preferences.agent),
+                     agent_finished = COALESCE($9, notification_preferences.agent_finished)",
                 &[
                     &account.0,
                     &preferences.muted,
@@ -1355,6 +1364,7 @@ impl Records for PgRecords {
                     &preferences.desktop_update,
                     &preferences.workflow,
                     &preferences.agent,
+                    &preferences.agent_finished,
                 ],
             )
             .await
@@ -1481,17 +1491,14 @@ impl Records for PgRecords {
         )
         .await
         .map_err(failed)?;
-        let refused: Vec<String> = ["task", "review", "failure", "desktopUpdate", "workflow"]
-            .into_iter()
-            .filter(|name| !category_allowed(&prefs, name))
-            .map(str::to_owned)
-            .collect();
+        // Every kind of notice a switch covers, an agent's two among them.
+        let refused = refused_notices(&prefs);
         if !refused.is_empty() {
             tx.execute(
                 "UPDATE mobile_notice_deliveries AS d SET state = 'dropped'
                  FROM mobile_notices n
                  WHERE d.notice = n.id AND n.account = $1 AND d.state = 'queued'
-                   AND n.category = ANY($2)",
+                   AND n.category || ':' || n.kind = ANY($2)",
                 &[&account.0, &refused],
             )
             .await

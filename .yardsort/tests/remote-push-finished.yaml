@@ -1,0 +1,160 @@
+id: remote-push-finished
+name: An agent that finished unseen reaches the phone once, and one that was looked at does not
+description: >-
+  Runs yardsort-host against the stand-in server, whose push provider only records what it would
+  have sent. A pretend phone pairs and registers a push token. An agent, which is really a shell
+  running a script of the repository, prints for ten seconds as one at work does, and then
+  waits. Nobody looks at it: within a minute there is one push, An agent finished, with fixed
+  words and a link, that opens the terminal of that agent and names nothing. A second agent
+  does the same while the phone follows the computer's Notifications list and marks its row
+  seen the moment it is listed, as someone watching it does: no second push comes. Linux only.
+  No window opens.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build
+    action: shell
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes. Each push it would have sent is a line in pushes.jsonl.
+      - >-
+        tail -f /dev/null | YARDSORT_STAND_IN_PUSHES="{{ run.dir }}/pushes.jsonl"
+        target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: a_repository_and_an_agent_that_is_a_shell
+    action: shell
+    line: >-
+      mkdir -p "$YS_RUN_DIR/repo" "$YS_RUN_DIR/profile" && git -C "$YS_RUN_DIR/repo" init -q && git -C
+      "$YS_RUN_DIR/repo" -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false
+      commit -q --allow-empty -m first && cp .yardsort/tests/support/work.sh "$YS_RUN_DIR/repo/work" &&
+      chmod +x "$YS_RUN_DIR/repo/work" && git -C "$YS_RUN_DIR/repo" add work && git -C "$YS_RUN_DIR/repo"
+      -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false commit -q -m
+      "An agent at work" && cp .yardsort/tests/support/headless-settings.toml
+      "$YS_RUN_DIR/profile/settings.toml"
+
+steps:
+  - id: sign_in_by_pasting
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", sign-in, Smoke box]
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: serve
+    action: shell
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: add_the_project
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, project, add, "{{ run.dir }}/repo"]
+    expect:
+      stdout_contains: Added repo
+  - id: pair_at_the_operators_terminal
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair]
+    timeout: 90s
+    expect:
+      stdout_contains: Let in.
+  - id: phone_registers
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", registers]
+    expect:
+      stdout_contains: registered for notifications
+
+  - id: an_agent_works_and_then_waits
+    action: run
+    program: sh
+    args:
+      - .yardsort/tests/support/headless.sh
+      - ys
+      - workspace
+      - new
+      - repo
+      # The message is what the agent runs, and names the workspace: `work-first`. Ten seconds
+      # of printing is a stretch of work; after it the terminal is quiet.
+      - ./work first
+      - --harness
+      - sh-agent
+    expect:
+      stdout_contains: created  work-first
+  - id: one_push_that_it_finished
+    action: wait_for
+    program: grep
+    # Its work, the terminal's quiet, a moment for someone to look, and the host's hand-over
+    # of its outbox every 20 seconds.
+    args: [-q, An agent finished, "{{ run.dir }}/pushes.jsonl"]
+    timeout: 120s
+  - id: it_opens_the_terminal_of_that_agent
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/phone.ts,
+        "{{ run.dir }}",
+        opens-notice,
+        Smoke box,
+        "{{ run.dir }}/pushes.jsonl",
+        An agent finished,
+      ]
+    expect:
+      stdout_contains: the notice opens the terminal of the agent that finished
+
+  - id: a_second_agent_works
+    action: run
+    program: sh
+    args:
+      - .yardsort/tests/support/headless.sh
+      - ys
+      - workspace
+      - new
+      - repo
+      - ./work second
+      - --harness
+      - sh-agent
+    expect:
+      stdout_contains: created  work-second
+  - id: and_is_looked_at_as_it_finishes
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", looks-in-time, Smoke box, work-second]
+    timeout: 90s
+    expect:
+      stdout_contains: seen in time
+  - id: one_push_in_all
+    action: shell
+    # Longer than it took the first to arrive, for a second that must not come.
+    line: >-
+      pushes="$YS_RUN_DIR/pushes.jsonl"; sleep 60; count=$(grep -c "An agent finished" "$pushes");
+      if [ "$count" -ne 1 ]; then echo "$count pushes, not one"; cat "$pushes"; exit 1; fi;
+      if grep -q -e work-first -e work-second -e repo -e working "$pushes"; then echo "a push says
+      more"; exit 1; fi; echo one push in all
+    timeout: 3m
+    expect:
+      stdout_contains: one push in all
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      kill "$(cat "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

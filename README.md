@@ -195,7 +195,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 - **Remote, still under development.** Reach this computer's workspaces and terminals from your
   phone, and start new ones there, through a Yardsort server you sign in to. It stays off, and connects to nothing, until you
   turn it on, and a device gets in only if you say yes at this computer. The phone can be told
-  about a task, a review, a failure, a desktop update, or a workflow question or approval. The
+  about a task, a review, a failure, a desktop update, a workflow question or approval, an
+  agent that needs you, or one that finished while nobody looked. The
   notification opens that item. You can answer or approve a workflow on the phone while this
   computer is online. On the phone a conversation reads as a chat, a column at the phone's width,
   and Claude Code's permission questions can be answered there, as can a smoke test waiting to

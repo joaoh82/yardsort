@@ -22,6 +22,11 @@ export interface NotificationPreferences {
    * without it keeps what the server has.
    */
   agent?: boolean;
+  /**
+   * Agents that finished and were not looked at: the `agent` category's `finished` kind, with a
+   * switch of its own. Left out by a server from before it, as `agent` is.
+   */
+  agentFinished?: boolean;
 }
 
 export interface PushRegistration {
@@ -72,6 +77,7 @@ export const notificationPreferences: Decoder<NotificationPreferences> = object(
   desktopUpdate: bool,
   workflow: bool,
   agent: optional(bool),
+  agentFinished: optional(bool),
 });
 
 export const noticeView: Decoder<NoticeView> = object({

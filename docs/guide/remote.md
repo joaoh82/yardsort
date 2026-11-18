@@ -570,6 +570,14 @@ computers themselves.
   If the agent asks again before anyone answers, that is the same notification, not a new one.
   Claude Code, OpenCode and Pi say when they ask; the notification says nothing of what was
   asked. A computer with no screen, running `yardsort-host`, sends it too.
+- An agent finished and nobody looked: it stopped after a stretch of work, and its row in
+  [Notifications](notifications.md) stayed unseen. Open it on the phone and it opens that
+  conversation, which also marks it seen. You are told within a minute of its finishing,
+  and only then: an agent whose terminal is in front of you here, or that you are watching on
+  the phone, is seen as it finishes and sends nothing. Every agent can be told of this way,
+  with no switch to turn on. The notification says only that an agent finished, not which, or
+  where, or what it did. A turn that failed, or an agent that stopped with an error, is in the
+  list and is not sent. A computer with no screen sends it too.
 
 The notification opens that item in the phone app. A workflow question or approval opens the
 decision. Installing a desktop update stays on this computer. A one-time code can still appear
@@ -588,8 +596,9 @@ workflow permissions until it states that it speaks them.
 On the phone, Settings → Notifications asks once for permission to send notifications. After
 that, the token is registered for every account this phone is signed in to, when the app starts
 and after a sign-in. The screen can
-mute everything for this account, or turn one of those categories off. **Agents that need
-you** shows only once the server knows that kind of notification. A tap opens the item,
+mute everything for this account, or turn one of those categories off. An agent has two
+switches, **Agents that need you** and **Agents that finish**, both on from the start. Each
+shows only once the server knows that kind of notification. A tap opens the item,
 including when the app was not running. A notice that was skipped while a category was off is not
 sent later if you turn it back on. A new event after that is.
 

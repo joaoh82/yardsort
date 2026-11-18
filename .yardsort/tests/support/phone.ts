@@ -7,7 +7,8 @@
 //   bun .yardsort/tests/support/phone.ts <run dir> sees <name> <expected>
 //   bun .yardsort/tests/support/phone.ts <run dir> refused <name> | ends <name>
 //   bun .yardsort/tests/support/phone.ts <run dir> resumes <name> <message> <expected>
-//   bun .yardsort/tests/support/phone.ts <run dir> registers | opens-notice <name> <pushes file>
+//   bun .yardsort/tests/support/phone.ts <run dir> registers | opens-notice <name> <pushes file> [title]
+//   bun .yardsort/tests/support/phone.ts <run dir> looks-in-time <name> <workspace>
 //   bun .yardsort/tests/support/phone.ts <run dir> lets-a-test-run <name>
 //   bun .yardsort/tests/support/phone.ts <run dir> sees-pull-requests <name>
 //   bun .yardsort/tests/support/phone.ts <run dir> sees-notifications <name>
@@ -20,7 +21,10 @@
 // one ended conversation the computer can resume, with a message, and waits for the expected text.
 // `registers` gives the server a push token, as a phone allowed to notify does. `opens-notice`
 // takes the one push the stand-in recorded, reads its notice, and checks it names the terminal of
-// the one session running on the computer, and that the push itself names nothing.
+// the one session running on the computer, and that the push itself names nothing. With a
+// title it is that notice and not an agent that needs you: `An agent finished`.
+// `looks-in-time` follows the computer's Notifications list and marks the named workspace's
+// finished row seen the moment it is listed, as someone watching that agent does.
 // `lets-a-test-run` reads the card of the smoke test run waiting in the project's own checkout,
 // is refused letting another file's hash run, lets the one shown run, and leaves the run's id in
 // the run's folder as `test-run`. `sees-pull-requests` asks the computer for its pull requests
@@ -582,8 +586,9 @@ switch (doing) {
     if (Object.keys(alert).sort().join() !== "body,category,deepLink,title") {
       throw new Error(`The push says more than it should: ${pushes[0]}`);
     }
-    if (alert.title !== "An agent needs you" || alert.category !== "agent") {
-      throw new Error(`Not an agent's notice: ${pushes[0]}`);
+    const title = expected ?? "An agent needs you";
+    if (alert.title !== title || alert.category !== "agent") {
+      throw new Error(`Not that notice of an agent's: ${pushes[0]}`);
     }
     const id = /^yardsort:\/\/notice\/agent\/([0-9a-f-]{36})$/.exec(alert.deepLink)?.[1];
     if (!id) throw new Error(`Not a notice's link: ${alert.deepLink}`);
@@ -596,7 +601,36 @@ switch (doing) {
     if (notice.hostId !== host || notice.terminalId !== terminal || !notice.workspaceId) {
       throw new Error(`It opens somewhere else: ${JSON.stringify(notice)}`);
     }
-    console.log("the notice opens the terminal that asked");
+    console.log(
+      expected
+        ? "the notice opens the terminal of the agent that finished"
+        : "the notice opens the terminal that asked",
+    );
+    break;
+  }
+  case "looks-in-time": {
+    // Here `line` is the workspace's name. Looked at within a moment of finishing, an agent
+    // is never told of to the phone.
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    let told = 0;
+    await channel.followNotifications(() => (told += 1));
+    const listed = async () =>
+      (await channel.notifications()).notifications.find(
+        (n) => n.part === "finished" && n.workspaceName === line,
+      );
+    let row = await listed();
+    for (let tries = 0; tries < 600 && !row; tries++) {
+      const heard = told;
+      for (let waits = 0; waits < 20 && told === heard; waits++) await Bun.sleep(50);
+      row = await listed();
+    }
+    if (!row) throw new Error(`${line} never finished.`);
+    await channel.notificationsSeen({ ids: [row.id] });
+    const waited = Date.now() - row.at;
+    if (waited > 8_000) throw new Error(`Seen ${waited} ms after it finished: too late to count.`);
+    console.log(`seen in time: ${line}, ${waited} ms after it finished`);
+    channel.close();
     break;
   }
   case "spend-sign-in": {

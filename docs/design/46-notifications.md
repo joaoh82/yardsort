@@ -1,7 +1,6 @@
 # 46. Notifications
 
-Status: proposed in Figma and answered by the owner on 2026-11-17. Built on the desktop and on
-the phone; the push for an agent that finished (slice 5) is left.
+Status: proposed in Figma and answered by the owner on 2026-11-17. Built: all five slices.
 
 ## The problem
 
@@ -180,8 +179,8 @@ Each comes with its tests, its guide and changelog lines, and a smoke test.
    when it changes, and marking a row seen. Their rows join the list, each naming its computer.
 4. **The phone. Built on 2026-11-17.** The bell and its count, the list, the counts on a
    computer's row and the marks on its workspaces, from the same protocol minor.
-5. **The push for an agent that finished.** A new kind of notice on the server, and its switch
-   under Settings → Notifications ([40](40-mobile-notifications.md)).
+5. **The push for an agent that finished. Built on 2026-11-17.** A new kind of notice on the
+   server, and its switch under Settings → Notifications ([40](40-mobile-notifications.md)).
 
 Later, if wanted: **Allow** and **Deny** on a permission's row.
 
@@ -421,6 +420,54 @@ Not run: an iPhone, where the header is the system's glass; a real computer with
 smoke test or a schedule waiting (the screens' tests cover their rows against the fake server);
 two real computers; the light colours on a device.
 
+### Slice 5, as built and as checked
+
+The whole of it is in [40](40-mobile-notifications.md#an-agent-that-finished). In short: the
+`agent` notice has a second kind, `finished`; the computer queues one for a row of the list
+that it found unseen twice running, ten seconds or more apart; the server has a switch for it,
+`agentFinished`, on from the start; and the phone shows that switch as **Agents that finish**.
+
+Decided while building it, none of it asked of the owner:
+
+- **A kind of the `agent` notice, not a category of its own.** A phone app from before it then
+  opens the notice as it opens an agent's, by its terminal. As a new category that app would
+  have shown the banner and failed to open it.
+- **Only what went unseen, so it arrives late, within a minute.** The alternative, a push
+  the moment an agent finishes, tells someone sitting in front of that agent. The computer
+  looks every 20 seconds, so the wait is between 20 and 40 seconds after the row is made.
+- **Only an agent that finished.** A turn that failed and an agent that stopped with an error
+  are listed and not sent: the words would be wrong for them, and nobody asked for those.
+- **Not what is older than ten minutes when first found**: an agent that finished while
+  Yardsort was closed, or before the computer was signed in to a server.
+- **Each finish is told of**, including a second one before anyone looked at the first.
+
+**Found on the way.** On PostgreSQL, a notice already waiting for a phone that could not be
+reached was still sent after **Agents that need you** was turned off: the query that clears a
+queue named five categories and not `agent`. It now covers every kind there is, from one list
+(`remote_proto::notify::NOTICES`), and both stores are tested for it.
+
+**Its tests.** The kinds and the two switches in `remote-proto`; the queueing against a real
+store, with a row seen in time, one too old, one told once and a second finish told again
+(`crates/core/src/notifications/tests.rs`); the server on both of its stores, PostgreSQL
+included: the words, the switch by itself, an older phone's save, and what a switch turned off
+drops (`crates/server/tests/notifications.rs`); the client library's reading of both; the
+phone's settings screen with a server that knows the switch and one that does not.
+
+**Its smoke test.** `remote-push-finished.yaml`, new, with the phone step `looks-in-time`: a
+`yardsort-host` on the stand-in server, whose push provider records what it would have sent.
+Its steps run by hand on 2026-11-17, on Linux, with no window:
+
+- An agent that worked for ten seconds and then waited, with nobody looking: one push, 52
+  seconds after it was started, saying _An agent finished_ and nothing else. Its notice named
+  the terminal of that agent on that computer.
+- A second agent, marked seen by the phone 96 ms after it finished: no push in the minute
+  after.
+
+The file was checked with `ys test validate`. It has not been run through `ys test run`.
+
+Not run: a real phone receiving it from Apple's or Google's service, the real desktop window as
+the computer (the core's tests and the headless host share the code), and macOS and Windows.
+
 ## Limits, said plainly
 
 - **A system notification cannot open its row.** The notification plugin the app uses does not
@@ -436,6 +483,7 @@ two real computers; the light colours on a device.
   computer says that it waits and names the workflow, without its question.
 - The phone's list covers the computers it can reach. One that is offline shows no rows.
 - The phone shows a computer's newest hundred rows, and has no **Mark all seen**.
-- Nothing tells the phone that an agent finished while the app is closed, until slice 5.
+- The phone is told that an agent finished within a minute of it, and only if nobody
+  looked. It is not told of a turn that failed or an agent that stopped with an error.
 - A computer on an earlier release sends no list, and one that lets this computer see its
   workspaces but not watch its terminals gives none.

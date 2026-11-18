@@ -823,18 +823,24 @@ fn claim_expired(claimed_at: Option<i64>, now: i64) -> bool {
     claimed_at.is_none_or(|at| now.saturating_sub(at) >= CLAIM_LEASE_MS)
 }
 
-/// Whether `category` (the wire name) is one `preferences` still delivers.
-pub(crate) fn category_allowed(preferences: &NotificationPreferences, category: &str) -> bool {
-    use remote_proto::notify::NoticeCategory;
-    match category {
-        "task" => preferences.allows(NoticeCategory::Task),
-        "review" => preferences.allows(NoticeCategory::Review),
-        "failure" => preferences.allows(NoticeCategory::Failure),
-        "desktopUpdate" => preferences.allows(NoticeCategory::DesktopUpdate),
-        "workflow" => preferences.allows(NoticeCategory::Workflow),
-        "agent" => preferences.allows(NoticeCategory::Agent),
-        _ => false,
-    }
+/// Whether a notice of `category` (the wire name) and `kind` is one `preferences` still
+/// delivers.
+pub(crate) fn notice_allowed(
+    preferences: &NotificationPreferences,
+    category: &str,
+    kind: &str,
+) -> bool {
+    crate::notices::category_of(category).is_some_and(|category| preferences.allows(category, kind))
+}
+
+/// Every notice `preferences` refuses now, as `category:kind` by the wire names: what a queue
+/// is cleared of when a switch was turned off after its notices were queued.
+pub(crate) fn refused_notices(preferences: &NotificationPreferences) -> Vec<String> {
+    remote_proto::notify::NOTICES
+        .iter()
+        .filter(|(category, kind)| !preferences.allows(*category, kind))
+        .map(|(category, kind)| format!("{}:{kind}", crate::notices::wire_name(*category)))
+        .collect()
 }
 
 #[derive(Default)]
@@ -1507,8 +1513,12 @@ impl Records for MemoryRecords {
     ) -> Result<()> {
         self.with(|s| {
             let mut kept = preferences.clone();
+            let before = s.preferences.get(&account.0);
             if kept.agent.is_none() {
-                kept.agent = s.preferences.get(&account.0).and_then(|p| p.agent);
+                kept.agent = before.and_then(|p| p.agent);
+            }
+            if kept.agent_finished.is_none() {
+                kept.agent_finished = before.and_then(|p| p.agent_finished);
             }
             s.preferences.insert(account.0.clone(), kept);
         })
@@ -1994,7 +2004,7 @@ impl State {
             if notice.account != account.0 {
                 continue;
             }
-            if !category_allowed(&prefs, &notice.category) {
+            if !notice_allowed(&prefs, &notice.category, &notice.kind) {
                 drop_ids.push((delivery.notice.clone(), delivery.device.clone()));
             }
         }

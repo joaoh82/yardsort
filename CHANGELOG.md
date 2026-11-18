@@ -44,6 +44,13 @@ has the downloads and the full commit lists.
   that is offline shows a line and no rows. A smoke test waiting to be let run now shows its
   card on the workspace's screen as well as in Chat. It needs this version on the computer. See
   [Notifications](docs/guide/notifications.md#on-the-phone).
+- **The phone is told when an agent finishes** (Remote, under development). An agent that
+  finished a stretch of work and that nobody looked at sends the phone a notification
+  within a minute: _An agent finished_, and nothing of which or what. Opening it opens that
+  agent's conversation and marks it seen. One you were looking at, here or on the phone, sends
+  nothing. It is on from the start, with a switch of its own, **Agents that finish**, under
+  Settings → Notifications on the phone. It needs this version on the computer, the server and
+  the phone; a server of your own adds one column when it starts.
 - **The ringed dot is remembered.** An agent that finished and was not looked at keeps its ring
   when Yardsort is closed and opened again, and one that finished while Yardsort was closed gets
   it. Before, every waiting agent was ringed at each start, looked at or not. Coming back to the

@@ -442,6 +442,81 @@ pub fn agent_approval(
     Ok(enqueue_on(&conn, &draft, now)?.then_some(draft))
 }
 
+/// How long an agent's finished row has to go unseen before the phone is told. A row made
+/// while its terminal is on screen is seen within a second, and is never told of.
+pub const UNSEEN_FOR_MS: i64 = 10_000;
+
+/// How long ago an agent may have finished and still be worth telling the phone of. One that
+/// finished while Yardsort was closed, or before this computer was signed in to a server, is
+/// in the list and is not news to push.
+pub const FINISHED_WITHIN_MS: i64 = 10 * 60 * 1000;
+
+/// Agents that finished a stretch of work and have not been looked at
+/// ([`crate::notifications`]): one notice each, once its row has gone unseen for
+/// [`UNSEEN_FOR_MS`] by this function's own count, so call it every few seconds. The first
+/// call that finds a row only notes when; a later one tells. A row seen meanwhile, at the
+/// computer or on the phone, is never told of.
+///
+/// One notice is one finish: an agent that finishes again before anyone looked moves its row
+/// to the later time, and that is told of too. Nothing is read from the terminal, and what
+/// the agent said stays on the computer: the notice names the workspace and the terminal by
+/// their ids, for the phone to open. Only a computer signed in to a server queues one.
+pub fn agents_finished(store: &Store, now: i64) -> StoreResult<Vec<NoticeDraft>> {
+    if store.remote_host()?.is_none() {
+        return Ok(Vec::new());
+    }
+    let conn = store.conn();
+    let mut statement = conn.prepare(
+        "SELECT n.id, n.created_at, n.workspace_id, s.pty_session_id
+         FROM notifications n
+         LEFT JOIN sessions s ON s.id = n.session_id
+         WHERE n.kind = 'agent.finished' AND n.part = 'finished' AND n.settled_at IS NULL
+           AND n.created_at > ?1
+         ORDER BY n.created_at, n.id",
+    )?;
+    let unseen = statement
+        .query_map([now.saturating_sub(FINISHED_WITHIN_MS)], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(statement);
+    let mut told = Vec::new();
+    for (id, at, workspace, terminal) in unseen {
+        let item = format!("agent-finished:{}:{at}", piece(&id, 80));
+        let Some(first) = seen(&conn, &item)?.and_then(|stamp| stamp.parse::<i64>().ok()) else {
+            remember(&conn, &item, &now.to_string(), now)?;
+            continue;
+        };
+        if now.saturating_sub(first) < UNSEEN_FOR_MS {
+            continue;
+        }
+        let Some(mut draft) = draft(
+            NoticeCategory::Agent,
+            "finished",
+            &format!("{}:finished:{at}", piece(&id, 80)),
+        ) else {
+            continue;
+        };
+        if let (Some(workspace), Some(terminal)) = (workspace, terminal) {
+            if subject_ok(&workspace) && subject_ok(&terminal) {
+                draft.workspace_id = Some(workspace);
+                draft.terminal_id = Some(terminal);
+            }
+        }
+        // Already queued, sent or dropped: the same finish is told of once.
+        if enqueue_on(&conn, &draft, now)? {
+            told.push(draft);
+        }
+    }
+    prune_seen(&conn, "agent-finished:", now)?;
+    Ok(told)
+}
+
 /// Whether anything since `since` — when the run's current wait began — answered it. The wait's
 /// requests are the `approval.requested` events from then on; see [`REQUEST_ANSWERED`].
 pub(crate) fn wait_answered(
