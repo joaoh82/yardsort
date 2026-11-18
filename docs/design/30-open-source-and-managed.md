@@ -96,7 +96,9 @@ delete local work, terminate local agents, or prevent export of user-owned synce
   provider's subject), the action, and the counts the decision needs. It sends no email address,
   name or credential. Answers are cached briefly.
 - **What an unreachable service means** is decided at R7, within the proposal's rule. Lean: what
-  was allowed stays allowed for the grace period, and only new things wait.
+  was allowed stays allowed for the grace period, and only new things wait. Built on that lean,
+  with 24 hours as the grace period, in R7 slice 4 ([46 §11](46-remote-r7.md)); the owner has not
+  answered question 7 yet.
 - **Billing never touches the server.** The payment provider's webhooks go to the private
   service. The server holds no payment data and does not know prices.
 

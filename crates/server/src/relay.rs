@@ -58,10 +58,12 @@ use remote_proto::relay::{
 use remote_proto::{DeviceId, ErrorCode, GrantId, HostId, RemoteError};
 use tokio::sync::{broadcast, Notify};
 
+use crate::entitlements::{Action, Counts};
 use crate::http::now_ms;
 use crate::records::{AccountId, GrantFilter, GrantStatus, LinkPlace, Records, Signal};
 use crate::service::unreadable;
 use crate::tokens::{self, Kind, TokenHash};
+use crate::usage::Meter;
 use crate::{Caller, ControlService};
 
 /// How often every connected account is checked again.
@@ -188,6 +190,8 @@ struct Hub {
     recheck: Notify,
     stopping: AtomicBool,
     next_link: AtomicU64,
+    /// What each account used through this instance, since it was last added to the records.
+    meter: Meter,
 }
 
 struct HostLink {
@@ -235,8 +239,23 @@ impl Relay {
                 recheck: Notify::new(),
                 stopping: AtomicBool::new(false),
                 next_link: AtomicU64::new(0),
+                meter: Meter::default(),
             }),
         }
+    }
+
+    /// What each account used through this instance, since it was last taken.
+    pub fn meter(&self) -> &Meter {
+        &self.hub.meter
+    }
+
+    /// The connections open from `account`'s devices to its hosts, through this instance.
+    pub fn streams(&self, account: &AccountId) -> usize {
+        lock(&self.hub.hosts)
+            .values()
+            .filter(|link| link.account == *account)
+            .map(|link| lock(&link.channels).len())
+            .sum()
     }
 
     /// This instance.
@@ -574,6 +593,19 @@ impl<R: Records> ControlService<R> {
                 if let Some(there) = self.link_elsewhere(&host.id, replayed, now).await? {
                     return Ok(Ticketed::Elsewhere(there));
                 }
+                // Asked where the link is, which counts its own connections.
+                let streams = self.relay.streams(&caller.account) as u64;
+                self.entitlements
+                    .may(
+                        &caller.account,
+                        Action::Stream,
+                        Counts {
+                            streams: Some(streams),
+                            ..Counts::default()
+                        },
+                        now,
+                    )
+                    .await?;
                 Role::Device {
                     account: caller.account.clone(),
                     host: host.id,
@@ -677,7 +709,7 @@ impl<R: Records> ControlService<R> {
                 // What already waits for it, rather than at the next round.
                 tell_pending(&self).await;
                 let reason = pump(sink, stream, &link.out, |message| {
-                    host_message(&link, message)
+                    host_message(&link, self.relay.meter(), message)
                 })
                 .await;
                 self.relay.detach_host(&link);
@@ -687,7 +719,7 @@ impl<R: Records> ControlService<R> {
                 tracing::info!(%host, reason = reason.text(), "relay: host left");
             }
             Role::Device {
-                account: _,
+                account,
                 host,
                 device,
                 grant,
@@ -719,6 +751,10 @@ impl<R: Records> ControlService<R> {
                     }
                     full
                 };
+                if !full {
+                    let open = self.relay.streams(&account);
+                    self.relay.meter().streams(&account, open, now_ms());
+                }
                 if full {
                     return refuse(
                         &mut sink,
@@ -743,7 +779,7 @@ impl<R: Records> ControlService<R> {
                 }
                 tracing::info!(%host, %device, channel, "relay: device connected");
                 let reason = pump(sink, stream, &joined.out, |message| {
-                    device_message(&link, &joined, message)
+                    device_message(&link, &joined, self.relay.meter(), message)
                 })
                 .await;
                 link.close_channel(channel, CloseReason::Gone);
@@ -754,12 +790,15 @@ impl<R: Records> ControlService<R> {
 }
 
 /// A message from a host: a frame for one of its channels.
-fn host_message(link: &HostLink, message: Message) -> Result<(), CloseReason> {
+fn host_message(link: &HostLink, meter: &Meter, message: Message) -> Result<(), CloseReason> {
     let Message::Binary(bytes) = message else {
         return Err(CloseReason::Invalid);
     };
     let frame = LinkFrame::decode(&bytes).map_err(|_| CloseReason::Invalid)?;
     let channel = frame.channel();
+    if let LinkFrame::Text(_, payload) | LinkFrame::Binary(_, payload) = &frame {
+        meter.relayed(&link.account, payload.len(), now_ms());
+    }
     // A channel the relay closed a moment ago: what the host sent on it is dropped.
     let Some(device) = lock(&link.channels).get(&channel).cloned() else {
         return match frame {
@@ -794,11 +833,13 @@ fn host_message(link: &HostLink, message: Message) -> Result<(), CloseReason> {
 fn device_message(
     link: &HostLink,
     device: &DeviceLink,
+    meter: &Meter,
     message: Message,
 ) -> Result<(), CloseReason> {
     let Message::Text(text) = message else {
         return Err(CloseReason::Invalid);
     };
+    meter.relayed(&link.account, text.len(), now_ms());
     if !link.out.push(link_message(&LinkFrame::Text(
         device.channel,
         text.as_bytes(),

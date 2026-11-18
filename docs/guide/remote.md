@@ -27,7 +27,8 @@ server.
 **Whoever runs the server can see what passes through it**, your terminals, your agents'
 conversations as Chat shows them, and what you type into them included. The connection is encrypted on the way, but not end to end. Use a server you run yourself, or
 one run by someone you trust with that. A project you [sync](#syncing-projects) is kept on the
-server too, in plain text.
+server too, in plain text. The server also counts how much each account uses a day: devices,
+connections and bytes, never what they carried.
 
 Neither the server nor this computer writes any of it in a log: not what a terminal shows or is sent,
 not what a conversation says or its title, and not a memory note. Their logs say which device and which computer, and
@@ -483,7 +484,8 @@ Yardsort syncs while it runs with Remote on: right after a change here, when the
 another computer changed something, and every five minutes otherwise. When the server cannot be
 reached, it tries again by itself, waiting longer each time, up to five minutes, and the section
 says why the last attempt failed. When the server refuses something, the section says why, and it
-is not sent again.
+is not sent again. What a server's plan has no room for is different: it waits here and goes once
+there is room ([When a server's plan has no room](#when-a-servers-plan-has-no-room)).
 
 **Your other computers' workspaces** of the project are listed under it in the sidebar, folded into
 **on other computers (n)**: each with its name, the computer it is on, its branch and the task it was
@@ -521,6 +523,23 @@ disk, and conversations can be [resumed](terminals-and-sessions.md#resume). If y
 what is running first, Yardsort does the same by itself when it next starts with nothing running. It only
 has to happen once: as long as a daemon can share terminals, later updates keep that working.
 
+## When a server's plan has no room
+
+A server you run yourself allows everything, up to its own limits such as 50 devices an account.
+A server that sells plans may not: it can refuse another phone or computer signing in, another
+connection to a computer, or more synced notes and workspaces. Each says so in the plan's own
+words where it happens: signing in, the phone connecting, or, for what waits to sync, the
+project's **Project settings…** → **Sync** and `ys sync status`.
+
+Only what is new waits. Devices already signed in keep working, other synced changes still come
+down, and nothing on your computers stops or is deleted. Reading what the server holds, signing
+devices out, removing a computer, [exporting your account](#exporting-your-account) and
+[deleting it](#deleting-your-account) are never refused for a plan. A note held back stays queued
+on its computer and goes up once the plan has room, without you doing anything.
+
+If the server cannot check the plan for a while, what your account did in the last day carries on,
+and only something it never did waits, saying the server cannot check the plan right now.
+
 ## If this computer is signed out
 
 If the server signs this computer out, **Settings → Remote** says so and offers **Sign in again**. It
@@ -539,7 +558,10 @@ You can save everything the server keeps of your account as one JSON file, to ke
 - your phones and computers, signed out ones the server still lists included, and which devices
   each computer lets in;
 - which phones get notifications, by device and platform, and your notification settings;
-- every synced project, note and workspace name, in plain text, with a revoked note's text too.
+- every synced project, note and workspace name, in plain text, with a revoked note's text too;
+- how much you used each day: how many of your devices made a request, the most connections they
+  had open to your computers at once, and the bytes the relay carried and your computers synced.
+  Counts only, never what passed through, kept for 400 days.
 
 It never holds a credential, a push token or a pairing code. It also leaves out what holds no
 content of yours: records deleted from sync, the server's change log, and notices on their way to a

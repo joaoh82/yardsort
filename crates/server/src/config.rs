@@ -20,6 +20,12 @@
 //!   Machine's id, which Fly.io sets as `FLY_MACHINE_ID` and is used when this is unset; anywhere
 //!   else, a name made up at each start.
 //!
+//! Entitlements are optional (`crate::entitlements`). Unset, everything is allowed up to the
+//! server's own limits, as a self-hosted server runs.
+//! - `YARDSORT_ENTITLEMENTS_URL`: the service asked before another device, a connection to a host
+//!   or more synced data. HTTPS, or plain HTTP to a loopback address.
+//! - `YARDSORT_ENTITLEMENTS_TOKEN` (or `_FILE`): sent to it as a bearer credential.
+//!
 //! Push is optional. With none of these set, notices wait until a provider is configured.
 //! The design is `docs/design/40-mobile-notifications.md`.
 //! - `YARDSORT_APNS_KEY_ID`, `YARDSORT_APNS_TEAM_ID`, `YARDSORT_APNS_BUNDLE_ID`
@@ -57,6 +63,13 @@ pub struct Settings {
     pub routing: Routing,
     pub instance: Instance,
     pub push: PushSettings,
+    pub entitlements: Option<EntitlementsSettings>,
+}
+
+/// The entitlements service, when the operator configured one.
+pub struct EntitlementsSettings {
+    pub url: Url,
+    pub token: Option<Secret>,
 }
 
 /// APNs and FCM, when the operator configured them. A missing piece leaves that provider off.
@@ -80,6 +93,10 @@ impl std::fmt::Debug for Settings {
             .field("instance", &self.instance.as_str())
             .field("apns", &self.push.apns.is_some())
             .field("fcm", &self.push.fcm.is_some())
+            .field(
+                "entitlements",
+                &self.entitlements.as_ref().map(|e| e.url.as_str()),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -155,8 +172,42 @@ impl Settings {
             device_redirects,
             database_url: database_url(&get)?,
             push: push_settings(&get),
+            entitlements: entitlements_settings(&get)?,
         })
     }
+}
+
+fn entitlements_settings(
+    get: &impl Fn(&str) -> Option<String>,
+) -> Result<Option<EntitlementsSettings>, ConfigError> {
+    let token = secret(get, "YARDSORT_ENTITLEMENTS_TOKEN")?;
+    let Some(url) = get("YARDSORT_ENTITLEMENTS_URL") else {
+        return match token {
+            Some(_) => Err(ConfigError(
+                "YARDSORT_ENTITLEMENTS_TOKEN is set without YARDSORT_ENTITLEMENTS_URL".into(),
+            )),
+            None => Ok(None),
+        };
+    };
+    let url = Url::parse(url.trim())
+        .map_err(|e| ConfigError(format!("YARDSORT_ENTITLEMENTS_URL {url:?}: {e}")))?;
+    let loopback = match url.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        _ => false,
+    };
+    match url.scheme() {
+        "https" => {}
+        "http" if loopback => {}
+        _ => {
+            return Err(ConfigError(format!(
+                "YARDSORT_ENTITLEMENTS_URL {:?} is not HTTPS (plain HTTP is accepted on a \
+                 loopback address only)",
+                url.as_str()
+            )))
+        }
+    }
+    Ok(Some(EntitlementsSettings { url, token }))
 }
 
 fn push_settings(get: &impl Fn(&str) -> Option<String>) -> PushSettings {
@@ -315,6 +366,44 @@ mod tests {
             let error = settings(&without).unwrap_err().to_string();
             assert!(error.contains(missing.0), "{error}");
         }
+    }
+
+    #[test]
+    fn entitlements_are_off_unless_a_secure_url_is_given() {
+        assert!(settings(MINIMAL).unwrap().entitlements.is_none());
+        let with = |extra: &[(&'static str, &'static str)]| {
+            let mut pairs = MINIMAL.to_vec();
+            pairs.extend_from_slice(extra);
+            settings(&pairs)
+        };
+        let on = with(&[
+            (
+                "YARDSORT_ENTITLEMENTS_URL",
+                "https://plans.example.invalid/ask",
+            ),
+            ("YARDSORT_ENTITLEMENTS_TOKEN", "the-entitlements-token"),
+        ])
+        .unwrap();
+        let entitlements = on.entitlements.as_ref().unwrap();
+        assert_eq!(
+            entitlements.url.as_str(),
+            "https://plans.example.invalid/ask"
+        );
+        assert_eq!(
+            entitlements.token.as_ref().unwrap().expose(),
+            "the-entitlements-token"
+        );
+        assert!(!format!("{on:?}").contains("the-entitlements-token"));
+        assert!(
+            with(&[("YARDSORT_ENTITLEMENTS_URL", "http://127.0.0.1:9/ask")])
+                .unwrap()
+                .entitlements
+                .is_some()
+        );
+        let plain = with(&[("YARDSORT_ENTITLEMENTS_URL", "http://plans.example.invalid/")]);
+        assert!(plain.unwrap_err().to_string().contains("not HTTPS"));
+        let alone = with(&[("YARDSORT_ENTITLEMENTS_TOKEN", "t")]);
+        assert!(alone.unwrap_err().to_string().contains("without"));
     }
 
     #[test]

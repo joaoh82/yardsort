@@ -419,4 +419,24 @@ describe("deleting an account", () => {
     expect(later.remote?.reason).toBe("unknown");
     expect(later.accountDeleted).toBe(false);
   });
+
+  test("a plan with no room says so in the operator's words", async () => {
+    const base = serve(() =>
+      Response.json(
+        {
+          code: "forbidden",
+          message: "Your plan has one device.",
+          retryable: false,
+          reason: "planLimit",
+        },
+        { status: 403 },
+      ),
+    );
+    const refused = (await new Client(base)
+      .devices(new Secret("a"))
+      .catch((e: unknown) => e)) as ClientError;
+    expect(refused.planLimit).toBe(true);
+    expect(refused.accountDeleted).toBe(false);
+    expect(refused.message).toBe("Your plan has one device.");
+  });
 });

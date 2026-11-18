@@ -3,5 +3,6 @@
 
 pub mod idp;
 pub mod pg;
+pub mod plans;
 pub mod replay;
 pub mod served;

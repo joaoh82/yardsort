@@ -140,6 +140,7 @@ pub fn router<R: Records + Clone + 'static>(
     crate::relay::start_rechecks(Arc::clone(&service));
     crate::limit::start_sweeping(Arc::downgrade(&service));
     crate::sync::start_pruning(Arc::downgrade(&service));
+    crate::usage::start_flushing(Arc::downgrade(&service));
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/v1/server", get(describe::<R>))

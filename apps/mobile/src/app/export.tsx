@@ -59,6 +59,9 @@ export default function Export() {
         <Body muted>• your phones and computers, and which devices each lets in</Body>
         <Body muted>• which phones get notifications, never their tokens, and your settings</Body>
         <Body muted>• every synced project, note and workspace name, in plain text</Body>
+        <Body muted>
+          • how much you used each day: devices, connections and bytes, never their content
+        </Body>
         <Body muted>Never a credential. Keep the file somewhere only you can read.</Body>
       </Section>
       {problem && <Problem>{problem}</Problem>}

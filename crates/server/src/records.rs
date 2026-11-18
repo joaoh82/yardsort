@@ -31,6 +31,7 @@ use tokio::sync::broadcast;
 
 use crate::sync::{decide, Applied, ProjectState, Pulled, Snapshot, Verdict};
 use crate::tokens::{self, TokenHash};
+use crate::usage::{UsageDay, UsageDelta};
 
 /// An account on this server: one identity provider subject. Never an email address, and never
 /// linked to another account by one.
@@ -380,6 +381,24 @@ pub trait Records: Send + Sync {
         credential: &TokenHash,
         now: i64,
     ) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Add what an instance counted (`crate::usage`), in one step: bytes added, the peak kept
+    /// if higher, each device counted once a day. An account deleted since adds nothing.
+    /// Devices counted before yesterday, and days past their retention, may be dropped.
+    fn add_usage(&self, deltas: &[UsageDelta], now: i64)
+        -> impl Future<Output = Result<()>> + Send;
+
+    /// Every account's days from `from` to `to`, both included, by day then account.
+    fn usage(&self, from: i64, to: i64) -> impl Future<Output = Result<Vec<UsageDay>>> + Send;
+
+    /// One account's days, oldest first, for its export.
+    fn account_usage(
+        &self,
+        account: &AccountId,
+    ) -> impl Future<Output = Result<Vec<UsageDay>>> + Send;
+
+    /// The bytes of synced bodies the account's records hold now.
+    fn sync_bytes(&self, account: &AccountId) -> impl Future<Output = Result<u64>> + Send;
 
     /// Keep a sign-in in progress. Ones that lapsed by `now` may be dropped.
     fn put_login(&self, login: PendingLogin, now: i64) -> impl Future<Output = Result<()>> + Send;
@@ -935,6 +954,8 @@ struct State {
     sync: HashMap<String, AccountSync>,
     /// The credentials of deleted accounts' devices, with when each would have lapsed.
     deleted: HashMap<TokenHash, i64>,
+    usage: HashMap<(AccountId, i64), UsageDay>,
+    usage_devices: HashMap<(AccountId, i64), BTreeSet<DeviceId>>,
 }
 
 /// One account's synced records.
@@ -1126,6 +1147,8 @@ impl Records for MemoryRecords {
             s.handoffs.retain(|h| h.account != *account);
             s.push_tokens.retain(|_, row| row.account != account.0);
             s.preferences.remove(&account.0);
+            s.usage.retain(|(a, _), _| a != account);
+            s.usage_devices.retain(|(a, _), _| a != account);
             let notices: BTreeSet<String> = s
                 .notices
                 .iter()
@@ -1149,6 +1172,86 @@ impl Records for MemoryRecords {
 
     async fn deleted_credential(&self, credential: &TokenHash, now: i64) -> Result<bool> {
         self.with(|s| s.deleted.get(credential).is_some_and(|until| *until > now))
+    }
+
+    async fn add_usage(&self, deltas: &[UsageDelta], now: i64) -> Result<()> {
+        self.with(|s| {
+            for delta in deltas {
+                let known = s.accounts.values().any(|(id, _)| *id == delta.account);
+                if !known {
+                    continue;
+                }
+                let theirs: BTreeSet<&DeviceId> = s
+                    .devices
+                    .iter()
+                    .filter(|d| d.account == delta.account)
+                    .map(|d| &d.id)
+                    .collect();
+                let seen = s
+                    .usage_devices
+                    .entry((delta.account.clone(), delta.day))
+                    .or_default();
+                seen.extend(delta.devices.iter().filter(|d| theirs.contains(d)).cloned());
+                let active = seen.len() as u64;
+                let day = s
+                    .usage
+                    .entry((delta.account.clone(), delta.day))
+                    .or_insert_with(|| UsageDay {
+                        account: delta.account.clone(),
+                        day: delta.day,
+                        relay_bytes: 0,
+                        peak_streams: 0,
+                        sync_bytes: 0,
+                        active_devices: 0,
+                    });
+                day.relay_bytes = day.relay_bytes.saturating_add(delta.relay_bytes);
+                day.peak_streams = day.peak_streams.max(delta.peak_streams);
+                day.sync_bytes = day.sync_bytes.saturating_add(delta.sync_bytes);
+                day.active_devices = active;
+            }
+            let today = crate::usage::day_of(now);
+            s.usage_devices.retain(|(_, day), _| *day >= today - 1);
+            s.usage
+                .retain(|(_, day), _| *day >= today - crate::usage::USAGE_RETENTION_DAYS);
+        })
+    }
+
+    async fn usage(&self, from: i64, to: i64) -> Result<Vec<UsageDay>> {
+        self.with(|s| {
+            let mut days: Vec<UsageDay> = s
+                .usage
+                .values()
+                .filter(|u| (from..=to).contains(&u.day))
+                .cloned()
+                .collect();
+            days.sort_by(|a, b| (a.day, &a.account.0).cmp(&(b.day, &b.account.0)));
+            days
+        })
+    }
+
+    async fn account_usage(&self, account: &AccountId) -> Result<Vec<UsageDay>> {
+        self.with(|s| {
+            let mut days: Vec<UsageDay> = s
+                .usage
+                .values()
+                .filter(|u| u.account == *account)
+                .cloned()
+                .collect();
+            days.sort_by_key(|u| u.day);
+            days
+        })
+    }
+
+    async fn sync_bytes(&self, account: &AccountId) -> Result<u64> {
+        self.with(|s| {
+            s.sync.get(&account.0).map_or(0, |sync| {
+                sync.records
+                    .values()
+                    .filter_map(|r| r.body.as_ref())
+                    .map(|body| body.to_string().len() as u64)
+                    .sum()
+            })
+        })
     }
 
     async fn put_login(&self, login: PendingLogin, now: i64) -> Result<()> {

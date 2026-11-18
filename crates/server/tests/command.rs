@@ -179,3 +179,62 @@ fn revoke_account_says_what_it_is_missing() {
         text(&unknown)
     );
 }
+
+#[tokio::test]
+async fn usage_prints_each_accounts_days_between_two_dates() {
+    use yardsort_server::usage::{day_of, parse_date, UsageDelta};
+    let Some(db) = common::pg::database().await else {
+        return;
+    };
+    let url = db.url();
+    let alice = db.records.account(ISSUER, "alice", T).await.unwrap();
+    let phone = enroll(&*db.records, &alice, "usage-phone").await;
+    let day = parse_date("2027-01-14").unwrap();
+    let now = day * 24 * 60 * 60_000;
+    assert_eq!(day_of(now), day);
+    let delta = |day, relay_bytes| UsageDelta {
+        account: alice.clone(),
+        day,
+        relay_bytes,
+        peak_streams: 2,
+        sync_bytes: 30,
+        devices: [phone.clone()].into(),
+    };
+    db.records
+        .add_usage(&[delta(day - 1, 1000), delta(day, 500)], now)
+        .await
+        .unwrap();
+
+    let env = [("DATABASE_URL", url.as_str())];
+    let out = server(
+        &env,
+        &["usage", "--from", "2027-01-14", "--to", "2027-01-14"],
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let printed = String::from_utf8_lossy(&out.stdout).into_owned();
+    let lines: Vec<&str> = printed.lines().collect();
+    assert_eq!(
+        lines,
+        [
+            "day\taccount\tactive devices\tpeak connections\trelay bytes\tsync bytes",
+            &*format!("2027-01-14\t{}\t1\t2\t500\t30", alice.0),
+        ]
+    );
+    let both = server(
+        &env,
+        &["usage", "--from", "2027-01-13", "--to", "2027-01-14"],
+    );
+    assert_eq!(String::from_utf8_lossy(&both.stdout).lines().count(), 3);
+    // Nothing that names a person: the server's account id only.
+    assert!(!printed.contains("alice"));
+
+    let wrong = server(&env, &["usage", "--from", "14/01/2027"]);
+    assert!(!wrong.status.success());
+    assert!(text(&wrong).contains("YYYY-MM-DD"), "{}", text(&wrong));
+    let backwards = server(
+        &env,
+        &["usage", "--from", "2027-01-14", "--to", "2027-01-13"],
+    );
+    assert!(text(&backwards).contains("after"), "{}", text(&backwards));
+    db.drop().await;
+}

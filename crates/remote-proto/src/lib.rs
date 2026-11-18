@@ -282,8 +282,9 @@ pub struct RemoteError {
     /// With `protocol_incompatible`: the majors this side speaks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supported_protocols: Option<Vec<u16>>,
-    /// With `unauthenticated`: why the credential stopped working, when that is something a
-    /// client says in its own words. Absent from an older server.
+    /// Why the request was refused, when that is something a client says in its own words:
+    /// with `unauthenticated`, why the credential stopped working; with `forbidden`, a plan's
+    /// limit. Absent from an older server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<ErrorReason>,
 }
@@ -295,6 +296,10 @@ pub enum ErrorReason {
     /// The account this device signed in to was deleted, from this device or another. Nothing
     /// of it is left at the server; everything on the device is still there.
     AccountDeleted,
+    /// With `forbidden`: the account's plan does not cover this: another device, another
+    /// connection to a host, or more synced data. The message says which, in the operator's
+    /// words. Nothing already there is affected.
+    PlanLimit,
     /// A reason from a newer server this build does not know.
     #[serde(other)]
     Unknown,

@@ -485,6 +485,9 @@ mod cli {
         println!("  Your devices and computers, and which devices each lets in");
         println!("  Which phones get notifications, never their tokens, and your settings");
         println!("  Every synced project, note and workspace name, in plain text");
+        println!(
+            "  How much you used each day: devices, connections and bytes, never their content"
+        );
         println!("Never a credential. Keep the file somewhere only you can read.");
         if path.exists() {
             return Err(format!(

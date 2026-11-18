@@ -51,6 +51,10 @@
 //! of Yardsort's own crates, and the server's default for the rest. The leak tests read it for what
 //! a person typed (35 §19). Any other value is a filter of its own, as `RUST_LOG` would be.
 //!
+//! With `YARDSORT_ENTITLEMENTS_URL` set, the server asks the entitlements service there, as a
+//! managed server does (`yardsort_server::entitlements`), and sends it
+//! `YARDSORT_ENTITLEMENTS_TOKEN` when that is set too. Unset, everything is allowed.
+//!
 //! It stops when stdin closes, so a test that dies takes it with it. Nothing here is a secret
 //! worth keeping: the server, its keys and its accounts last as long as the process.
 
@@ -118,6 +122,7 @@ async fn main() -> Result<(), String> {
             .map(|r| (*r).to_owned())
             .collect(),
         Arc::clone(&pushes) as Arc<dyn PushProvider>,
+        entitlements()?,
     )
     .await;
     let credentials = served
@@ -656,4 +661,21 @@ fn echo_lines(workspace: &str) -> LaunchPlan {
         .into(),
         prompt: None,
     }
+}
+
+/// The entitlements service the environment names, or none.
+fn entitlements() -> Result<yardsort_server::entitlements::Entitlements, String> {
+    use yardsort_server::entitlements::Entitlements;
+    let Ok(url) = std::env::var("YARDSORT_ENTITLEMENTS_URL") else {
+        return Ok(Entitlements::none());
+    };
+    let url = url::Url::parse(&url).map_err(|e| format!("YARDSORT_ENTITLEMENTS_URL: {e}"))?;
+    let token = std::env::var("YARDSORT_ENTITLEMENTS_TOKEN")
+        .ok()
+        .map(remote_proto::account::Secret::new);
+    let http = yardsort_server::oidc::http_client_builder()
+        .no_proxy()
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(Entitlements::service(url, token, http))
 }
