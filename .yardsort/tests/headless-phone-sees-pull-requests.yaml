@@ -1,0 +1,105 @@
+id: headless-phone-sees-pull-requests
+name: A phone is told of the pull requests of a computer with no screen
+description: >-
+  Runs yardsort-host with no display variables against the stand-in server, with one project on a
+  branch with a pull request, and pairs a pretend phone. A stand-in gh answers for the pull
+  requests from a file, and the host finds programs through a shell that reads no startup files,
+  so the stand-in is the gh it finds; the remote is under a name reserved for tests, which no
+  program could reach. The phone asks for the computer's pull requests: the first answer says the
+  host is reading them, and the next has the checkout's own, with its checks, review and conflicts
+  as gh said them, and one the host never read is refused as not found. Then it checks that the
+  stand-in was asked for the list, and for nothing that changes one. Linux only. No window opens.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build
+    action: shell
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: a_repository_on_trunk
+    action: shell
+    line: >-
+      mkdir -p "$YS_RUN_DIR/repo" "$YS_RUN_DIR/profile" && git -C "$YS_RUN_DIR/repo" init -q -b trunk
+      && git -C "$YS_RUN_DIR/repo" -c user.name=Smoke -c user.email=smoke@example.invalid -c
+      commit.gpgsign=false commit -q --allow-empty -m first && cp
+      .yardsort/tests/support/headless-settings.toml "$YS_RUN_DIR/profile/settings.toml"
+  - id: seed_a_pull_request
+    # The app's seeding, in a folder of its own since $YS_RUN_DIR/bin is the build's: a branch
+    # with pull request 12, a gh answering from a file in app/bin, and a login shell in
+    # app/loginshell that puts it first. Its remote is a forge's address; here it is moved under a
+    # name reserved for tests.
+    action: shell
+    line: >-
+      YS_APP_DIR="$YS_RUN_DIR/app" sh .yardsort/tests/support/app.sh seed-a-pull-request && git -C "$YS_RUN_DIR/repo" remote
+      set-url origin https://git.example.test/orchard/demo.git
+
+steps:
+  - id: the_host_signs_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", sign-in, Smoke box]
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: serve
+    action: shell
+    line: >-
+      SHELL="$YS_RUN_DIR/app/loginshell" PATH="$YS_RUN_DIR/app/bin:$PATH" setsid sh
+      .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log" 2>&1 <
+      /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: add_the_project
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, project, add, "{{ run.dir }}/repo"]
+    expect:
+      stdout_contains: Added repo
+  - id: pair_a_phone
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+  - id: phone_sees_pull_requests
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", sees-pull-requests, Smoke box]
+    timeout: 90s
+    expect:
+      stdout_contains: saw the pull requests
+  - id: the_stand_in_was_asked_for_the_list
+    action: shell
+    line: grep -c "^pr list " "$YS_RUN_DIR/app/gh/asked"
+    expect:
+      exit: 0
+  - id: and_for_nothing_that_changes_one
+    action: shell
+    line: '! grep -E ''^pr (merge|close|reopen|ready|edit|comment|create)'' "$YS_RUN_DIR/app/gh/asked"'
+    expect:
+      exit: 0
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      kill "$(cat "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon
+      .*$YS_RUN_DIR"; pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true
