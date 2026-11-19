@@ -208,9 +208,10 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   [A computer with no screen](docs/guide/headless-host.md). Its agents keep
   running when the host restarts, and when a reboot ends them, `ys session resume` brings their
   conversations back. It serves a [dashboard](docs/guide/host-dashboard.md) for setting the server
-  up from a browser, installing agents, signing GitHub in, cloning and running commands: on that
-  computer's own `127.0.0.1`, signed in to with a one-time link from a terminal there, reached
-  over an SSH forward or a rustunnel tunnel you turn on. The app can serve the same page, and
+  up from a browser: installing agents, signing GitHub in, cloning, running commands, a terminal,
+  signing the server in and pairing your phone. It is on that computer's own `127.0.0.1`, signed
+  in to with a one-time link from a terminal there, reached over an SSH forward or a rustunnel
+  tunnel you turn on. The app can serve the same page, and
   does not until you turn it on. The desktop app can
   reach another computer the same way: its projects and workspaces in the sidebar under that
   computer, opened like your own, with its terminals to watch and, once you have control, to type
@@ -662,7 +663,7 @@ says no.
 | [Remote](docs/guide/remote.md)                                                                   | Your phone and your other computers, through a server. Still under development        |
 | [The phone app](docs/guide/phone.md)                                                             | What it does and what it needs. Invite only for now, in the app stores in a few weeks |
 | [A computer with no screen](docs/guide/headless-host.md)                                         | `yardsort-host`: a Linux server your phone reaches. Still under development           |
-| [The host dashboard](docs/guide/host-dashboard.md)                                               | A web page for setting a host up from a browser: agents, Git, setup commands          |
+| [The host dashboard](docs/guide/host-dashboard.md)                                               | A web page for setting a host up from a browser: agents, Git, a terminal, pairing     |
 | [Usage](docs/guide/usage.md)                                                                     | Tokens spent and their cost; CPU and memory per agent                                 |
 | [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                                            |
 | [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                                        |

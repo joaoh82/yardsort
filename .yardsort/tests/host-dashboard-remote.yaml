@@ -1,0 +1,89 @@
+id: host-dashboard-remote
+name: A computer with no screen is signed in and a phone let in from its dashboard
+description: >-
+  Runs yardsort-host with no display and no sign-in, on this run's profile and port, beside the
+  stand-in server. The operator signs a browser's worth of requests in to the dashboard with a link
+  from a terminal of their own. From the page, they then sign the host in to the server by pasting
+  the address a browser came back to, show a pairing code, see the pretend phone ask, and let it
+  watch and type; the phone reaches the host. A terminal opened in the page answers what is typed
+  into it, and is refused yardsort-host pair. What was done is in the dashboard's activity, with no
+  code in it. With build set to package, it runs the tarball the release ships. Linux only. No
+  window opens.
+version: 1
+timeout: 45m
+
+inputs:
+  - id: build
+    kind: choice
+    label: Which yardsort-host to run
+    options: [debug, package]
+    default: debug
+
+setup:
+  - id: build
+    action: shell
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: a_profile_on_this_runs_port
+    action: shell
+    line: >-
+      mkdir -p "$YS_RUN_DIR/profile" && printf '[dashboard]\nport = %s\n' "$YS_RUN_PORT" >
+      "$YS_RUN_DIR/profile/settings.toml"
+  - id: serve
+    action: shell
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: served
+    action: wait_for
+    url: "http://127.0.0.1:{{ run.port }}/"
+    timeout: 60s
+
+steps:
+  - id: serve_said_remote_is_off
+    action: run
+    program: grep
+    args: ["Serving, with Remote off", "{{ run.dir }}/serve.log"]
+  - id: signed_in_and_a_phone_let_in_from_the_page
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/dashboard-remote.ts, "{{ run.dir }}", "{{ run.port }}"]
+    timeout: 3m
+    expect:
+      stdout_contains: "let in from the page: the pretend phone"
+  - id: the_phone_reaches_the_host
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", reaches, Smoke box]
+    expect:
+      stdout_contains: welcomed by Smoke box
+  - id: status_says_the_same
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, yardsort-host, status]
+    expect:
+      stdout_contains: Smoke box
+  - id: devices_lists_the_phone
+    action: shell
+    line: sh .yardsort/tests/support/headless.sh yardsort-host devices
+    expect:
+      stdout_contains: watches and types
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      kill "$(cat "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

@@ -60,9 +60,9 @@ export function HostDashboardSettings() {
       <h4 className="text-ink-muted">Host dashboard</h4>
       <p className="text-ink-faint">
         A web page this computer serves to itself, for looking after it from a browser: how it
-        stands, the agents installed, Git and GitHub, and commands that set it up. It is not another
-        Yardsort, and needs no Remote. It listens on this computer alone, and a browser signs in
-        with a one-time link made here.
+        stands, the agents installed, Git and GitHub, commands that set it up, and a terminal. It is
+        not another Yardsort, and needs no Remote. It listens on this computer alone, and a browser
+        signs in with a one-time link made here.
       </p>
       <label className="flex items-start gap-2">
         <input
@@ -78,8 +78,7 @@ export function HostDashboardSettings() {
         <span>
           Serve the host dashboard
           <span className="block text-ink-faint">
-            Off unless you turn it on. Whoever signs in to it can run commands on this computer, as
-            you.
+            Off unless you turn it on. Whoever signs in to it has a shell on this computer, as you.
           </span>
         </span>
       </label>

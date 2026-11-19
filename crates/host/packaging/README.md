@@ -31,7 +31,7 @@ the same way.
 agent into `~/.local`, as you, from its vendor's own installer or from npm.
 
 While it runs, the host serves a dashboard on `127.0.0.1:28680`, for doing the rest from a browser:
-installing agents, Git and GitHub, and setup commands. `yardsort-host dashboard` prints a one-time
+installing agents, Git and GitHub, setup commands, a terminal, signing in to a server and pairing. `yardsort-host dashboard` prints a one-time
 link that signs a browser in; from another computer, forward the port over SSH first
 (`ssh -L 28680:127.0.0.1:28680 <this computer>`). `yardsort-host dashboard off` turns it off. See
 https://yardsort.sh/docs/guide/host-dashboard.

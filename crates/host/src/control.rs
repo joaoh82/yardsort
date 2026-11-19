@@ -534,9 +534,9 @@ mod tests {
         }
         assert_eq!(
             Refusal::Job.say("Signing in to the dashboard", "dashboard"),
-            "Signing in to the dashboard is refused to a command the dashboard ran. Only a \
-             person may do it, from a terminal of their own on this computer (an SSH login, \
-             say), never through the dashboard."
+            "Signing in to the dashboard is refused to a command or a terminal the dashboard \
+             ran: run `yardsort-host dashboard` in a terminal of your own on this computer (an \
+             SSH login, say)."
         );
     }
 

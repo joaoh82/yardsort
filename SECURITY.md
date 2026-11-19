@@ -30,10 +30,12 @@ Knowing the design helps judge what is a vulnerability:
 - **The host dashboard**, where it is served ([guide](docs/guide/host-dashboard.md)), listens on
   `127.0.0.1` only. It takes a request only when it is addressed to a loopback name or to its own
   tunnel, comes from its own page, and carries a session bought with a one-time code, which is
-  handed out only to a person at that computer. A signed-in browser can run commands there as
-  that user: that is its purpose, and the one place a line someone typed is handed to a shell. It
-  can let no device in, and a command it runs is refused what only a person at a terminal may
-  ask of the host.
+  handed out only to a person at that computer. A signed-in browser has a shell there as that
+  user, by commands and by a terminal in the page: that is its purpose, and the one place a line
+  someone typed is handed to a shell. **On a computer with no screen, a signed-in browser can
+  also let a device in and sign the host in to a server**, on the page's Remote tab: there, the
+  dashboard's sign-in is part of what guards pairing. A command or a terminal the dashboard runs
+  is still refused what only a person at a terminal may ask of the host.
 
 Reports about breaking those guarantees — path traversal out of a workspace, command injection
 through a prompt or a harness field, a webview escape, anything that would let an unsigned or

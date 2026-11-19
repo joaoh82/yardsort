@@ -14,6 +14,7 @@ Beside them, each under its own licence, unmodified:
 | Go                          | 1.27.3                | BSD-3-Clause                                            | https://go.dev                        |
 | Rust, Cargo, rustup         | 1.98.1, rustup 1.29.2 | MIT or Apache-2.0                                       | https://www.rust-lang.org             |
 | GitHub CLI                  | 2.103.3               | MIT                                                     | https://github.com/cli/cli            |
+| rustunnel (the client)      | 0.8.9                 | AGPL-3.0; its source is at that tag                     | https://github.com/joaoh82/rustunnel  |
 | Codex CLI                   | 0.166.0               | Apache-2.0                                              | https://github.com/openai/codex       |
 | OpenCode                    | 2.2.2                 | MIT                                                     | https://github.com/anomalyco/opencode |
 | Pi                          | 1.4.0                 | MIT                                                     | https://github.com/earendil-works/pi  |

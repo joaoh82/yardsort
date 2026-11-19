@@ -4,15 +4,17 @@
 > Expect it to change.
 
 The host dashboard is a web page a computer serves to itself, for looking after it as a host
-from a browser: how it stands, the agents installed on it, Git and GitHub, and the commands that
-set it up. It is what you would otherwise do over SSH, a command at a time, after
+from a browser: how it stands, the agents installed on it, Git and GitHub, the commands that set
+it up, a terminal for what asks a question, signing it in to a Yardsort server and letting your
+devices in. It is what you would otherwise do over SSH, a command at a time, after
 [installing `yardsort-host`](headless-host.md#installing).
 
 ![The host dashboard's Overview: the host signed in as Build box with its link connected, the computer's processors, memory and disk as bars, and two projects](../images/host-dashboard.png)
 
-It is not another Yardsort. There are no workspaces, terminals or conversations in it, and it
-starts no agent: that is the [phone's and the desktop's](remote.md). It does not need Remote
-either, so a server that is not signed in to anything yet serves it all the same.
+It is not another Yardsort. There are no workspaces, agents' terminals or conversations in it,
+and it starts no agent: that is the [phone's and the desktop's](remote.md). It does not need
+Remote either, so a server that is not signed in to anything yet serves it all the same, and is
+signed in from it.
 
 - **On a computer with no screen**, `yardsort-host serve` serves it unless you turn it off.
 - **In the app**, it is off until you turn it on under **Settings → Remote → Host dashboard**.
@@ -27,13 +29,19 @@ a [tunnel](#a-tunnel) you turn on.
 a person: at a terminal of your own there, or in the app's window. There is no password to
 guess. A link is good once, for ten minutes; the browser then stays signed in for thirty days.
 
-**Whoever signs in can run commands on that computer, as the user the host runs as.** That is
-what it is for. Treat a sign-in link as you would treat a shell on that computer.
+**Whoever signs in has a shell on that computer, as the user the host runs as.** That is what
+it is for. Treat a sign-in link as you would treat an SSH login there.
 
-It lets no device in, approves no [memory](memory.md) note and turns no sync on. Those stay at a
-terminal of your own, or in the app, so that nothing an agent could reach can do them, and a
-command you run from the dashboard is refused them too: `yardsort-host pair` typed into
-**Commands** does not pair a device.
+**On a computer with no screen, whoever signs in can also let a device in**, and sign the
+computer in to a Yardsort server: its [Remote](#remote) tab does both, so that a server can be
+set up from a browser alone. Everywhere else in Yardsort a device is let in only by a person at
+a terminal of their own or at the app's window. Here it is whoever holds a dashboard session, so
+keep the dashboard's sign-in as close as you would keep pairing.
+
+It approves no [memory](memory.md) note and turns no sync on: those stay at a terminal of your
+own, or in the app. And only the page's own **Remote** tab pairs: `yardsort-host pair` typed
+into **Commands** or into the page's **Terminal** is refused, as it is for an agent, so a
+command you ran for another reason lets nobody in.
 
 ## Opening it on a computer with no screen
 
@@ -103,8 +111,8 @@ where their terms are, and asks, before it runs one; Codex CLI, OpenCode, Pi and
 from npm. What the installer prints is shown as it runs. Installing is offered on Linux and
 macOS.
 
-**An agent still has to be signed in**, once, as its own guide says, at a terminal on that
-computer: the dashboard has no terminal.
+**An agent still has to be signed in**, once, as its own guide says: open the dashboard's
+[Terminal](#terminal), run the agent, and follow what it asks.
 
 ### Git
 
@@ -130,7 +138,7 @@ started.
 
 **Nothing is on a command's input.** One that asks a question gets no answer and fails, so pass
 `-y`, or whatever the command has for that: `sudo -n apt-get install -y ripgrep`, not
-`sudo apt-get install ripgrep`.
+`sudo apt-get install ripgrep`. For one that must ask, use the [Terminal](#terminal).
 
 **A command is not you at a terminal.** `yardsort-host pair`, `yardsort-host dashboard`, and the
 `sync` and `memory` commands that [only a person may run](headless-host.md#only-a-person-can-pair-a-device)
@@ -138,18 +146,86 @@ are refused to a command the dashboard ran, and to anything that command starts.
 
 **Jobs** lists what has been run since the host last started, an agent's install and a GitHub
 sign-in included, each with its output. They are kept in memory: restarting the host forgets
-them, and stops any still running.
+them, and stops any still running. That each was run, and how it ended, stays in
+[Activity](#activity).
+
+### Terminal
+
+![The dashboard's Terminal tab: a shell on the server in the page, an agent's version asked for, and a question waiting for an answer typed into it](../images/host-dashboard-terminal.png)
+
+A shell on that computer, in the page: your own login shell, as the user the host runs as, in
+the home folder. It is for what a command cannot do because it asks a question: an agent's own
+sign-in, `sudo` with a password, `rustunnel setup`.
+
+- **New terminal** opens one, and **Close** ends it and what runs in it. Up to four are open at
+  once, each on its own tab above the terminal.
+- **It stays open when you leave the page**, or close the browser: come back and it shows what
+  it printed meanwhile, the newest megabyte of it. Any signed-in browser sees the same
+  terminals.
+- **It ends** when you close it, when [every browser is signed out](#access), and when the host
+  stops. Unlike an agent's terminal in Yardsort, it does not outlast a restart of the host.
+- **Nothing typed or shown in it is recorded.** [Activity](#activity) says only that one was
+  opened, and when it ended.
+
+It is the dashboard's terminal, not one of your own: `yardsort-host pair` and
+`yardsort-host dashboard` typed into it are refused, as they are in **Commands**. Pair on the
+[Remote](#remote) tab.
+
+### Remote
+
+![The dashboard's Remote tab: the host signed in to a server, a phone asking to watch and type with its answers beside it, one device already let in, and a pairing code with its QR code](../images/host-dashboard-remote.png)
+
+On a computer with no screen, this tab does what `yardsort-host sign-in` and `yardsort-host pair`
+do at a terminal. In the app it only says where the computer is signed in: the app keeps both
+under **Settings → Remote**.
+
+**Signing in to a server.** Give the server's address and a name for this computer, and press
+**Sign in**. Then:
+
+1. Open **the sign-in page** it links to, in any browser, and sign in.
+2. The browser is then sent to an address starting `http://127.0.0.1:<port>/signed-in`, which
+   shows an error: nothing answers there on the computer you are sitting at. Copy that whole
+   address from the address bar.
+3. Paste it into the page and press **Finish**.
+
+The host is signed in at once, with no restart, and its link to the server comes up by itself.
+The address you paste is worth nothing to anyone else: it finishes only the sign-in this host
+started. If you forwarded that port to the server over SSH as well, the sign-in finishes by
+itself and there is nothing to paste. To sign in to a different server, sign out first with
+`yardsort-host sign-out`.
+
+**Letting a device in.** **Pair a device** shows a code and a QR code, good once, for five
+minutes. Scan it with the Yardsort app, or type the code into it. The device then shows on the
+page, asking; choose **Allow watching**, **Allow watching and typing** or **Deny**, whether it
+may also approve or answer workflows, and, with more than one project, which projects it
+reaches. Nothing is let in without that answer.
+
+**Devices** lists the ones let in, and **Take off** ends one's way in at once.
+
+### Activity
+
+What was done through the dashboard, the newest first: each sign-in and each one refused, each
+command and how it ended, each terminal opened, a change to the tunnel or to Git's name, a
+sign-in to a server, each device let in, refused or taken off. The last 500 are kept, across
+restarts.
+
+- **It never holds what a command printed, a sign-in code, a pairing code or a GitHub token.**
+- **A command is recorded as you typed it**, so a secret typed into a command line is in it, as
+  it is in a shell's history. Nothing typed into the **Terminal** is.
+- **It is a record for you, not a lock.** Anyone signed in has a shell, and can delete the file.
 
 ### Access
 
 The dashboard's addresses, its [tunnel](#a-tunnel), and how many browsers are signed in. **Sign
-every browser out** signs out this one too, and voids the links not yet used.
+every browser out** signs out this one too, voids the links not yet used, and closes every
+[terminal](#terminal) open in the page.
 
 ## A tunnel
 
-A [rustunnel](https://github.com/joaoh82/rustunnel) tunnel gives the dashboard an `https://`
-address that needs no SSH. The host runs rustunnel's client, which reaches out to a tunnel
-server; nothing new listens on that computer.
+A [rustunnel](https://rustunnel.com) tunnel gives the dashboard an `https://` address that needs
+no SSH. The host runs rustunnel's client, which reaches out to a tunnel server; nothing new
+listens on that computer. rustunnel is the one tunnel the dashboard works with: an address from
+another tunnel, or from a reverse proxy of your own, is refused as not this dashboard's.
 
 > **Not yet run through a real tunnel.** This part was built against rustunnel's documented
 > client and tested with a stand-in for it. If the real one behaves otherwise, the dashboard says
@@ -219,8 +295,19 @@ server = "tunnel.example.com:4040"
 ## In a container
 
 The dashboard is served inside the container, on the container's own `127.0.0.1`, which a
-published port does not reach. Until that changes it can be used there only through a tunnel,
-from an image of your own with `rustunnel` in it. This has not been tried yet.
+published port does not reach, so there it is opened through a tunnel. The full image
+(`yardsort-host-full`) carries the `rustunnel` client for that; the slim one does not. Give the
+container your rustunnel token, and turn the tunnel on from a terminal in it:
+
+```sh
+docker run -d --name yardsort-host -e RUSTUNNEL_TOKEN=<your token> … ghcr.io/joaoh82/yardsort-host-full
+docker exec -it yardsort-host yardsort-host dashboard tunnel on --subdomain build-box
+docker exec -it yardsort-host yardsort-host dashboard     # the address, and a sign-in link
+```
+
+`-it` matters: only a person at a terminal may open the dashboard up. A token kept with
+`rustunnel setup` works too, in the home volume. This has not been tried against a real tunnel
+yet.
 
 ## If something is wrong
 
@@ -233,15 +320,22 @@ from an image of your own with `rustunnel` in it. This has not been tried yet.
   tunnel dropped. It keeps trying, and carries on when the host is back; a browser stays signed
   in across a restart.
 - **The tunnel is "not up".** The line says why, in the client's own words when it gave any. No
-  `rustunnel` on that user's `PATH`: install it. No token, or a wrong one: `rustunnel setup`.
+  `rustunnel` on that user's `PATH`: install it from [rustunnel.com](https://rustunnel.com). No
+  token, or a wrong one: `rustunnel setup`, which the dashboard's own **Terminal** can run.
   When the host runs as a service, the client is found on the `PATH` that user's login shell
   has, as agents are.
 - **"Signing in to the dashboard needs a person at a terminal"**, or **"… is refused from a
-  terminal Yardsort started"**, or **"… is refused to a command the dashboard ran"**. You ran
-  `yardsort-host dashboard` from a script, an agent's terminal or the dashboard's own
-  **Commands**. Run it in an SSH login of your own. Turning the dashboard on and opening a
-  tunnel are refused the same way, each named for what was asked. On a computer that is not
-  Linux it says it needs Linux, where the host can check who asks.
+  terminal Yardsort started"**, or **"… is refused to a command or a terminal the dashboard
+  ran"**. You ran `yardsort-host dashboard` from a script, an agent's terminal, or the
+  dashboard's own **Commands** or **Terminal**. Run it in an SSH login of your own. Turning the
+  dashboard on and opening a tunnel are refused the same way, each named for what was asked. On
+  a computer that is not Linux it says it needs Linux, where the host can check who asks.
+- **"Pairing is refused to a command or a terminal the dashboard ran… Or pair from the
+  dashboard's Remote tab."** `yardsort-host pair` was typed into the page. Use the **Remote**
+  tab's **Pair a device** instead.
+- **"That is not the address this sign-in waits for."** What was pasted on the **Remote** tab is
+  not the address the browser ended at. Copy the whole of it, from `http://127.0.0.1:` to the
+  end. The sign-in still waits, for ten minutes from when it was started.
 - **"Signed out for now, but … could be neither written nor deleted"** The profile's
   `dashboard` folder cannot be changed, so the sign-out holds only until the host restarts. Fix
   the folder's owner or the full disk, or delete the file it names.
@@ -253,6 +347,8 @@ from an image of your own with `rustunnel` in it. This has not been tried yet.
 | Who is signed in     | `dashboard/sessions.json` in the profile, by a hash of each session, never its key |
 | Its settings         | `[dashboard]` in `settings.toml`                                                   |
 | The tunnel's sign-in | rustunnel's own: `~/.rustunnel/config.yml`, or `RUSTUNNEL_TOKEN`                   |
-| What was run         | Nowhere: jobs and their output are kept in memory, and go when the host stops      |
+| What was done        | `dashboard/activity.json` in the profile: the last 500 things, never their output  |
+| What a job printed   | Nowhere: jobs and their output are kept in memory, and go when the host stops      |
+| A terminal's screen  | Nowhere: in memory, the newest megabyte, until the terminal ends                   |
 
 How it was decided, and what is left open: [the design record](../design/47-host-dashboard.md).

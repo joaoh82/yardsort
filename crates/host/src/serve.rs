@@ -115,8 +115,8 @@ pub async fn run(profile: Profile) -> Result<(), String> {
             );
         }
         _ => println!(
-            "Serving, with Remote off: sign in with `yardsort-host sign-in <server>`, after \
-             stopping this."
+            "Serving, with Remote off: sign in from the dashboard's Remote tab, or with \
+             `yardsort-host sign-in <server>` after stopping this."
         ),
     }
     if let Some(said) = crate::dashboard::start_if_wanted(&home).await {
@@ -165,7 +165,14 @@ async fn answer(home: &Arc<HostHome>, stream: UnixStream) {
         Ok(Some(Ask::Pair)) => match refusal {
             None => return pair(home, &mut line).await,
             Some(why) => Reply::Failed {
-                message: why.say("Pairing", "pair"),
+                message: match why {
+                    // The page itself can: say where.
+                    crate::guard::Refusal::Job => format!(
+                        "{} Or pair from the dashboard's Remote tab.",
+                        why.say("Pairing", "pair")
+                    ),
+                    _ => why.say("Pairing", "pair"),
+                },
             },
         },
         Ok(Some(ask)) if refusal.is_some() && ask.guarded() => {
@@ -320,6 +327,11 @@ async fn devices(home: &HostHome) -> account::Result<Vec<Device>> {
             return Err(error);
         }
     }
+    let_in(home)
+}
+
+/// The devices let in, as this computer has them.
+pub(crate) fn let_in(home: &HostHome) -> account::Result<Vec<Device>> {
     let names = project_names(home);
     Ok(host::local_grants(&home.store)
         .map_err(|e| account::Failure::new("remote_store", e.to_string()))?
@@ -345,7 +357,7 @@ async fn devices(home: &HostHome) -> account::Result<Vec<Device>> {
         .collect())
 }
 
-fn project_names(home: &HostHome) -> Vec<Project> {
+pub(crate) fn project_names(home: &HostHome) -> Vec<Project> {
     home.store
         .projects()
         .unwrap_or_default()

@@ -40,6 +40,8 @@ pub struct HostHome {
     starting: Arc<HostStarting>,
     /// The dashboard, while it is served (`dashboard.rs`).
     pub dashboard: std::sync::Mutex<Option<host_dashboard::Dashboard>>,
+    /// A sign-in to a server started from the dashboard, while it waits for its browser.
+    pub signing_in: std::sync::Mutex<crate::dashboard::SignIn>,
     /// The projects' pull requests, read here when a device asks about them.
     pulls: Arc<yardsort_core::remote::pull::polled::Polled>,
 }
@@ -62,6 +64,7 @@ impl HostHome {
             watcher: OnceLock::new(),
             starting: Arc::new(HostStarting(home.clone())),
             dashboard: std::sync::Mutex::new(None),
+            signing_in: std::sync::Mutex::default(),
             pulls: Arc::new(pulls(home.clone())),
         }))
     }

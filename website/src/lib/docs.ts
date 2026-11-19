@@ -162,7 +162,7 @@ export const DOCS_NAV: DocSection[] = [
         slug: "guide/host-dashboard",
         title: "The host dashboard",
         description:
-          "A web page a Yardsort host serves to itself for setting a server up from a browser: install agents, sign GitHub in, clone repositories and run setup commands. On 127.0.0.1 only, signed in to with a one-time link from a terminal, with an optional rustunnel tunnel.",
+          "A web page a Yardsort host serves to itself for setting a server up from a browser: install agents, sign GitHub in, clone repositories, run commands, use a terminal, sign the server in and pair a phone. On 127.0.0.1 only, signed in to with a one-time link from a terminal, with an optional rustunnel tunnel.",
       },
       {
         slug: "guide/smoke-tests",

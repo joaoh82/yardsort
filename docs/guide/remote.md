@@ -18,9 +18,10 @@ other too: see [Syncing projects](#syncing-projects).
 Neither end listens for connections: this computer and your phone each reach out to the server.
 
 Apart from all of that, a computer can serve a page for looking after it from a browser, its agents,
-its Git sign-in and the commands that set it up: [The host dashboard](host-dashboard.md). It is on
-for a computer with no screen and off in the app, listens on that computer alone, and needs no
-server.
+its Git sign-in, the commands that set it up and a terminal: [The host dashboard](host-dashboard.md).
+It is on for a computer with no screen and off in the app, listens on that computer alone, and needs
+no server. On a computer with no screen it is also where that computer can be signed in to a server
+and a device let in, from a browser.
 
 ## What the server can see
 

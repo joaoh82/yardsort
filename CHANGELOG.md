@@ -10,14 +10,22 @@ has the downloads and the full commit lists.
   release starts doing so without being asked**; `yardsort-host dashboard off` turns it off for
   good. The page shows how the host and the computer stand, installs agents, gives Git a name,
   signs the GitHub CLI in from a browser or with a token, clones repositories as projects, and
-  runs setup commands, each with its output as it comes. It listens on that computer alone: reach
-  it over an SSH forward, or turn on a [rustunnel](https://github.com/joaoh82/rustunnel) tunnel
-  with `yardsort-host dashboard tunnel on --subdomain <name>` for an `https://` address, whose
-  server can read what passes through it. A browser signs in with a one-time link that
-  `yardsort-host dashboard` prints only at a terminal of your own, as `pair` does, and whoever
-  signs in can run commands there as you. It is not another Yardsort and lets no device in. The
-  app can serve the same page for this computer: **Settings → Remote → Host dashboard**, off
-  until you tick it. See [The host dashboard](docs/guide/host-dashboard.md).
+  runs setup commands, each with its output as it comes. It has a **terminal**, a shell on that
+  computer for what asks a question: an agent's own sign-in, `sudo` with a password. Its
+  **Remote** tab signs the host in to a Yardsort server while it runs, and **pairs a device**
+  with a code and a QR code, so a server can be set up from a browser alone. **Activity** lists
+  what was done through it, the last 500 things, never what a command printed. It listens on
+  that computer alone: reach it over an SSH forward, or turn on a
+  [rustunnel](https://rustunnel.com) tunnel with
+  `yardsort-host dashboard tunnel on --subdomain <name>` for an `https://` address, whose server
+  can read what passes through it; the full container image now carries the `rustunnel` client,
+  which is how a container's dashboard is reached. A browser signs in with a one-time link that
+  `yardsort-host dashboard` prints only at a terminal of your own, as `pair` does. **Whoever
+  signs in has a shell there as you, and on a host can let a device in**: keep that link as
+  close as you would keep pairing. It is not another Yardsort. The app can serve the same page
+  for this computer, without the Remote tab's sign-in and pairing, which stay in its Settings:
+  **Settings → Remote → Host dashboard**, off until you tick it. See
+  [The host dashboard](docs/guide/host-dashboard.md).
 - **Pull requests on the phone from a computer with no screen.** `yardsort-host` now reads its
   projects' pull requests with its own `gh` when the phone asks, so the badges, the card and the
   **Pull requests** list show for it as for a desktop. Those a workspace follows in another

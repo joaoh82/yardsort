@@ -7,6 +7,8 @@
     <meta name="color-scheme" content="dark light" />
     <title>Yardsort host</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="style-nonce" content="__STYLE_NONCE__" />
+    <link rel="stylesheet" href="/vendor/xterm.css" />
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
@@ -54,7 +56,10 @@
           <a href="#agents" data-tab="agents">Agents</a>
           <a href="#git" data-tab="git">Git</a>
           <a href="#commands" data-tab="commands">Commands</a>
+          <a href="#terminal" data-tab="terminal">Terminal</a>
+          <a href="#remote" data-tab="remote">Remote</a>
           <a href="#access" data-tab="access">Access</a>
+          <a href="#activity" data-tab="activity">Activity</a>
         </nav>
         <button id="sign-out" type="button">Sign out</button>
       </header>
@@ -217,6 +222,126 @@
           </article>
         </section>
 
+        <!-- Terminal -->
+        <section id="tab-terminal" class="tab" hidden>
+          <article class="card">
+            <h2>Terminal</h2>
+            <p class="muted">
+              A shell on this computer as <b id="terminal-user">its user</b>, in the home folder,
+              for what asks a question: an agent's own sign-in, <code>sudo</code> with a password,
+              <code>rustunnel setup</code>. It stays open when you leave this page, and ends when
+              you close it, when every browser is signed out, or when the host stops. What is typed
+              and shown here is not recorded.
+            </p>
+            <div class="terminal-bar">
+              <div id="terminal-list" class="terminal-list" role="tablist"></div>
+              <button id="terminal-new" class="primary" type="button">New terminal</button>
+              <button id="terminal-close" type="button" hidden>Close</button>
+            </div>
+            <p id="terminal-error" class="error" role="alert" hidden></p>
+            <p id="terminal-none" class="muted">No terminal is open.</p>
+            <div id="terminal-view" class="terminal-view" hidden></div>
+          </article>
+        </section>
+
+        <!-- Remote -->
+        <section id="tab-remote" class="tab" hidden>
+          <article class="card">
+            <h2>Yardsort server</h2>
+            <p id="remote-state" class="state"></p>
+            <p id="remote-unmanaged" class="muted" hidden>
+              Remote is set up in the Yardsort app on this computer, under
+              <b>Settings → Remote</b>: signing in, and letting devices in.
+            </p>
+            <div id="remote-signed-out" class="stack" hidden>
+              <p class="muted">
+                Signed in to a Yardsort server, this computer can be reached from your phone and
+                your other computers, once you let each in below. Whoever runs the server can see
+                what passes through it.
+              </p>
+              <form id="remote-form" class="form">
+                <label>
+                  Server
+                  <input
+                    id="remote-server"
+                    name="server"
+                    placeholder="https://remote.example.com"
+                    spellcheck="false"
+                    autocapitalize="off"
+                    autocomplete="off"
+                    required
+                  />
+                </label>
+                <label>
+                  Name
+                  <input id="remote-name" name="name" maxlength="64" autocomplete="off" required />
+                  <span class="faint">What your devices will call this computer.</span>
+                </label>
+                <div class="actions">
+                  <button class="primary" type="submit">Sign in</button>
+                  <span id="remote-said" class="said" role="status"></span>
+                </div>
+              </form>
+            </div>
+            <div id="remote-waiting" class="stack" hidden>
+              <ol class="steps">
+                <li>
+                  Open
+                  <a id="remote-url" rel="noreferrer noopener" target="_blank">the sign-in page</a>
+                  and sign in.
+                </li>
+                <li>
+                  The browser is then sent to an address starting
+                  <code id="remote-back">http://127.0.0.1/signed-in</code>, which shows an error
+                  there: nothing answers at it on the computer you are using. Copy that whole
+                  address from the address bar.
+                </li>
+                <li>Paste it here.</li>
+              </ol>
+              <form id="remote-finish" class="form inline">
+                <input
+                  id="remote-address"
+                  name="address"
+                  class="mono"
+                  placeholder="http://127.0.0.1:…/signed-in?code=…"
+                  spellcheck="false"
+                  autocapitalize="off"
+                  autocomplete="off"
+                  required
+                />
+                <button class="primary" type="submit">Finish</button>
+              </form>
+              <div class="actions">
+                <button id="remote-cancel" type="button">Cancel</button>
+                <span id="remote-finish-said" class="said" role="status"></span>
+              </div>
+            </div>
+          </article>
+
+          <article id="devices-card" class="card" hidden>
+            <h2>Devices</h2>
+            <p class="muted">
+              A device you let in reaches this computer's workspaces and terminals through the
+              server. Whoever is signed in to this dashboard can let one in.
+            </p>
+            <p id="devices-problem" class="error" role="alert" hidden></p>
+            <div id="devices-asking"></div>
+            <div id="devices-list" class="rows"></div>
+            <div class="actions">
+              <button id="pair-start" class="primary" type="button">Pair a device</button>
+              <span id="pair-said" class="said" role="status"></span>
+            </div>
+            <div id="pair-offer" class="pair-offer" hidden>
+              <canvas id="pair-qr" class="qr" width="0" height="0"></canvas>
+              <div>
+                <p>Scan this with the Yardsort app, or type this code in it:</p>
+                <p id="pair-code" class="code pair-code"></p>
+                <p id="pair-left" class="faint"></p>
+              </div>
+            </div>
+          </article>
+        </section>
+
         <!-- Access -->
         <section id="tab-access" class="tab" hidden>
           <article class="card">
@@ -232,17 +357,16 @@
           <article class="card">
             <h2>Tunnel</h2>
             <p class="muted">
-              A
-              <a
-                href="https://github.com/joaoh82/rustunnel"
-                rel="noreferrer noopener"
-                target="_blank"
-                >rustunnel</a
+              A tunnel gives the dashboard an <code>https://</code> address anyone can open, with
+              its sign-in as the only lock. Tunnels are made with
+              <a href="https://rustunnel.com" rel="noreferrer noopener" target="_blank">rustunnel</a
+              >, and with nothing else: its server carries, and can read, everything that passes. It
+              needs the <code>rustunnel</code> client installed for this user, with its token set by
+              <code>rustunnel setup</code>;
+              <a href="https://rustunnel.com" rel="noreferrer noopener" target="_blank"
+                >rustunnel.com</a
               >
-              tunnel gives the dashboard an <code>https://</code> address anyone can open, with its
-              sign-in as the only lock. The tunnel's server carries, and can read, everything that
-              passes. It needs the <code>rustunnel</code> client installed for this user, with its
-              token set by <code>rustunnel setup</code>.
+              has the client and an account.
             </p>
             <p id="tunnel-state" class="state"></p>
             <form id="tunnel-form" class="form">
@@ -304,6 +428,20 @@
             </div>
           </article>
         </section>
+
+        <!-- Activity -->
+        <section id="tab-activity" class="tab" hidden>
+          <article class="card">
+            <h2>Activity</h2>
+            <p class="muted">
+              What was done through this dashboard, the newest first: who signed in, what was run
+              and how it ended, what was changed. The last 500 are kept on this computer, across
+              restarts. Never what a command printed, nor a token or a code.
+            </p>
+            <p id="activity-none" class="muted" hidden>Nothing yet.</p>
+            <ol id="activity-list" class="activity"></ol>
+          </article>
+        </section>
       </main>
     </div>
 
@@ -319,6 +457,8 @@
       </form>
     </dialog>
 
+    <script src="/vendor/xterm.js" defer></script>
+    <script src="/vendor/addon-fit.js" defer></script>
     <script src="/app.js" defer></script>
   </body>
 </html>

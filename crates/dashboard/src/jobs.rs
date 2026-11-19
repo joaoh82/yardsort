@@ -178,7 +178,11 @@ struct Job {
     stoppable: bool,
     stop: AtomicBool,
     inner: Mutex<Inner>,
+    seen: Option<Seen>,
 }
+
+/// Told of a job when it starts and when it ends.
+type Seen = Arc<dyn Fn(&Summary) + Send + Sync>;
 
 struct Inner {
     state: State,
@@ -217,10 +221,15 @@ impl Job {
     }
 
     fn finish(&self, state: State) {
-        let mut inner = self.lock();
-        inner.state = state;
-        inner.ended = Some(yardsort_core::store::now_ms());
-        inner.group = None;
+        {
+            let mut inner = self.lock();
+            inner.state = state;
+            inner.ended = Some(yardsort_core::store::now_ms());
+            inner.group = None;
+        }
+        if let Some(seen) = &self.seen {
+            seen(&self.summary());
+        }
     }
 }
 
@@ -228,9 +237,18 @@ impl Job {
 pub struct Jobs {
     jobs: Mutex<Vec<Arc<Job>>>,
     next: Mutex<u64>,
+    seen: Option<Seen>,
 }
 
 impl Jobs {
+    /// Jobs that tell `seen` of each one as it starts and as it ends.
+    pub fn watched(seen: impl Fn(&Summary) + Send + Sync + 'static) -> Self {
+        Self {
+            seen: Some(Arc::new(seen)),
+            ..Self::default()
+        }
+    }
+
     /// Start a job. Refused while too many run.
     pub fn start(&self, kind: &str, title: &str, work: Work) -> Result<Summary, String> {
         let job = {
@@ -263,6 +281,7 @@ impl Jobs {
                     written: 0,
                     group: None,
                 }),
+                seen: self.seen.clone(),
             });
             jobs.push(job.clone());
             // The oldest finished ones go; one still running is never forgotten.
@@ -278,6 +297,9 @@ impl Jobs {
             job
         };
         let summary = job.summary();
+        if let Some(seen) = &self.seen {
+            seen(&summary);
+        }
         let spawned = std::thread::Builder::new()
             .name(format!("dashboard-job-{}", job.id))
             .spawn({

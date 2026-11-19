@@ -153,7 +153,7 @@ $("sign-out").addEventListener("click", async () => {
 
 // ── The frame ────────────────────────────────────────────────────────────────────────────────
 
-const TABS = ["overview", "agents", "git", "commands", "access"];
+const TABS = ["overview", "agents", "git", "commands", "terminal", "remote", "access", "activity"];
 let tab = null;
 let timers = [];
 const watchers = new Map();
@@ -174,6 +174,7 @@ function stopEverything() {
   timers = [];
   for (const watcher of watchers.values()) watcher.stop();
   watchers.clear();
+  leaveTerminal();
   tab = null;
 }
 
@@ -191,6 +192,7 @@ function showTab() {
   if (next === tab) return;
   for (const timer of timers) clearInterval(timer);
   timers = [];
+  if (tab === "terminal") leaveTerminal();
   tab = next;
   for (const name of TABS) $(`tab-${name}`).hidden = name !== tab;
   for (const link of $("tabs").querySelectorAll("a")) {
@@ -202,7 +204,13 @@ function showTab() {
   if (tab === "agents") void readAgents();
   if (tab === "git") void readGit();
   if (tab === "commands") every(3000, readJobs);
+  if (tab === "terminal") every(4000, readTerminals);
+  if (tab === "remote") {
+    remoteRead = 0;
+    every(1000, remoteTick);
+  }
   if (tab === "access") tunnelFormFilled = false;
+  if (tab === "activity") every(5000, readActivity);
 }
 
 window.addEventListener("hashchange", () => {
@@ -394,7 +402,7 @@ function tunnelWords(tunnel) {
     case "missing":
       return [
         el("span", { class: "dot bad" }),
-        "There is no rustunnel on this user's PATH. Install it, run rustunnel setup there, and save again.",
+        "There is no rustunnel on this user's PATH. Get it from rustunnel.com, run rustunnel setup there, and save again.",
       ];
     default:
       return [tunnel.state];
@@ -409,6 +417,7 @@ async function readStatus() {
   $("host-sub").textContent = `${host.program} ${host.version}`;
   document.title = `${$("host-name").textContent} · Yardsort host`;
   $("command-user").textContent = status.user ?? "its user";
+  $("terminal-user").textContent = status.user ?? "its user";
   $("command-shell").textContent = status.shell;
 
   replace(
@@ -768,6 +777,495 @@ $("command-form").addEventListener("submit", async (event) => {
   }
 });
 
+// ── Terminal ─────────────────────────────────────────────────────────────────────────────────
+
+// The terminal's library writes style sheets into the page as it draws. The page lets a style
+// sheet in only with the nonce it was served with, so the ones made here are given it.
+{
+  const nonce = document.querySelector('meta[name="style-nonce"]')?.content;
+  const create = document.createElement.bind(document);
+  document.createElement = (tag, options) => {
+    const node = create(tag, options);
+    if (nonce && String(tag).toLowerCase() === "style") node.nonce = nonce;
+    return node;
+  };
+}
+
+/** The terminal on show: its id, what draws it, and how to stop following it. */
+let shown = null;
+
+function terminalColours() {
+  const style = getComputedStyle(document.documentElement);
+  const colour = (name) => style.getPropertyValue(name).trim();
+  return {
+    background: colour("--canvas"),
+    foreground: colour("--ink"),
+    cursor: colour("--accent"),
+    cursorAccent: colour("--canvas"),
+    selectionBackground: colour("--line"),
+  };
+}
+
+function leaveTerminal() {
+  if (!shown) return;
+  shown.stop();
+  shown = null;
+  $("terminal-view").hidden = true;
+  $("terminal-close").hidden = true;
+}
+
+function terminalError(message) {
+  $("terminal-error").hidden = !message;
+  $("terminal-error").textContent = message ?? "";
+}
+
+/** Show terminal `id`, from the start of what is still kept of it, and follow it. */
+function showTerminal(id) {
+  leaveTerminal();
+  const view = $("terminal-view");
+  view.hidden = false;
+  $("terminal-none").hidden = true;
+  $("terminal-close").hidden = false;
+  const term = new Terminal({
+    cursorBlink: true,
+    fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono").trim(),
+    fontSize: 13,
+    scrollback: 5000,
+    theme: terminalColours(),
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  replace(view);
+  term.open(view);
+
+  let stopped = false;
+  let next = 0;
+  let timer = null;
+  const typed = [];
+  let sending = false;
+
+  // One request at a time, in the order typed.
+  const send = async () => {
+    if (sending) return;
+    sending = true;
+    while (typed.length > 0 && !stopped) {
+      const data = typed.splice(0).join("");
+      try {
+        await ask("POST", `/api/terminals/${id}/input`, { data });
+      } catch (error) {
+        if (!quiet(error)) terminalError(error.message);
+        break;
+      }
+    }
+    sending = false;
+  };
+  term.onData((data) => {
+    typed.push(data);
+    void send();
+  });
+
+  const sized = () => {
+    if (stopped || view.hidden) return;
+    try {
+      fit.fit();
+    } catch {
+      // Not laid out yet.
+    }
+  };
+  term.onResize(({ cols, rows }) => {
+    void ask("POST", `/api/terminals/${id}/size`, { cols, rows }).catch(() => {});
+  });
+  const watching = new ResizeObserver(sized);
+  watching.observe(view);
+
+  const read = async () => {
+    if (stopped) return;
+    let reading;
+    try {
+      reading = await ask("GET", `/api/terminals/${id}/output?from=${next}&wait=20000`);
+    } catch (error) {
+      if (stopped) return;
+      if (error instanceof Unreachable) timer = setTimeout(read, 2000);
+      else if (!quiet(error)) {
+        // Closed from another browser, or the host started again.
+        leaveTerminal();
+        void readTerminals().catch(() => {});
+      }
+      return;
+    }
+    if (stopped) return;
+    // The start of a long output is no longer kept: say so, rather than join the two ends.
+    if (reading.from > next && next > 0) term.write("\r\n[…]\r\n");
+    if (reading.data) {
+      term.write(Uint8Array.from(atob(reading.data), (c) => c.charCodeAt(0)));
+    }
+    next = reading.next;
+    if (reading.ended) {
+      term.write("\r\n\x1b[2m[This terminal has ended.]\x1b[0m\r\n");
+      void readTerminals().catch(() => {});
+      return;
+    }
+    void read();
+  };
+
+  shown = {
+    id,
+    stop() {
+      stopped = true;
+      clearTimeout(timer);
+      watching.disconnect();
+      term.dispose();
+    },
+  };
+  sized();
+  // The shell is told the size this browser shows it at, whoever opened it.
+  void ask("POST", `/api/terminals/${id}/size`, { cols: term.cols, rows: term.rows }).catch(
+    () => {},
+  );
+  void read();
+  term.focus();
+}
+
+async function readTerminals() {
+  const terminals = await ask("GET", "/api/terminals");
+  if (shown && !terminals.some((terminal) => terminal.id === shown.id)) leaveTerminal();
+  if (!shown && tab === "terminal") {
+    const open = terminals.findLast((terminal) => terminal.ended === null);
+    if (open) showTerminal(open.id);
+  }
+  $("terminal-none").hidden = shown !== null;
+  replace(
+    $("terminal-list"),
+    terminals.map((terminal) =>
+      el(
+        "button",
+        {
+          type: "button",
+          role: "tab",
+          ariaSelected: terminal.id === shown?.id ? "true" : "false",
+          onclick: () => {
+            showTerminal(terminal.id);
+            void readTerminals().catch(() => {});
+          },
+        },
+        el("span", { class: `dot ${terminal.ended === null ? "good" : ""}` }),
+        `${terminal.title} ${terminal.id}`,
+      ),
+    ),
+  );
+}
+
+$("terminal-new").addEventListener("click", async () => {
+  terminalError();
+  try {
+    const terminal = await ask("POST", "/api/terminals", { cols: 80, rows: 24 });
+    showTerminal(terminal.id);
+    await readTerminals();
+  } catch (error) {
+    if (!quiet(error)) terminalError(error.message);
+  }
+});
+
+$("terminal-close").addEventListener("click", async () => {
+  if (!shown) return;
+  const id = shown.id;
+  leaveTerminal();
+  try {
+    await ask("POST", `/api/terminals/${id}/close`);
+    await readTerminals();
+  } catch (error) {
+    if (!quiet(error)) terminalError(error.message);
+  }
+});
+
+// ── Remote ───────────────────────────────────────────────────────────────────────────────────
+
+let remote = null;
+/** When Remote was last read: the host asks its server each time, so not more often than needed. */
+let remoteRead = 0;
+/** The pairing code on show, and when it lapses. */
+let offer = null;
+/** Which devices the questions on show are for, so that a choice half made is not redrawn. */
+let askingShown = "";
+let remoteFormTouched = false;
+
+async function remoteTick() {
+  drawOffer();
+  // Quickly while something is expected, slowly otherwise.
+  const expecting =
+    offer !== null || remote?.asking.length > 0 || remote?.signingIn.state === "waiting";
+  if (Date.now() - remoteRead < (expecting ? 3000 : 12000)) return;
+  await readRemote();
+}
+
+async function readRemote() {
+  remoteRead = Date.now();
+  remote = await ask("GET", "/api/remote");
+  drawRemote();
+}
+
+function drawRemote() {
+  const link = remote.signedIn;
+  const signing = remote.signingIn;
+  replace(
+    $("remote-state"),
+    link
+      ? [
+          el("span", { class: `dot ${link.link.startsWith("connected") ? "good" : "warn"}` }),
+          `Signed in as ${link.name} at ${link.serverUrl}. Link: ${link.link}.`,
+        ]
+      : [el("span", { class: "dot" }), "Not signed in to a server."],
+  );
+  $("remote-unmanaged").hidden = remote.managed;
+  const waiting = remote.managed && !link && signing.state === "waiting";
+  $("remote-signed-out").hidden = !remote.managed || !!link || waiting;
+  $("remote-waiting").hidden = !waiting;
+  if (waiting) {
+    $("remote-url").href = signing.url;
+    $("remote-back").textContent = `http://127.0.0.1:${signing.port}/signed-in`;
+  } else if (!link && remote.managed) {
+    if (!remoteFormTouched && !$("remote-name").value) {
+      $("remote-name").value = status?.machine.hostName ?? "";
+    }
+    if (signing.state === "failed" && !$("remote-said").textContent) {
+      $("remote-said").className = "said bad";
+      $("remote-said").textContent = signing.message;
+    }
+  }
+
+  $("devices-card").hidden = !remote.managed || !link;
+  $("devices-problem").hidden = !remote.problem;
+  $("devices-problem").textContent = remote.problem ?? "";
+  const asking = remote.asking.map((device) => device.grant).join(" ");
+  if (asking !== askingShown) {
+    askingShown = asking;
+    replace($("devices-asking"), remote.asking.map(askingCard));
+  }
+  replace(
+    $("devices-list"),
+    remote.devices.length === 0
+      ? el("p", { class: "muted", text: "No device is let in." })
+      : remote.devices.map((device) =>
+          el(
+            "div",
+            { class: "row" },
+            el(
+              "div",
+              { class: "row-main" },
+              el("strong", { text: device.name }),
+              el("span", {
+                class: "faint",
+                text: `${device.control ? "Watches and types" : "Watches"}, ${
+                  device.projects ? `in ${device.projects.join(", ")}` : "in every project"
+                }`,
+              }),
+            ),
+            el("button", { type: "button", text: "Take off", onclick: () => void revoke(device) }),
+          ),
+        ),
+  );
+}
+
+/** A device asking to be let in, and the answers there are to give it. */
+function askingCard(device) {
+  const workflows = el("input", { type: "checkbox" });
+  const projects = remote.projects.map((project) => ({
+    id: project.id,
+    box: el("input", { type: "checkbox", checked: true }),
+    name: project.name,
+  }));
+  const said = el("span", { class: "said", role: "status" });
+  const answer = async (allow, control) => {
+    const chosen = projects.filter((project) => project.box.checked).map((project) => project.id);
+    if (allow && projects.length > 0 && chosen.length === 0) {
+      said.className = "said bad";
+      said.textContent = "Tick at least one project.";
+      return;
+    }
+    try {
+      await ask("POST", "/api/remote/answer", {
+        grant: device.grant,
+        allow,
+        control,
+        workflows: allow && workflows.checked,
+        // Every project ticked is all of them, the ones added later too.
+        projects: allow && chosen.length < projects.length ? chosen : null,
+      });
+      offer = null;
+      await readRemote();
+    } catch (error) {
+      if (quiet(error)) return;
+      said.className = "said bad";
+      said.textContent = error.message;
+    }
+  };
+  return el(
+    "div",
+    { class: "notice asking" },
+    el(
+      "p",
+      {},
+      el("strong", { text: device.name }),
+      device.wantsControl
+        ? " asks to watch and type into this computer's terminals."
+        : " asks to watch this computer's terminals.",
+      device.wantsWorkflows && " Watching includes reading workflow runs.",
+    ),
+    device.wantsWorkflows &&
+      el(
+        "label",
+        { class: "check" },
+        workflows,
+        el("span", { text: "Also let it approve or answer workflows" }),
+      ),
+    projects.length > 0 &&
+      el(
+        "div",
+        { class: "choices" },
+        el("span", { class: "faint", text: "In these projects:" }),
+        projects.map((project) =>
+          el("label", { class: "check" }, project.box, el("span", { text: project.name })),
+        ),
+      ),
+    el(
+      "div",
+      { class: "actions" },
+      el("button", {
+        type: "button",
+        text: "Allow watching",
+        onclick: () => void answer(true, false),
+      }),
+      device.wantsControl &&
+        el("button", {
+          type: "button",
+          text: "Allow watching and typing",
+          onclick: () => void answer(true, true),
+        }),
+      el("button", {
+        type: "button",
+        class: "danger",
+        text: "Deny",
+        onclick: () => void answer(false, false),
+      }),
+      said,
+    ),
+  );
+}
+
+async function revoke(device) {
+  const sure = await confirmed({
+    title: `Take ${device.name} off?`,
+    text: "It can no longer reach this computer. To let it back in, pair it again.",
+    yes: "Take off",
+  });
+  if (!sure) return;
+  try {
+    await ask("POST", `/api/remote/devices/${encodeURIComponent(device.grant)}/revoke`);
+  } catch (error) {
+    if (quiet(error)) return;
+    $("devices-problem").hidden = false;
+    $("devices-problem").textContent = error.message;
+    return;
+  }
+  await readRemote();
+}
+
+/** The pairing code and its QR code, until it lapses. Dark on white whatever the page's colours. */
+function drawOffer() {
+  const live = offer !== null && offer.until > Date.now();
+  if (offer !== null && !live) offer = null;
+  $("pair-offer").hidden = !live;
+  if (!live) return;
+  $("pair-left").textContent = `Good once, for ${lasted((offer.until - Date.now()) / 1000)} more.`;
+  if (offer.drawn) return;
+  offer.drawn = true;
+  $("pair-code").textContent = offer.code;
+  const canvas = $("pair-qr");
+  const dot = 5;
+  const quiet = 4;
+  const side = (offer.qr.length + quiet * 2) * dot;
+  canvas.width = side;
+  canvas.height = side;
+  const pen = canvas.getContext("2d");
+  pen.fillStyle = "#ffffff";
+  pen.fillRect(0, 0, side, side);
+  pen.fillStyle = "#000000";
+  offer.qr.forEach((row, y) => {
+    for (let x = 0; x < row.length; x += 1) {
+      if (row[x] === "#") pen.fillRect((x + quiet) * dot, (y + quiet) * dot, dot, dot);
+    }
+  });
+}
+
+$("pair-start").addEventListener("click", async () => {
+  const said = $("pair-said");
+  said.className = "said";
+  said.textContent = "";
+  try {
+    const shown = await ask("POST", "/api/remote/pair");
+    offer = { ...shown, until: Date.now() + shown.expiresInMs, drawn: false };
+    drawOffer();
+  } catch (error) {
+    if (quiet(error)) return;
+    said.className = "said bad";
+    said.textContent = error.message;
+  }
+});
+
+for (const id of ["remote-server", "remote-name"]) {
+  $(id).addEventListener("input", () => {
+    remoteFormTouched = true;
+    $("remote-said").textContent = "";
+  });
+}
+
+$("remote-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const said = $("remote-said");
+  said.className = "said";
+  said.textContent = "Asking the server…";
+  try {
+    await ask("POST", "/api/remote/sign-in", {
+      server: $("remote-server").value,
+      name: $("remote-name").value,
+    });
+    said.textContent = "";
+    $("remote-address").value = "";
+    $("remote-finish-said").textContent = "";
+    await readRemote();
+  } catch (error) {
+    if (quiet(error)) return;
+    said.className = "said bad";
+    said.textContent = error.message;
+  }
+});
+
+$("remote-finish").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const said = $("remote-finish-said");
+  said.className = "said";
+  said.textContent = "Signing in…";
+  try {
+    await ask("POST", "/api/remote/sign-in/finish", { address: $("remote-address").value });
+    said.textContent = "";
+    await readRemote();
+    void readStatus().catch(() => {});
+  } catch (error) {
+    if (quiet(error)) return;
+    said.className = "said bad";
+    said.textContent = error.message;
+  }
+});
+
+$("remote-cancel").addEventListener("click", async () => {
+  try {
+    await ask("POST", "/api/remote/sign-in/cancel");
+    await readRemote();
+  } catch (error) {
+    if (!quiet(error)) $("remote-finish-said").textContent = error.message;
+  }
+});
+
 // ── Access ───────────────────────────────────────────────────────────────────────────────────
 
 const throughTheTunnel = !["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
@@ -825,6 +1323,54 @@ $("sign-everyone-out").addEventListener("click", async () => {
   }
   showGate();
 });
+
+// ── Activity ─────────────────────────────────────────────────────────────────────────────────
+
+const ACTIVITY_WORDS = {
+  session: "Sign-in",
+  job: "Run",
+  terminal: "Terminal",
+  tunnel: "Tunnel",
+  git: "Git",
+  device: "Device",
+  remote: "Remote",
+};
+
+function when(at) {
+  const date = new Date(at);
+  const today = new Date().toDateString() === date.toDateString();
+  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return today
+    ? time
+    : `${date.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+}
+
+async function readActivity() {
+  const entries = await ask("GET", "/api/activity");
+  $("activity-none").hidden = entries.length > 0;
+  replace(
+    $("activity-list"),
+    entries.map((entry) =>
+      el(
+        "li",
+        {},
+        el("time", {
+          class: "faint",
+          dateTime: new Date(entry.at).toISOString(),
+          title: new Date(entry.at).toLocaleString(),
+          text: when(entry.at),
+        }),
+        el("span", { class: "kind", text: ACTIVITY_WORDS[entry.kind] ?? entry.kind }),
+        el(
+          "span",
+          { class: "what" },
+          entry.text,
+          entry.times > 1 && el("span", { class: "faint", text: ` ×${entry.times}` }),
+        ),
+      ),
+    ),
+  );
+}
 
 // ── Starting ─────────────────────────────────────────────────────────────────────────────────
 

@@ -12,12 +12,18 @@
 //! does not descend from the daemon. Linux only, where `/proc` says all that. Elsewhere approving
 //! is refused, since none of it could be checked.
 //!
-//! **A command the dashboard ran is not a person either.** The dashboard runs commands for a
-//! signed-in browser, as children of this host and outside the daemon, and such a command can
-//! make itself a terminal (`script`). So the caller must also not carry the mark every dashboard
-//! job is given, and must not descend from this host. That keeps the dashboard's sign-in out of
-//! what guards pairing, at the strength the rest of this has: a job that sheds both its mark and
-//! its ancestry gets past, as an agent that sheds its own does.
+//! **A command the dashboard ran is not a person either, nor is a terminal it opened.** The
+//! dashboard runs commands and shells for a signed-in browser, as children of this host and
+//! outside the daemon; its terminal is a real one, and a command can make itself one (`script`).
+//! So the caller must also not carry the mark every dashboard job and terminal is given, and must
+//! not descend from this host. That is of the strength the rest of this has: a job that sheds
+//! both its mark and its ancestry gets past, as an agent that sheds its own does.
+//!
+//! The dashboard's page lets a device in by itself, on its Remote tab, and signs this computer
+//! in to a server: the owner chose that, so that a server can be set up from a browser alone.
+//! That is the page asking, with its session; no program is taken for it. So what this guard
+//! refuses a dashboard job is not kept from whoever holds a dashboard session, only from a
+//! command they did not mean to pair with.
 
 use std::os::fd::AsRawFd;
 
@@ -36,7 +42,8 @@ pub enum Refusal {
     OtherUser,
     /// A terminal Yardsort started, or a program running in one: an agent's.
     Launched,
-    /// A command the dashboard ran for a signed-in browser, or a program that command started.
+    /// A command the dashboard ran for a signed-in browser, a terminal it opened for one, or a
+    /// program either started.
     Job,
     /// Not a terminal at all: a script, or a pipe.
     NoTerminal,
@@ -57,9 +64,9 @@ impl Refusal {
                  terminal of their own on this computer (an SSH login, say), never an agent."
             ),
             Refusal::Job => format!(
-                "{act} is refused to a command the dashboard ran. Only a person may do it, from a \
-                 terminal of their own on this computer (an SSH login, say), never through the \
-                 dashboard."
+                "{act} is refused to a command or a terminal the dashboard ran: run \
+                 `yardsort-host {command}` in a terminal of your own on this computer (an SSH \
+                 login, say)."
             ),
             Refusal::NoTerminal => format!(
                 "{act} needs a person at a terminal: run `yardsort-host {command}` in one, not from \

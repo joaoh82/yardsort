@@ -27,7 +27,10 @@ async fn main() {
     let home = std::path::absolute(&home).expect("a path");
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("the folder can be made");
-    let source = common::StandIn::new(&home, &bin);
+    // Remote is managed from the page, as `yardsort-host` lets it be: signed in, unless a second
+    // argument says `signed-out`.
+    let signed_in = std::env::args().nth(2).as_deref() != Some("signed-out");
+    let source = common::StandIn::new(&home, &bin).managing(signed_in);
     *source.projects.lock().unwrap() = ["my-service", "website"]
         .into_iter()
         .map(|name| Project {

@@ -405,7 +405,9 @@ fn a_command_the_dashboard_runs_is_refused_what_only_a_person_may_ask() {
         &cookie,
     );
     assert!(
-        through.contains("Signing in to the dashboard is refused to a command the dashboard ran"),
+        through.contains(
+            "Signing in to the dashboard is refused to a command or a terminal the dashboard ran"
+        ),
         "{through}"
     );
     assert!(
@@ -418,7 +420,7 @@ fn a_command_the_dashboard_runs_is_refused_what_only_a_person_may_ask() {
         &cookie,
     );
     assert!(
-        unmarked.contains("is refused to a command the dashboard ran"),
+        unmarked.contains("is refused to a command or a terminal the dashboard ran"),
         "{unmarked}"
     );
     assert!(!unmarked.contains("#code="), "{unmarked}");
@@ -429,7 +431,7 @@ fn a_command_the_dashboard_runs_is_refused_what_only_a_person_may_ask() {
             &cookie,
         );
         assert!(
-            refused.contains("is refused to a command the dashboard ran"),
+            refused.contains("is refused to a command or a terminal the dashboard ran"),
             "{guarded}: {refused}"
         );
     }
@@ -439,10 +441,95 @@ fn a_command_the_dashboard_runs_is_refused_what_only_a_person_may_ask() {
     );
     assert!(
         tunnel.contains(
-            "Opening a tunnel to the dashboard is refused to a command the dashboard ran"
+            "Opening a tunnel to the dashboard is refused to a command or a terminal the dashboard ran"
         ),
         "{tunnel}"
     );
     let settings = std::fs::read_to_string(host.data().join("settings.toml")).unwrap();
     assert!(!settings.contains("tunnel"), "{settings}");
+
+    // A terminal in the page is a real one, with nothing to make up, and is no person's own
+    // either: typed into it, the same commands are refused the same way.
+    let (status, _, opened) = host.page(
+        "POST",
+        "/api/terminals",
+        Some(&serde_json::json!({ "cols": 200, "rows": 50 })),
+        Some(&cookie),
+    );
+    assert_eq!(status, "HTTP/1.1 200 OK", "{opened}");
+    let opened: serde_json::Value = serde_json::from_str(&opened).unwrap();
+    let terminal = opened["id"].as_u64().expect("a terminal");
+    let typed = |line: &str| {
+        let (status, _, body) = host.page(
+            "POST",
+            &format!("/api/terminals/{terminal}/input"),
+            Some(&serde_json::json!({ "data": line })),
+            Some(&cookie),
+        );
+        assert_eq!(status, "HTTP/1.1 200 OK", "{body}");
+    };
+    let shown = |wanted: &str| -> String {
+        let since = Instant::now();
+        loop {
+            let (_, _, reading) = host.page(
+                "GET",
+                &format!("/api/terminals/{terminal}/output?from=0&wait=200"),
+                None,
+                Some(&cookie),
+            );
+            let reading: serde_json::Value = serde_json::from_str(&reading).unwrap();
+            let text = unbase64(reading["data"].as_str().unwrap());
+            // Without the line breaks the terminal's width puts into a long sentence.
+            let flat = text.replace(['\r', '\n'], "");
+            if flat.contains(wanted) {
+                return flat;
+            }
+            assert!(
+                since.elapsed() < Duration::from_secs(30),
+                "never showed {wanted:?}: {text}"
+            );
+        }
+    };
+    typed(&format!(
+        "test -t 0 && echo it-is-a-terminal; {exe} dashboard; echo asked-$((1+1))\n"
+    ));
+    let said = shown("asked-2");
+    assert!(said.contains("it-is-a-terminal"), "{said}");
+    assert!(
+        said.contains("Signing in to the dashboard is refused to a command or a terminal"),
+        "{said}"
+    );
+    assert!(
+        !said.contains("#code="),
+        "the terminal minted a session: {said}"
+    );
+    typed(&format!("{exe} pair; echo paired-$((1+1))\n"));
+    let said = shown("paired-2");
+    assert!(
+        said.contains("Pairing is refused to a command or a terminal the dashboard ran"),
+        "{said}"
+    );
+    // The page itself can pair, and the refusal says where.
+    assert!(
+        said.contains("Or pair from the dashboard's Remote tab."),
+        "{said}"
+    );
+}
+
+/// Text from base64, as the dashboard sends a terminal's output: the test has no library for it.
+fn unbase64(encoded: &str) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut bytes = Vec::new();
+    let (mut bits, mut held) = (0u32, 0u32);
+    for c in encoded.bytes().filter(|c| *c != b'=') {
+        let value = ALPHABET.iter().position(|a| *a == c).expect("base64") as u32;
+        held = (held << 6) | value;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            bytes.push((held >> bits) as u8);
+            held &= (1 << bits) - 1;
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
 }

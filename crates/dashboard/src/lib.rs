@@ -21,12 +21,15 @@
 //!
 //! See `docs/design/47-host-dashboard.md` and `docs/guide/host-dashboard.md`.
 
+pub mod activity;
 pub mod agents;
 mod auth;
 mod git;
 mod http;
 pub mod jobs;
+pub mod remote;
 mod system;
+pub mod terminal;
 pub mod tunnel;
 
 use std::path::PathBuf;
@@ -54,6 +57,11 @@ pub trait Source: Send + Sync + 'static {
     fn projects(&self) -> Vec<Project>;
     /// Clone a repository into the folder for clones, and add it as a project.
     fn clone_project(&self, remote: &str) -> Result<Project, String>;
+    /// Remote, where this program lets the page manage it: signing in to a server, and letting
+    /// devices in. `None` where that is done elsewhere, as in the app's own Settings.
+    fn remote(&self) -> Option<&dyn remote::Remote> {
+        None
+    }
 }
 
 /// How the host stands, as `yardsort-host status` says it.
@@ -149,7 +157,10 @@ impl From<&TunnelSettings> for TunnelWanted {
 pub(crate) struct Inner {
     pub source: Arc<dyn Source>,
     pub auth: auth::Auth,
+    /// What was done through the dashboard.
+    pub activity: Arc<activity::Activity>,
     pub jobs: jobs::Jobs,
+    pub terminals: terminal::Terminals,
     pub tunnel: tunnel::Tunnel,
     pub machine: system::Reader,
     pub port: u16,
@@ -244,10 +255,19 @@ impl Dashboard {
                 options.state_dir.display()
             ));
         }
+        let activity = Arc::new(activity::Activity::open(&options.state_dir));
         let inner = Arc::new(Inner {
             source,
             auth: auth::Auth::open(&options.state_dir),
-            jobs: jobs::Jobs::default(),
+            jobs: jobs::Jobs::watched({
+                let activity = activity.clone();
+                move |job| activity.note("job", job_words(job))
+            }),
+            terminals: terminal::Terminals::watched({
+                let activity = activity.clone();
+                move |terminal| activity.note("terminal", terminal_words(terminal))
+            }),
+            activity,
             tunnel: tunnel::Tunnel::default(),
             machine: system::Reader::default(),
             port,
@@ -296,6 +316,9 @@ impl Dashboard {
     /// [`CODE_GOOD_FOR`].
     pub fn sign_in(&self) -> SignIn {
         let code = self.inner.auth.offer();
+        self.inner
+            .activity
+            .note("session", "A sign-in link was given at this computer.");
         let public = match self.inner.tunnel.state() {
             tunnel::State::Ready { url } => {
                 Some(format!("{}/#code={code}", url.trim_end_matches('/')))
@@ -313,7 +336,19 @@ impl Dashboard {
     /// Sign every browser out, and void every code. Says how many browsers that was. An error
     /// means they are signed out for now, and that a restart would sign them in again.
     pub fn sign_everyone_out(&self) -> Result<usize, String> {
-        self.inner.auth.end_all()
+        let ended = self.inner.auth.end_all();
+        // A shell nobody can reach any more is not left open.
+        self.inner.terminals.close_all();
+        self.inner.activity.note(
+            "session",
+            "Every browser was signed out, from this computer.",
+        );
+        ended
+    }
+
+    /// What was done through the dashboard, the newest first.
+    pub fn activity(&self) -> Vec<activity::Entry> {
+        self.inner.activity.list()
     }
 
     /// Keep `wanted` in the settings, and make the tunnel so. Blocking: call it off the runtime.
@@ -350,6 +385,7 @@ impl Dashboard {
         }
         self.inner.tunnel.stop();
         self.inner.jobs.stop_all();
+        self.inner.terminals.close_all();
     }
 }
 
@@ -359,6 +395,37 @@ impl Drop for Dashboard {
         if let Some(served) = self.served.take() {
             served.abort();
         }
+    }
+}
+
+/// A terminal's opening or its end, as the activity says it. Never what was typed into it.
+fn terminal_words(terminal: &terminal::Summary) -> String {
+    match terminal.ended {
+        None => format!("A terminal was opened ({}).", terminal.title),
+        Some(ended) => format!(
+            "A terminal ended after {}s ({}).",
+            (ended - terminal.started).max(0) / 1000,
+            terminal.title
+        ),
+    }
+}
+
+/// A job's start or its end, as the activity says it.
+fn job_words(job: &jobs::Summary) -> String {
+    let lasted = |ended: i64| (ended - job.started).max(0) / 1000;
+    match (job.state, job.ended) {
+        (jobs::State::Running, _) => format!("Started: {}", job.title),
+        (jobs::State::Succeeded, Some(ended)) => {
+            format!("Finished after {}s: {}", lasted(ended), job.title)
+        }
+        (jobs::State::Stopped, Some(ended)) => {
+            format!("Stopped after {}s: {}", lasted(ended), job.title)
+        }
+        (_, ended) => format!(
+            "Failed after {}s: {}",
+            lasted(ended.unwrap_or(job.started)),
+            job.title
+        ),
     }
 }
 
