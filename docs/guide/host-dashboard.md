@@ -125,7 +125,9 @@ five minutes, as `pair` does. Scan it or type it on the phone, or in the app on 
 When the device asks, the page says its name and what it asks for. Tick **Let it type** if it
 asked to type and you want it to, **Let it approve or answer workflows** if it asked for that,
 and, with more than one project, the projects it may reach. Then **Let it in** or **Turn it
-away**. Nothing is let in without that answer. **Stop** takes the code back.
+away**. Nothing is let in without that answer. **Stop** takes the code back. A device you do
+not answer within five minutes is no longer waiting: the page says so, and **Try again** shows a
+new code for it.
 
 ### Agents
 

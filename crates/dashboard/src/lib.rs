@@ -91,7 +91,7 @@ pub trait Remote: Send + Sync {
 }
 
 /// How pairing a device from the page stands.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(
     tag = "state",
     rename_all = "camelCase",
@@ -127,7 +127,7 @@ pub enum Pairing {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairProject {
     pub id: String,
@@ -151,7 +151,7 @@ pub struct PairAnswer {
 }
 
 /// How signing in from the page stands.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(
     tag = "state",
     rename_all = "camelCase",

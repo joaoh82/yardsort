@@ -32,12 +32,15 @@ function replace(node, ...children) {
 
 class SignedOut extends Error {}
 class Unreachable extends Error {}
+class GivenUp extends Error {}
 
-async function ask(method, path, body) {
+/** Ask the host. `signal` gives the request up, for one that waits and is no longer wanted. */
+async function ask(method, path, body, signal) {
   let response;
   try {
     response = await fetch(path, {
       method,
+      signal,
       // What tells the host this is its own page asking: no form or link can add a header.
       headers: {
         "X-Yardsort-Dashboard": "1",
@@ -48,6 +51,8 @@ async function ask(method, path, body) {
       cache: "no-store",
     });
   } catch {
+    // Given up from here: the host was not asked whether it answers.
+    if (signal?.aborted) throw new GivenUp("No longer asked.");
     lost(true);
     throw new Unreachable("This computer is not answering.");
   }
@@ -73,7 +78,8 @@ function lost(is) {
 }
 
 /** Whether an error is one the page already shows in its own way. */
-const quiet = (error) => error instanceof SignedOut || error instanceof Unreachable;
+const quiet = (error) =>
+  error instanceof SignedOut || error instanceof Unreachable || error instanceof GivenUp;
 
 // ── Words for numbers ────────────────────────────────────────────────────────────────────────
 
@@ -532,8 +538,11 @@ async function readRemote() {
     $("pair-card").hidden = true;
     return;
   }
-  const on = status?.host.remote ?? null;
   const signing = remote.signingIn;
+  // A sign-in the browser's own return finished: the status says so only at its next reading,
+  // and until then this would show the form again, as if nothing had come of it.
+  if (signing.state === "signedIn" && !status?.host.remote) await readStatus().catch(() => {});
+  const on = status?.host.remote ?? null;
   const waiting = signing.state === "waiting";
 
   $("server-form").hidden = Boolean(on) || waiting;
@@ -1129,6 +1138,10 @@ function showTerminal(id) {
   let stopped = false;
   let next = 0;
   let timer = null;
+  // What gives up the reading that waits for output, once this view is left. Left waiting, each
+  // holds one of the few connections a browser keeps to a host, for twenty seconds, and a
+  // handful of terminals looked at in turn leave none for typing or for the rest of the page.
+  const leaving = new AbortController();
   const typed = [];
   let sending = false;
 
@@ -1170,7 +1183,12 @@ function showTerminal(id) {
     if (stopped) return;
     let reading;
     try {
-      reading = await ask("GET", `/api/terminals/${id}/output?from=${next}&wait=20000`);
+      reading = await ask(
+        "GET",
+        `/api/terminals/${id}/output?from=${next}&wait=20000`,
+        undefined,
+        leaving.signal,
+      );
     } catch (error) {
       if (stopped) return;
       if (error instanceof Unreachable) timer = setTimeout(read, 2000);
@@ -1200,6 +1218,7 @@ function showTerminal(id) {
     id,
     stop() {
       stopped = true;
+      leaving.abort();
       clearTimeout(timer);
       watching.disconnect();
       term.dispose();

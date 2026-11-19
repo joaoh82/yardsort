@@ -29,10 +29,52 @@ pub struct HostRemote {
 #[derive(Default)]
 struct PairState {
     now: Option<Pairing>,
-    /// When the offer lapses, while one is out.
+    /// When the offer lapses, while one is out; then, while a device asks, when its asking does.
     lapses: Option<Instant>,
     /// Waiting for a device to ask.
     waiting: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl PairState {
+    /// How pairing stands at `at`. An offer no device took in time has lapsed. So has a device
+    /// nobody answered in time: the server has stopped waiting for its answer, and left asking
+    /// here it would hold the page, where a new code is shown only once this one is done with.
+    fn shown(&mut self, at: Instant) -> Pairing {
+        let left = self.lapses.map(|lapses| lapses.checked_duration_since(at));
+        let lapsed = match (&mut self.now, left) {
+            (Some(Pairing::Offered { lapses_in_ms, .. }), Some(Some(left))) => {
+                *lapses_in_ms = left.as_millis() as u64;
+                None
+            }
+            (Some(Pairing::Offered { .. }), Some(None)) => Some(Pairing::Lapsed),
+            (Some(Pairing::Asked { device, .. }), Some(None)) => Some(Pairing::Failed {
+                message: format!(
+                    "{device} asked and was not answered in time. Show a new code to pair it."
+                ),
+            }),
+            _ => None,
+        };
+        if let Some(lapsed) = lapsed {
+            self.now = Some(lapsed);
+            self.lapses = None;
+        }
+        self.now.clone().unwrap_or(Pairing::Idle)
+    }
+
+    /// The device of `grant` asks, and waits `good_for` for its answer.
+    fn asked(&mut self, asking: Pairing, good_for: Duration, at: Instant) {
+        self.now = Some(asking);
+        self.lapses = Some(at + good_for);
+    }
+
+    /// The device of `grant` could not be answered, and the server says it waits no longer: it
+    /// gave up, or was answered from elsewhere. `why` is shown, with a way to a new code.
+    fn gone(&mut self, grant: &str, why: String) {
+        if matches!(&self.now, Some(Pairing::Asked { grant: asking, .. }) if asking == grant) {
+            self.now = Some(Pairing::Failed { message: why });
+            self.lapses = None;
+        }
+    }
 }
 
 /// An address pasted, and where to say whether it was the sign-in's.
@@ -57,6 +99,10 @@ struct SignState {
 /// Said when a sign-in is asked to stop, or another to start, while one is being finished.
 const FINISHING: &str = "This sign-in is being finished and cannot be given up now. Once it is \
                          done, signing out of the server undoes it.";
+
+/// Said when the computer is asked to sign out while a sign-in is being finished.
+const NOT_YET_SIGNED_IN: &str = "A sign-in is being finished. Sign out once it is done, in a \
+                                 moment.";
 
 impl SignState {
     /// The sign-in of `turn` has its code, and goes on to finish: unless it was given up, or
@@ -86,6 +132,17 @@ impl SignState {
         // Whatever of it is still running is no longer this turn's, and finishes nothing.
         self.turn += 1;
         true
+    }
+
+    /// Before signing out: a sign-in still waiting for its browser is given up. One being
+    /// finished is neither given up nor signed out yet, and says so: signing out now would find
+    /// nothing to sign out, and the sign-in would then turn Remote back on behind it.
+    fn leave(&mut self) -> Result<(), &'static str> {
+        if self.finishing {
+            return Err(NOT_YET_SIGNED_IN);
+        }
+        self.give_up();
+        Ok(())
     }
 
     /// The sign-in of `turn` is over, as `ended`.
@@ -137,18 +194,7 @@ impl HostRemote {
 
 impl Remote for HostRemote {
     fn pairing(&self) -> Pairing {
-        let mut state = lock(&self.pairing);
-        let lapses = state.lapses;
-        if let (Some(Pairing::Offered { lapses_in_ms, .. }), Some(at)) = (&mut state.now, lapses) {
-            match at.checked_duration_since(Instant::now()) {
-                Some(left) => *lapses_in_ms = left.as_millis() as u64,
-                None => {
-                    state.now = Some(Pairing::Lapsed);
-                    state.lapses = None;
-                }
-            }
-        }
-        state.now.clone().unwrap_or(Pairing::Idle)
+        lock(&self.pairing).shown(Instant::now())
     }
 
     fn pair(&self) -> Result<Pairing, String> {
@@ -180,15 +226,23 @@ impl Remote for HostRemote {
                     },
                     () = tokio::time::sleep(good_for) => return,
                 };
-                let mut state = lock(&shared);
-                state.now = Some(Pairing::Asked {
-                    grant: request.grant_id,
-                    device: request.device_name,
-                    wants_control: request.wants_control,
-                    wants_workflows: request.wants_workflows,
-                    projects,
-                });
-                state.lapses = None;
+                // As long as the server waits for the answer: as long as the offer, where it
+                // does not say.
+                let waits = match request.expires_in_ms {
+                    0 => good_for,
+                    ms => Duration::from_millis(u64::from(ms)),
+                };
+                lock(&shared).asked(
+                    Pairing::Asked {
+                        grant: request.grant_id,
+                        device: request.device_name,
+                        wants_control: request.wants_control,
+                        wants_workflows: request.wants_workflows,
+                        projects,
+                    },
+                    waits,
+                    Instant::now(),
+                );
                 return;
             }
         });
@@ -219,10 +273,27 @@ impl Remote for HostRemote {
         } else {
             Answer::Deny
         };
-        self.runtime
-            .block_on(account::answer(self.home.as_ref(), answer.grant, given))
-            .map_err(|f| f.message)?;
-        lock(&self.pairing).now = Some(Pairing::Answered { device, allowed });
+        let grant = answer.grant;
+        let answered =
+            self.runtime
+                .block_on(account::answer(self.home.as_ref(), grant.clone(), given));
+        if let Err(failure) = answered {
+            // Whether it still waits is the server's to say. Where that cannot be had, it is
+            // left asking, to be answered again, until its time is up.
+            let waits = self
+                .runtime
+                .block_on(account::requests(self.home.as_ref()))
+                .map_or(true, |waiting| waiting.iter().any(|r| r.grant_id == grant));
+            if waits {
+                return Err(failure.message);
+            }
+            lock(&self.pairing).gone(&grant, failure.message);
+            return Ok(self.pairing());
+        }
+        let mut state = lock(&self.pairing);
+        state.now = Some(Pairing::Answered { device, allowed });
+        state.lapses = None;
+        drop(state);
         Ok(self.pairing())
     }
 
@@ -376,8 +447,8 @@ impl Remote for HostRemote {
     }
 
     fn sign_out(&self) -> Result<(), String> {
+        lock(&self.signing_in).leave()?;
         self.stop_pairing();
-        self.stop_signing_in();
         let home = self.home.clone();
         self.runtime.block_on(async move {
             account::disconnect(home.as_ref()).await;
@@ -466,6 +537,103 @@ mod tests {
         );
         assert!(matches!(state.now, Some(SigningIn::SignedIn { .. })));
         assert!(state.give_up());
+    }
+
+    #[test]
+    fn signing_out_waits_for_a_sign_in_being_finished_and_gives_up_one_still_waiting() {
+        let mut state = SignState::default();
+        let turn = begun(&mut state);
+        // Still waiting for its browser: signing out gives it up, and it finishes nothing.
+        assert_eq!(state.leave(), Ok(()));
+        assert!(state.now.is_none());
+        assert!(!state.finish(turn));
+
+        // Being finished: signing out now would find no host to sign out, and the sign-in would
+        // then turn Remote on behind it. It is refused, and the sign-in is left as it was.
+        let turn = begun(&mut state);
+        assert!(state.finish(turn));
+        assert_eq!(state.leave(), Err(NOT_YET_SIGNED_IN));
+        assert_eq!(state.now, Some(waiting()));
+        assert_eq!(state.turn, turn);
+        state.end(
+            turn,
+            SigningIn::SignedIn {
+                name: "Build box".into(),
+                server_url: "https://remote.example.test".into(),
+            },
+        );
+        assert_eq!(state.leave(), Ok(()));
+        assert!(state.now.is_none());
+    }
+
+    fn asking(grant: &str) -> Pairing {
+        Pairing::Asked {
+            grant: grant.into(),
+            device: "Ana's phone".into(),
+            wants_control: true,
+            wants_workflows: false,
+            projects: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_device_not_answered_in_time_is_no_longer_asking_and_says_so() {
+        let begun = Instant::now();
+        let mut state = PairState::default();
+        state.asked(asking("grant-1"), Duration::from_secs(300), begun);
+        assert_eq!(
+            state.shown(begun + Duration::from_secs(299)),
+            asking("grant-1")
+        );
+        // The server has stopped waiting for the answer. Left asking, it would hold the page:
+        // a new code is shown only once this one is done with.
+        match state.shown(begun + Duration::from_secs(301)) {
+            Pairing::Failed { message } => assert_eq!(
+                message,
+                "Ana's phone asked and was not answered in time. Show a new code to pair it."
+            ),
+            other => panic!("{other:?}"),
+        }
+        assert!(state.lapses.is_none());
+    }
+
+    #[test]
+    fn a_device_that_stopped_waiting_is_taken_off_the_page_and_another_is_left_alone() {
+        let begun = Instant::now();
+        let mut state = PairState::default();
+        state.asked(asking("grant-1"), Duration::from_secs(300), begun);
+        // Not the one asking: nothing changes.
+        state.gone("grant-0", "That device is no longer waiting.".into());
+        assert_eq!(state.shown(begun), asking("grant-1"));
+        state.gone("grant-1", "That device is no longer waiting.".into());
+        assert_eq!(
+            state.shown(begun),
+            Pairing::Failed {
+                message: "That device is no longer waiting.".into()
+            }
+        );
+    }
+
+    #[test]
+    fn an_offer_counts_down_and_lapses_with_no_device_asking() {
+        let begun = Instant::now();
+        let mut state = PairState {
+            now: Some(Pairing::Offered {
+                code: "ABCD-1234".into(),
+                qr: Vec::new(),
+                lapses_in_ms: 300_000,
+            }),
+            lapses: Some(begun + Duration::from_secs(300)),
+            waiting: None,
+        };
+        match state.shown(begun + Duration::from_secs(100)) {
+            Pairing::Offered { lapses_in_ms, .. } => assert_eq!(lapses_in_ms, 200_000),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            state.shown(begun + Duration::from_secs(301)),
+            Pairing::Lapsed
+        );
     }
 
     #[test]

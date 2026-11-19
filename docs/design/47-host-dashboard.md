@@ -364,11 +364,19 @@ of what the clients do. A **Remote** tab, after Overview.
   begun; a review reproduced that one signing in after its cancel, with a server slow to
   answer. The rule here is the answer to both.
 - **Signing out**, after the page asks: `account::disconnect` and `account::disable`, as the
-  control socket's `signOut`.
+  control socket's `signOut`. A sign-in still waiting for its browser is given up first. One
+  being finished is not, and the sign-out is refused until it is done: `disable` would find no
+  host yet and answer that all is off, and the sign-in would then turn Remote on behind it. A
+  review reproduced that, with a server slow to answer.
 - **Pairing**: an offer, its code and its QR code, drawn by the page from the modules the host
   sends (`Pairing::Offered.qr`, a row of `0` and `1` each); the first device that asks, with what
   it asks for and the projects to choose among; and the operator's answer, the same choices as
   `pair` gives, sent with the device's grant id. An answer for any other grant is refused.
+  A device asking is shown for as long as the server waits for its answer, five minutes, and
+  then no longer: as first built it was shown until answered, and since a new code is only
+  given once the last is done with, a device that gave up left the page with nothing to press
+  until the host was restarted. An answer the server refuses is checked against the devices
+  still waiting there (`account::requests`), and one no longer among them goes the same way.
 
 **The interface.** `host_dashboard::Remote`, given by `Source::remote`. The app gives none: its
 window does all three, so the tab says to use **Settings → Remote** and every route answers so.
@@ -392,7 +400,8 @@ by hand. A second check would guard nothing that first one does not open. What s
 another site's page; an offer with its code and QR code; the device asking, an answer for another
 device refused, and the answer chosen passed through; signing in by the address pasted, a wrong
 one refused, and signing out; and the app's case, every route saying where to go instead. The
-host's QR rows checked in `dashboard_remote.rs`. The smoke test `host-dashboard-remote`, against
+host's QR rows checked in `dashboard_remote.rs`, with what a sign-in and a device asking do
+when given up, finished, signed out over or left unanswered. The smoke test `host-dashboard-remote`, against
 the stand-in server with a real `yardsort-host`: signed in from the page after a wrong address,
 linked with no restart, `pair` refused to a job, a phone paired from the page and reaching the
 computer, signed out. Its steps passed by hand on 2026-11-19. The page was looked at in a browser
@@ -430,7 +439,11 @@ password, `rustunnel setup`.
 - **The page asks; nothing is pushed.** Output is read by a request that waits up to twenty
   seconds for there to be any, and what is typed goes up one request at a time, in order. That
   keeps the server at HTTP/1.1, through a tunnel as well as a forward, at the cost of a round
-  trip a keystroke.
+  trip a keystroke. The request that waits is given up when its view is left (`AbortController`
+  in `showTerminal`). As first built it was left to run out, each holding one of the six
+  connections a browser keeps to a host: a review looked at a quiet terminal seven times and
+  then waited 15.9 seconds for the page's next request, and here eight times made it 14.4
+  seconds, and 5 milliseconds once given up.
 - **Drawn by xterm.js**, the library the app's own terminals use, kept as three files beside the
   page (`ui/vendor`), since the dashboard has no build step and is compiled where there is no
   `node_modules`. A test fails when they are not the ones the app installs.
