@@ -1,9 +1,12 @@
 # Remote, R7: the managed launch
 
-**Status:** planned on 2026-11-16, with the questions in §3 open for the owner. Slice 1, exporting
-an account, built on 2026-11-17 (§9), on question 8's lean. Slice 2, deleting an account, built the
-same day (§10), on question 5's lean. Slice 4, entitlements and metering, built the same day (§11),
-on question 7's lean.
+**Status:** planned on 2026-11-16. The owner took every lean in §3 on 2026-11-18, and asked for a
+computer with no screen to do what the clients do. Slice 1, exporting an account, built on
+2026-11-17 (§9). Slice 2, deleting an account, built the same day (§10), and on a computer with no
+screen on 2026-11-18. Slice 4, entitlements and metering, built the same day (§11). Slices 1, 2
+and 4 merged, and `main` deployed to staging on 2026-11-18: its usage counters checked there. The
+owner chose to skip deleting an account on staging, which would be theirs; deletion's proof is the
+local tests and smoke tests.
 
 This is the plan for the last phase of the proposal ([25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)
 §13): what it has to show, what it starts from, the decisions it needs, and the slices in the order
@@ -94,8 +97,12 @@ never trusted from a client, and a lapse never deletes local work, ends a local 
 export (proposal §12, 30 §4); store submission, paid services and production deployment each need
 the owner's own go-ahead (proposal §15).
 
-**For the owner to settle.** Each has the plan's lean, which the slices assume until told
-otherwise.
+**Settled by the owner on 2026-11-18**: every lean below was taken. For question 6's bucket the
+owner chose Fly's own object store, Tigris: on 2026-11-19 `yardsort-journal-staging` was made for
+staging with `fly storage create`, which put its credentials straight into the app's Fly secrets
+(`AWS_*`, `BUCKET_NAME`); production gets its own with production. Still asked: whether ZITADEL Pro
+can wait for the beta's first users (question 1), so that US$100 a month is not paid for nobody,
+provided it comes before anyone signs in to production, since its custom domain is the issuer.
 
 1. **When production starts, and ZITADEL Pro with it** (28 §7). Lean: at slice 5, for an invited
    beta, before billing exists. Not chosen: at launch only, which leaves the drills on staging
@@ -216,7 +223,7 @@ for each deploy.
 
 ## 9 · Slice 1, exporting an account
 
-Built on 2026-11-17, on question 8's lean, which the owner has not answered yet.
+Built on 2026-11-17, on question 8's lean, which the owner took on 2026-11-18.
 
 **The server.** `GET /v1/account/export` (`remote_proto::export`), listed as `account.export` in
 `GET /v1/server`'s capabilities, for any device the account has signed in, phone, computer or host,
@@ -271,7 +278,7 @@ those computers keep.
 
 ## 10 · Slice 2, deleting an account
 
-Built on 2026-11-17, on question 5's lean, which the owner has not answered yet.
+Built on 2026-11-17, on question 5's lean, which the owner took on 2026-11-18.
 
 **Confirming.** A sign-in started with `purpose=confirm` (`remote_proto::account::LoginPurpose`)
 sends the browser to the provider with `prompt=login` and `max_age=0`, so the person signs in
@@ -313,8 +320,13 @@ has a guide page for the stores' links, [Deleting your account](../guide/delete-
 - The phone: **Settings → Your account → Delete my account**, a screen of its own. The profile goes
   from the phone, and the notice says so. A confirmation the server refuses does not sign the
   phone out.
-- A computer with no screen has no command for it: the guide sends its person to the other two or
-  the page.
+- A computer with no screen: `yardsort-host account delete`, added on 2026-11-18, since the owner
+  wants it to do what the clients do. Behind the operator's guard, like `pair`, and refused to the
+  dashboard's commands. It says what goes and what stays, takes `delete` typed, and prints the
+  confirming sign-in's address; the browser's return comes by a forwarded port or is pasted, as
+  `sign-in`'s does. The running host holds the sign-in, its verifier included, and deletes
+  (`crates/host/src/serve.rs`, over the control socket's `accountDelete` and `pasted`); the
+  command holds nothing.
 
 Every client words `accountDeleted` as its account having been deleted, not as being signed out:
 the desktop's and the host's link line, and the phone's notice. Local work is never touched.
@@ -339,7 +351,7 @@ again finding an empty account.
 
 ## 11 · Slice 4, entitlements and metering
 
-Built on 2026-11-17, on question 7's lean, which the owner has not answered yet: 24 hours of grace.
+Built on 2026-11-17, on question 7's lean, which the owner took on 2026-11-18: 24 hours of grace.
 
 **The seam** (`crates/server/src/entitlements.rs`, 30 §4). With `YARDSORT_ENTITLEMENTS_URL` unset,
 everything is allowed up to the server's own limits, as a self-hosted server runs. Set, the server

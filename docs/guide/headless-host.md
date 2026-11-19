@@ -574,11 +574,33 @@ everything it holds and leaves out.
 Like `pair`, it is refused from any terminal Yardsort started and from anything an agent runs, since
 the file holds every synced note. `serve` has to be running.
 
-## When the account is deleted
+## Deleting your account
 
-There is no command to delete the account from here. Delete it from your computer, your phone or
-your server's web page: see [Deleting your account](delete-account.md). The next time this computer
-reaches the server, `yardsort-host status` says so:
+```sh
+yardsort-host account delete
+```
+
+Deletes everything the server keeps of this computer's account, for every device: every phone and
+computer signed in to it, the devices each lets in, which phones get notifications, and every synced
+project, note and workspace name. It cannot be undone; export the account first to keep a copy.
+Everything on this computer stays: projects, workspaces and agents keep running, and Remote turns off
+here.
+
+It says what goes and what stays, and asks you to type `delete`. Then, as with `sign-in`, it prints an
+address: open it in a browser on any computer and sign in again, even if that browser is signed in
+already. The browser is sent to an address starting `http://127.0.0.1:<port>/signed-in` that goes
+nowhere there: paste it back, or forward the port over SSH first and it finishes by itself. Signing
+in again is what deletes, and it has to be within five minutes and as the same person: as someone
+else, the server says so and deletes nothing. Stop the command before then and nothing is deleted.
+
+Like `pair`, it is refused from any terminal Yardsort started and from anything an agent runs or the
+[dashboard](host-dashboard.md) runs. `serve` has to be running. You can also delete the account from
+your computer, your phone or your server's web page: see [Deleting your account](delete-account.md).
+
+## When the account is deleted elsewhere
+
+Deleted from another device or the web page, the next time this computer reaches the server,
+`yardsort-host status` says so:
 
 ```text
 Link: stopped: This computer's account was deleted at the server. Everything on this computer is still here. Sign in again with `yardsort-host sign-in`.

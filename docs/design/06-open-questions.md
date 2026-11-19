@@ -425,11 +425,12 @@ put to the owner before it was built.
 57. **Should the page have a terminal?** An agent's own sign-in, `sudo` with a password and
     `rustunnel setup` want one, and a job has none. It would finish the setup without SSH, and
     make the dashboard a shell on the internet behind one cookie.
-58. **Should a device be paired from the dashboard?** Left out on purpose: as it is, a signed-in
-    browser can do nothing the operator's guard is there to stop. With pairing in it, the
-    dashboard's sign-in becomes part of what guards pairing.
-59. **Should the dashboard sign the host in to a Yardsort server?** Today that is
-    `yardsort-host sign-in`, with `serve` stopped.
+58. ~~**Should a device be paired from the dashboard?**~~ **Settled by the owner 2026-11-19: yes.**
+    The host should do most if not all of what the clients do. The dashboard's sign-in becomes
+    part of what guards pairing, and is to be built as such.
+59. ~~**Should the dashboard sign the host in to a Yardsort server?**~~ **Settled by the owner
+    2026-11-19: yes**, for the same reason. Today that is `yardsort-host sign-in`, with `serve`
+    stopped.
 60. **Other tunnels, and a reverse proxy of one's own.** Only rustunnel's host name is taken as
     the dashboard's address.
 61. **Should what was run be recorded?** Jobs are forgotten when the host stops, and nothing is

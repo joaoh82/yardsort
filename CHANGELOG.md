@@ -33,8 +33,9 @@ has the downloads and the full commit lists.
   my account…** deletes everything the server keeps of your account, for every device, once you have
   typed delete and signed in again in the browser. Nothing on your computers or phones is deleted,
   and Remote turns off here. Your other devices say the account was deleted the next time they
-  reach the server. The phone has it under **Settings → Your account**, and the server has a web
-  page for it, `/account/delete`. It needs a server of this version. See
+  reach the server. The phone has it under **Settings → Your account**, a computer with no screen
+  has `yardsort-host account delete`, and the server has a web page for it, `/account/delete`. It
+  needs a server of this version. See
   [Deleting your account](docs/guide/delete-account.md).
 - **A server counts what each account uses, and can ask about plans** (Remote, under development).
   The server now keeps, for each account and day, how many of its devices made a request, the most

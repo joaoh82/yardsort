@@ -30,7 +30,8 @@ guess. A link is good once, for ten minutes; the browser then stays signed in fo
 **Whoever signs in can run commands on that computer, as the user the host runs as.** That is
 what it is for. Treat a sign-in link as you would treat a shell on that computer.
 
-It lets no device in, approves no [memory](memory.md) note and turns no sync on. Those stay at a
+It lets no device in, approves no [memory](memory.md) note, turns no sync on, and neither exports
+nor deletes your account. Those stay at a
 terminal of your own, or in the app, so that nothing an agent could reach can do them, and a
 command you run from the dashboard is refused them too: `yardsort-host pair` typed into
 **Commands** does not pair a device.
@@ -132,8 +133,8 @@ started.
 `-y`, or whatever the command has for that: `sudo -n apt-get install -y ripgrep`, not
 `sudo apt-get install ripgrep`.
 
-**A command is not you at a terminal.** `yardsort-host pair`, `yardsort-host dashboard`, and the
-`sync` and `memory` commands that [only a person may run](headless-host.md#only-a-person-can-pair-a-device)
+**A command is not you at a terminal.** `yardsort-host pair`, `yardsort-host dashboard`,
+`yardsort-host account export` and `account delete`, and the `sync` and `memory` commands that [only a person may run](headless-host.md#only-a-person-can-pair-a-device)
 are refused to a command the dashboard ran, and to anything that command starts.
 
 **Jobs** lists what has been run since the host last started, an agent's install and a GitHub

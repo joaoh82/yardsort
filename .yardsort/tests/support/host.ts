@@ -4,12 +4,17 @@
 //
 //   bun .yardsort/tests/support/host.ts <run dir> sign-in <name>
 //   bun .yardsort/tests/support/host.ts <run dir> pair [watching | window <port> [v|t]]
+//   bun .yardsort/tests/support/host.ts <run dir> deletes
 //
 // It signs in to the stand-in, or to `YS_SERVER` when set: a cable to it (cable.ts), say.
 //
 // The pretend phone is let watch and type, or with `watching` only watch. With `window`, the app's
 // window is the device that asks, through its inspector on `port`. It asks to watch and type, as
 // the phone does, and is let watch (`v`, the default) or type too (`t`).
+//
+// `deletes` runs `account delete` at a terminal of the operator's own: first answered with
+// something other than `delete`, which deletes nothing; then confirmed, signed in again by
+// following the address it prints, a wrong address pasted and then the right one.
 //
 // `yardsort-host` runs through headless.sh: the build headless-build.sh made, on this run's profile.
 
@@ -123,6 +128,42 @@ switch (doing) {
     await out.until(/Let in\./);
     pairing.kill();
     process.exit(0);
+    break;
+  }
+  case "deletes": {
+    const deleting = (answer: string) => {
+      const running = Bun.spawn(
+        ["script", "-qefc", `${HOST.join(" ")} account delete`, "/dev/null"],
+        { stdin: "pipe", stdout: "pipe", stderr: "inherit", env: own() },
+      );
+      const out = reading(running.stdout);
+      return {
+        running,
+        out,
+        async confirm() {
+          await out.until(/Type delete to confirm: /);
+          running.stdin.write(`${answer}\n`);
+          await running.stdin.flush();
+        },
+      };
+    };
+    const kept = deleting("keep");
+    await kept.confirm();
+    await kept.out.until(/Nothing was deleted\./);
+    if ((await kept.running.exited) === 0) throw new Error("Not deleting exited 0.");
+
+    const gone = deleting("delete");
+    await gone.confirm();
+    const [, address] = await gone.out.until(/^ {2}(http\S+)\r?$/m);
+    const back = await signInIn(address);
+    await gone.out.until(/Address: /);
+    gone.running.stdin.write("http://127.0.0.1:1/signed-in?code=not-this-one\n");
+    await gone.running.stdin.flush();
+    await gone.out.until(/not the address this sign-in waits for/);
+    gone.running.stdin.write(`${back}\n`);
+    await gone.running.stdin.flush();
+    await gone.out.until(/Your account was deleted at the server/);
+    process.exit(await gone.running.exited);
     break;
   }
   default:
