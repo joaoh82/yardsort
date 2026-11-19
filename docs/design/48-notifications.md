@@ -309,9 +309,8 @@ question kept from a grant without `workflow:read`) in
 for ten seconds and then waits.
 
 **Its steps run by hand on 2026-11-17**, on Linux: a `yardsort-host` on the stand-in server,
-and the real window on a profile of its own, kept on a monitor nobody sees. The file itself was
-checked with `ys test validate`; it has not been run through `ys test run`, which needs its
-owner's approval first.
+and the real window on a profile of its own, kept on a monitor nobody sees. The file was then run
+through `ys test run` on 2026-11-18, once its owner had approved it: 21 of 21 steps passed.
 
 - The host listed its agent that had finished before anything was paired with it.
 - Signed in as a client and let watch at the host's terminal, the window's Notifications row
@@ -413,8 +412,8 @@ and not seen, and marks it seen; the real window then has nothing unseen and the
 Its steps were run by hand on 2026-11-17, on Linux, against a fresh debug build on a profile
 of its own, with the window on a monitor nobody sees, and all passed: the phone was told
 fourteen seconds after it started the agent, ten of them the agent's work. The file was
-checked with `ys test validate`. It has not been run through `ys test run`, which needs its
-owner's approval first.
+then run through `ys test run` on 2026-11-18, once its owner had approved it: 14 of 14 steps
+passed.
 
 Not run: an iPhone, where the header is the system's glass; a real computer with a workflow, a
 smoke test or a schedule waiting (the screens' tests cover their rows against the fake server);
@@ -463,7 +462,8 @@ Its steps run by hand on 2026-11-17, on Linux, with no window:
 - A second agent, marked seen by the phone 96 ms after it finished: no push in the minute
   after.
 
-The file was checked with `ys test validate`. It has not been run through `ys test run`.
+The file was then run through `ys test run` on 2026-11-18, once its owner had approved it: 16
+of 16 steps passed.
 
 Not run: a real phone receiving it from Apple's or Google's service, the real desktop window as
 the computer (the core's tests and the headless host share the code), and macOS and Windows.
