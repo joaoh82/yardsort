@@ -180,6 +180,16 @@ fn requests_match_their_fixtures() {
     assert_eq!(request.operation.name(), "pull.describe");
     assert_eq!(request.operation.scope(), Some(Scope::WorkspaceRead));
     assert!(request.operation.validate().is_ok());
+    for (name, op) in [
+        ("request-notification-list.json", "notification.list"),
+        ("request-notification-seen.json", "notification.seen"),
+        ("request-notification-follow.json", "notification.follow"),
+    ] {
+        let request: Request = pinned(name);
+        assert_eq!(request.operation.name(), op);
+        assert_eq!(request.operation.scope(), Some(Scope::TerminalRead), "{op}");
+        assert!(request.operation.validate().is_ok(), "{op}");
+    }
     let hello: Hello = pinned("hello.json");
     assert_eq!(negotiate(&hello), Ok(ProtocolVersion::CURRENT));
 }
@@ -219,6 +229,79 @@ fn a_pull_request_is_named_by_its_project_and_number_or_by_the_hosts_id_for_one_
     let asked: pull::PullListParams = serde_json::from_str("{}").unwrap();
     assert_eq!(asked.of, pull::PullsOf::Workspaces);
     assert!(serde_json::from_str::<pull::PullListParams>(r#"{"of":"mine"}"#).is_err());
+}
+
+#[test]
+fn seen_names_rows_or_says_all_and_nothing_else() {
+    use notification::{NotificationSeenParams, MAX_SEEN};
+    let seen = |ids: Vec<String>, all: bool| {
+        Operation::NotificationSeen(NotificationSeenParams { ids, all }).validate()
+    };
+    assert!(seen(vec!["7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f".into()], false).is_ok());
+    assert!(seen(Vec::new(), true).is_ok());
+    // Nothing named and not all is nothing asked.
+    assert_eq!(
+        seen(Vec::new(), false).unwrap_err().code,
+        ErrorCode::InvalidRequest
+    );
+    for bad in ["", "a b", "../x"] {
+        assert_eq!(
+            seen(vec![bad.into()], false).unwrap_err().code,
+            ErrorCode::InvalidRequest,
+            "{bad:?}"
+        );
+    }
+    assert!(seen(vec!["a".into(); MAX_SEEN], false).is_ok());
+    assert_eq!(
+        seen(vec!["a".into(); MAX_SEEN + 1], false)
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidRequest
+    );
+    // Both are optional on the wire, and an older client's `{}` is refused as nothing asked.
+    let empty: NotificationSeenParams = serde_json::from_str("{}").unwrap();
+    assert_eq!(empty, NotificationSeenParams::default());
+    // Stopping needs nothing said, as following does.
+    let stop: Request = serde_json::from_str(
+        r#"{"requestId":"r-1","protocol":{"major":1,"minor":15},"op":"notification.unfollow"}"#,
+    )
+    .unwrap();
+    assert_eq!(stop.operation, Operation::NotificationUnfollow);
+    assert_eq!(stop.operation.name(), "notification.unfollow");
+    assert_eq!(stop.operation.scope(), Some(Scope::TerminalRead));
+}
+
+#[test]
+fn a_list_reads_as_its_fixture_and_a_newer_hosts_words_are_not_refused() {
+    use notification::{NotificationKind, NotificationPart, NotificationSummary};
+    let response: Response = pinned("response-notifications.json");
+    let Outcome::Result(Reply::Notifications(page)) = response.outcome else {
+        panic!("not a list");
+    };
+    assert_eq!((page.needs, page.finished, page.more), (2, 1, false));
+    let kinds: Vec<_> = page.notifications.iter().map(|row| row.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            NotificationKind::AgentAsks,
+            NotificationKind::WorkflowFailed,
+            NotificationKind::ScheduleNoWorkspace,
+            NotificationKind::AgentStopped,
+        ]
+    );
+    // A schedule that lost its workspace names none, and keeps what it was called.
+    assert_eq!(page.notifications[2].workspace, None);
+    assert_eq!(page.notifications[2].workspace_name, "celsius-fahrenheit");
+    assert_eq!(page.notifications[3].part, NotificationPart::Earlier);
+    assert_eq!(page.notifications[3].exit_code, Some(1));
+
+    // A kind and a part this build does not know are read as such, for a device to pass over.
+    let mut newer = serde_json::to_value(&page.notifications[0]).unwrap();
+    newer["kind"] = "deploy.waits".into();
+    newer["part"] = "snoozed".into();
+    let row: NotificationSummary = serde_json::from_value(newer).unwrap();
+    assert_eq!(row.kind, NotificationKind::Other);
+    assert_eq!(row.part, NotificationPart::Other);
 }
 
 #[test]
@@ -323,6 +406,7 @@ fn responses_match_their_fixtures() {
         "response-tests-waiting.json",
         "response-pulls.json",
         "response-pull.json",
+        "response-notifications.json",
         "response-harnesses-choices.json",
         "response-branches.json",
         "response-cloned.json",
@@ -505,6 +589,8 @@ fn relay_messages_and_events_match_their_fixtures() {
         panic!("{ended:?}")
     };
     assert_eq!(ended.error, RemoteError::not_found());
+    let changed: Event = pinned("event-notifications-changed.json");
+    assert!(matches!(changed, Event::NotificationsChanged(_)));
     // An event is told from a response by its `event` field.
     assert!(serde_json::from_value::<Event>(fixture("response-host.json")).is_err());
 }
@@ -641,6 +727,13 @@ fn every_operation_has_the_name_it_is_sent_under() {
             number: 1,
             followed: None,
         }),
+        Operation::NotificationList(notification::NotificationListParams::default()),
+        Operation::NotificationSeen(notification::NotificationSeenParams {
+            ids: Vec::new(),
+            all: true,
+        }),
+        Operation::NotificationFollow,
+        Operation::NotificationUnfollow,
         Operation::ProjectBranches(ProjectRef {
             project: ProjectId::new("p").unwrap(),
         }),

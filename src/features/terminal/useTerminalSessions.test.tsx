@@ -6,6 +6,7 @@ const core = vi.hoisted(() => ({
   ptyList: vi.fn(),
   onHostEvent: vi.fn(),
   onSessionStarted: vi.fn(),
+  notificationList: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -14,7 +15,9 @@ vi.mock("@/lib/ipc", async (original) => ({
 }));
 
 import { useTerminalStore } from "@/stores/terminals";
-import { useTerminalSessions } from "./useTerminalSessions";
+import { useNotificationsStore } from "@/stores/notifications";
+import { notification } from "@/test/fixtures";
+import { handleHostEvent, useTerminalSessions } from "./useTerminalSessions";
 
 function session(id: string, workspace: string): SessionInfo {
   return {
@@ -58,5 +61,34 @@ describe("useTerminalSessions", () => {
     const { tabs, active } = useTerminalStore.getState();
     expect(tabs.map((t) => t.id)).toEqual(["mine", "reviewer"]);
     expect(active).toEqual({ ws: "mine" });
+  });
+
+  it("asks the core what an agent finished when its terminal goes quiet, and not for a shell", async () => {
+    const tab = (id: string, recordId: string | null) => ({
+      id,
+      workspaceId: "ws",
+      title: id,
+      exit: null,
+      recordId,
+      busy: true,
+      attention: false,
+      toldAbout: null,
+      toldAt: null,
+      busySince: null,
+    });
+    useTerminalStore.setState({ tabs: [tab("agent", "record-1"), tab("shell", null)] });
+    useNotificationsStore.setState({ items: [], loaded: false, inFront: null });
+    core.notificationList.mockResolvedValue([
+      notification("n1", { kind: "agent.finished", part: "finished", terminalId: "agent" }),
+    ]);
+
+    handleHostEvent({ type: "quiet", id: "shell", busyMs: 60_000 });
+    expect(core.notificationList).not.toHaveBeenCalled();
+
+    handleHostEvent({ type: "quiet", id: "agent", busyMs: 60_000 });
+    await vi.waitFor(() => expect(useNotificationsStore.getState().items).toHaveLength(1));
+    // The ring is the list's to draw: on the agent's tab, since the core says nobody saw it.
+    const ringed = useTerminalStore.getState().tabs.filter((t) => t.attention);
+    expect(ringed.map((t) => t.id)).toEqual(["agent"]);
   });
 });

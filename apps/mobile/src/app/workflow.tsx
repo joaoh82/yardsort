@@ -11,7 +11,9 @@ import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 
 import { moment } from "../lib/format";
+import type { Listed } from "../lib/notifications";
 import { OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
+import { useLooking } from "../ui/notifications";
 import { Body, Button, Group, Problem, Row, Screen, Section, Waiting } from "../ui/parts";
 
 export default function WorkflowScreen() {
@@ -31,6 +33,9 @@ function Run({ host, run }: { host: HostId; run: RunId }) {
   const read = useCallback(async (through: Channel) => through.workflowRun(run), [run]);
   const first = useRead(channel, read, asked);
   const detail = first.answer;
+  // A run that ended is seen once it is looked at here, as at the computer.
+  const shows = useCallback((row: Listed) => row.run === run, [run]);
+  useLooking(host, channel, reach, shows);
   return (
     <Screen refreshing={false} onRefresh={() => setAsked((n) => n + 1)}>
       <Stack.Screen options={{ title: detail?.name ?? "Workflow" }} />

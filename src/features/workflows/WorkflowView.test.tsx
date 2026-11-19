@@ -18,6 +18,7 @@ const core = vi.hoisted(() => ({
   workflowWaits: vi.fn(),
   workflowWriterStatus: vi.fn(),
   workflowDescribe: vi.fn(),
+  notificationSeen: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -75,10 +76,12 @@ vi.mock("./RunWorkflowDialog", () => ({
   ),
 }));
 
+import { useNotificationsStore } from "@/stores/notifications";
 import { useProjectsStore } from "@/stores/projects";
 import { useSchedulesStore } from "@/stores/schedules";
 import { useTriggersStore } from "@/stores/triggers";
 import { NEW_WORKFLOW, useWorkflowStore, WORKFLOW_LIST } from "@/stores/workflows";
+import { standingNotification } from "@/test/fixtures";
 import { WorkflowView } from "./WorkflowView";
 
 const TEXT = "id: demo\nname: Demo\n";
@@ -150,6 +153,8 @@ describe("WorkflowView", () => {
     useProjectsStore.setState({ workflowId: null });
     useSchedulesStore.setState({ started: [] });
     useTriggersStore.setState({ started: [] });
+    useNotificationsStore.setState({ items: [], runInFront: null });
+    core.notificationSeen.mockResolvedValue(null);
   });
 
   it("shows a built-in read-only, and customizing it copies it to the user's folder", async () => {
@@ -504,6 +509,58 @@ describe("WorkflowView", () => {
     expect(within(summary).getByText("Fix the login")).toBeInTheDocument();
     expect(within(summary).getByText("run-1")).toBeInTheDocument();
     expect(screen.queryByLabelText("Workflow file")).toBeNull();
+  });
+
+  it("marks a run's ending seen in Notifications once the run is on screen, not before", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    useNotificationsStore.setState({
+      items: [
+        standingNotification("ended", {
+          kind: "workflow.succeeded",
+          part: "finished",
+          subjectId: "run-1",
+          workflowId: "demo",
+        }),
+      ],
+    });
+    core.workflowRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "demo",
+        workflowName: "Demo",
+        workspaceId: "w",
+        workspaceName: "fix-login",
+        status: "succeeded",
+        requestedBy: "app",
+        error: null,
+        inputs: {},
+        pullRequest: null,
+        pullRequestsMade: [],
+        reports: [],
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+      },
+    ]);
+    core.workflowRunSteps.mockResolvedValue([]);
+    const view = render(<WorkflowView workflowId="demo" />);
+    const views = screen.getByRole("group", { name: "View" });
+    // A run that succeeded opens on the definition: the run is not on screen yet.
+    await waitFor(() =>
+      expect(within(views).getByRole("button", { name: "Definition" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    expect(core.notificationSeen).not.toHaveBeenCalled();
+
+    await userEvent.setup().click(within(views).getByRole("button", { name: "Runs" }));
+    await waitFor(() => expect(core.notificationSeen).toHaveBeenCalledWith(["ended"]));
+    expect(useNotificationsStore.getState().runInFront).toBe("run-1");
+    // Leaving the view, nothing is on screen any more.
+    view.unmount();
+    expect(useNotificationsStore.getState().runInFront).toBeNull();
   });
 
   it("shows a run's result and the pull requests it opened on its summary", async () => {

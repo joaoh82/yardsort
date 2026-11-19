@@ -219,10 +219,12 @@ pub async fn forge_search_repositories(
 #[tauri::command]
 #[specta::specta]
 pub async fn project_remove(app: AppHandle, id: String, keep_history: bool) -> IpcResult<()> {
-    blocking(app, move |state| {
+    blocking(app.clone(), move |state| {
         Ok(state.store.remove_project(&id, keep_history).map(drop)?)
     })
-    .await
+    .await?;
+    crate::notifications::reread(&app);
+    Ok(())
 }
 
 #[tauri::command]

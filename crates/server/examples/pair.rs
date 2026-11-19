@@ -561,6 +561,7 @@ mod serving {
                 conversations: None,
                 tests: None,
                 pulls: None,
+                notifications: None,
             });
         }
 

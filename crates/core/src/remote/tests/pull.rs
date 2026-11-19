@@ -73,6 +73,7 @@ fn check(name: &str, state: Checks) -> PullRequestCheck {
 fn facade_with<'a>(f: &'a Fixture, read: &'a Read) -> HostFacade<'a> {
     HostFacade {
         pulls: Some(read),
+        notifications: None,
         ..f.facade(None)
     }
 }

@@ -5,6 +5,56 @@ has the downloads and the full commit lists.
 
 ## 0.36.0
 
+- **Notifications.** A new first row in the sidebar opens one list of what is waiting for you and
+  what finished while you were looking elsewhere, over every project: an agent that asks for a
+  permission, one that finished a stretch of work, one whose turn failed or that stopped with an
+  error. Each row names the workspace, its project and branch, and shows the command asked for
+  or the start of what the agent said last; pressing it opens that agent's terminal. A finished
+  row leaves when you look at its terminal, or with **Mark seen**; what left is kept under
+  **Earlier** for a week. Group the rows by what they are or by project. The row's two numbers
+  are how many need you and how many finished unseen, each project's row shows its own count,
+  and `Mod+I` opens the list. A row for a permission needs that agent's **Capture what it
+  reports** switch on, in Settings → General. See [Notifications](docs/guide/notifications.md).
+- **Workflows, smoke tests, schedules and triggers in Notifications.** The same list has a row
+  for a workflow that waits for your approval or asks you a question, with the question; for a
+  smoke test waiting for you to approve its file; and for a schedule or a trigger that could not
+  start its run, lost its workspace, or reached its limit, with the reason. A workflow run that
+  succeeded or failed while you were not looking is listed as finished, with why it failed; one
+  you cancelled or rejected is not.
+  Pressing a row opens the run, the workspace with the approval card, **Schedules** or
+  **Triggers**. A row leaves when what it waits for is done, wherever that was done: the window,
+  `ys` or the phone. While a workflow run is going, an agent it started is not listed each time
+  it finishes a turn, and its tab is not ringed: the run's end is.
+- **Other computers in Notifications** (Remote, under development). The list holds what waits
+  and what finished on each other computer this one reaches, every row saying which computer it
+  is on. That computer keeps its own list: this one reads it and is told at once when it
+  changes, and a row marked seen here, or whose agent's terminal there you look at from this
+  window, is seen there too. Pressing a row opens its workspace on that computer. It needs this
+  version on the other computer, and that computer letting this one watch. A computer with no
+  screen, running `yardsort-host`, keeps a list of its agents too. See
+  [Notifications](docs/guide/notifications.md#other-computers).
+- **Notifications on the phone** (Remote, under development). A bell in the corner of the
+  account's screen and of a computer's screen opens the same list on the phone, over every
+  computer it is paired with: what needs you, what finished and was not seen, and what left.
+  The number on the bell is how many things need you. A computer's row says how many need you
+  there and how many finished, and its workspaces are marked **needs you** or **finished**.
+  Pressing a row opens the agent's conversation, the workflow's decision or run, or the
+  workspace. Opening a finished row, or looking at that agent on the phone, marks it seen on the
+  computer too, and what is answered or seen at the computer leaves the phone's list. A computer
+  that is offline shows a line and no rows. A smoke test waiting to be let run now shows its
+  card on the workspace's screen as well as in Chat. It needs this version on the computer. See
+  [Notifications](docs/guide/notifications.md#on-the-phone).
+- **The phone is told when an agent finishes** (Remote, under development). An agent that
+  finished a stretch of work and that nobody looked at sends the phone a notification
+  within a minute: _An agent finished_, and nothing of which or what. Opening it opens that
+  agent's conversation and marks it seen. One you were looking at, here or on the phone, sends
+  nothing. It is on from the start, with a switch of its own, **Agents that finish**, under
+  Settings → Notifications on the phone. It needs this version on the computer, the server and
+  the phone; a server of your own adds one column when it starts.
+- **The ringed dot is remembered.** An agent that finished and was not looked at keeps its ring
+  when Yardsort is closed and opened again, and one that finished while Yardsort was closed gets
+  it. Before, every waiting agent was ringed at each start, looked at or not. Coming back to the
+  window with the agent's terminal showing now clears the ring, as switching to its tab does.
 - **A dashboard for setting a server up from a browser** (Remote, under development).
   **`yardsort-host serve` now serves a web page on `127.0.0.1:28680`, and a host upgraded to this
   release starts doing so without being asked**; `yardsort-host dashboard off` turns it off for

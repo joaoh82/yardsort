@@ -51,6 +51,10 @@ pub fn copy(category: NoticeCategory, kind: &str) -> Option<(&'static str, &'sta
             "An agent needs you",
             "Open its terminal on this phone. It waits for you there.",
         ),
+        (NoticeCategory::Agent, "finished") => (
+            "An agent finished",
+            "Open it on this phone to see where it stands.",
+        ),
         _ => return None,
     })
 }
@@ -66,7 +70,7 @@ pub fn wire_name(category: NoticeCategory) -> &'static str {
     }
 }
 
-fn category_of(name: &str) -> Option<NoticeCategory> {
+pub(crate) fn category_of(name: &str) -> Option<NoticeCategory> {
     Some(match name {
         "task" => NoticeCategory::Task,
         "review" => NoticeCategory::Review,
@@ -110,6 +114,7 @@ impl<R: Records + Clone + 'static> ControlService<R> {
             .notification_preferences(&caller.account)
             .await
             .map_err(unreadable)?;
+        let suppressed = !preferences.allows(submission.category, &submission.kind);
         let id = uuid::Uuid::new_v4().to_string();
         let (run_id, step_id) = workflow_subject(&submission);
         let (workspace_id, terminal_id) = agent_subject(&submission);
@@ -133,7 +138,7 @@ impl<R: Records + Clone + 'static> ControlService<R> {
                     title: title.to_owned(),
                     body: body.to_owned(),
                     expires_at: now.saturating_add(NOTICE_TTL_MS),
-                    suppressed: !preferences.allows(submission.category),
+                    suppressed,
                     run_id,
                     step_id,
                     workspace_id,

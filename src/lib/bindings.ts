@@ -934,11 +934,25 @@ export const commands = {
 	 *  that does not exist yet, which starts from that repository.
 	 */
 	testListInProject: (projectId: string) => typedError<TestItem[], IpcError>(__TAURI_INVOKE("test_list_in_project", { projectId })),
+	/**
+	 *  The list: what needs an answer, what finished and was not seen, and the newest of what
+	 *  left, on this computer and on each other one it reaches now.
+	 */
+	notificationList: () => typedError<NotificationItem[], IpcError>(__TAURI_INVOKE("notification_list")),
+	/**  These finished rows of this computer's list were looked at. */
+	notificationSeen: (ids: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("notification_seen", { ids })),
+	/**  These finished rows of another computer's list were looked at here. It is said there. */
+	notificationSeenThere: (hostId: string, ids: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("notification_seen_there", { hostId, ids })),
+	/**  This terminal is in front of its person: what its agent finished is seen. */
+	notificationSeenTerminal: (terminalId: string) => typedError<null, IpcError>(__TAURI_INVOKE("notification_seen_terminal", { terminalId })),
+	/**  Everything finished is seen: here, and on each other computer that can be told so now. */
+	notificationSeenAll: () => typedError<null, IpcError>(__TAURI_INVOKE("notification_seen_all")),
 };
 
 /** Events */
 export const events = {
 	activityChanged: makeEvent<ActivityChanged>("activity-changed"),
+	notificationsChanged: makeEvent<NotificationsChanged>("notifications-changed"),
 	otherComputersChanged: makeEvent<OtherComputersChanged>("other-computers-changed"),
 	ptyHostEvent: makeEvent<PtyHostEvent>("pty-host-event"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
@@ -2314,6 +2328,108 @@ export type NewWorkspaceEachRun = {
 	/**  `None`: five. */
 	keep: number | null,
 };
+
+/**  One row of the list, as the window shows it. Times are epoch milliseconds. */
+export type NotificationItem = {
+	/**  The row's id on the computer that keeps it. Two computers may use the same one. */
+	id: string,
+	/**  The other computer the row is on, by its id; `None` for this one. */
+	hostId: string | null,
+	/**  What that computer is called. */
+	hostName: string | null,
+	kind: NotificationKind,
+	part: NotificationPart,
+	projectId: string,
+	projectName: string,
+	/**  The workspace it happened in. Only a schedule or a trigger can be without one. */
+	workspaceId: string | null,
+	/**  What that workspace is called, or was. Empty for a schedule that makes its own. */
+	workspaceName: string,
+	branch: string | null,
+	/**  The agent's conversation, by its record's id. */
+	sessionId: string | null,
+	/**
+	 *  What the row is about, within its workspace: the conversation's label or the start of
+	 *  its first message, or the name of the workflow, the test, the schedule or the trigger.
+	 */
+	title: string,
+	/**  Which agent: `claude`, `codex`… */
+	harnessId: string | null,
+	/**
+	 *  The workflow's run, the smoke test's run, the schedule or the trigger, by its id. Of
+	 *  another computer's, only a workflow's run is known.
+	 */
+	subjectId: string | null,
+	/**  The workflow of a row about a workflow's run, on this computer. */
+	workflowId: string | null,
+	/**  The step that waits, for a workflow's question or approval. */
+	stepId: string | null,
+	/**  The conversation's terminal, while its process runs. */
+	terminalId: string | null,
+	/**  When it happened. */
+	at: number | null,
+	/**  When it was answered or seen. */
+	settledAt: number | null,
+	/**  How long the agent worked before it finished, when that is known. */
+	workedMs: number | null,
+	/**  What its process exited with, for one that stopped. */
+	exitCode: number | null,
+	/**  The command the agent wants to run, while its question is open. */
+	command: string | null,
+	/**  The start of what the agent said last, or of what a workflow asks. */
+	said: string | null,
+	/**
+	 *  Why, for something that went wrong: a failed run's error, or the reason a schedule or a
+	 *  trigger could not start.
+	 */
+	note: string | null,
+};
+
+/**  What a row is about. */
+export type NotificationKind = 
+/**  An agent asked for a permission. */
+"agent.asks" | 
+/**  An agent finished a turn. */
+"agent.finished" | 
+/**  An agent's turn failed. */
+"agent.failed" | 
+/**  An agent's process exited with an error. */
+"agent.stopped" | 
+/**  A workflow run waits for an approval. */
+"workflow.approval" | 
+/**  A workflow run waits for the answer to a question. */
+"workflow.question" | 
+/**  A workflow run ended well. */
+"workflow.succeeded" | 
+/**  A workflow run failed. */
+"workflow.failed" | 
+/**  A smoke test's run waits for its file to be approved. */
+"test.waits" | 
+/**  A schedule's time came and its run could not be started. */
+"schedule.refused" | 
+/**  A schedule's workspace was deleted. */
+"schedule.noWorkspace" | 
+/**  A trigger fired and its run could not be started. */
+"trigger.refused" | 
+/**  A trigger has had the runs its limit allows, and waits to be reset. */
+"trigger.capped" | 
+/**  A trigger's workspace was deleted. */
+"trigger.noWorkspace";
+
+/**  Where a row is in the list. */
+export type NotificationPart = 
+/**  Waiting for an answer. */
+"needs" | 
+/**  Finished, and not seen yet. */
+"finished" | 
+/**  Answered or seen. */
+"earlier";
+
+/**
+ *  The list changed: a row was added, answered or seen, here or on another computer. The
+ *  window reads it again.
+ */
+export type NotificationsChanged = Record<string, never>;
 
 /**  One tool call that was executing when the file was last written. */
 export type ObservedMatch = {

@@ -1,0 +1,758 @@
+use std::path::Path;
+
+use pty_host::{HostEvent, SessionId};
+use serde_json::json;
+
+use super::*;
+use crate::activity::{PRIVACY_METADATA, SCHEMA_VERSION};
+use crate::store::{now_ms, NewEvent, NewRun, NewSession};
+use crate::trigger::turns::Change;
+
+/// A project with one workspace, in a store of its own.
+struct Fixture {
+    store: Store,
+    workspace: String,
+    events: std::cell::Cell<u32>,
+}
+
+impl Fixture {
+    fn new() -> Self {
+        Self::at("/code/weather-cli-fix")
+    }
+
+    fn at(path: &str) -> Self {
+        let store = Store::in_memory();
+        let project = store
+            .add_project("weather-cli", "/code/weather-cli")
+            .unwrap();
+        let workspace = store
+            .add_worktree(
+                &project.id,
+                "fix-timezone-offsets",
+                path,
+                Some("ys/fix-timezone-offsets"),
+                Some("main"),
+            )
+            .unwrap();
+        Self {
+            store,
+            workspace: workspace.id,
+            events: std::cell::Cell::new(0),
+        }
+    }
+
+    /// An agent's conversation `record`, running in `terminal`, with its run.
+    fn agent(&self, record: &str, terminal: &str) {
+        self.agent_of(record, terminal, None);
+    }
+
+    fn agent_of(&self, record: &str, terminal: &str, harness_session: Option<&str>) {
+        self.store
+            .add_session(&NewSession {
+                id: record,
+                workspace_id: &self.workspace,
+                harness_id: "claude",
+                model: None,
+                effort: None,
+                harness_session_id: harness_session,
+                title: "Cover half-hour zones",
+                forked_from: None,
+                pty_session_id: terminal,
+                prompt: None,
+            })
+            .unwrap();
+        let run = format!("run-{record}");
+        self.store
+            .add_run(&NewRun {
+                id: &run,
+                workspace_id: &self.workspace,
+                session_id: Some(record),
+                kind: "harness",
+                harness_id: Some("claude"),
+                harness_session_id: None,
+                launched_by: "app",
+            })
+            .unwrap();
+        self.store.run_spawned(&run, terminal).unwrap();
+    }
+
+    /// One of the agent's hook events, as the inbox would have brought it.
+    fn event(&self, record: &str, kind: &str, at: i64, payload: serde_json::Value) {
+        let n = self.events.get() + 1;
+        self.events.set(n);
+        let run = format!("run-{record}");
+        let added = self
+            .store
+            .add_event(&NewEvent {
+                id: &format!("event-{n}"),
+                schema_version: SCHEMA_VERSION,
+                workspace_id: &self.workspace,
+                session_id: Some(record),
+                run_id: Some(&run),
+                occurred_at: at,
+                kind,
+                producer: "claude",
+                method: "hook",
+                fidelity: "exact",
+                source_key: None,
+                privacy_class: PRIVACY_METADATA,
+                payload: &payload.to_string(),
+            })
+            .unwrap();
+        assert!(added);
+    }
+
+    /// A list that has had its first, quiet look: what comes after is news.
+    fn listening(&self) -> Turns {
+        let turns = Turns::default();
+        assert!(!read_events(&self.store, &turns).unwrap());
+        turns
+    }
+
+    fn list(&self, now: i64) -> Vec<Notification> {
+        list(&self.store, now).unwrap()
+    }
+
+    fn parts(&self, now: i64) -> Vec<(NotificationKind, NotificationPart)> {
+        self.list(now).iter().map(|n| (n.kind, n.part)).collect()
+    }
+}
+
+fn busy(terminal: &str) -> HostEvent {
+    HostEvent::Busy {
+        id: SessionId(terminal.to_owned()),
+    }
+}
+
+fn quiet(terminal: &str, busy_ms: u32) -> HostEvent {
+    HostEvent::Quiet {
+        id: SessionId(terminal.to_owned()),
+        busy_ms,
+    }
+}
+
+#[test]
+fn a_permission_is_one_row_until_it_is_answered() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    let turns = f.listening();
+    let t = now_ms();
+
+    f.event(
+        "s1",
+        "approval.requested",
+        t,
+        json!({"toolUseId": "call-1"}),
+    );
+    assert!(read_events(&f.store, &turns).unwrap());
+    let rows = f.list(t + 1);
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(
+        (row.kind, row.part),
+        (NotificationKind::AgentAsks, NotificationPart::Needs)
+    );
+    assert_eq!(row.project_name, "weather-cli");
+    assert_eq!(row.workspace_name, "fix-timezone-offsets");
+    assert_eq!(row.branch.as_deref(), Some("ys/fix-timezone-offsets"));
+    assert_eq!(row.session_id.as_deref(), Some("s1"));
+    assert_eq!(row.title, "Cover half-hour zones");
+    assert_eq!(row.harness_id.as_deref(), Some("claude"));
+    assert_eq!(row.terminal_id.as_deref(), Some("pty-1"));
+    assert_eq!(row.at, t);
+
+    // A second request while the first waits is the same wait.
+    f.event(
+        "s1",
+        "approval.requested",
+        t + 10,
+        json!({"toolUseId": "call-2"}),
+    );
+    assert!(!read_events(&f.store, &turns).unwrap());
+    assert_eq!(
+        f.parts(t + 11),
+        [(NotificationKind::AgentAsks, NotificationPart::Needs)]
+    );
+
+    // Another tool finishing beside it is not an answer.
+    f.event(
+        "s1",
+        "tool.completed",
+        t + 20,
+        json!({"toolUseId": "call-9"}),
+    );
+    assert!(!read_events(&f.store, &turns).unwrap());
+    assert_eq!(
+        f.parts(t + 21),
+        [(NotificationKind::AgentAsks, NotificationPart::Needs)]
+    );
+
+    // The tool it asked about running is.
+    f.event(
+        "s1",
+        "tool.completed",
+        t + 30,
+        json!({"toolUseId": "call-1"}),
+    );
+    assert!(read_events(&f.store, &turns).unwrap());
+    let rows = f.list(t + 31);
+    assert_eq!(rows[0].part, NotificationPart::Earlier);
+    assert_eq!(rows[0].settled_at, Some(t + 30));
+
+    // The next request is a new wait.
+    f.event(
+        "s1",
+        "approval.requested",
+        t + 40,
+        json!({"toolUseId": "call-3"}),
+    );
+    assert!(read_events(&f.store, &turns).unwrap());
+    assert_eq!(
+        f.parts(t + 41),
+        [
+            (NotificationKind::AgentAsks, NotificationPart::Needs),
+            (NotificationKind::AgentAsks, NotificationPart::Earlier)
+        ]
+    );
+}
+
+#[test]
+fn what_happened_before_the_first_look_is_not_news() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    let t = now_ms();
+    f.event("s1", "approval.requested", t, json!({}));
+    f.event("s1", "turn.completed", t + 1, json!({}));
+    let turns = Turns::default();
+    assert!(!read_events(&f.store, &turns).unwrap());
+    assert!(!read_events(&f.store, &turns).unwrap());
+    assert!(f.list(t + 2).is_empty());
+}
+
+#[test]
+fn a_quiet_terminal_and_a_reported_turn_are_one_finished_row() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    let turns = f.listening();
+    let t = now_ms();
+
+    // The terminal goes quiet after nine seconds of work: the turn's first word.
+    turns.observe(&busy("pty-1"), t);
+    assert_eq!(
+        turns.observe(&quiet("pty-1", 9_000), t + 10_000),
+        Some(Change::Settled {
+            terminal: "pty-1".into()
+        })
+    );
+    assert!(settled_terminal(&f.store, "pty-1", 9_000, t + 10_000).unwrap());
+    let rows = f.list(t + 10_001);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        (rows[0].kind, rows[0].part),
+        (NotificationKind::AgentFinished, NotificationPart::Finished)
+    );
+    assert_eq!(rows[0].worked_ms, Some(9_000));
+
+    // Its harness then reports the same turn: no second row.
+    f.event("s1", "turn.completed", t + 10_050, json!({}));
+    assert!(!read_events(&f.store, &turns).unwrap());
+    assert_eq!(f.list(t + 10_100).len(), 1);
+
+    // Someone looks at the terminal.
+    assert_eq!(seen_terminal(&f.store, "pty-1", t + 11_000).unwrap(), 1);
+    assert_eq!(
+        f.parts(t + 11_001),
+        [(NotificationKind::AgentFinished, NotificationPart::Earlier)]
+    );
+    assert_eq!(seen_terminal(&f.store, "pty-1", t + 11_002).unwrap(), 0);
+
+    // The next turn, told by the harness first this time, is a new row. It worked since the
+    // message that started it.
+    turns.observe(&busy("pty-1"), t + 12_000);
+    f.event("s1", "prompt.submitted", t + 12_000, json!({}));
+    f.event("s1", "turn.completed", t + 20_000, json!({}));
+    assert!(read_events(&f.store, &turns).unwrap());
+    let rows = f.list(t + 20_001);
+    assert_eq!(
+        rows.iter().map(|n| n.part).collect::<Vec<_>>(),
+        [NotificationPart::Finished, NotificationPart::Earlier]
+    );
+    assert_eq!(rows[0].worked_ms, Some(8_000));
+
+    // Finishing again before anyone looked keeps the one unseen row, at the later time.
+    turns.observe(&busy("pty-1"), t + 21_000);
+    f.event("s1", "turn.completed", t + 25_000, json!({}));
+    assert!(read_events(&f.store, &turns).unwrap());
+    let rows = f.list(t + 25_001);
+    assert_eq!(
+        rows.iter().map(|n| n.part).collect::<Vec<_>>(),
+        [NotificationPart::Finished, NotificationPart::Earlier]
+    );
+    assert_eq!(rows[0].at, t + 25_000);
+
+    // Typing to the agent is seeing where it stood.
+    f.event("s1", "prompt.submitted", t + 26_000, json!({}));
+    assert!(read_events(&f.store, &turns).unwrap());
+    assert_eq!(
+        f.list(t + 26_001)
+            .iter()
+            .map(|n| n.part)
+            .collect::<Vec<_>>(),
+        [NotificationPart::Earlier, NotificationPart::Earlier]
+    );
+}
+
+#[test]
+fn an_agent_that_finished_while_yardsort_was_closed_is_caught_up_with() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    f.agent("s2", "pty-2");
+    f.agent("s3", "pty-3");
+    let turns = f.listening();
+    let t = now_ms();
+    let waiting = |idle: &[(&str, u32)]| -> Vec<Waiting> {
+        idle.iter()
+            .map(|(terminal, idle_ms)| Waiting {
+                terminal: (*terminal).to_owned(),
+                idle_ms: *idle_ms,
+            })
+            .collect()
+    };
+
+    // The first time the list ever listens, a quiet agent is not news.
+    assert!(!catch_up(&f.store, &waiting(&[("pty-1", 1_000)]), t).unwrap());
+    assert!(f.list(t).is_empty());
+
+    // While Yardsort is open: s1 finishes and is seen, and the list keeps hearing.
+    assert!(settled_terminal(&f.store, "pty-1", 9_000, t + 60_000).unwrap());
+    assert_eq!(seen_all(&f.store, t + 61_000).unwrap(), 1);
+    heard(&f.store, t + 100_000).unwrap();
+
+    // Closed for an hour. s1 has not printed since it was seen; s2 stopped printing twenty
+    // minutes ago, after ten minutes of work its harness said nothing of; s3 finished ten
+    // minutes ago and its harness reported the turn, which was read on the way in; a shell is
+    // nobody's agent.
+    let open = t + 3_700_000;
+    f.event("s2", "prompt.submitted", open - 1_800_000, json!({}));
+    f.event("s3", "turn.completed", open - 600_000, json!({}));
+    assert!(read_events(&f.store, &turns).unwrap());
+    let alive = waiting(&[
+        ("pty-1", (open - (t + 57_000)) as u32),
+        ("pty-2", 1_200_000),
+        ("pty-3", 603_000),
+        ("pty-shell", 5_000),
+    ]);
+    assert!(catch_up(&f.store, &alive, open).unwrap());
+    let unseen: Vec<_> = f
+        .list(open)
+        .into_iter()
+        .filter(|n| n.part == NotificationPart::Finished)
+        .map(|n| (n.session_id.unwrap(), n.at, n.worked_ms))
+        .collect();
+    assert_eq!(
+        unseen,
+        [
+            ("s3".to_owned(), open - 600_000, None),
+            ("s2".to_owned(), open - 1_200_000, Some(600_000)),
+        ]
+    );
+
+    // Opening it again a moment later finds nothing new.
+    assert!(!catch_up(&f.store, &alive, open + 1_000).unwrap());
+}
+
+#[test]
+fn a_shell_going_quiet_is_not_a_row() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    assert!(!settled_terminal(&f.store, "pty-shell", 60_000, now_ms()).unwrap());
+    assert!(f.list(now_ms()).is_empty());
+}
+
+#[test]
+fn a_failed_turn_says_so_even_after_the_quiet_told_its_end() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    let turns = f.listening();
+    let t = now_ms();
+    turns.observe(&busy("pty-1"), t);
+    assert!(turns.observe(&quiet("pty-1", 9_000), t + 10_000).is_some());
+    assert!(settled_terminal(&f.store, "pty-1", 9_000, t + 10_000).unwrap());
+    f.event("s1", "turn.failed", t + 10_050, json!({}));
+    assert!(read_events(&f.store, &turns).unwrap());
+    assert_eq!(
+        f.parts(t + 10_100),
+        [(NotificationKind::AgentFailed, NotificationPart::Finished)]
+    );
+}
+
+#[test]
+fn an_agent_that_stops_with_an_error_is_told_and_one_that_was_closed_is_not() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    f.agent("s2", "pty-2");
+    let turns = f.listening();
+    let t = now_ms();
+
+    // It was waiting on a permission when it died: nothing waits any more, and it stopped.
+    f.event("s1", "approval.requested", t, json!({}));
+    assert!(read_events(&f.store, &turns).unwrap());
+    f.store.end_session_by_pty("pty-1", Some(1)).unwrap();
+    assert!(exited(&f.store, "s1", Some(1), t + 10).unwrap());
+    let rows = f.list(t + 11);
+    assert_eq!(
+        rows.iter().map(|n| (n.kind, n.part)).collect::<Vec<_>>(),
+        [
+            (NotificationKind::AgentStopped, NotificationPart::Finished),
+            (NotificationKind::AgentAsks, NotificationPart::Earlier)
+        ]
+    );
+    assert_eq!(rows[0].exit_code, Some(1));
+    assert_eq!(rows[0].terminal_id, None, "its process is gone");
+
+    // Closed by its person, or left with 0: nothing to tell.
+    f.store.end_session_by_pty("pty-2", Some(0)).unwrap();
+    assert!(!exited(&f.store, "s2", None, t + 20).unwrap());
+    assert!(!exited(&f.store, "s2", Some(0), t + 20).unwrap());
+    assert_eq!(f.list(t + 21).len(), 2);
+}
+
+#[test]
+fn seen_takes_finished_rows_only_and_all_takes_every_one() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    f.agent("s2", "pty-2");
+    f.agent("s3", "pty-3");
+    let turns = f.listening();
+    let t = now_ms();
+    f.event("s1", "approval.requested", t, json!({}));
+    assert!(read_events(&f.store, &turns).unwrap());
+    assert!(settled_terminal(&f.store, "pty-2", 9_000, t + 1).unwrap());
+    assert!(settled_terminal(&f.store, "pty-3", 9_000, t + 2).unwrap());
+    let rows = f.list(t + 3);
+    let id = |session: &str| {
+        rows.iter()
+            .find(|n| n.session_id.as_deref() == Some(session))
+            .unwrap()
+            .id
+            .clone()
+    };
+
+    // A question is not something to mark seen: it leaves when it is answered.
+    assert_eq!(seen(&f.store, &[id("s1")], t + 4).unwrap(), 0);
+    assert_eq!(seen(&f.store, &[id("s2")], t + 4).unwrap(), 1);
+    assert_eq!(seen(&f.store, &[id("s2")], t + 5).unwrap(), 0);
+    assert_eq!(seen_all(&f.store, t + 6).unwrap(), 1);
+    let parts: Vec<_> = f.list(t + 7).iter().map(|n| n.part).collect();
+    assert_eq!(
+        parts,
+        [
+            NotificationPart::Needs,
+            NotificationPart::Earlier,
+            NotificationPart::Earlier
+        ]
+    );
+}
+
+#[test]
+fn earlier_is_kept_a_week_and_a_question_whose_agent_is_gone_leaves() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    f.agent("s2", "pty-2");
+    let turns = f.listening();
+    let t = now_ms();
+    assert!(settled_terminal(&f.store, "pty-1", 9_000, t).unwrap());
+    assert_eq!(seen_all(&f.store, t + 1).unwrap(), 1);
+    assert_eq!(f.list(t + KEPT_MS).len(), 1);
+    assert!(f.list(t + KEPT_MS + 2).is_empty());
+
+    // The agent that asked ended while the app was closed, so no exit was heard.
+    f.event("s2", "approval.requested", t, json!({}));
+    assert!(read_events(&f.store, &turns).unwrap());
+    assert_eq!(
+        f.parts(t + 5),
+        [(NotificationKind::AgentAsks, NotificationPart::Needs)]
+    );
+    f.store.end_session_by_pty("pty-2", None).unwrap();
+    assert_eq!(
+        f.parts(t + 6),
+        [(NotificationKind::AgentAsks, NotificationPart::Earlier)]
+    );
+}
+
+#[test]
+fn a_row_of_a_workspace_that_was_deleted_goes_with_it() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    let t = now_ms();
+    assert!(settled_terminal(&f.store, "pty-1", 9_000, t).unwrap());
+    assert_eq!(f.list(t + 1).len(), 1);
+    f.store
+        .conn()
+        .execute("DELETE FROM workspaces WHERE id = ?", [&f.workspace])
+        .unwrap();
+    assert!(f.list(t + 2).is_empty());
+}
+
+#[test]
+fn a_row_shows_the_command_asked_for_and_what_the_agent_said_last() {
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = dir.path().join("wt-fix");
+    std::fs::create_dir_all(&worktree).unwrap();
+    let f = Fixture::at(&worktree.to_string_lossy());
+    f.agent_of("s1", "pty-1", Some("claude-a"));
+    f.agent("s2", "pty-2");
+    let turns = f.listening();
+    let t = now_ms();
+
+    // Claude Code's recorded conversation, where it keeps one.
+    let claude = dir.path().join("claude");
+    let folder = claude.join("projects").join("-wt-fix");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/claude-transcript/2.1.302/conversation.jsonl"),
+        folder.join("claude-a.jsonl"),
+    )
+    .unwrap();
+    let sources = Sources {
+        claude: vec![claude],
+        ..Sources::default()
+    };
+    let expected = {
+        let workspace = f.store.workspace(&f.workspace).unwrap().unwrap();
+        let conversation = digest::one(&f.store, &workspace, "s1", &sources, t)
+            .unwrap()
+            .unwrap();
+        one_line(conversation.turns.last().unwrap().reply().unwrap())
+    };
+    assert!(!expected.is_empty());
+
+    assert!(settled_terminal(&f.store, "pty-1", 9_000, t).unwrap());
+    f.event("s2", "approval.requested", t, json!({}));
+    assert!(read_events(&f.store, &turns).unwrap());
+    let data = dir.path().join("data");
+    asks::post(
+        &asks::asks_dir(&data),
+        &asks::Ask {
+            id: "ask-1".into(),
+            at_ms: t,
+            session_record_id: "s2".into(),
+            harness: "claude".into(),
+            tool: "Bash".into(),
+            command: Some("git push --force-with-lease\n".into()),
+            path: None,
+            call: "call-1".into(),
+        },
+    )
+    .unwrap();
+
+    let lines = Lines::default();
+    let mut rows = f.list(t + 1);
+    lines.fill(&f.store, &sources, &data, &mut rows, t + 1);
+    let asks_row = rows
+        .iter()
+        .find(|n| n.kind == NotificationKind::AgentAsks)
+        .unwrap();
+    assert_eq!(
+        asks_row.command.as_deref(),
+        Some("git push --force-with-lease")
+    );
+    assert_eq!(asks_row.said, None);
+    let finished_row = rows
+        .iter()
+        .find(|n| n.kind == NotificationKind::AgentFinished)
+        .unwrap();
+    assert_eq!(finished_row.said.as_deref(), Some(expected.as_str()));
+    assert_eq!(finished_row.command, None);
+
+    // Seen, it keeps what was read while this process runs, and the file is not read again.
+    std::fs::remove_file(folder.join("claude-a.jsonl")).unwrap();
+    assert_eq!(seen_all(&f.store, t + 2).unwrap(), 1);
+    let mut rows = f.list(t + 3);
+    lines.fill(&f.store, &sources, &data, &mut rows, t + 3);
+    let earlier = rows
+        .iter()
+        .find(|n| n.kind == NotificationKind::AgentFinished)
+        .unwrap();
+    assert_eq!(earlier.part, NotificationPart::Earlier);
+    assert_eq!(earlier.said.as_deref(), Some(expected.as_str()));
+}
+
+#[test]
+fn a_long_reply_is_cut_to_its_first_line() {
+    assert_eq!(one_line("\n\n  Done.  \nAnd more."), "Done.");
+    let long = "a".repeat(SAID_CHARS + 20);
+    let cut = one_line(&long);
+    assert_eq!(cut.chars().count(), SAID_CHARS + 1);
+    assert!(cut.ends_with('…'));
+    assert_eq!(one_line("   "), "");
+}
+
+fn signed_in(store: &Store) {
+    store
+        .set_remote_host(&crate::store::RemoteHostRow {
+            server_url: "https://remote.example.com".into(),
+            server_id: "server-1".into(),
+            host_id: "host-1".into(),
+            device_id: "device-host".into(),
+            name: "Workstation".into(),
+            enabled_at: 1,
+        })
+        .unwrap();
+}
+
+/// What waits in the outbox for the phone, as (category, kind, workspace, terminal).
+fn queued(store: &Store, now: i64) -> Vec<(String, String, Option<String>, Option<String>)> {
+    crate::notify::pending(store, now)
+        .unwrap()
+        .into_iter()
+        .map(|n| (n.category, n.kind, n.workspace_id, n.terminal_id))
+        .collect()
+}
+
+#[test]
+fn an_agent_that_finished_and_went_unseen_is_told_to_the_phone_once() {
+    use crate::notify::{agents_finished, UNSEEN_FOR_MS};
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    let t = now_ms();
+    assert!(settled_terminal(&f.store, "pty-1", 45_000, t).unwrap());
+
+    // A computer not signed in to a server tells nobody.
+    assert!(agents_finished(&f.store, t + 60_000).unwrap().is_empty());
+    assert!(queued(&f.store, t + 60_000).is_empty());
+
+    signed_in(&f.store);
+    // The first look only notes that the row is unseen: whoever is watching has a moment.
+    assert!(agents_finished(&f.store, t + 1_000).unwrap().is_empty());
+    assert!(agents_finished(&f.store, t + UNSEEN_FOR_MS)
+        .unwrap()
+        .is_empty());
+    // Still unseen that long after, the phone is told, with the workspace and the terminal.
+    let told = agents_finished(&f.store, t + 1_000 + UNSEEN_FOR_MS).unwrap();
+    assert_eq!(told.len(), 1);
+    assert!(told[0].event_key.starts_with("agent:"));
+    assert_eq!(
+        queued(&f.store, t + 20_000),
+        vec![(
+            "agent".to_owned(),
+            "finished".to_owned(),
+            Some(f.workspace.clone()),
+            Some("pty-1".to_owned()),
+        )]
+    );
+    // Looked at again and again, the same finish is one notice.
+    assert!(agents_finished(&f.store, t + 40_000).unwrap().is_empty());
+    assert_eq!(queued(&f.store, t + 40_000).len(), 1);
+
+    // It finishes again before anyone looked: its row moves to the later time, and that
+    // finish is told of too.
+    assert!(settled_terminal(&f.store, "pty-1", 30_000, t + 60_000).unwrap());
+    assert!(agents_finished(&f.store, t + 61_000).unwrap().is_empty());
+    assert_eq!(agents_finished(&f.store, t + 81_000).unwrap().len(), 1);
+    assert_eq!(queued(&f.store, t + 81_000).len(), 2);
+}
+
+#[test]
+fn an_agent_that_was_looked_at_in_time_is_not_told_to_the_phone() {
+    use crate::notify::{agents_finished, FINISHED_WITHIN_MS};
+    let f = Fixture::new();
+    signed_in(&f.store);
+    f.agent("s1", "pty-1");
+    f.agent("s2", "pty-2");
+    let t = now_ms();
+
+    // Its terminal is on screen: the window says seen within a second of the row.
+    assert!(settled_terminal(&f.store, "pty-1", 45_000, t).unwrap());
+    assert!(agents_finished(&f.store, t + 500).unwrap().is_empty());
+    assert_eq!(seen_terminal(&f.store, "pty-1", t + 800).unwrap(), 1);
+    assert!(agents_finished(&f.store, t + 30_000).unwrap().is_empty());
+
+    // One that finished long before the list was looked at here, as while Yardsort was
+    // closed, is in the list and is not news to push.
+    assert!(settled_terminal(&f.store, "pty-2", 45_000, t - FINISHED_WITHIN_MS - 1).unwrap());
+    assert!(agents_finished(&f.store, t).unwrap().is_empty());
+    assert!(agents_finished(&f.store, t + 30_000).unwrap().is_empty());
+    assert!(queued(&f.store, t + 30_000).is_empty());
+
+    // A permission it asks for, or its stopping with an error, is not this notice either.
+    assert!(exited(&f.store, "s2", Some(3), t + 40_000).unwrap());
+    assert!(agents_finished(&f.store, t + 41_000).unwrap().is_empty());
+    assert!(agents_finished(&f.store, t + 70_000).unwrap().is_empty());
+    assert!(queued(&f.store, t + 70_000).is_empty());
+}
+
+#[test]
+fn a_quiet_terminal_does_not_answer_a_permission_or_finish_the_agent() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    let keeper = Keeper::new(|| {});
+    keeper.read_events(&f.store);
+    // A little ago, so that what the keeper hears now is later than what its hooks said.
+    let t = now_ms() - 10_000;
+    let asks = [(NotificationKind::AgentAsks, NotificationPart::Needs)];
+
+    // It works for a while, asks for a permission, and goes quiet waiting for the answer.
+    keeper.observe(&f.store, &busy("pty-1"), None);
+    f.event("s1", "approval.requested", t, json!({}));
+    keeper.read_events(&f.store);
+    assert_eq!(f.parts(t + 1), asks);
+    keeper.observe(&f.store, &quiet("pty-1", 9_000), None);
+    // Nobody answered: the question stands, and nothing finished.
+    assert_eq!(f.parts(t + 2), asks);
+    // Told directly, as whoever calls it without the keeper does, it is the same.
+    assert!(!settled_terminal(&f.store, "pty-1", 9_000, t + 3).unwrap());
+    assert_eq!(f.parts(t + 4), asks);
+    assert!(waits_for_an_answer(&f.store, "pty-1").unwrap());
+
+    // Refused, it ends its turn with barely a word. The quiet that was not its turn's end
+    // must not have been taken for one: this is the first word of it, and it is a row.
+    f.event("s1", "turn.completed", t + 5_000, json!({}));
+    keeper.read_events(&f.store);
+    assert!(!waits_for_an_answer(&f.store, "pty-1").unwrap());
+    let mut parts = f.parts(t + 5_001);
+    parts.sort_by_key(|(kind, _)| kind.name());
+    assert_eq!(
+        parts,
+        [
+            (NotificationKind::AgentAsks, NotificationPart::Earlier),
+            (NotificationKind::AgentFinished, NotificationPart::Finished),
+        ]
+    );
+
+    // With nothing asked, a quiet after a stretch of work is its turn's end as before.
+    keeper.observe(&f.store, &busy("pty-1"), None);
+    keeper.observe(&f.store, &quiet("pty-1", 9_000), None);
+    let finished: Vec<_> = f
+        .list(now_ms() + 1)
+        .into_iter()
+        .filter(|n| n.part == NotificationPart::Finished)
+        .collect();
+    assert_eq!(finished.len(), 1);
+    assert!(finished[0].at > t + 5_000, "moved to the later finish");
+}
+
+#[test]
+fn an_agent_that_asked_while_yardsort_was_closed_is_not_caught_up_with_as_finished() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    let turns = f.listening();
+    let t = now_ms();
+    // The list has listened before, so what is quiet at the next start can be news.
+    assert!(!catch_up(&f.store, &[], t).unwrap());
+
+    // Closed for an hour. The agent worked, asked ten minutes ago, and has waited since.
+    let open = t + 3_600_000;
+    f.event("s1", "approval.requested", open - 600_000, json!({}));
+    assert!(read_events(&f.store, &turns).unwrap());
+    let alive = [Waiting {
+        terminal: "pty-1".into(),
+        idle_ms: 600_000,
+    }];
+    assert!(!catch_up(&f.store, &alive, open).unwrap());
+    assert_eq!(
+        f.parts(open + 1),
+        [(NotificationKind::AgentAsks, NotificationPart::Needs)]
+    );
+}

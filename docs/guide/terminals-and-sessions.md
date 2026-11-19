@@ -248,8 +248,10 @@ on doing. So is Yardsort crashing, or being killed.
 
 Open it again and it finds that daemon, reattaches, and repaints every terminal from where it got
 to. Conversations that never stopped are still _running_ — they are not listed as
-[interrupted](#resume), because nothing interrupted them. Any agent that is waiting for you wears
-the **ringed** dot, so you can see at a glance what wants reading.
+[interrupted](#resume), because nothing interrupted them. An agent that finished something you
+have not looked at wears the **ringed** dot, whether it finished before you closed Yardsort or
+while it was closed, so you can see at a glance what wants reading.
+[Notifications](notifications.md) lists them.
 
 Because leaving processes behind is not something to discover by accident, **closing with agents
 still working asks first**. The dialog names them and offers three answers:
@@ -273,13 +275,13 @@ with `YARDSORT_NO_DAEMON=1`.
 The dot on a tab, and the one on each workspace in the sidebar, tell you what is going on without
 opening anything:
 
-| Dot            | Meaning                                                                                                                                        |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **solid + 2m** | printing right now — an agent at work. The count says for how long: seconds, then minutes, then hours                                          |
-| **solid**      | running but quiet for a few seconds — most likely waiting for you                                                                              |
-| **ringed**     | an agent is waiting and you have not looked at it yet — it finished a long stretch of work, or it was already waiting when you opened Yardsort |
-| **grey**       | nothing running                                                                                                                                |
-| **red** (tabs) | the program exited with an error                                                                                                               |
+| Dot            | Meaning                                                                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **solid + 2m** | printing right now — an agent at work. The count says for how long: seconds, then minutes, then hours                                                        |
+| **solid**      | running but quiet for a few seconds — most likely waiting for you                                                                                            |
+| **ringed**     | an agent finished a long stretch of work and you have not looked at it yet. It stays ringed across a restart, and [Notifications](notifications.md) lists it |
+| **grey**       | nothing running                                                                                                                                              |
+| **red** (tabs) | the program exited with an error                                                                                                                             |
 
 This comes purely from terminal activity. Agents animate a spinner while they think, so for them
 silence really does mean "your turn". The count starts when the output starts and goes away once

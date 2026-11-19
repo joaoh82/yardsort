@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   added,
+  notification,
   project,
   pullRequest,
   pullRequestsOf,
@@ -84,6 +85,7 @@ import { useTasksStore } from "@/stores/tasks";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore } from "@/stores/terminals";
 import { useUpdatesStore } from "@/stores/updates";
+import { useNotificationsStore } from "@/stores/notifications";
 import { useMemoryStore } from "@/stores/memory";
 import { useOutcomesStore } from "@/stores/outcomes";
 import { useSmokeTestsStore } from "@/stores/smokeTests";
@@ -148,6 +150,7 @@ describe("Sidebar", () => {
     core.onSchedulesChanged.mockResolvedValue(() => {});
     core.onRemoteChangedProjects.mockResolvedValue(() => {});
     useMemoryStore.setState({ waiting: {} });
+    useNotificationsStore.setState({ items: [] });
     useOutcomesStore.setState({ asking: null, error: null });
     opener.openUrl.mockResolvedValue(undefined);
     core.projectPullRequests.mockResolvedValue({
@@ -2186,6 +2189,33 @@ describe("Sidebar", () => {
     expect(
       within(screen.getByRole("treeitem", { name: "local" })).getByRole("button"),
     ).toBeDisabled();
+  });
+
+  it("counts what Notifications lists for a project on its row, and opens the list from it", async () => {
+    const user = userEvent.setup();
+    useNotificationsStore.setState({
+      items: [
+        notification("a", { projectId: "p-alpha", projectName: "alpha" }),
+        notification("b", {
+          projectId: "p-alpha",
+          projectName: "alpha",
+          kind: "agent.finished",
+          part: "finished",
+        }),
+        // What was answered or seen is not counted.
+        notification("c", { projectId: "p-beta", projectName: "beta", part: "earlier" }),
+      ],
+    });
+    await renderSidebar("alpha", "beta");
+
+    expect(
+      screen.getByRole("button", { name: "Notifications, 1 needs you, 1 finished and not seen" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /notifications? in beta/ }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "2 notifications in alpha" }));
+    expect(useProjectsStore.getState().notificationsOpen).toBe(true);
   });
 
   it("counts memory proposals on the project row, and opens the Memory view from it", async () => {

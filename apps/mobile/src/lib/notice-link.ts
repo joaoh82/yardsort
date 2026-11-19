@@ -15,8 +15,9 @@ export function noticeRoute(path: string): string | null {
 }
 
 /**
- * Where an agent notice opens: the terminal of the agent that asked, on the computer that said
- * so. Ids only, as the server gave them. Null for any other notice, or one without all three.
+ * Where an agent notice opens: the terminal of the agent that asked, or that finished, on the
+ * computer that said so. Ids only, as the server gave them. Null for any other notice, or one
+ * without all three.
  */
 export function terminalTarget(notice: {
   category: string;

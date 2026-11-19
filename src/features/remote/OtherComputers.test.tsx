@@ -416,6 +416,25 @@ describe("a workspace on another computer", () => {
     expect(core.remoteTerminalClose).toHaveBeenCalledWith(7);
   });
 
+  it("says which terminal there is on screen, for the Notifications list to mark seen", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const view = render(<span />);
+    view.unmount();
+    await open();
+    const { useNotificationsStore } = await import("@/stores/notifications");
+    // The agent's terminal is in front when the workspace opens.
+    expect(useNotificationsStore.getState().thereInFront).toEqual({
+      hostId: "h-1",
+      terminalId: "t-1",
+    });
+    const tabs = within(screen.getByRole("tablist", { name: "Terminals" })).getAllByRole("tab");
+    await userEvent.click(tabs[1]!);
+    expect(useNotificationsStore.getState().thereInFront).toEqual({
+      hostId: "h-1",
+      terminalId: "t-2",
+    });
+  });
+
   it("watches at that computer's size, and types only once this computer takes control", async () => {
     await open();
     said({ kind: "controller", controller: { kind: "local" } });

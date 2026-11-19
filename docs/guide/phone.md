@@ -28,9 +28,13 @@ the computer, not on the phone, so they keep going whatever happens to the conne
   [Pull requests on the phone](remote.md#pull-requests-on-the-phone).
 - **Start work.** A new workspace, another agent in one you have, or a conversation that ended,
   resumed. See [Starting work from the phone](remote.md#starting-work-from-the-phone).
+- **See what waits, in one list.** The bell opens **Notifications**: what needs you and what
+  finished while you were not looking, on every computer the phone can reach. A computer's row
+  says how many, and its workspaces are marked. Opening a finished row marks it seen on the
+  computer too. See [Notifications](notifications.md#on-the-phone).
 - **Be told when something needs you.** A task that moved, a review, a failed run, an agent or a
-  workflow waiting for an answer. The notification opens that item. See
-  [Notifications](remote.md#notifications).
+  workflow waiting for an answer, or an agent that finished while nobody looked. The
+  notification opens that item. See [Notifications](remote.md#notifications).
 - **Export your account.** Settings → Your account saves everything the server keeps of it as a
   file, never a credential. See [Exporting your account](remote.md#exporting-your-account).
 - **Delete your account.** Settings → Your account → Delete my account removes everything the

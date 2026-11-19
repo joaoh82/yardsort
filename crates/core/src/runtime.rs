@@ -75,12 +75,19 @@ pub fn settle_at_start(
 /// The daemon says the process in terminal `pty_id` exited: settle its record first, so a client
 /// reacting to the exit reads the truth. Then drain the inbox, since an agent's last hooks ran
 /// just before it exited, which is the caller's to do (it knows whom to tell).
-pub fn exited(store: &Store, data_dir: &Path, pty_id: &str, exit: &ExitInfo) {
-    let _ = store.end_session_by_pty(pty_id, Some(i64::from(exit.code)));
+///
+/// Returns the conversation whose process this was, by its record's id, when it was an agent's:
+/// what the Notifications list is told about ([`crate::notifications::exited`]).
+pub fn exited(store: &Store, data_dir: &Path, pty_id: &str, exit: &ExitInfo) -> Option<String> {
+    let ended = store
+        .end_session_by_pty(pty_id, Some(i64::from(exit.code)))
+        .ok()
+        .flatten();
     activity::record_exit(store, pty_id, &ExitFacts::from(exit), Via::Live);
     // The daemon kept this exit for us too; take it out of the spool now rather than find it
     // as a duplicate at the next start.
     activity::import_spool(store, data_dir);
+    ended
 }
 
 /// What one drain found.

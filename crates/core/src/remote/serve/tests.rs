@@ -180,6 +180,7 @@ impl Fixture {
             conversations: None,
             tests: None,
             pulls: None,
+            notifications: None,
         }
     }
 
@@ -1275,4 +1276,5 @@ fn a_device_hears_why_terminals_under_an_earlier_daemon_wait() {
     );
 }
 
+mod notification;
 mod start;

@@ -14,6 +14,7 @@ export const COMMANDS = [
   { id: "focusWorkspace", label: "Focus workspace / terminal", key: "e" },
   { id: "focusChanges", label: "Focus changes and files", key: "r" },
   { id: "floorManager", label: "Floor Manager", key: "j" },
+  { id: "notifications", label: "Notifications", key: "i" },
   { id: "previousWorkspace", label: "Previous workspace", key: "ArrowUp" },
   { id: "nextWorkspace", label: "Next workspace", key: "ArrowDown" },
   { id: "previousTerminal", label: "Previous terminal tab", key: "ArrowLeft" },

@@ -6,7 +6,8 @@
 //! One task reads the socket and one writes it. The reader matches each reply to its request,
 //! hands a terminal's frames and events to its [`Attachment`] and checks that its items come
 //! numbered without a gap, and hands activity to its [`Subscription`]. A held [`Control`] is
-//! renewed by a task of its own until it is lost or let go.
+//! renewed by a task of its own until it is lost or let go. That the host's Notifications list
+//! changed is kept as one word until it is asked for ([`Channel::notifications_changed`]).
 //!
 //! **Liveness** is the relay's: it pings, and a socket that says nothing at all for
 //! [`remote_proto::relay::SILENCE_MS`] is taken to be gone ([`crate::LinkReader::next`]). Opening a
@@ -18,6 +19,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use remote_proto::account::Secret;
+use remote_proto::notification::{
+    NotificationListParams, NotificationPage, NotificationSeenParams,
+};
 use remote_proto::relay::{CloseReason, TicketRequest};
 use remote_proto::terminal::FrameError;
 use remote_proto::{
@@ -42,13 +46,14 @@ use crate::{Client, ClientError};
 const WELCOME_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The events this build reads. One a newer host sends is passed over.
-const EVENTS: [&str; 6] = [
+const EVENTS: [&str; 7] = [
     "terminal.resized",
     "terminal.detached",
     "terminal.control",
     "terminal.exited",
     "activity.events",
     "activity.ended",
+    "notifications.changed",
 ];
 
 /// Why a channel ended.
@@ -166,6 +171,7 @@ impl Channel {
             shared: Arc::new(Mutex::new(State::default())),
             outgoing,
             closing: Arc::new(tokio::sync::Notify::new()),
+            list_changed: Arc::new(tokio::sync::Notify::new()),
         };
         tokio::spawn(write(writer, queued));
         tokio::spawn(read(reader, link.clone(), ended_tx));
@@ -493,6 +499,41 @@ impl Channel {
         Ok(Control::new(self.link.clone(), terminal, lease))
     }
 
+    /// The host's Notifications list, as much of it as the grant is shown. Minor 15.
+    pub async fn notifications(&self) -> Result<NotificationPage> {
+        match self
+            .ask(Operation::NotificationList(NotificationListParams {}))
+            .await?
+        {
+            Reply::Notifications(page) => Ok(page),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// These finished rows of the host's list were looked at, or all of them. Minor 15.
+    pub async fn notifications_seen(&self, params: NotificationSeenParams) -> Result<()> {
+        match self.ask(Operation::NotificationSeen(params)).await? {
+            Reply::Done => Ok(()),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// Have the host say when its Notifications list changes, for as long as this channel is
+    /// open: [`Self::notifications_changed`] then waits for it. Minor 15.
+    pub async fn follow_notifications(&self) -> Result<()> {
+        match self.ask(Operation::NotificationFollow).await? {
+            Reply::Done => Ok(()),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// Wait until the host says its Notifications list changed. A change said while nobody
+    /// waited is not lost: the next wait returns at once, once, however many there were. On a
+    /// channel that does not follow the list this never returns.
+    pub async fn notifications_changed(&self) {
+        self.link.list_changed.notified().await;
+    }
+
     /// Follow activity as it is recorded: everything the grant reaches, unless `params` narrows it.
     pub async fn subscribe(&self, params: ActivitySubscribeParams) -> Result<Subscription> {
         let answer = self
@@ -656,6 +697,8 @@ struct Link {
     outgoing: mpsc::UnboundedSender<Outgoing>,
     /// [`Channel::close`]: the reader stops at once, rather than wait for the far end to close.
     closing: Arc<tokio::sync::Notify>,
+    /// The host said its Notifications list changed: one word, kept until it is waited for.
+    list_changed: Arc<tokio::sync::Notify>,
 }
 
 impl Link {
@@ -921,6 +964,8 @@ fn event_message(link: &Link, event: Event) {
                 let _ = followed.send(Followed::Ended(SubscriptionEnd::Ended(ended.error)));
             }
         }
+        // One permit: whoever waits next is told once, however many changes there were.
+        Event::NotificationsChanged(_) => link.list_changed.notify_one(),
     }
 }
 

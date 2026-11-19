@@ -66,6 +66,8 @@ for_each_store!(
     a_gone_token_is_deleted,
     an_agent_notice_names_only_its_terminal,
     an_older_phone_keeps_the_agent_preference,
+    an_agent_that_finished_has_a_switch_of_its_own,
+    a_switch_turned_off_drops_what_was_queued_for_it,
 );
 
 struct World {
@@ -204,6 +206,12 @@ async fn each_category_is_a_fixed_sentence(records: impl Records + Clone + 'stat
             "agent",
             "approval",
             "An agent needs you",
+        ),
+        (
+            "agent:row-1:finished:13",
+            "agent",
+            "finished",
+            "An agent finished",
         ),
     ];
     for (key, category, kind, title) in cases {
@@ -1082,4 +1090,234 @@ async fn an_older_phone_keeps_the_agent_preference(records: impl Records + Clone
         world.push.sent().is_empty(),
         "agents that are off send nothing"
     );
+}
+
+/// An agent that finished is the `agent` category's own kind, opened as an agent's notice is,
+/// and switched on and off by itself: on from the start.
+async fn an_agent_that_finished_has_a_switch_of_its_own(records: impl Records + Clone + 'static) {
+    let world = world(records, PushOutcome::Sent).await;
+    let host = signed(&world, "ada", "Workstation", DeviceKind::Host).await;
+    let phone = signed(&world, "ada", "Phone", DeviceKind::Phone).await;
+    world
+        .served
+        .post_as(
+            &phone,
+            "v1/notifications/token",
+            Some(&json!({ "platform": "apns", "token": "phone-token" })),
+        )
+        .await;
+    let read = || async {
+        world
+            .served
+            .get_as(&phone, "v1/notifications/preferences")
+            .await
+            .json::<Value>()
+            .await
+            .unwrap()
+    };
+    let before = read().await;
+    assert_eq!(before["agentFinished"], true, "on until turned off");
+    assert_eq!(before["agent"], true);
+
+    let mut body = notice("agent:row-7:finished:1", "agent", "finished");
+    body["workspaceId"] = json!("workspace-7");
+    body["terminalId"] = json!("pty-7");
+    let accepted = submit(&world, &host, &body).await;
+    assert!(accepted.status().is_success(), "{}", accepted.status());
+    let id = accepted.json::<Value>().await.unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    await_sent(&world.push, 1).await;
+    let view: Value = world
+        .served
+        .get_as(&phone, &format!("v1/notifications/{id}"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(view["category"], "agent");
+    assert_eq!(view["kind"], "finished");
+    assert_eq!(view["title"], "An agent finished");
+    assert_eq!(view["workspaceId"], "workspace-7");
+    assert_eq!(view["terminalId"], "pty-7");
+    // What is pushed says nothing of which agent, where, or what it did.
+    let alert = world.push.sent()[0].json.clone();
+    assert!(alert.contains("An agent finished"), "{alert}");
+    assert!(
+        !alert.contains("workspace-7") && !alert.contains("pty-7"),
+        "{alert}"
+    );
+
+    // Its switch off: agents that finish send nothing, and agents that need you still do.
+    let off = json!({
+        "muted": false, "task": true, "review": true, "failure": true,
+        "desktopUpdate": true, "workflow": true, "agent": true, "agentFinished": false
+    });
+    assert_eq!(
+        world
+            .served
+            .post_as(&phone, "v1/notifications/preferences", Some(&off))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(submit(
+        &world,
+        &host,
+        &notice("agent:row-8:finished:1", "agent", "finished")
+    )
+    .await
+    .status()
+    .is_success());
+    assert!(submit(
+        &world,
+        &host,
+        &notice("agent:run-8:approval:1", "agent", "approval")
+    )
+    .await
+    .status()
+    .is_success());
+    await_quiet(&world.push, 2).await;
+    let sent: Vec<String> = world
+        .push
+        .sent()
+        .into_iter()
+        .map(|alert| alert.json)
+        .collect();
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    assert!(sent[1].contains("An agent needs you"), "{sent:?}");
+
+    // A phone from before this switch saves what it knows, and the switch stays where it was.
+    let older = json!({
+        "muted": false, "task": true, "review": true, "failure": true,
+        "desktopUpdate": true, "workflow": true, "agent": true
+    });
+    world
+        .served
+        .post_as(&phone, "v1/notifications/preferences", Some(&older))
+        .await;
+    let now = read().await;
+    assert_eq!(now["agentFinished"], false);
+    assert_eq!(now["agent"], true);
+
+    // Turned back on, what was skipped is not sent after the fact; a new finish is.
+    let on = json!({
+        "muted": false, "task": true, "review": true, "failure": true,
+        "desktopUpdate": true, "workflow": true, "agent": true, "agentFinished": true
+    });
+    world
+        .served
+        .post_as(&phone, "v1/notifications/preferences", Some(&on))
+        .await;
+    assert!(submit(
+        &world,
+        &host,
+        &notice("agent:row-8:finished:1", "agent", "finished")
+    )
+    .await
+    .status()
+    .is_success());
+    assert!(submit(
+        &world,
+        &host,
+        &notice("agent:row-9:finished:1", "agent", "finished")
+    )
+    .await
+    .status()
+    .is_success());
+    await_sent(&world.push, 3).await;
+    await_quiet(&world.push, 3).await;
+    assert_eq!(world.push.sent().len(), 3);
+}
+
+/// A notice waiting for a phone that could not be reached is not sent once its switch is off,
+/// whichever of an agent's two switches that is. The others waiting still are.
+async fn a_switch_turned_off_drops_what_was_queued_for_it(records: impl Records + Clone + 'static) {
+    let world = world(records, PushOutcome::Unreachable).await;
+    let host = signed(&world, "ada", "Workstation", DeviceKind::Host).await;
+    let phone = signed(&world, "ada", "Phone", DeviceKind::Phone).await;
+    world
+        .served
+        .post_as(
+            &phone,
+            "v1/notifications/token",
+            Some(&json!({ "platform": "apns", "token": "phone-token" })),
+        )
+        .await;
+    for (key, category, kind) in [
+        ("agent:row-1:finished:1", "agent", "finished"),
+        ("agent:run-1:approval:1", "agent", "approval"),
+        ("failure:workflow:run-1", "failure", "failed"),
+    ] {
+        assert!(submit(&world, &host, &notice(key, category, kind))
+            .await
+            .status()
+            .is_success());
+    }
+    await_quiet(&world.push, 3).await;
+    assert!(world.push.sent().is_empty());
+
+    let save = |agent: bool, finished: bool| {
+        let body = json!({
+            "muted": false, "task": true, "review": true, "failure": true,
+            "desktopUpdate": true, "workflow": true, "agent": agent, "agentFinished": finished
+        });
+        let world = &world;
+        let phone = &phone;
+        async move {
+            world
+                .served
+                .post_as(phone, "v1/notifications/preferences", Some(&body))
+                .await;
+        }
+    };
+    let reachable = || async {
+        world
+            .served
+            .post_as(&phone, "v1/notifications/reachable", None)
+            .await
+            .json::<Value>()
+            .await
+            .unwrap()["sent"]
+            .clone()
+    };
+
+    // Agents that finish are turned off while the phone was away: back, it gets the other two.
+    save(true, false).await;
+    world.push.set_outcome(PushOutcome::Sent);
+    assert_eq!(reachable().await, 2);
+    let sent: Vec<String> = world
+        .push
+        .sent()
+        .into_iter()
+        .map(|alert| alert.json)
+        .collect();
+    assert!(
+        sent.iter()
+            .all(|alert| !alert.contains("An agent finished")),
+        "{sent:?}"
+    );
+    assert!(sent
+        .iter()
+        .any(|alert| alert.contains("An agent needs you")));
+
+    // And the same for agents that need you.
+    world.push.set_outcome(PushOutcome::Unreachable);
+    assert!(submit(
+        &world,
+        &host,
+        &notice("agent:run-2:approval:1", "agent", "approval")
+    )
+    .await
+    .status()
+    .is_success());
+    await_quiet(&world.push, 3).await;
+    save(false, false).await;
+    world.push.set_outcome(PushOutcome::Sent);
+    assert_eq!(reachable().await, 0);
+    // Turned back on, it was dropped, not kept for later.
+    save(true, true).await;
+    assert_eq!(reachable().await, 0);
+    assert_eq!(world.push.sent().len(), 2);
 }

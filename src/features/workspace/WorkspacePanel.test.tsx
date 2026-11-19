@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { harness, project, worktree } from "@/test/fixtures";
+import { harness, notification, project, worktree } from "@/test/fixtures";
 
 const core = vi.hoisted(() => ({
   ptySpawn: vi.fn(),
@@ -35,6 +35,8 @@ const core = vi.hoisted(() => ({
     problem: null,
   })),
   onSyncChanged: vi.fn(async () => () => {}),
+  notificationList: vi.fn(async () => []),
+  notificationSeenTerminal: vi.fn(async () => null),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -48,6 +50,7 @@ vi.mock("@/features/terminal/TerminalView", () => ({
 
 import { useAppStore } from "@/stores/app";
 import { useHarnessStore } from "@/stores/harnesses";
+import { useNotificationsStore } from "@/stores/notifications";
 import { useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore } from "@/stores/terminals";
@@ -81,6 +84,7 @@ beforeEach(() => {
   }));
   useSessionsStore.setState({ byWorkspace: {}, error: null });
   useTerminalStore.setState({ tabs: [], active: {}, error: null });
+  useNotificationsStore.setState({ items: [], loaded: true, inFront: null });
   useHarnessStore.setState({ harnesses: [harness("claude")], loaded: true });
   useAppStore.setState({ showTimeline: false });
   core.activityTimeline.mockResolvedValue({ events: [], hasMore: false });
@@ -175,6 +179,54 @@ describe("an empty workspace", () => {
     expect(screen.getByText("Nothing running in this workspace.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Open Composer/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Open Terminal/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("a finished agent's terminal", () => {
+  const agentTab = {
+    id: "pty-1",
+    workspaceId: feature.id,
+    title: "claude",
+    exit: null,
+    recordId: "record-1",
+    busy: false,
+    attention: true,
+    toldAbout: null,
+    toldAt: null,
+    busySince: null,
+  };
+  const unseen = notification("n1", {
+    kind: "agent.finished",
+    part: "finished",
+    workspaceId: feature.id,
+    terminalId: "pty-1",
+  });
+
+  it("is marked seen in the Notifications list when it comes to the front", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    useTerminalStore.setState({ tabs: [agentTab], active: { [feature.id]: "pty-1" } });
+    useNotificationsStore.setState({ items: [unseen] });
+    show(feature.id);
+
+    expect(core.notificationSeenTerminal).toHaveBeenCalledExactlyOnceWith("pty-1");
+    expect(useNotificationsStore.getState().items[0]?.part).toBe("earlier");
+    expect(useTerminalStore.getState().tabs[0]?.attention).toBe(false);
+    vi.restoreAllMocks();
+  });
+
+  it("stays unseen behind another window, until that window is come back to", () => {
+    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    useTerminalStore.setState({ tabs: [agentTab], active: { [feature.id]: "pty-1" } });
+    useNotificationsStore.setState({ items: [unseen] });
+    show(feature.id);
+    expect(core.notificationSeenTerminal).not.toHaveBeenCalled();
+    expect(useNotificationsStore.getState().items[0]?.part).toBe("finished");
+
+    focus.mockReturnValue(true);
+    window.dispatchEvent(new Event("focus"));
+    expect(core.notificationSeenTerminal).toHaveBeenCalledExactlyOnceWith("pty-1");
+    expect(useNotificationsStore.getState().items[0]?.part).toBe("earlier");
+    vi.restoreAllMocks();
   });
 });
 

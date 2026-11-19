@@ -138,7 +138,7 @@ export const DOCS_NAV: DocSection[] = [
         slug: "guide/remote",
         title: "Remote",
         description:
-          "Reach this computer from your phone or another computer through a Yardsort server, and sync a project between your computers. The phone can be told about tasks, reviews, failures, desktop updates, and workflow questions, and can answer or approve a workflow while the computer is online. Still under development, and off until you turn it on.",
+          "Reach this computer from your phone or another computer through a Yardsort server, and sync a project between your computers. The phone can be told about tasks, reviews, failures, desktop updates, workflow questions, and agents that need you or finished, and can answer or approve a workflow while the computer is online. Still under development, and off until you turn it on.",
       },
       {
         slug: "guide/phone",
@@ -181,6 +181,12 @@ export const DOCS_NAV: DocSection[] = [
         title: "Triggers",
         description:
           "Start a workflow or a smoke test in Yardsort when something happens: an agent says it is done, a pull request gets a review or failing checks, a run ends, or a custom event, with presets, limits against loops and ys trigger.",
+      },
+      {
+        slug: "guide/notifications",
+        title: "Notifications",
+        description:
+          "One list in Yardsort of what needs you and what finished while you were not looking: agents that ask for a permission, finish or stop with an error, across every project and workspace.",
       },
       {
         slug: "guide/floor-manager",
