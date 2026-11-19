@@ -166,6 +166,7 @@ import {
   type RemoteDevice,
   type RemoteEarlierDaemon,
   type RemoteLink,
+  type RemoteDeleted,
   type RemoteExported,
   type RemotePairing,
   type RemoteRequest,
@@ -369,6 +370,7 @@ export type {
   RemoteDevice,
   RemoteEarlierDaemon,
   RemoteLink,
+  RemoteDeleted,
   RemoteExported,
   RemotePairing,
   RemoteRequest,
@@ -904,6 +906,12 @@ export const ipc = {
    * the one the person chose in the save dialog.
    */
   remoteExport: (path: string) => unwrap(commands.remoteExport(path)),
+  /**
+   * Delete this computer's account at its server, for every device, once the person signs in
+   * again in the browser. Waits for the browser until {@link ipc.remoteCancel}. Remote is off here
+   * afterwards; nothing on this computer is touched.
+   */
+  remoteDeleteAccount: () => unwrap(commands.remoteDeleteAccount()),
   /** Devices waiting for an answer, and the ones let in. */
   remoteRequests: () => unwrap(commands.remoteRequests()),
   remoteAnswer: (grantId: string, answer: RemoteAnswer) =>

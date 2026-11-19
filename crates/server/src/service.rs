@@ -3,13 +3,15 @@
 use std::sync::Arc;
 
 use remote_proto::account::{
-    Credentials, DeviceKind, DevicePage, DeviceSummary, LoginParams, Secret, ServerDescription,
-    TokenRequest,
+    Credentials, DeviceKind, DevicePage, DeviceSummary, LoginParams, LoginPurpose, Secret,
+    ServerDescription, TokenRequest,
 };
-use remote_proto::{DeviceId, ErrorCode, ProtocolVersion, RemoteError, ServerId};
+use remote_proto::delete::{AccountDeleted, DeleteRequest, FRESH_SIGN_IN_MS};
+use remote_proto::{DeviceId, ErrorCode, ErrorReason, ProtocolVersion, RemoteError, ServerId};
 use url::Url;
 
-use crate::oidc::{OidcError, Provider, ProviderConfig};
+use crate::entitlements::{Action, Counts, Entitlements};
+use crate::oidc::{OidcError, Provider, ProviderConfig, CLOCK_LEEWAY_MS};
 use crate::push::{DisabledPush, PushProvider};
 use crate::records::{
     AccountId, Device, Handoff, Issued, PendingLogin, Records, RevokeReason, Revoked, Rotation,
@@ -59,12 +61,15 @@ pub enum LoginFinish {
 
 pub struct ControlService<R> {
     config: ServerConfig,
+    /// The public URL, ending in `/`.
+    base: Url,
     callback: Url,
     redirects: Vec<Url>,
     provider: Provider,
     pub(crate) records: R,
     pub(crate) relay: Relay,
     pub(crate) push: Arc<dyn PushProvider>,
+    pub(crate) entitlements: Entitlements,
 }
 
 impl<R: Records> ControlService<R> {
@@ -87,11 +92,13 @@ impl<R: Records> ControlService<R> {
         Ok(Self {
             provider: Provider::new(config.provider.clone(), http)?,
             config,
+            base,
             callback,
             redirects,
             records,
             relay: Relay::default(),
             push: Arc::new(DisabledPush),
+            entitlements: Entitlements::none(),
         })
     }
 
@@ -102,8 +109,31 @@ impl<R: Records> ControlService<R> {
         self
     }
 
+    /// Ask `entitlements` before what costs the operator. Without, everything is allowed.
+    pub fn with_entitlements(mut self, entitlements: Entitlements) -> Self {
+        self.entitlements = entitlements;
+        self
+    }
+
     pub fn records(&self) -> &R {
         &self.records
+    }
+
+    /// Whether an entitlements service is asked.
+    pub fn entitlements_configured(&self) -> bool {
+        self.entitlements.configured()
+    }
+
+    /// Add what this instance counted to the records. What fails to go is kept for the next.
+    pub async fn flush_usage(&self, now: i64) {
+        let deltas = self.relay.meter().take();
+        if deltas.is_empty() {
+            return;
+        }
+        if let Err(error) = self.records.add_usage(&deltas, now).await {
+            tracing::error!("usage: records: {error}");
+            self.relay.meter().restore(deltas);
+        }
     }
 
     /// The relay's sockets, to close them all when the server stops.
@@ -127,6 +157,11 @@ impl<R: Records> ControlService<R> {
         self
     }
 
+    /// The server's public URL, ending in `/`.
+    pub(crate) fn base_url(&self) -> &Url {
+        &self.base
+    }
+
     /// The redirect URI to register at the identity provider.
     pub fn callback_url(&self) -> &Url {
         &self.callback
@@ -144,6 +179,7 @@ impl<R: Records> ControlService<R> {
                 "host.list".into(),
                 "host.pair".into(),
                 remote_proto::export::EXPORT_CAPABILITY.into(),
+                remote_proto::delete::DELETE_CAPABILITY.into(),
             ],
         }
     }
@@ -161,6 +197,18 @@ impl<R: Records> ControlService<R> {
                 "This server does not send sign-ins back to that address.",
             )
         })?;
+        let confirm = params.purpose == Some(LoginPurpose::Confirm);
+        self.begin(&params.challenge, &redirect, confirm, now).await
+    }
+
+    /// Start a sign-in for `challenge`, sent back to `redirect`, already allowed.
+    pub(crate) async fn begin(
+        &self,
+        challenge: &str,
+        redirect: &Url,
+        confirm: bool,
+        now: i64,
+    ) -> Result<Url, RemoteError> {
         let state = tokens::random();
         let nonce = tokens::random();
         let verifier = Secret::new(tokens::random());
@@ -171,6 +219,7 @@ impl<R: Records> ControlService<R> {
                 &state,
                 &nonce,
                 &tokens::s256(verifier.expose()),
+                confirm,
                 now,
             )
             .await
@@ -181,8 +230,9 @@ impl<R: Records> ControlService<R> {
                     state: tokens::hash(&state),
                     nonce: tokens::hash(&nonce),
                     provider_verifier: verifier,
-                    device_challenge: params.challenge.clone(),
+                    device_challenge: challenge.to_owned(),
                     device_redirect: redirect.to_string(),
+                    confirm,
                     expires_at: now + LOGIN_TTL_MS,
                 },
                 now,
@@ -255,13 +305,42 @@ impl<R: Records> ControlService<R> {
             Ok(identity) => identity,
             Err(error) => return refuse(ErrorCode::Unauthenticated, error.to_string()),
         };
-        let account = match self
-            .records
-            .account(&identity.issuer, &identity.subject, now)
-            .await
-        {
-            Ok(account) => account,
-            Err(error) => return refuse(ErrorCode::Internal, error.to_string()),
+        let (account, expires_at) = if login.confirm {
+            // The provider was asked to sign the person in again: its token has to say it did,
+            // just now. A provider that kept its session and said nothing confirms nothing.
+            let Some(at) = identity
+                .auth_time
+                .filter(|at| *at > now - FRESH_SIGN_IN_MS && *at <= now + CLOCK_LEEWAY_MS)
+            else {
+                return refuse(
+                    ErrorCode::Unauthenticated,
+                    "the provider did not say the person signed in again just now".into(),
+                );
+            };
+            // Signing in again makes no account: one that has none has nothing to delete.
+            match self
+                .records
+                .find_account(&identity.issuer, &identity.subject)
+                .await
+            {
+                Ok(Some(account)) => (account, (at + FRESH_SIGN_IN_MS).min(now + FRESH_SIGN_IN_MS)),
+                Ok(None) => {
+                    return refuse(
+                        ErrorCode::Unauthenticated,
+                        "signed in again as someone with no account here".into(),
+                    )
+                }
+                Err(error) => return refuse(ErrorCode::Internal, error.to_string()),
+            }
+        } else {
+            match self
+                .records
+                .account(&identity.issuer, &identity.subject, now)
+                .await
+            {
+                Ok(account) => (account, now + HANDOFF_TTL_MS),
+                Err(error) => return refuse(ErrorCode::Internal, error.to_string()),
+            }
         };
         let handoff = tokens::mint(Kind::Handoff);
         let kept = self
@@ -271,7 +350,8 @@ impl<R: Records> ControlService<R> {
                     code: handoff.hash,
                     account,
                     device_challenge: login.device_challenge,
-                    expires_at: now + HANDOFF_TTL_MS,
+                    confirm: login.confirm,
+                    expires_at,
                 },
                 now,
             )
@@ -308,7 +388,9 @@ impl<R: Records> ControlService<R> {
                     .await
                     .map_err(unreadable)?
                     .ok_or_else(refused)?;
-                if handoff.expires_at <= now
+                // A confirming sign-in's code confirms, and enrolls nothing.
+                if handoff.confirm
+                    || handoff.expires_at <= now
                     || !tokens::verifies(&handoff.device_challenge, verifier.expose())
                 {
                     return Err(refused());
@@ -329,6 +411,17 @@ impl<R: Records> ControlService<R> {
                         ),
                     ));
                 }
+                self.entitlements
+                    .may(
+                        &handoff.account,
+                        Action::Device,
+                        Counts {
+                            devices: Some(signed_in as u64),
+                            ..Counts::default()
+                        },
+                        now,
+                    )
+                    .await?;
                 let id = DeviceId::new(uuid::Uuid::new_v4().to_string()).map_err(unreadable)?;
                 let (issued, pair) = issue(now);
                 let credentials = pair.for_device(id.clone());
@@ -375,6 +468,7 @@ impl<R: Records> ControlService<R> {
                          signed out. Sign in again.",
                         ))
                     }
+                    Rotation::Unknown if self.deleted(&hash, now).await? => Err(account_deleted()),
                     Rotation::Expired | Rotation::Revoked | Rotation::Unknown => Err(signed_out()),
                 }
             }
@@ -385,12 +479,14 @@ impl<R: Records> ControlService<R> {
     pub async fn authenticate(&self, access: &str, now: i64) -> Result<Caller, RemoteError> {
         let signed_out = || unauthenticated("Sign in again.");
         let hash = tokens::presented(Kind::Access, access).ok_or_else(signed_out)?;
-        let (device, expires_at) = self
-            .records
-            .access(&hash)
-            .await
-            .map_err(unreadable)?
-            .ok_or_else(signed_out)?;
+        let Some((device, expires_at)) = self.records.access(&hash).await.map_err(unreadable)?
+        else {
+            return Err(if self.deleted(&hash, now).await? {
+                account_deleted()
+            } else {
+                signed_out()
+            });
+        };
         if expires_at <= now || device.revoked.is_some() {
             return Err(signed_out());
         }
@@ -398,6 +494,7 @@ impl<R: Records> ControlService<R> {
             .seen(&device.id, now)
             .await
             .map_err(unreadable)?;
+        self.relay.meter().active(&device.account, &device.id, now);
         Ok(Caller {
             account: device.account,
             device: device.id,
@@ -456,6 +553,94 @@ impl<R: Records> ControlService<R> {
         } else {
             Err(RemoteError::not_found())
         }
+    }
+
+    /// `POST /v1/account/delete`: delete the caller's account, confirmed by the person having
+    /// just signed in again as it, from this device. See [`remote_proto::delete`].
+    pub async fn delete_account(
+        &self,
+        caller: &Caller,
+        request: &DeleteRequest,
+        now: i64,
+    ) -> Result<AccountDeleted, RemoteError> {
+        request.validate()?;
+        let confirmed = self
+            .confirmed(&request.code, &request.verifier, now)
+            .await?;
+        if confirmed != caller.account {
+            return Err(RemoteError::new(
+                ErrorCode::Forbidden,
+                "You signed in again as someone else, not as this device's account. Nothing was \
+                 deleted.",
+            ));
+        }
+        self.delete(&confirmed, now).await
+    }
+
+    /// The account a confirming sign-in's code was for, the code spent in the same step. Only
+    /// one from such a sign-in, unexpired, answered with the verifier that started it.
+    pub(crate) async fn confirmed(
+        &self,
+        code: &Secret,
+        verifier: &Secret,
+        now: i64,
+    ) -> Result<AccountId, RemoteError> {
+        let refused = || {
+            unauthenticated(
+                "That confirmation has expired or was already used. Sign in again to confirm.",
+            )
+        };
+        let hash = tokens::presented(Kind::Handoff, code.expose()).ok_or_else(refused)?;
+        // Taken first, so a wrong verifier spends it too.
+        let handoff = self
+            .records
+            .take_handoff(&hash)
+            .await
+            .map_err(unreadable)?
+            .ok_or_else(refused)?;
+        if !handoff.confirm
+            || handoff.expires_at <= now
+            || !tokens::verifies(&handoff.device_challenge, verifier.expose())
+        {
+            return Err(refused());
+        }
+        Ok(handoff.account)
+    }
+
+    /// Delete `account` and everything of it, then close its links on every instance.
+    pub(crate) async fn delete(
+        &self,
+        account: &AccountId,
+        now: i64,
+    ) -> Result<AccountDeleted, RemoteError> {
+        let deleted = self
+            .records
+            .delete_account(account, now)
+            .await
+            .map_err(unreadable)?
+            // Deleted meanwhile, by another of its devices.
+            .ok_or_else(account_deleted)?;
+        self.revoked(account).await;
+        tracing::info!(
+            devices = deleted.devices,
+            hosts = deleted.hosts,
+            records = deleted.records,
+            "an account was deleted by its person"
+        );
+        let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+        Ok(AccountDeleted {
+            devices: count(deleted.devices),
+            hosts: count(deleted.hosts),
+            records: count(deleted.records),
+        })
+    }
+
+    /// Whether `credential` was one of a deleted account's devices'.
+    async fn deleted(&self, credential: &tokens::TokenHash, now: i64) -> Result<bool, RemoteError> {
+        self.records
+            .deleted_credential(credential, now)
+            .await
+            .map_err(unreadable)
     }
 
     fn allowed_redirect(&self, asked: &str) -> Option<Url> {
@@ -538,6 +723,15 @@ fn error_code(code: ErrorCode) -> &'static str {
 
 fn unauthenticated(message: &'static str) -> RemoteError {
     RemoteError::new(ErrorCode::Unauthenticated, message)
+}
+
+/// A deleted account's device, asking.
+pub(crate) fn account_deleted() -> RemoteError {
+    unauthenticated(
+        "This account was deleted from the server, so this device is signed out. Nothing on the \
+         device was deleted.",
+    )
+    .because(ErrorReason::AccountDeleted)
 }
 
 fn provider_unavailable() -> RemoteError {

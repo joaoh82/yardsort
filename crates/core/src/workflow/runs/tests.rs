@@ -262,6 +262,7 @@ fn a_workflow_that_names_the_pull_request_before_waiting_needs_one_open() {
             url: "https://github.com/o/r/pull/7".into(),
             title: "Fix the login".into(),
             elsewhere: None,
+            base: None,
         })
     );
     let var = |path: &str| facts.var(&path.split('.').map(str::to_owned).collect::<Vec<_>>());
@@ -309,6 +310,7 @@ fn a_tracked_pull_requests_review_is_about_that_one_and_only_that_one() {
             clone: Some("/code/app/lib".into()),
             opened_by: None,
         }),
+        base: None,
     };
     let id = fx
         .queue_on(
@@ -879,6 +881,106 @@ fn the_projects_own_checkout_takes_its_branch_from_git() {
     let said = empty_variables(&workflow, &place, true);
     assert_eq!(said.len(), 1, "{said:?}");
     assert!(said[0].contains("workspace.base_branch") && said[0].contains("default branch"));
+}
+
+/// A branch Yardsort did not start, a checked-out pull request's: no base is stored for it, and
+/// the repository has no `origin/HEAD`. Its base is the default branch of the project's own
+/// checkout, never the worktree's own branch, and the pull request's base once that is known.
+#[test]
+fn a_branch_yardsort_did_not_start_is_based_on_its_pull_requests_base() {
+    let fx = Fixture::new();
+    let git = git();
+    let repo = fx.dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    git.init(&repo).unwrap();
+    git.run(&repo, &["checkout", "-b", "trunk"]).unwrap();
+    git.initial_commit(&repo).unwrap();
+    let project = fx
+        .store
+        .add_project("real", &repo.display().to_string())
+        .unwrap();
+    let tree = fx.dir.path().join("pr-7");
+    git.run(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "pr/7",
+            &tree.display().to_string(),
+        ],
+    )
+    .unwrap();
+    let opened = fx
+        .store
+        .add_worktree(
+            &project.id,
+            "pr-7",
+            &tree.display().to_string(),
+            Some("pr/7"),
+            None,
+        )
+        .unwrap();
+    let load = || Place::load(&fx.store, &opened.id, &git).unwrap().unwrap();
+    let base = |place: &Place| place.var(&["workspace".into(), "base_branch".into()]);
+
+    assert_eq!(base(&load()).as_deref(), Some("trunk"));
+
+    let own = PrFacts {
+        number: 7,
+        url: "https://github.com/o/r/pull/7".into(),
+        title: "Fix the login".into(),
+        elsewhere: None,
+        base: Some("release".into()),
+    };
+    let facts = Facts {
+        pr: Some(own.clone()),
+        ..Facts::default()
+    };
+    assert_eq!(base(&load().in_run(&facts)).as_deref(), Some("release"));
+
+    // The base of one tracked in another repository says nothing about this branch.
+    let elsewhere = PrFacts {
+        elsewhere: Some(Elsewhere {
+            repo: "o/lib".into(),
+            clone: None,
+            opened_by: None,
+        }),
+        ..own.clone()
+    };
+    assert_eq!(
+        base(&load().with_pull_request(Some(&elsewhere))).as_deref(),
+        Some("trunk")
+    );
+
+    // A branch Yardsort started keeps the base it was started from.
+    let started = Place::load(&fx.store, &fx.workspace.id, &git)
+        .unwrap()
+        .unwrap()
+        .with_pull_request(Some(&own));
+    assert_eq!(base(&started).as_deref(), Some("main"));
+
+    // With no default branch to fall back on, the note says why, and not that `pr/7` is the
+    // default branch.
+    git.run(&repo, &["checkout", "-q", "--detach"]).unwrap();
+    let folder = crate::workflow::user_dir(fx.dir.path());
+    let uses = DEMO.replace("id: demo", "id: based").replace(
+        "prompt: \"{{ inputs.note }}\"",
+        "prompt: \"{{ workspace.base_branch }}\"",
+    );
+    std::fs::write(folder.join("based.yaml"), uses).unwrap();
+    let workflow = crate::workflow::find(fx.dir.path(), "based")
+        .unwrap()
+        .workflow
+        .unwrap();
+    let said = empty_variables(&workflow, &load(), true);
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].contains("did not start `pr/7`") && !said[0].contains("on the default branch"),
+        "{said:?}"
+    );
+    assert!(empty_variables(&workflow, &load().in_run(&facts), true).is_empty());
 }
 
 /// A real repository as a project, and where its worktrees go: what a run asked for from a

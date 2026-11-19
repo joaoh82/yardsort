@@ -20,6 +20,8 @@
 //! the server with a single-use ticket; neither listens.
 
 pub mod config;
+mod delete_page;
+pub mod entitlements;
 mod export;
 pub mod http;
 pub mod limit;
@@ -33,6 +35,7 @@ pub mod relay;
 mod service;
 pub mod sync;
 pub mod tokens;
+pub mod usage;
 
 pub use service::{Caller, ControlService, LoginFinish, ServerConfig};
 

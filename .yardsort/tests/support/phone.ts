@@ -11,6 +11,8 @@
 //   bun .yardsort/tests/support/phone.ts <run dir> lets-a-test-run <name>
 //   bun .yardsort/tests/support/phone.ts <run dir> sees-pull-requests <name>
 //   bun .yardsort/tests/support/phone.ts <run dir> exports
+//   bun .yardsort/tests/support/phone.ts <run dir> signs-in | told-deleted | starts-empty
+//   bun .yardsort/tests/support/phone.ts <run dir> held-back <name> | not-signed-in
 //
 // `type` takes control of the one session running on the computer, types the line and a return,
 // and waits for the expected text in what the terminal prints. `take-over` does the same while
@@ -27,7 +29,12 @@
 // until it has read them, and checks the one from the project's checkout: its badge's facts, its
 // checks by name with the failed one first, and that one it never read is not found. `exports`
 // signs a phone in and exports the account, every page, to `phone-export.json` in the run's
-// folder, after checking that its own credentials are nowhere in it.
+// folder, after checking that its own credentials are nowhere in it. `signs-in` signs a phone in
+// and keeps its sign-in; `told-deleted` expects that kept sign-in to be refused, the server saying
+// the account was deleted; `starts-empty` signs a new phone in as the same person and expects an
+// account with nothing in it but that phone. `held-back` expects the paired phone to be refused
+// connecting to the computer, the server saying the account's plan has no room, and prints the
+// words it was given; `not-signed-in` expects the same of a new phone signing in.
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -548,6 +555,53 @@ switch (doing) {
     }
     writeFileSync(join(dir, "phone-export.json"), text, { mode: 0o600 });
     console.log(`exported ${exported.records.length} records`);
+    break;
+  }
+  case "signs-in": {
+    const phone = await signIn();
+    await client.devices(await phone.access());
+    console.log("signed in");
+    break;
+  }
+  case "told-deleted": {
+    const refused = await session().catch((error: unknown) => error);
+    if (!(refused instanceof ClientError) || !refused.accountDeleted) {
+      throw new Error(`Not told the account was deleted: ${String(refused)}`);
+    }
+    console.log(`told: ${refused.message}`);
+    break;
+  }
+  case "starts-empty": {
+    const phone = await signIn();
+    const exported = await client.exportAccount(await phone.access(), Date.now());
+    const account = exported.account as { devices: unknown[]; hosts: unknown[] };
+    const held = [account.devices.length, account.hosts.length, exported.records.length];
+    if (held.join() !== "1,0,0") throw new Error(`The account holds ${held.join(", ")}.`);
+    console.log("an empty account: this phone, no computers, no records");
+    break;
+  }
+  case "held-back": {
+    const phone = await session();
+    const refused = await reach(phone, await theComputer(phone)).then(
+      (channel) => {
+        channel.close();
+        throw new Error("It was let connect.");
+      },
+      (error: unknown) => error,
+    );
+    if (!(refused instanceof ClientError) || !refused.planLimit) throw refused;
+    console.log(`told: ${refused.message}`);
+    break;
+  }
+  case "not-signed-in": {
+    const refused = await signIn().then(
+      () => {
+        throw new Error("It was signed in.");
+      },
+      (error: unknown) => error,
+    );
+    if (!(refused instanceof ClientError) || !refused.planLimit) throw refused;
+    console.log(`told: ${refused.message}`);
     break;
   }
   default:

@@ -10,6 +10,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
+use common::plans::{Plan, Plans};
 use common::served::*;
 use remote_client::{Client, ClientError, Incoming, LinkReader, RelayLink};
 use remote_proto::account::{Credentials, DeviceKind};
@@ -22,6 +23,7 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 use yardsort_server::records::{MemoryRecords, Records};
 use yardsort_server::relay::RECHECK_EVERY;
+use yardsort_server::usage::day_of;
 
 macro_rules! for_each_store {
     ($($name:ident),* $(,)?) => {
@@ -56,6 +58,7 @@ for_each_store!(
     a_phone_reaches_its_host_and_nothing_else_does,
     revoking_closes_a_live_socket,
     a_host_hears_of_each_device_asking_to_pair_once,
+    the_relay_counts_what_it_carries_and_asks_before_a_connection,
 );
 
 #[tokio::test]
@@ -559,4 +562,83 @@ async fn a_host_hears_of_each_device_asking_to_pair_once(records: impl Records +
     // A round later it has not been told of either again.
     let again = tokio::time::timeout(RECHECK_EVERY + SOON, link.reader.next()).await;
     assert!(again.is_err(), "told again: {again:?}");
+}
+
+async fn the_relay_counts_what_it_carries_and_asks_before_a_connection(
+    records: impl Records + Clone + 'static,
+) {
+    let plans = Plans::start().await;
+    let s = Served::start_entitled(records.clone(), plans.entitlements()).await;
+    let p = pair(&s, "alice").await;
+    let mut host = host_link(&s, &p).await;
+    let mut phone = phone_link(&s, &p).await;
+    let (_, asked) = plans.asked().last().cloned().unwrap();
+    assert_eq!(asked["action"], "stream");
+    assert_eq!(asked["counts"], json!({"streams": 0}));
+    let account = asked["account"].as_str().unwrap().to_owned();
+    let Heard::Open(channel, ..) = heard(&mut host.reader).await else {
+        panic!("no channel opened");
+    };
+    // 11 bytes one way, 11 and 5 the other.
+    phone.writer.text(r#"{"hello":1}"#.into()).await.unwrap();
+    heard(&mut host.reader).await;
+    host.writer
+        .binary(LinkFrame::Text(channel, br#"{"reply":1}"#).encode())
+        .await
+        .unwrap();
+    host.writer
+        .binary(LinkFrame::Binary(channel, b"\x01\x01raw").encode())
+        .await
+        .unwrap();
+    phone.reader.next().await.unwrap();
+    phone.reader.next().await.unwrap();
+
+    let counted = s.relay.meter().take();
+    let alice = counted
+        .iter()
+        .find(|d| d.account.0 == account)
+        .expect("alice counted");
+    assert_eq!(alice.relay_bytes, 27);
+    assert_eq!(alice.peak_streams, 1);
+    assert!(alice.devices.contains(&p.phone.device));
+    assert!(alice.devices.contains(&p.host.device));
+    // Added to the records as an instance's minute is.
+    let today = day_of(yardsort_server::http::now_ms());
+    records
+        .add_usage(&counted, yardsort_server::http::now_ms())
+        .await
+        .unwrap();
+    let day = records
+        .usage(today, today)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|d| d.account.0 == account)
+        .unwrap();
+    assert_eq!((day.relay_bytes, day.peak_streams), (27, 1));
+    assert_eq!(day.active_devices, 2);
+
+    // Another account's phone, on a plan with no room for a connection.
+    plans.set(
+        "stream",
+        Plan::Refuse(Some("Your plan has no connections left today.")),
+    );
+    let q = pair(&s, "bob").await;
+    let _bobs_host = host_link(&s, &q).await;
+    let no = client(&s)
+        .open_relay(
+            &q.phone.access,
+            &TicketRequest::Device {
+                host: q.host_id.clone(),
+            },
+        )
+        .await;
+    let Err(ClientError::Remote(error)) = no else {
+        panic!("let through");
+    };
+    assert_eq!(error.code, ErrorCode::Forbidden);
+    assert_eq!(error.reason, Some(remote_proto::ErrorReason::PlanLimit));
+    assert_eq!(error.message, "Your plan has no connections left today.");
+    // A host's own link is never asked about.
+    assert_eq!(plans.asked_about("stream"), 2);
 }

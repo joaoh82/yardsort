@@ -1,7 +1,9 @@
 # Remote, R7: the managed launch
 
 **Status:** planned on 2026-11-16, with the questions in §3 open for the owner. Slice 1, exporting
-an account, built on 2026-11-17 (§9), on question 8's lean.
+an account, built on 2026-11-17 (§9), on question 8's lean. Slice 2, deleting an account, built the
+same day (§10), on question 5's lean. Slice 4, entitlements and metering, built the same day (§11),
+on question 7's lean.
 
 This is the plan for the last phase of the proposal ([25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)
 §13): what it has to show, what it starts from, the decisions it needs, and the slices in the order
@@ -266,3 +268,149 @@ refused from a shell that is not a terminal and saved from one; the window's sec
 the save dialog's answer goes to asked with a place, since a page cannot answer that dialog; the phone's every page; each file with the
 account, both computers and a synced note, readable by its owner only, and none of the sign-ins
 those computers keep.
+
+## 10 · Slice 2, deleting an account
+
+Built on 2026-11-17, on question 5's lean, which the owner has not answered yet.
+
+**Confirming.** A sign-in started with `purpose=confirm` (`remote_proto::account::LoginPurpose`)
+sends the browser to the provider with `prompt=login` and `max_age=0`, so the person signs in
+there and then, whatever session the browser has. Its ID token must carry `auth_time` within the
+last five minutes (`FRESH_SIGN_IN_MS`), or the browser goes back with an error and no code. It
+makes no account: a person with none here gets an error too. Its handoff is marked `confirm`, lapses
+five minutes after that sign-in, and is good for a deletion only: `POST /v1/token` refuses it, and a
+deletion refuses an ordinary sign-in's. Clients ask for the typed confirmation, `delete`, before
+they start that sign-in, so the code comes back to a deletion that goes at once.
+
+**The server.** `POST /v1/account/delete {code, verifier}` (`remote_proto::delete`), listed as
+`account.delete`, with the caller's access: the code is taken in the same step it is read, a wrong
+verifier spends it, and it has to be the caller's own account (`forbidden` otherwise, and nothing
+goes). It answers how many devices, hosts and synced records went. In one transaction, with the
+account's row locked: the hashes of its devices' access and refresh credentials go into
+`deleted_credentials` with when each would have lapsed, linked to nothing, then the row is deleted
+and everything else cascades. Then every instance rechecks its links, so the account's relay
+sockets close at once. A device that asks afterwards, with access or a refresh credential, is told
+`unauthenticated` with the new `reason: accountDeleted` (`remote_proto::ErrorReason`, absent from
+an older server, read as `unknown` from a newer one), and words saying nothing on it was deleted.
+Migration 0011 adds the `confirm` columns and `deleted_credentials`. Two store methods,
+`find_account` and `delete_account`, and `deleted_credential`, on both stores. The log says that
+an account was deleted, with its counts and nothing that names it.
+
+**The web page**, for the stores and for a person with no device to hand: `/account/delete` on the
+server itself (`crates/server/src/delete_page.rs`). It says what goes and what stays; **Sign in
+again to delete** keeps a verifier in a `HttpOnly`, `SameSite=Lax` cookie scoped to those pages and
+starts a confirming sign-in back to `/account/delete/confirm`, which asks for `delete` typed, and
+the form deletes the account signed in as. A post from another site carries neither the cookie nor
+this server's `Origin`, and deletes nothing. The pages load nothing and run no script. The website
+has a guide page for the stores' links, [Deleting your account](../guide/delete-account.md).
+
+**The clients.** Each says what goes and what stays, takes `delete` typed, then the browser:
+
+- The desktop: **Settings → Remote → Your account → Delete my account…**
+  (`remote_delete_account`, `remote_host::delete`), waiting for the browser until **Cancel**. It
+  then forgets the account here: the link, the row and the kept sign-in, and nothing remembered
+  for signing in again, since the host is gone too.
+- The phone: **Settings → Your account → Delete my account**, a screen of its own. The profile goes
+  from the phone, and the notice says so. A confirmation the server refuses does not sign the
+  phone out.
+- A computer with no screen has no command for it: the guide sends its person to the other two or
+  the page.
+
+Every client words `accountDeleted` as its account having been deleted, not as being signed out:
+the desktop's and the host's link line, and the phone's notice. Local work is never touched.
+
+**Proof.** The store tests (`tests/records.rs`), on both stores: a confirming sign-in and handoff
+kept as such, `find_account` making nothing; an account with a phone, a push route, a host, a
+grant, an offer, a link place, preferences and synced records deleted, nothing of it readable
+afterwards, its credentials' hashes kept until each would have lapsed, and another account's
+holdings the same before and after. The HTTP tests (`tests/delete.rs`), on both: deleted from a
+phone after the provider was asked to sign in again; the phone, the host and a computer each told
+why, by access and by refresh; another account untouched; signing in again starts empty. Refused:
+an ordinary sign-in's code, a confirming code at `/v1/token`, a sign-in again as someone else, a
+wrong verifier (which spends the code), a stale or missing `auth_time`, a person with no account,
+a malformed request and one with no access. The page deletes in the browser that started it and
+not from another, another site, or with the confirmation mistyped. And on PostgreSQL, every table
+holding anything of an account cascades from it, and no row naming the account, its devices or its
+hosts is left in any table after a deletion. The desktop's, the phone's and both clients' own
+tests. The smoke test `account-delete`: the window, a computer with no screen running a shell and
+a pretend phone on one account against the stand-in; deleted from the window through the browser;
+the computer with no screen and the phone each told; the shell still running; and signing in
+again finding an empty account.
+
+## 11 · Slice 4, entitlements and metering
+
+Built on 2026-11-17, on question 7's lean, which the owner has not answered yet: 24 hours of grace.
+
+**The seam** (`crates/server/src/entitlements.rs`, 30 §4). With `YARDSORT_ENTITLEMENTS_URL` unset,
+everything is allowed up to the server's own limits, as a self-hosted server runs. Set, the server
+`POST`s `{account, action, counts}` there: the server's own account id, never the provider's
+subject, one of `device`, `stream` or `sync`, and only that action's count (devices signed in,
+connections open through the instance, synced bytes stored with the push's). No name, email
+address or credential; `YARDSORT_ENTITLEMENTS_TOKEN` (or `_FILE`) goes as a bearer token. The
+address must be HTTPS or loopback HTTP. The answer is `{"allowed": true}` or `{"allowed": false,
+"message": …}`, the message cleaned of control characters and cut at 300. Each answer is kept for
+a minute (`KEEP_ANSWER_MS`) per account and action, so a burst asks once: a bound, as the device
+limit is, not an exact quota.
+
+**Unreachable**, or no answer within three seconds, or not a 2xx: what that account and action
+were allowed in the last day (`GRACE_MS`) stays allowed, and anything else gets `internal`,
+retryable, "cannot check this account's plan right now". That outcome is kept for the same minute,
+so a service that is down is not asked at every request. A refusal is never overridden by an
+earlier yes. The memory of yeses is each instance's, in memory: an instance started during an
+outage knows of none. Kept answers are dropped past the grace period once there are 100 000.
+
+**Where it is asked**, and only there:
+
+- `POST /v1/token` signing a device in, after the 50-device limit: refused, `forbidden` with the
+  new `reason: planLimit` (`remote_proto::ErrorReason`). The code is spent, as any refusal there
+  spends it.
+- `POST /v1/relay/tickets` for a device, on the instance that holds the host's link: the same. A
+  host's own link is never asked about.
+- `POST /v1/sync/push` with a put in it. A revoke or a delete is never asked about. Ops apply in
+  order, so a refusal applies what comes before the first put and stops there, answering the
+  results so far and the new `PushReply::held` with why. The host (`remote_host::sync`) settles
+  those, still pulls, keeps the rest queued, and ends the pass with the held message as its
+  problem, so it tries again with the failed-pass backoff rather than at once. An older host reads
+  the short answer as the rest waiting, which it is. An older server never sends `held`.
+
+Reading, revoking a device or a grant, removing a host, exporting and deleting ask nothing. A
+device already signed in keeps working whatever the plan says.
+
+**Metering** (`crates/server/src/usage.rs`). Each instance counts per account and UTC day, in
+memory: the bytes the relay carried either way (frames' payloads), the most device connections
+open at once through it, the bytes of synced bodies pushed, and which devices authenticated. Every
+minute, and once more when the server stops after its sockets close, it adds them to the records
+in one step (`Records::add_usage`): bytes added, the peak kept if higher, each device counted once
+a day. What fails to go is put back for the next. Migration 0012 adds `usage_days` and
+`usage_devices`, both cascading from the account; device ids are kept only for that day and the
+next, the day's row keeping the count, and a day's row for 400 days. An account deleted since adds
+nothing. The peak is per instance, so on several instances it is the most through one.
+`yardsort-server usage [--from DATE] [--to DATE]` prints the rows, the last seven days unless told,
+by account id; it needs only `DATABASE_URL`. The account's export now carries its days
+(`ExportedAccount::usage`), and every client's list of what an export holds says so.
+
+**What it does not do yet.** Nothing reads the counters but the command and the export: slice 9's
+service decides from its own view, and asks for the counts the server sends. No client shows a
+plan, a quota or usage; each shows the refusal's words where it happens. The desktop's, the
+phone's and the host's own handling of `planLimit` is their existing showing of a server's message;
+the TypeScript client has a `planLimit` getter.
+
+**Proof.** `tests/entitlements.rs`: an answer kept a minute per account and action, then asked
+again; what is asked, with the token, and nothing else; a day's grace while the service is down,
+and nothing new allowed; a refusal not undone by an outage; a port nothing listens on treated as
+down. On both stores over HTTP: a device the plan has no room for not signed in, in the plan's
+words, the first one still working; a push stopping at its first put with `held`, the ops before
+it applied, a revoke and a delete going through and asking nothing; and with every action
+refused, listing devices, pulling, exporting, revoking a device and deleting the account all
+working and asking nothing. `tests/relay.rs`: a known load counted to the byte, the peak and both
+devices, added to the records; another account's phone refused a connection in the plan's words,
+and a host's link never asked about. `tests/records.rs` on both stores: days added up, peaks kept,
+each device once, another account's device not counted, deleted with the account, pruned past
+retention; and an account's stored sync bytes. `tests/command.rs`: `usage` between two dates, by
+account id, and its wrong dates refused. `tests/export.rs`: the day's usage in an export. The
+config's, the meter's and the dates' own tests. `remote-host`'s: a push held back keeps the note
+queued, still pulls, and goes up once there is room. The smoke test `plan-limits`: the stand-in
+server asking a stand-in service whose answers change as it runs; a computer with no screen's note
+held back in the plan's words while it stays linked; a phone refused a connection, then let in once
+the plan has room, and the note going up; a new phone refused signing in while the paired one still
+connects; and every question carrying the token and naming nobody.

@@ -31,6 +31,7 @@ import Pair from "../../src/app/pair";
 import Servers from "../../src/app/servers";
 import Settings from "../../src/app/settings";
 import ExportScreen from "../../src/app/export";
+import DeleteAccountScreen from "../../src/app/delete-account";
 import StartWork from "../../src/app/start";
 import PullScreen from "../../src/app/pull";
 import PullsScreen from "../../src/app/pulls";
@@ -95,6 +96,7 @@ async function start({
       servers: Servers,
       settings: Settings,
       export: ExportScreen,
+      "delete-account": DeleteAccountScreen,
       pair: Pair,
       computer: ComputerScreen,
       pull: PullScreen,
@@ -396,6 +398,75 @@ describe("Exporting the account", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Export" }));
     await screen.findByText(
       "Example Remote cannot export an account yet. Its operator has to update it.",
+    );
+  });
+});
+
+describe("Deleting the account", () => {
+  async function onDelete(server = new FakeServer(), browser: Browser = signedInBrowser) {
+    const opened: string[] = [];
+    let signedIn = false;
+    const app = await start({
+      server,
+      browser: async (url, redirect) => {
+        if (!signedIn) return signedInBrowser(url, redirect);
+        opened.push(url);
+        return browser(url, redirect);
+      },
+    });
+    await signIn();
+    signedIn = true;
+    await act(async () => router.push("/settings"));
+    await fireEvent.press(await screen.findByRole("button", { name: "Delete my account" }));
+    await screen.findByText("• every synced project, note and workspace name");
+    return { ...app, opened };
+  }
+
+  test("says what goes and what stays, then signs in again and deletes, and the phone forgets it", async () => {
+    const { server, opened, vault, accounts } = await onDelete();
+    expect(screen.getByText(/Everything on your computers/)).toBeTruthy();
+    const go = screen.getByRole("button", { name: "Sign in again and delete" });
+    expect(go).toBeDisabled();
+    await fireEvent.changeText(screen.getByLabelText("Type delete to confirm"), "delet");
+    expect(go).toBeDisabled();
+    expect(opened).toHaveLength(0);
+    await fireEvent.changeText(screen.getByLabelText("Type delete to confirm"), "Delete");
+    await fireEvent.press(go);
+    await screen.findByText(
+      "Your account at Example Remote was deleted, and every device signed out. Everything on your computers is still there.",
+    );
+    expect(new URL(opened[0]!).searchParams.get("purpose")).toBe("confirm");
+    expect(server.deletions).toEqual([{ code: "a-code", verifier: expect.any(String) }]);
+    expect(accounts.getSnapshot().profiles).toHaveLength(0);
+    expect([...vault.kept.values()].join("\n")).not.toContain("refresh-");
+  });
+
+  test("closing the browser deletes nothing, and an older server says why first", async () => {
+    const server = new FakeServer();
+    await onDelete(server, async () => null);
+    await fireEvent.changeText(screen.getByLabelText("Type delete to confirm"), "delete");
+    await fireEvent.press(screen.getByRole("button", { name: "Sign in again and delete" }));
+    await screen.findByText("You did not sign in again, so nothing was deleted.");
+    expect(server.deletions).toHaveLength(0);
+
+    server.deletes = false;
+    await fireEvent.press(screen.getByRole("button", { name: "Sign in again and delete" }));
+    await screen.findByText(
+      "Example Remote cannot delete an account yet. Its operator has to update it.",
+    );
+    expect(server.deletions).toHaveLength(0);
+  });
+
+  test("deleted from another device, the phone says so when it next asks", async () => {
+    const server = new FakeServer();
+    await start({ server });
+    await signIn();
+    server.deleted = true;
+    await act(async () => router.push("/settings"));
+    await fireEvent.press(await screen.findByRole("button", { name: "Export my account’s data" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Export" }));
+    await screen.findByText(
+      "Your account at Example Remote was deleted, so this phone is signed out. Everything on your computers is still there.",
     );
   });
 });

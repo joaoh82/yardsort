@@ -85,6 +85,9 @@ Things it holds to:
 - **An account's export** (Settings → Your account) is made only when the person presses Export,
   after the screen has said what it holds, and goes only where they save it: on iOS from a copy in
   the cache folder, deleted once the share sheet closes. Nothing of it is kept or logged.
+- **Deleting the account** (Settings → Your account) asks the server for nothing until the person
+  has typed `delete`, and then only after they sign in again in the browser. The profile goes from
+  the phone afterwards; nothing on their computers is touched.
 - **Diagnostics** are ids, states and codes with their times, never a name, title, path or a
   server's words, kept in memory and shown whole before **Share** sends that same text. The app
   writes no log. A test types, prints, titles and notes markers through the real server and host,

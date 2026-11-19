@@ -387,6 +387,13 @@ export const commands = {
 	 */
 	remoteExport: (path: string) => typedError<RemoteExported, IpcError>(__TAURI_INVOKE("remote_export", { path })),
 	/**
+	 *  Delete this computer's account at its server, for every device: the person typed the
+	 *  confirmation in the window, and now signs in again in the browser, which is what deletes.
+	 *  Waits for the browser, for up to ten minutes, unless [`remote_cancel`] is called. Afterwards
+	 *  Remote is off here; nothing on this computer is touched.
+	 */
+	remoteDeleteAccount: () => typedError<RemoteDeleted, IpcError>(__TAURI_INVOKE("remote_delete_account")),
+	/**
 	 *  Devices waiting for an answer, and the devices let in here once the server has said which
 	 *  are still in force. The server can take a device off this list, never put one on it.
 	 */
@@ -2618,6 +2625,11 @@ export type PrFacts_Deserialize = {
 	title: string,
 	/**  Set when it is one the workspace tracks in another repository: asked about by its link. */
 	elsewhere?: Elsewhere_Deserialize | null,
+	/**
+	 *  The branch it would merge into, when the forge said. For the workspace's own pull
+	 *  request it is what the branch is based on, if Yardsort did not start the branch.
+	 */
+	base?: string | null,
 };
 
 export type PrFacts_Serialize = {
@@ -2626,6 +2638,11 @@ export type PrFacts_Serialize = {
 	title: string,
 	/**  Set when it is one the workspace tracks in another repository: asked about by its link. */
 	elsewhere?: Elsewhere_Serialize | null,
+	/**
+	 *  The branch it would merge into, when the forge said. For the workspace's own pull
+	 *  request it is what the branch is based on, if Yardsort did not start the branch.
+	 */
+	base?: string | null,
 };
 
 export type Preflight = {
@@ -3106,6 +3123,13 @@ export type RemoteChangedProjects = Record<string, never>;
 export type RemoteController = { kind: "nobody" } | 
 /**  The person at that computer. */
 { kind: "local" } | { kind: "device"; device: string; name: string };
+
+/**  An account, deleted at its server: how much went with it. */
+export type RemoteDeleted = {
+	devices: number,
+	hosts: number,
+	records: number,
+};
 
 export type RemoteDevice = {
 	grantId: string,

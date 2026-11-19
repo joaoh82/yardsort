@@ -363,6 +363,7 @@ impl Look for Forge {
                 clone: Some("/projects/parent/lib".into()),
                 opened_by: tracked.session_id.clone(),
             }),
+            base: None,
         })
     }
 }

@@ -31,6 +31,7 @@ use tokio::sync::broadcast;
 
 use crate::sync::{decide, Applied, ProjectState, Pulled, Snapshot, Verdict};
 use crate::tokens::{self, TokenHash};
+use crate::usage::{UsageDay, UsageDelta};
 
 /// An account on this server: one identity provider subject. Never an email address, and never
 /// linked to another account by one.
@@ -58,6 +59,9 @@ pub struct PendingLogin {
     pub device_challenge: String,
     /// Where the device asked to be sent back, already checked against the allowed redirects.
     pub device_redirect: String,
+    /// The person was asked to sign in again, to confirm deleting the account: its handoff
+    /// confirms, and enrolls nothing.
+    pub confirm: bool,
     pub expires_at: i64,
 }
 
@@ -67,7 +71,19 @@ pub struct Handoff {
     pub code: TokenHash,
     pub account: AccountId,
     pub device_challenge: String,
+    /// From a sign-in that confirms deleting the account. Such a handoff is good for that alone,
+    /// and lapses [`remote_proto::delete::FRESH_SIGN_IN_MS`] after the person signed in.
+    pub confirm: bool,
     pub expires_at: i64,
+}
+
+/// What deleting an account took with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Deleted {
+    pub devices: usize,
+    pub hosts: usize,
+    /// Synced records of every kind, tombstones included.
+    pub records: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -339,6 +355,50 @@ pub trait Records: Send + Sync {
         subject: &str,
         now: i64,
     ) -> impl Future<Output = Result<AccountId>> + Send;
+
+    /// The account for this provider subject, if it has one. None is made.
+    fn find_account(
+        &self,
+        issuer: &str,
+        subject: &str,
+    ) -> impl Future<Output = Result<Option<AccountId>>> + Send;
+
+    /// Delete the account and everything of it, in one step: its devices and their credentials,
+    /// hosts, offers, grants, relay link places, handoffs, push routes, preferences, notices and
+    /// synced records. The hashes of its devices' credentials are kept, with when each would have
+    /// lapsed and nothing else, so that [`Records::deleted_credential`] can say why one stopped
+    /// working. `None` when there is no such account.
+    fn delete_account(
+        &self,
+        account: &AccountId,
+        now: i64,
+    ) -> impl Future<Output = Result<Option<Deleted>>> + Send;
+
+    /// Whether this credential belonged to a device of an account since deleted, and would not
+    /// have lapsed by `now`.
+    fn deleted_credential(
+        &self,
+        credential: &TokenHash,
+        now: i64,
+    ) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Add what an instance counted (`crate::usage`), in one step: bytes added, the peak kept
+    /// if higher, each device counted once a day. An account deleted since adds nothing.
+    /// Devices counted before yesterday, and days past their retention, may be dropped.
+    fn add_usage(&self, deltas: &[UsageDelta], now: i64)
+        -> impl Future<Output = Result<()>> + Send;
+
+    /// Every account's days from `from` to `to`, both included, by day then account.
+    fn usage(&self, from: i64, to: i64) -> impl Future<Output = Result<Vec<UsageDay>>> + Send;
+
+    /// One account's days, oldest first, for its export.
+    fn account_usage(
+        &self,
+        account: &AccountId,
+    ) -> impl Future<Output = Result<Vec<UsageDay>>> + Send;
+
+    /// The bytes of synced bodies the account's records hold now.
+    fn sync_bytes(&self, account: &AccountId) -> impl Future<Output = Result<u64>> + Send;
 
     /// Keep a sign-in in progress. Ones that lapsed by `now` may be dropped.
     fn put_login(&self, login: PendingLogin, now: i64) -> impl Future<Output = Result<()>> + Send;
@@ -892,6 +952,10 @@ struct State {
     notices: Vec<NoticeRow>,
     deliveries: Vec<DeliveryRow>,
     sync: HashMap<String, AccountSync>,
+    /// The credentials of deleted accounts' devices, with when each would have lapsed.
+    deleted: HashMap<TokenHash, i64>,
+    usage: HashMap<(AccountId, i64), UsageDay>,
+    usage_devices: HashMap<(AccountId, i64), BTreeSet<DeviceId>>,
 }
 
 /// One account's synced records.
@@ -1035,6 +1099,158 @@ impl Records for MemoryRecords {
                 .or_insert_with(|| (AccountId(uuid::Uuid::new_v4().to_string()), now))
                 .0
                 .clone()
+        })
+    }
+
+    async fn find_account(&self, issuer: &str, subject: &str) -> Result<Option<AccountId>> {
+        self.with(|s| {
+            s.accounts
+                .get(&(issuer.to_owned(), subject.to_owned()))
+                .map(|(id, _)| id.clone())
+        })
+    }
+
+    async fn delete_account(&self, account: &AccountId, now: i64) -> Result<Option<Deleted>> {
+        self.with(|s| {
+            let before = s.accounts.len();
+            s.accounts.retain(|_, (id, _)| id != account);
+            if s.accounts.len() == before {
+                return None;
+            }
+            let devices: BTreeSet<String> = s
+                .devices
+                .iter()
+                .filter(|d| d.account == *account)
+                .map(|d| d.id.as_str().to_owned())
+                .collect();
+            let hosts: BTreeSet<HostId> = s
+                .hosts
+                .iter()
+                .filter(|(h, _)| h.account == *account)
+                .map(|(h, _)| h.id.clone())
+                .collect();
+            s.deleted.retain(|_, until| *until > now);
+            let ours = |device: &DeviceId| devices.contains(device.as_str());
+            for (hash, access) in s.access.iter().filter(|(_, a)| ours(&a.device)) {
+                s.deleted.insert(*hash, access.expires_at);
+            }
+            for (hash, refresh) in s.refresh.iter().filter(|(_, r)| ours(&r.device)) {
+                s.deleted.insert(*hash, refresh.expires_at);
+            }
+            s.access.retain(|_, a| !ours(&a.device));
+            s.refresh.retain(|_, r| !ours(&r.device));
+            s.devices.retain(|d| d.account != *account);
+            s.hosts.retain(|(h, _)| h.account != *account);
+            s.offers.retain(|(o, _)| o.account != *account);
+            s.grants.retain(|g| g.account != *account);
+            s.links.retain(|host, _| !hosts.contains(host));
+            s.handoffs.retain(|h| h.account != *account);
+            s.push_tokens.retain(|_, row| row.account != account.0);
+            s.preferences.remove(&account.0);
+            s.usage.retain(|(a, _), _| a != account);
+            s.usage_devices.retain(|(a, _), _| a != account);
+            let notices: BTreeSet<String> = s
+                .notices
+                .iter()
+                .filter(|n| n.account == account.0)
+                .map(|n| n.id.clone())
+                .collect();
+            s.notices.retain(|n| n.account != account.0);
+            s.deliveries
+                .retain(|d| !notices.contains(&d.notice) && !devices.contains(&d.device));
+            let records = s
+                .sync
+                .remove(&account.0)
+                .map_or(0, |sync| sync.records.len());
+            Some(Deleted {
+                devices: devices.len(),
+                hosts: hosts.len(),
+                records,
+            })
+        })
+    }
+
+    async fn deleted_credential(&self, credential: &TokenHash, now: i64) -> Result<bool> {
+        self.with(|s| s.deleted.get(credential).is_some_and(|until| *until > now))
+    }
+
+    async fn add_usage(&self, deltas: &[UsageDelta], now: i64) -> Result<()> {
+        self.with(|s| {
+            for delta in deltas {
+                let known = s.accounts.values().any(|(id, _)| *id == delta.account);
+                if !known {
+                    continue;
+                }
+                let theirs: BTreeSet<&DeviceId> = s
+                    .devices
+                    .iter()
+                    .filter(|d| d.account == delta.account)
+                    .map(|d| &d.id)
+                    .collect();
+                let seen = s
+                    .usage_devices
+                    .entry((delta.account.clone(), delta.day))
+                    .or_default();
+                seen.extend(delta.devices.iter().filter(|d| theirs.contains(d)).cloned());
+                let active = seen.len() as u64;
+                let day = s
+                    .usage
+                    .entry((delta.account.clone(), delta.day))
+                    .or_insert_with(|| UsageDay {
+                        account: delta.account.clone(),
+                        day: delta.day,
+                        relay_bytes: 0,
+                        peak_streams: 0,
+                        sync_bytes: 0,
+                        active_devices: 0,
+                    });
+                day.relay_bytes = day.relay_bytes.saturating_add(delta.relay_bytes);
+                day.peak_streams = day.peak_streams.max(delta.peak_streams);
+                day.sync_bytes = day.sync_bytes.saturating_add(delta.sync_bytes);
+                day.active_devices = active;
+            }
+            let today = crate::usage::day_of(now);
+            s.usage_devices.retain(|(_, day), _| *day >= today - 1);
+            s.usage
+                .retain(|(_, day), _| *day >= today - crate::usage::USAGE_RETENTION_DAYS);
+        })
+    }
+
+    async fn usage(&self, from: i64, to: i64) -> Result<Vec<UsageDay>> {
+        self.with(|s| {
+            let mut days: Vec<UsageDay> = s
+                .usage
+                .values()
+                .filter(|u| (from..=to).contains(&u.day))
+                .cloned()
+                .collect();
+            days.sort_by(|a, b| (a.day, &a.account.0).cmp(&(b.day, &b.account.0)));
+            days
+        })
+    }
+
+    async fn account_usage(&self, account: &AccountId) -> Result<Vec<UsageDay>> {
+        self.with(|s| {
+            let mut days: Vec<UsageDay> = s
+                .usage
+                .values()
+                .filter(|u| u.account == *account)
+                .cloned()
+                .collect();
+            days.sort_by_key(|u| u.day);
+            days
+        })
+    }
+
+    async fn sync_bytes(&self, account: &AccountId) -> Result<u64> {
+        self.with(|s| {
+            s.sync.get(&account.0).map_or(0, |sync| {
+                sync.records
+                    .values()
+                    .filter_map(|r| r.body.as_ref())
+                    .map(|body| body.to_string().len() as u64)
+                    .sum()
+            })
         })
     }
 

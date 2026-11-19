@@ -33,6 +33,9 @@ the computer, not on the phone, so they keep going whatever happens to the conne
   [Notifications](remote.md#notifications).
 - **Export your account.** Settings → Your account saves everything the server keeps of it as a
   file, never a credential. See [Exporting your account](remote.md#exporting-your-account).
+- **Delete your account.** Settings → Your account → Delete my account removes everything the
+  server keeps of it, for every device, after you type delete and sign in again. Nothing on your
+  computers is deleted. See [Deleting your account](delete-account.md).
 
 ## What it needs
 

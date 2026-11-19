@@ -78,6 +78,24 @@ pub struct ExportedAccount {
     pub grants: Vec<GrantSummary>,
     pub push_routes: Vec<PushRoute>,
     pub notifications: NotificationPreferences,
+    /// What the account used, a UTC day at a time, as long as the server keeps it. Absent from
+    /// an older server, which counted nothing.
+    #[serde(default)]
+    pub usage: Vec<ExportedUsageDay>,
+}
+
+/// One day of what an account used: how many of its devices made a request, the most
+/// connections it had open to its computers at once, and the bytes the relay carried for it and
+/// its computers sent to sync.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportedUsageDay {
+    /// `YYYY-MM-DD`, in UTC.
+    pub date: String,
+    pub active_devices: u64,
+    pub peak_connections: u64,
+    pub relay_bytes: u64,
+    pub sync_bytes: u64,
 }
 
 /// A phone the server can send notices to: which, and through whom. Never the token.

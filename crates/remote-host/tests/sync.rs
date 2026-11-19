@@ -52,6 +52,10 @@ struct Account {
     notes: Vec<String>,
     /// The workspaces pushed, by their name.
     workspaces: Vec<String>,
+    /// When set, a push is held back from its first op, as for an account whose plan is full.
+    plan_full: bool,
+    /// Pulls answered.
+    pulls: usize,
 }
 
 type Server = Arc<Mutex<Account>>;
@@ -141,6 +145,14 @@ async fn push(State(server): State<Server>, Json(request): Json<PushRequest>) ->
         hold.notified().await;
     }
     let mut account = server.lock().unwrap();
+    if account.plan_full {
+        let held = RemoteError::new(ErrorCode::Forbidden, "Your plan holds 1 MB of notes.")
+            .because(remote_proto::ErrorReason::PlanLimit);
+        return Json(PushReply {
+            results: Vec::new(),
+            held: Some(held),
+        });
+    }
     let results = request
         .ops
         .iter()
@@ -168,7 +180,10 @@ async fn push(State(server): State<Server>, Json(request): Json<PushRequest>) ->
             }
         })
         .collect();
-    Json(PushReply { results })
+    Json(PushReply {
+        results,
+        held: None,
+    })
 }
 
 async fn pull(State(server): State<Server>, RawQuery(query): RawQuery) -> Response {
@@ -178,6 +193,7 @@ async fn pull(State(server): State<Server>, RawQuery(query): RawQuery) -> Respon
         let error = RemoteError::new(ErrorCode::Internal, "The server is having a moment.");
         return (StatusCode::SERVICE_UNAVAILABLE, Json(error)).into_response();
     }
+    account.pulls += 1;
     let after: u64 = query
         .as_deref()
         .and_then(|q| q.strip_prefix("after="))
@@ -429,6 +445,33 @@ async fn reaching_the_server_and_recovering_from_a_failed_pass_both_tell_the_win
     assert_eq!(home.store.sync_state().unwrap().problem, None);
     assert_eq!(syncer.state(), sync::Loop::Idle);
     syncer.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_push_the_plan_holds_back_waits_queued_and_the_pass_still_pulls() {
+    let (home, server) = here().await;
+    let project = home.store.add_project("widgets", "/src/widgets").unwrap();
+    sync::turn_on(home.as_ref(), &project.id, None).unwrap();
+    sync::pass(home.as_ref()).await.unwrap();
+    server.lock().unwrap().plan_full = true;
+    yardsort_core::memory::write(&home.store, &project.id, "The tests need TZ=UTC.").unwrap();
+    let pulls = server.lock().unwrap().pulls;
+
+    let held = sync::pass(home.as_ref()).await.unwrap_err();
+    assert_eq!(held.message, "Your plan holds 1 MB of notes.");
+    assert_eq!(server.lock().unwrap().pulls, pulls + 1, "it still pulled");
+    assert_eq!(
+        home.store.sync_waiting().unwrap(),
+        1,
+        "the note waits, queued"
+    );
+    assert!(server.lock().unwrap().notes.is_empty());
+
+    // Room again: it goes up on the next pass.
+    server.lock().unwrap().plan_full = false;
+    sync::pass(home.as_ref()).await.unwrap();
+    assert_eq!(server.lock().unwrap().notes, ["The tests need TZ=UTC."]);
+    assert_eq!(home.store.sync_waiting().unwrap(), 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]

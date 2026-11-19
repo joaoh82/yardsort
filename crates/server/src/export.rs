@@ -4,7 +4,7 @@
 //! belongs to, so no id a request names can reach another's.
 
 use remote_proto::export::{
-    ExportPage, ExportedAccount, ExportedRecord, EXPORT_PAGE, EXPORT_PAGE_BYTES,
+    ExportPage, ExportedAccount, ExportedRecord, ExportedUsageDay, EXPORT_PAGE, EXPORT_PAGE_BYTES,
 };
 use remote_proto::sync::{SyncId, SyncRecord};
 use remote_proto::RemoteError;
@@ -85,6 +85,20 @@ impl<R: Records> ControlService<R> {
                 .notification_preferences(&caller.account)
                 .await
                 .map_err(unreadable)?,
+            usage: self
+                .records
+                .account_usage(&caller.account)
+                .await
+                .map_err(unreadable)?
+                .into_iter()
+                .map(|day| ExportedUsageDay {
+                    date: crate::usage::date(day.day),
+                    active_devices: day.active_devices,
+                    peak_connections: day.peak_streams,
+                    relay_bytes: day.relay_bytes,
+                    sync_bytes: day.sync_bytes,
+                })
+                .collect(),
         })
     }
 }

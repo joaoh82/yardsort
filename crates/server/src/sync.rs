@@ -21,6 +21,7 @@ use remote_proto::sync::{
 };
 use remote_proto::{ErrorCode, HostId, RemoteError};
 
+use crate::entitlements::{self, Counts};
 use crate::http::now_ms;
 use crate::records::{Records, Signal};
 use crate::service::{unreadable, Caller, ControlService};
@@ -249,9 +250,53 @@ impl<R: Records> ControlService<R> {
         request
             .check()
             .map_err(|why| RemoteError::new(ErrorCode::InvalidRequest, why))?;
+        // Only what stores more is asked about: a revoke or a delete always goes through. Ops
+        // apply in order, so a refusal stops at the first put, and that put and what follows it
+        // wait on the host for a later push.
+        let incoming: usize = request
+            .ops
+            .iter()
+            .filter(|op| op.action == Action::Put)
+            .filter_map(|op| op.body.as_ref())
+            .map(|body| body.to_string().len())
+            .sum();
+        let mut held = None;
+        if request.ops.iter().any(|op| op.action == Action::Put) {
+            let stored = self
+                .records
+                .sync_bytes(&caller.account)
+                .await
+                .map_err(unreadable)?;
+            held = self
+                .entitlements
+                .may(
+                    &caller.account,
+                    entitlements::Action::Sync,
+                    Counts {
+                        sync_bytes: Some(stored.saturating_add(incoming as u64)),
+                        ..Counts::default()
+                    },
+                    now_ms(),
+                )
+                .await
+                .err();
+        }
+        let applying = match held {
+            Some(_) => request
+                .ops
+                .iter()
+                .position(|op| op.action == Action::Put)
+                .unwrap_or(request.ops.len()),
+            None => request.ops.len(),
+        };
+        if held.is_none() {
+            self.relay
+                .meter()
+                .synced(&caller.account, incoming, now_ms());
+        }
         let mut results = Vec::with_capacity(request.ops.len());
         let mut tell = BTreeSet::new();
-        for op in &request.ops {
+        for op in &request.ops[..applying] {
             let applied = self
                 .records
                 .apply_sync_op(&caller.account, &host, op, now_ms())
@@ -265,7 +310,7 @@ impl<R: Records> ControlService<R> {
                 tracing::error!("sync: records: {error}");
             }
         }
-        Ok(PushReply { results })
+        Ok(PushReply { results, held })
     }
 
     pub(crate) async fn sync_pull(

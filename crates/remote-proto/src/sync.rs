@@ -305,6 +305,12 @@ impl PushRequest {
 #[serde(rename_all = "camelCase")]
 pub struct PushReply {
     pub results: Vec<OpResult>,
+    /// Why the ops after the last result were not applied, when the server stopped short: the
+    /// account's plan has no room for more synced data (`forbidden`, with `planLimit`), or the
+    /// server could not check it (`internal`). Ops go in order, so those wait, still queued,
+    /// for a later push. Absent from an older server, which never stops short for this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<crate::RemoteError>,
 }
 
 /// What became of one op.

@@ -18,6 +18,10 @@
 //! - `exp` has not passed and `iat` is not in the future, each within [`CLOCK_LEEWAY_MS`].
 //! - `nonce` is the one this sign-in sent.
 //!
+//! A sign-in that confirms deleting an account asks the provider to sign the person in again
+//! (`prompt=login`, `max_age=0`), and its token must then carry `auth_time` (OIDC Core §3.1.2.1),
+//! which the caller checks is recent.
+//!
 //! The discovery document and the key set are fetched again once they are [`PROVIDER_MAX_AGE_MS`]
 //! old, so a key the provider withdraws stops being accepted within that time.
 //!
@@ -82,6 +86,8 @@ pub enum OidcError {
 pub struct Identity {
     pub issuer: String,
     pub subject: String,
+    /// When the person last signed in at the provider, as its token says, in milliseconds.
+    pub auth_time: Option<i64>,
 }
 
 /// An HTTP client for talking to providers: no redirects followed, a timeout on everything, and
@@ -160,6 +166,8 @@ struct Claims {
     nonce: Option<String>,
     #[serde(default)]
     azp: Option<String>,
+    #[serde(default)]
+    auth_time: Option<i64>,
 }
 
 /// How many audiences there are. Which they are is checked by `jsonwebtoken`.
@@ -197,13 +205,15 @@ impl Provider {
     }
 
     /// Where to send the browser: the provider's authorization endpoint, asking for a code for
-    /// `redirect_uri`, bound to `state`, `nonce` and the PKCE `challenge`.
+    /// `redirect_uri`, bound to `state`, `nonce` and the PKCE `challenge`. With `again`, the
+    /// provider is asked to have the person sign in again, whatever session it already has.
     pub async fn authorize_url(
         &self,
         redirect_uri: &Url,
         state: &str,
         nonce: &str,
         challenge: &str,
+        again: bool,
         now: i64,
     ) -> Result<Url, OidcError> {
         let discovery = self.discovery(now).await?;
@@ -217,6 +227,11 @@ impl Provider {
             .append_pair("nonce", nonce)
             .append_pair("code_challenge", challenge)
             .append_pair("code_challenge_method", "S256");
+        if again {
+            url.query_pairs_mut()
+                .append_pair("prompt", "login")
+                .append_pair("max_age", "0");
+        }
         Ok(url)
     }
 
@@ -344,6 +359,7 @@ impl Provider {
         Ok(Identity {
             issuer: claims.iss,
             subject: claims.sub,
+            auth_time: claims.auth_time.map(ms),
         })
     }
 

@@ -29,11 +29,33 @@ has the downloads and the full commit lists.
   a push token. The phone has it under **Settings → Your account**, and a computer with no screen
   has `yardsort-host account export`. It needs a server of this version. See
   [Exporting your account](docs/guide/remote.md#exporting-your-account).
+- **Delete your account** (Remote, under development). **Settings → Remote → Your account → Delete
+  my account…** deletes everything the server keeps of your account, for every device, once you have
+  typed delete and signed in again in the browser. Nothing on your computers or phones is deleted,
+  and Remote turns off here. Your other devices say the account was deleted the next time they
+  reach the server. The phone has it under **Settings → Your account**, and the server has a web
+  page for it, `/account/delete`. It needs a server of this version. See
+  [Deleting your account](docs/guide/delete-account.md).
+- **A server counts what each account uses, and can ask about plans** (Remote, under development).
+  The server now keeps, for each account and day, how many of its devices made a request, the most
+  connections they had open, and the bytes the relay carried and its computers synced: counts,
+  never what passed through. `yardsort-server usage` prints them for its operator, and your
+  account's export includes them. A server can be set to ask a plans service before another device
+  signs in, a phone connects to a computer, or more notes sync (`YARDSORT_ENTITLEMENTS_URL`); one
+  you run yourself asks nothing and allows everything, as before. Where a plan has no room, the
+  app, the phone and `ys sync status` say so in the plan's words, a note waits queued until there
+  is room, and nothing already working stops. See
+  [When a server's plan has no room](docs/guide/remote.md#when-a-servers-plan-has-no-room) and
+  [Running the Yardsort server yourself](crates/server/self-host/README.md#plans-and-entitlements).
 - **Pull requests from forks can be code reviewed.** A workspace on a fork's pull request — its
   branch is `pr/<number>`, from **Start workspace** or `ys pr checkout` — now finds that pull
   request by the number its branch follows, so **Request code review** and
   `ys workflow run code-review` work there, and so does the Floor Manager's review of other
   people's pull requests. The review is posted on the pull request in your project's repository.
+- **A review of a checked-out pull request reads the right diff.** In a workspace from
+  **Start workspace** or `ys pr checkout`, `{{ workspace.base_branch }}` is now the branch the
+  pull request merges into, where it was empty, so the code review compares against it. When it
+  is still empty, the note says why, instead of calling the branch the default one.
 
 ## 0.35.0
 

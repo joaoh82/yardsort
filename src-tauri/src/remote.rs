@@ -523,6 +523,15 @@ pub struct RemoteExported {
     pub records: u32,
 }
 
+/// An account, deleted at its server: how much went with it.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDeleted {
+    pub devices: u32,
+    pub hosts: u32,
+    pub records: u32,
+}
+
 /// A device that redeemed this host's code and waits for an answer.
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -830,6 +839,57 @@ pub async fn remote_export(app: AppHandle, path: String) -> IpcResult<RemoteExpo
         devices: count(export.account.devices.len()),
         hosts: count(export.account.hosts.len()),
         records: count(export.records.len()),
+    })
+}
+
+/// Delete this computer's account at its server, for every device: the person typed the
+/// confirmation in the window, and now signs in again in the browser, which is what deletes.
+/// Waits for the browser, for up to ten minutes, unless [`remote_cancel`] is called. Afterwards
+/// Remote is off here; nothing on this computer is touched.
+#[tauri::command]
+#[specta::specta]
+pub async fn remote_delete_account(app: AppHandle) -> IpcResult<RemoteDeleted> {
+    let home = AppHome::new(&app);
+    let (_client, sign_in) = remote_host::delete::begin(&home).await.map_err(ipc)?;
+    let (cancel, cancelled) = tokio::sync::oneshot::channel();
+    {
+        let state = app.state::<AppState>();
+        let mut signing_in = state
+            .remote
+            .signing_in
+            .lock()
+            .map_err(|_| IpcError::internal("poisoned"))?;
+        if signing_in.is_some() {
+            return Err(IpcError::new(
+                "remote_busy",
+                "A sign-in is already waiting for the browser.",
+            ));
+        }
+        *signing_in = Some(cancel);
+    }
+    let returned = async {
+        app.opener()
+            .open_url(sign_in.url().as_str(), None::<&str>)
+            .map_err(|e| IpcError::new("remote_browser", e.to_string()))?;
+        tokio::select! {
+            code = sign_in.returned(SIGN_IN_TIMEOUT) => code.map_err(|e| ipc(account::failed(e))),
+            _ = cancelled => Err(IpcError::new(
+                "remote_cancelled",
+                "Deleting was cancelled. Nothing was deleted.",
+            )),
+        }
+    }
+    .await;
+    if let Ok(mut signing_in) = app.state::<AppState>().remote.signing_in.lock() {
+        signing_in.take();
+    }
+    let deleted = remote_host::delete::finish(&home, sign_in, returned?)
+        .await
+        .map_err(ipc)?;
+    Ok(RemoteDeleted {
+        devices: deleted.devices,
+        hosts: deleted.hosts,
+        records: deleted.records,
     })
 }
 
