@@ -262,24 +262,24 @@ server = "tunnel.example.com:4040"   # a rustunnel server of your own
 
 ## Where it is
 
-| What                                         | Where                                                      |
-| -------------------------------------------- | ---------------------------------------------------------- |
-| The server, its guard and the page's answers | `crates/dashboard/src/http.rs`                             |
-| Codes and sessions                           | `crates/dashboard/src/auth.rs`                             |
-| Jobs                                         | `crates/dashboard/src/jobs.rs`                             |
-| Terminals                                    | `crates/dashboard/src/terminal.rs`, `ui/vendor/`           |
-| Remote from the page, and the QR code's dots | `crates/dashboard/src/remote.rs`                           |
-| What was done                                | `crates/dashboard/src/activity.rs`                         |
-| Agents and how each is installed             | `crates/dashboard/src/agents.rs`                           |
-| Git and the GitHub CLI                       | `crates/dashboard/src/git.rs`                              |
-| The tunnel                                   | `crates/dashboard/src/tunnel.rs`                           |
-| The computer's load, memory and disks        | `crates/dashboard/src/system.rs`                           |
-| The page                                     | `crates/dashboard/ui/`                                     |
-| The host's part, and its commands            | `crates/host/src/dashboard.rs`, `control.rs`, `main.rs`    |
-| The host signing in and pairing for the page | `HostRemote` in `crates/host/src/dashboard.rs`             |
-| The app's part, and Settings                 | `src-tauri/src/dashboard.rs`, `HostDashboardSettings.tsx`  |
-| A stand-in host, to look at the page         | `cargo run -p host-dashboard --example dashboard-stand-in` |
-| The settings                                 | `DashboardSettings` in `crates/core/src/settings.rs`       |
+| What                                         | Where                                                                            |
+| -------------------------------------------- | -------------------------------------------------------------------------------- |
+| The server, its guard and the page's answers | `crates/dashboard/src/http.rs`                                                   |
+| Codes and sessions                           | `crates/dashboard/src/auth.rs`                                                   |
+| Jobs                                         | `crates/dashboard/src/jobs.rs`                                                   |
+| Terminals                                    | `crates/dashboard/src/terminal.rs`, `ui/vendor/`                                 |
+| Remote from the page, and the QR code's dots | `Remote` in `crates/dashboard/src/lib.rs`, `crates/host/src/dashboard_remote.rs` |
+| What was done                                | `crates/dashboard/src/activity.rs`                                               |
+| Agents and how each is installed             | `crates/dashboard/src/agents.rs`                                                 |
+| Git and the GitHub CLI                       | `crates/dashboard/src/git.rs`                                                    |
+| The tunnel                                   | `crates/dashboard/src/tunnel.rs`                                                 |
+| The computer's load, memory and disks        | `crates/dashboard/src/system.rs`                                                 |
+| The page                                     | `crates/dashboard/ui/`                                                           |
+| The host's part, and its commands            | `crates/host/src/dashboard.rs`, `control.rs`, `main.rs`                          |
+| The host signing in and pairing for the page | `HostRemote` in `crates/host/src/dashboard.rs`                                   |
+| The app's part, and Settings                 | `src-tauri/src/dashboard.rs`, `HostDashboardSettings.tsx`                        |
+| A stand-in host, to look at the page         | `cargo run -p host-dashboard --example dashboard-stand-in`                       |
+| The settings                                 | `DashboardSettings` in `crates/core/src/settings.rs`                             |
 
 ## Checked
 
