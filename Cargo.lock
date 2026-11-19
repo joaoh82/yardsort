@@ -2516,7 +2516,6 @@ dependencies = [
  "getrandom 0.3.4",
  "libc",
  "portable-pty",
- "qrcode",
  "serde",
  "serde_json",
  "sha2 0.10.9",

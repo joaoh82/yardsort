@@ -1,6 +1,7 @@
 import type {
   AddedProject,
   HarnessInfo,
+  NotificationItem,
   Project,
   ProjectPullRequests,
   ProjectTasks,
@@ -483,3 +484,72 @@ export const triggerPresets: TriggerPreset[] = [
     quietMs: 0,
   },
 ];
+
+/** A row of the Notifications list: claude asking for a permission in `fix-login`, a minute ago,
+ *  unless overridden. */
+export const notification = (
+  id: string,
+  overrides: Partial<NotificationItem> = {},
+): NotificationItem => ({
+  id,
+  hostId: null,
+  hostName: null,
+  kind: "agent.asks",
+  part: "needs",
+  projectId: "p-app",
+  projectName: "app",
+  workspaceId: "w-app-fix-login",
+  workspaceName: "fix-login",
+  branch: "ys/fix-login",
+  sessionId: `session-${id}`,
+  title: "Fix the login form",
+  harnessId: "claude",
+  subjectId: null,
+  workflowId: null,
+  stepId: null,
+  terminalId: `pty-${id}`,
+  at: Date.now() - 60_000,
+  settledAt: null,
+  workedMs: null,
+  exitCode: null,
+  command: null,
+  said: null,
+  note: null,
+  ...overrides,
+});
+
+/** A row of another computer's list: claude finished in `fix-login` on `Build box`, unseen,
+ *  unless overridden. */
+export const notificationThere = (
+  id: string,
+  overrides: Partial<NotificationItem> = {},
+): NotificationItem =>
+  notification(id, {
+    hostId: "h-1",
+    hostName: "Build box",
+    kind: "agent.finished",
+    part: "finished",
+    projectId: "p-there",
+    projectName: "service",
+    workspaceId: "w-1",
+    terminalId: "t-1",
+    ...overrides,
+  });
+
+/** A row of the Notifications list that is not about an agent: the workflow `Review` waiting
+ *  for an approval in `fix-login`, unless overridden. */
+export const standingNotification = (
+  id: string,
+  overrides: Partial<NotificationItem> = {},
+): NotificationItem =>
+  notification(id, {
+    kind: "workflow.approval",
+    sessionId: null,
+    title: "Review",
+    harnessId: null,
+    subjectId: `run-${id}`,
+    workflowId: "review",
+    stepId: "sign-off",
+    terminalId: null,
+    ...overrides,
+  });

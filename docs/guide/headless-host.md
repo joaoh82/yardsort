@@ -138,9 +138,9 @@ Sign in while `yardsort-host serve` is stopped: one sign-in held by two programs
 the server, so `sign-in` refuses while anything runs on the profile. Signing in again later, as the
 same name or another, keeps this computer as the same host, with its devices still paired.
 
-**Or sign in from a browser, while the host runs.** [The dashboard](host-dashboard.md#remote)'s
-**Remote** tab does the same sign-in, pasted address and all, inside the running host, so nothing has
-to be stopped.
+**Or sign in from the [dashboard](host-dashboard.md#remote)**, while `serve` runs: its **Remote**
+tab asks for the server and the name, and takes the pasted address the same way. The host links at
+once, with no restart.
 
 **The sign-in is this computer's identity at the server.** It is kept in a folder only its user can
 read: `credentials` in the profile, or the folder `YARDSORT_CREDENTIALS_DIR` names. Anyone who can read
@@ -339,6 +339,12 @@ commit, push and open or merge its pull request: see
 name and email (`git config --global user.name` and `user.email`), credentials that can push, and
 `gh auth login` if pull requests should be opened and merged from it.
 
+The host keeps a [Notifications](notifications.md#other-computers) list of its agents: one that
+asks for a permission, finishes a stretch of work, or stops with an error. The desktop app on
+another computer that may watch here shows those rows in its own list, and what is marked seen
+there is marked here. An agent that finished while `yardsort-host` was stopped is listed when it
+starts again.
+
 It is cloned with this host's own Git sign-in, from an HTTPS or SSH address, and never to a path a
 device names. In a container, point `projects_dir` at a folder in a volume if clones should outlast
 the container.
@@ -448,6 +454,9 @@ all of them if you just press Enter. Nothing is let in without your answer.
 The device can be a phone, or the desktop app on another computer, signed in under **Settings → Remote →
 Other computers** ([Reaching another computer](remote.md#reaching-another-computer)). The app asks to
 watch and to type, as a phone does, and `pair` asks the same questions it asks a phone.
+
+Or pair from the [dashboard](host-dashboard.md#remote)'s **Remote** tab, in a browser you signed in
+to it: the same code, QR code and questions, answered on the page.
 
 `pair` is refused from any terminal Yardsort started, and from anything an agent runs: the host checks
 who is at the other end of its socket, and refuses a process that carries a launched session's
@@ -588,11 +597,35 @@ everything it holds and leaves out.
 Like `pair`, it is refused from any terminal Yardsort started and from anything an agent runs, since
 the file holds every synced note. `serve` has to be running.
 
-## When the account is deleted
+## Deleting your account
 
-There is no command to delete the account from here. Delete it from your computer, your phone or
-your server's web page: see [Deleting your account](delete-account.md). The next time this computer
-reaches the server, `yardsort-host status` says so:
+```sh
+yardsort-host account delete
+```
+
+Deletes everything the server keeps of this computer's account, for every device: every phone and
+computer signed in to it, the devices each lets in, which phones get notifications, and every synced
+project, note and workspace name. It cannot be undone; export the account first to keep a copy.
+Everything on this computer stays: projects, workspaces and agents keep running, and Remote turns off
+here.
+
+It says what goes and what stays, and asks you to type `delete`. Then, as with `sign-in`, it prints an
+address: open it in a browser on any computer and sign in again, even if that browser is signed in
+already. The browser is sent to an address starting `http://127.0.0.1:<port>/signed-in` that goes
+nowhere there: paste it back, or forward the port over SSH first and it finishes by itself. Signing
+in again is what deletes, and it has to be within five minutes and as the same person: as someone
+else, the server says so and deletes nothing. Stop the command before then and nothing is deleted.
+If the host stops answering after it printed the address, the command cannot tell whether the
+account went, and says so: `yardsort-host status` tells, once the host runs again.
+
+Like `pair`, it is refused from any terminal Yardsort started and from anything an agent runs or the
+[dashboard](host-dashboard.md) runs. `serve` has to be running. You can also delete the account from
+your computer, your phone or your server's web page: see [Deleting your account](delete-account.md).
+
+## When the account is deleted elsewhere
+
+Deleted from another device or the web page, the next time this computer reaches the server,
+`yardsort-host status` says so:
 
 ```text
 Link: stopped: This computer's account was deleted at the server. Everything on this computer is still here. Sign in again with `yardsort-host sign-in`.

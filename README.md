@@ -145,7 +145,11 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   an issue's or a pull request's address and opens it, ready to delegate; a repository that is
   not a project yet is cloned on the way. See [Projects](docs/guide/projects.md#clone-a-repository).
 - **Know who needs you.** Status dots show which agents are working and which are waiting; a
-  desktop notification tells you when one finishes while you are elsewhere.
+  desktop notification tells you when one finishes while you are elsewhere, and
+  [Notifications](docs/guide/notifications.md) lists, over every project, what waits for you
+  and what finished while you were not looking: agents that ask for a permission or are done,
+  workflows waiting for an approval or an answer, smoke tests waiting to be let run, and
+  schedules and triggers that could not start. Other computers you reach are in the same list.
 - **Careful with your work.** Deleting or archiving a workspace always keeps the branch, and
   never discards uncommitted changes without a second, explicit confirmation.
 - **A second pair of eyes, if you want one.** [Assist](docs/guide/assist.md) asks
@@ -191,12 +195,15 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 - **Remote, still under development.** Reach this computer's workspaces and terminals from your
   phone, and start new ones there, through a Yardsort server you sign in to. It stays off, and connects to nothing, until you
   turn it on, and a device gets in only if you say yes at this computer. The phone can be told
-  about a task, a review, a failure, a desktop update, or a workflow question or approval. The
+  about a task, a review, a failure, a desktop update, a workflow question or approval, an
+  agent that needs you, or one that finished while nobody looked. The
   notification opens that item. You can answer or approve a workflow on the phone while this
   computer is online. On the phone a conversation reads as a chat, a column at the phone's width,
   and Claude Code's permission questions can be answered there, as can a smoke test waiting to
   be let run. A workspace's pull request shows there too, with its checks and reviews, read-only,
-  and a project folds to put its workspaces away.
+  and a project folds to put its workspaces away. A bell opens the
+  [Notifications](docs/guide/notifications.md#on-the-phone) list there: what needs you and what
+  finished, on every computer the phone reaches.
   Installing a desktop update stays on the computer.
   Whoever runs the server
   can see what passes through it, and [the phone app](docs/guide/phone.md) is invite only until it
@@ -515,7 +522,8 @@ See [Triggers](docs/guide/triggers.md).
 Yardsort has a phone app that reaches the agents on your computer. See what each workspace is
 doing and how its pull request stands, read a conversation as a chat at the phone's width, answer
 Claude Code when it asks to run a command, let a waiting smoke test run, and start new work, away
-from your desk. The agents run on the computer, so they keep going whatever happens to the
+from your desk. A bell lists what needs you and what finished on every computer, and the phone is
+told when an agent finishes while nobody is looking. The agents run on the computer, so they keep going whatever happens to the
 connection. The phone gets in only through a server you sign in to, and only after you say yes at
 the computer.
 
@@ -650,6 +658,7 @@ says no.
 | [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving                                          |
 | [Migrate from Conductor](docs/guide/migrate-from-conductor.md)                                   | Import existing local worktrees and reconfigure scripts by hand                       |
 | [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off, shared conversations  |
+| [Notifications](docs/guide/notifications.md)                                                     | One list of what needs you and what finished unseen, over every project               |
 | [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                                           |
 | [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file                              |
 | [Memory](docs/guide/memory.md)                                                                   | Lessons for a project's agents, approved by you                                       |

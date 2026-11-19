@@ -1403,6 +1403,49 @@ _Exit:_ a person starts a task on another computer from the composer, follows it
 as a local workspace, reviews what it changed and opens its pull request, without that computer's
 screen.
 
+## M34 — Notifications
+
+Proposed in Figma and answered on 2026-11-17 ([49-notifications](49-notifications.md)): one list,
+on the desktop and on the phone, of what needs a person and what finished while they were not
+looking.
+
+- [x] Slice 1: the list for agents on this computer. The core keeps it; the sidebar row with its
+      two counts, the view, both groupings, Mark seen, the count on a project's row, Mod+I, and
+      the ring on tabs drawn from the list. Found while building it: agents' hooks are off by
+      default, so by default the list hears only the terminal and cannot know that an agent
+      asks for a permission; and the ring, kept only in the window until now, was put on every
+      waiting agent at each start, looked at or not.
+- [x] Slice 2: workflows that ask, runs that end, smoke tests that wait, schedules and triggers
+      that could not start. Read from where each stands in the store, not told as it happens:
+      the app and `ys` both change them. Decided while building it: a trigger held by its limit
+      is listed with the refused ones; a schedule or a trigger whose run waits for a test's
+      approval is the test's row only; a run its person cancelled or rejected is no row; and
+      an agent a running workflow started is not a finished row each turn. Found by running it:
+      a rejected approval ends its run as failed, which was listed as news until it was tried.
+- [x] Slice 3: other computers' rows on the desktop, over protocol minor 15: the list, marking
+      rows seen, and being told when the list changes. The keeper of the list moved into the
+      core, so `yardsort-host` keeps one too. A row there opens its workspace there; what a
+      workflow, a test, a schedule or a trigger there waits for is answered on that computer.
+- [x] Its smoke test, `notifications-there`, passed on Linux (2026-11-18), 21 of 21 steps: a
+      headless host and the real window.
+- [x] Slice 4: the phone: the bell, the list, counts on computers and marks on workspaces,
+      read from each computer over the same protocol minor. Seen is said back to the computer.
+      Found by running it on an emulator: Android's header clips a count drawn outside the
+      bell's own bounds, and with no computer reached the list said that nothing needed its
+      person, which it could not know.
+- [x] Its smoke test, `remote-phone-sees-notifications`, passed on Linux (2026-11-18), 14 of
+      14 steps: a pretend phone against the real window.
+- [x] Slice 5: a push when an agent finishes, with its own switch. A second kind of the
+      `agent` notice, `finished`, queued for a row of the list that stayed unseen: the
+      computer looks each time it hands over its outbox, and tells only of what it found
+      unseen the time before too. Found while building it: on PostgreSQL, a notice already
+      queued for an agent that needs you was still sent after its switch was turned off.
+- [x] Its smoke test, `remote-push-finished`, passed on Linux (2026-11-18), 16 of 16 steps: a
+      headless host and a pretend phone.
+
+_Exit:_ with agents at work in several projects and on more than one computer, a person learns
+from one place, at the desk or on the phone, which of them wait for an answer and which finished.
+
 ## M35 — The host dashboard
 
 Asked for by the owner on 2026-11-17, after the one-line install
@@ -1417,7 +1460,8 @@ Built the same day, in one piece: [47-host-dashboard](47-host-dashboard.md).
 - [x] On by default in `yardsort-host serve`; off in the app, under **Settings → Remote**.
 - [x] A rustunnel tunnel, with a subdomain, for an address beyond that computer. Off until asked
       for, and the token is rustunnel's to keep.
-- [x] The owner's six answers, 2026-11-19 ([47](47-host-dashboard.md#the-owners-answers-2026-11-19)):
+- [x] The owner's six answers, 2026-11-19 ([47](47-host-dashboard.md#remote-from-the-page), and
+      [the other four](47-host-dashboard.md#the-owners-other-answers-2026-11-19)):
       a terminal in the page; signing the host in to a server and pairing a device from the
       page, which makes the dashboard's sign-in part of what guards pairing; an activity log;
       rustunnel as the one tunnel, and in the full image, which is how a container's dashboard
@@ -1430,6 +1474,16 @@ Built the same day, in one piece: [47-host-dashboard](47-host-dashboard.md).
 _Exit:_ a person installs `yardsort-host` on a new server with one line, asks it for a sign-in
 link once over SSH, opens the dashboard and finishes the rest there: an agent and its sign-in,
 GitHub, their repositories, the server's own sign-in and their phone.
+
+## M36 — Merging from the phone
+
+Asked for by the owner on 2026-11-18, after the phone's pull requests (45). Built the same day:
+[48-phone-merge](48-phone-merge.md). No host or protocol change.
+
+- [x] **Merge…** on a workspace's own pull request card, with a sheet naming the commit, Squash
+      by default, a warning for checks, and the branch kept.
+- [x] A smoke test, `headless-phone-merges.yaml`: a stale commit is refused, the head merges.
+- [ ] Run on the iPhone against `yardsort-box`.
 
 ## Later (unordered)
 

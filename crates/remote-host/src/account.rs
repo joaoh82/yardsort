@@ -285,6 +285,8 @@ async fn flush_notices(home: &impl Home) {
     if home.store().remote_host().ok().flatten().is_none() {
         return;
     }
+    // Agents that finished and that nobody has looked at since the last look here.
+    let _ = yardsort_core::notify::agents_finished(home.store(), yardsort_core::store::now_ms());
     let pending = match yardsort_core::notify::pending(home.store(), yardsort_core::store::now_ms())
     {
         Ok(pending) => pending,

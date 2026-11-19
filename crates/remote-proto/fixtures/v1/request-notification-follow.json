@@ -1,0 +1,5 @@
+{
+  "requestId": "r-62",
+  "protocol": { "major": 1, "minor": 15 },
+  "op": "notification.follow"
+}

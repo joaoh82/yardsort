@@ -13,6 +13,10 @@ mod control;
 #[cfg(unix)]
 mod dashboard;
 #[cfg(unix)]
+mod dashboard_remote;
+#[cfg(unix)]
+mod delete;
+#[cfg(unix)]
 mod guard;
 #[cfg(unix)]
 mod home;
@@ -252,6 +256,10 @@ mod cli {
             #[arg(long)]
             yes: bool,
         },
+        /// Delete your account at the server, for every device: says what goes and what stays,
+        /// asks for `delete` typed, then for a sign-in again in a browser on any computer, which
+        /// is what deletes. Everything on this computer stays. Needs `serve` running.
+        Delete,
     }
 
     pub fn main() -> i32 {
@@ -476,7 +484,10 @@ mod cli {
     }
 
     async fn account(profile: &Profile, command: Account) -> Result<(), String> {
-        let Account::Export { out, yes } = command;
+        let (out, yes) = match command {
+            Account::Export { out, yes } => (out, yes),
+            Account::Delete => return crate::delete::run(profile).await,
+        };
         let path = out.unwrap_or_else(|| {
             remote_host::export::file_name(remote_host::account::now_ms()).into()
         });

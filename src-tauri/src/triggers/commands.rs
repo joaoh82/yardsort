@@ -314,6 +314,7 @@ fn one(store: &Store, row: TriggerRow) -> IpcResult<TriggerItem> {
 /// have a watch to look at, and a fire let go by Reset may be due.
 pub(crate) fn changed(app: &AppHandle) {
     let _ = TriggersChanged {}.emit(app);
+    crate::notifications::look(app);
     if let Some(listener) = app.try_state::<Listener>() {
         listener.wake();
     }

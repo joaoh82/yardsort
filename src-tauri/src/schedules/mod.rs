@@ -136,6 +136,7 @@ fn look(handle: &AppHandle, woken: &Receiver<()>) {
 
         if changed {
             let _ = SchedulesChanged {}.emit(handle);
+            crate::notifications::look(handle);
         }
     }
 }

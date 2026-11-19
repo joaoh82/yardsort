@@ -479,7 +479,7 @@ pub async fn workspace_create(
 #[tauri::command]
 #[specta::specta]
 pub async fn workspace_delete(app: AppHandle, id: String, force: bool) -> IpcResult<()> {
-    blocking(app, move |state| {
+    blocking(app.clone(), move |state| {
         let git = Git::new(&state.env())?;
         let root = state.worktree_root()?;
         let settings = state.settings.get();
@@ -492,7 +492,9 @@ pub async fn workspace_delete(app: AppHandle, id: String, force: bool) -> IpcRes
         }
         .delete(&id, force)
     })
-    .await
+    .await?;
+    crate::notifications::reread(&app);
+    Ok(())
 }
 
 fn with_workspaces<T>(
@@ -585,10 +587,12 @@ pub async fn workspaces_import(
 #[tauri::command]
 #[specta::specta]
 pub async fn workspace_forget(app: AppHandle, id: String, keep_history: bool) -> IpcResult<()> {
-    blocking(app, move |state| {
+    blocking(app.clone(), move |state| {
         with_workspaces(state, |workspaces, _| workspaces.forget(&id, keep_history))
     })
-    .await
+    .await?;
+    crate::notifications::reread(&app);
+    Ok(())
 }
 
 #[tauri::command]

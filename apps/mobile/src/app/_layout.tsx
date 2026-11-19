@@ -130,6 +130,7 @@ export default function Layout() {
               <Stack.Screen name="servers" options={{ title: "Servers" }} />
               <Stack.Screen name="settings" options={{ title: "Settings" }} />
               <Stack.Screen name="diagnostics" options={{ title: "Diagnostics" }} />
+              <Stack.Screen name="notification-list" options={{ title: "Notifications" }} />
               <Stack.Screen name="export" options={{ title: "Export your account" }} />
               <Stack.Screen name="delete-account" options={{ title: "Delete your account" }} />
               <Stack.Screen name="computer" options={{ title: "Computer" }} />

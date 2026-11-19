@@ -39,6 +39,7 @@ pub fn drain_inbox(handle: &AppHandle, store: &Store, data_dir: &Path) {
     // git, which the next terminal event should not wait for.
     track_on_a_thread(handle, report.pull_requests);
     changed(handle, report.workspaces);
+    crate::notifications::read(handle);
     // The watcher's thread also reads the session directories of harnesses that keep their
     // own — Grok's — and an exit is the moment their last lines land; so it is woken here
     // whatever the inbox held.
@@ -131,6 +132,7 @@ pub fn watch_inbox(handle: AppHandle, data_dir: &Path) -> notify::Result<InboxWa
         );
         tracked(&handle, &state.store, drained.tracked);
         changed(&handle, drained.workspaces);
+        crate::notifications::read(&handle);
         drained.pending
     })
 }

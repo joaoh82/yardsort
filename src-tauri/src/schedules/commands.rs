@@ -200,6 +200,7 @@ fn one(store: &Store, row: ScheduleRow) -> IpcResult<Schedule> {
 /// Tell the window schedules changed, and have the thread look now: one may be due at once.
 fn changed(app: &AppHandle) {
     let _ = SchedulesChanged {}.emit(app);
+    crate::notifications::look(app);
     if let Some(scheduler) = app.try_state::<super::Scheduler>() {
         scheduler.wake();
     }

@@ -4,7 +4,9 @@
 //! cargo run -p host-dashboard --example dashboard-stand-in -- /tmp/dash
 //! ```
 //!
-//! It prints a sign-in link, and one more each time Enter is pressed. The folder given is its
+//! It prints a sign-in link, and one more each time Enter is pressed. With `--remote`, the page's
+//! Remote tab works as a host with no screen's does, and a line `ask` makes a pretend phone ask
+//! to be let in; `--remote-off` is the same with this host not signed in yet. The folder given is its
 //! home: settings, sessions and whatever a command run from the page leaves there. Programs are
 //! looked for in `<folder>/bin` and then in /usr/bin and /bin, so a stand-in `gh`, `claude` or
 //! `rustunnel` put in `bin` is the one the page finds. Used for the screenshots in the guide,
@@ -27,10 +29,15 @@ async fn main() {
     let home = std::path::absolute(&home).expect("a path");
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("the folder can be made");
-    // Remote is managed from the page, as `yardsort-host` lets it be: signed in, unless a second
-    // argument says `signed-out`.
-    let signed_in = std::env::args().nth(2).as_deref() != Some("signed-out");
-    let source = common::StandIn::new(&home, &bin).managing(signed_in);
+    let flags: Vec<String> = std::env::args().skip(2).collect();
+    let mut source = common::StandIn::new(&home, &bin);
+    if flags.iter().any(|f| f.starts_with("--remote")) {
+        source.remote = Some(common::StandInRemote::default());
+    }
+    if flags.iter().any(|f| f == "--remote-off") {
+        source.about.remote = None;
+    }
+    let source = Arc::new(source);
     *source.projects.lock().unwrap() = ["my-service", "website"]
         .into_iter()
         .map(|name| Project {
@@ -40,7 +47,7 @@ async fn main() {
         })
         .collect();
     let dashboard = Dashboard::start(
-        Arc::new(source),
+        source.clone(),
         Options {
             state_dir: home.join("dashboard"),
         },
@@ -48,16 +55,23 @@ async fn main() {
     .await
     .expect("the dashboard starts");
     println!("{}", dashboard.sign_in().local);
-    let (again, mut asked) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let (again, mut asked) = tokio::sync::mpsc::unbounded_channel::<String>();
     std::thread::spawn(move || {
-        for _line in std::io::stdin().lock().lines() {
-            if again.send(()).is_err() {
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            if again.send(line).is_err() {
                 break;
             }
         }
     });
-    // Until its input closes: each line is a request for one more link.
-    while asked.recv().await.is_some() {
+    // Until its input closes: each line is a request for one more link, or a phone asking.
+    while let Some(line) = asked.recv().await {
+        if line.trim() == "ask" {
+            if let Some(remote) = &source.remote {
+                remote.asks("Ana's phone", true);
+            }
+            continue;
+        }
         let sign_in = dashboard.sign_in();
         println!("{}", sign_in.public.unwrap_or(sign_in.local));
     }

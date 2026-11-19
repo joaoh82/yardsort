@@ -2824,6 +2824,7 @@ async fn furnish(records: &impl Records, account: &AccountId, name: &str) -> (De
                 desktop_update: true,
                 workflow: true,
                 agent: Some(false),
+                agent_finished: Some(false),
             },
         )
         .await

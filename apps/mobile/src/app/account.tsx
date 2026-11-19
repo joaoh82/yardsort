@@ -15,6 +15,7 @@ import type { Profile } from "../lib/profiles";
 import { Computers } from "../ui/computers";
 import { stillSignedIn } from "../ui/leaving";
 import { SeenComputers } from "../ui/live";
+import { Corner } from "../ui/notifications";
 import { SettingsCorner } from "../ui/settings-corner";
 import {
   Body,
@@ -148,6 +149,8 @@ function SignedIn({ profile, title }: { profile: Profile; title: ReactNode }) {
   return (
     <Screen refreshing={refreshing} onRefresh={() => void refresh()}>
       {title}
+      {/* Signed in, the corner has the bell too: how many things need you, on every computer. */}
+      <Corner settings />
       <Body>
         Signed in to {profile.serverName} as {profile.deviceName}.
       </Body>

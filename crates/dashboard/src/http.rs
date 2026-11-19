@@ -30,7 +30,9 @@ use yardsort_core::program::Program;
 use yardsort_core::settings::TunnelSettings;
 
 use crate::jobs::{Step, Summary, Work};
-use crate::{agents, git, remote, system, terminal, Inner, Project};
+use crate::{
+    agents, git, system, terminal, Inner, PairAnswer, Pairing, Project, Remote, SigningIn,
+};
 
 /// What a request that changes something must carry. A page on another site cannot add it
 /// without the browser asking this server first, and this server never says yes.
@@ -66,18 +68,19 @@ pub fn router(inner: Arc<Inner>) -> Router {
         .route("/api/jobs/{id}/stop", post(stop_job))
         .route("/api/tunnel", post(set_tunnel))
         .route("/api/activity", get(list_activity))
-        .route("/api/remote", get(read_remote))
-        .route("/api/remote/pair", post(pair_device))
-        .route("/api/remote/answer", post(answer_device))
-        .route("/api/remote/devices/{grant}/revoke", post(revoke_device))
-        .route("/api/remote/sign-in", post(begin_remote_sign_in))
-        .route("/api/remote/sign-in/finish", post(finish_remote_sign_in))
-        .route("/api/remote/sign-in/cancel", post(cancel_remote_sign_in))
         .route("/api/terminals", get(list_terminals).post(open_terminal))
         .route("/api/terminals/{id}/output", get(read_terminal))
         .route("/api/terminals/{id}/input", post(type_into_terminal))
         .route("/api/terminals/{id}/size", post(resize_terminal))
         .route("/api/terminals/{id}/close", post(close_terminal))
+        .route("/api/remote", get(read_remote))
+        .route("/api/remote/pair", post(pair))
+        .route("/api/remote/pair/answer", post(answer_device))
+        .route("/api/remote/pair/stop", post(stop_pairing))
+        .route("/api/remote/sign-in", post(remote_sign_in))
+        .route("/api/remote/sign-in/pasted", post(remote_pasted))
+        .route("/api/remote/sign-in/stop", post(stop_remote_sign_in))
+        .route("/api/remote/sign-out", post(remote_sign_out))
         .fallback(|| async { refuse(StatusCode::NOT_FOUND, "not_found", "There is nothing here.") })
         .layer(axum::middleware::from_fn_with_state(inner.clone(), guard))
         .with_state(inner)
@@ -1046,152 +1049,149 @@ async fn close_terminal(State(inner): Shared, Path(id): Path<u64>) -> Json<Done>
     })
 }
 
-// ── Remote ──────────────────────────────────────────────────────────────────────────────────
+// ── What was done ───────────────────────────────────────────────────────────────────────────
 
-const NOT_MANAGED: &str = "Remote is not managed from this dashboard. In the Yardsort app, it is \
-                           under Settings → Remote.";
+async fn list_activity(State(inner): Shared) -> Json<Vec<crate::activity::Entry>> {
+    Json(inner.activity.list())
+}
 
+// ── Remote: signing in, and pairing ─────────────────────────────────────────────────────────
+
+/// What the page may do at the Yardsort server, and how it stands.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteState {
-    /// Whether this dashboard manages Remote at all: the app's does not.
-    managed: bool,
-    signed_in: Option<crate::RemoteLink>,
-    signing_in: remote::SignInState,
-    #[serde(flatten)]
-    devices: remote::Devices,
-    /// Why the devices could not be read, when they could not.
-    problem: Option<String>,
+    /// The program serving the page lets these be done here. The app does not: its window does.
+    available: bool,
+    pairing: Pairing,
+    signing_in: SigningIn,
+}
+
+const NOT_HERE: &str =
+    "Pair devices and sign in from the Yardsort app's window: Settings → Remote.";
+
+/// Run `work` with this program's [`Remote`], off the runtime.
+async fn with_remote<T: Send + 'static>(
+    inner: &Arc<Inner>,
+    work: impl FnOnce(&Inner, &dyn Remote) -> Result<T, String> + Send + 'static,
+) -> Result<T, Failed> {
+    blocking(inner, move |inner| match inner.source.remote() {
+        Some(remote) => work(inner, remote),
+        None => Err(NOT_HERE.into()),
+    })
+    .await
+}
+
+/// Record a sign-in to a server that has come through, once: whichever request sees it first
+/// says so, since the browser's own return finishes one as well as a pasted address does.
+fn record_signed_in(inner: &Inner, signing_in: &SigningIn) {
+    let SigningIn::SignedIn { name, server_url } = signing_in else {
+        return;
+    };
+    let mut recorded = inner
+        .signed_in_recorded
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !std::mem::replace(&mut *recorded, true) {
+        inner.activity.note(
+            "remote",
+            format!("This computer was signed in to {server_url} as {name}, from the page."),
+        );
+    }
 }
 
 async fn read_remote(State(inner): Shared) -> Answer<RemoteState> {
     blocking(&inner, |inner| {
-        let signed_in = inner.source.about().remote;
-        let Some(managing) = inner.source.remote() else {
-            return Ok(RemoteState {
-                managed: false,
-                signed_in,
-                signing_in: remote::SignInState::None,
-                devices: remote::Devices::default(),
-                problem: None,
-            });
-        };
-        let (devices, problem) = match &signed_in {
-            None => (remote::Devices::default(), None),
-            Some(_) => match managing.devices() {
-                Ok(devices) => (devices, None),
-                Err(why) => (remote::Devices::default(), Some(why)),
+        Ok(match inner.source.remote() {
+            Some(remote) => {
+                let signing_in = remote.signing_in();
+                record_signed_in(inner, &signing_in);
+                RemoteState {
+                    available: true,
+                    pairing: remote.pairing(),
+                    signing_in,
+                }
+            }
+            None => RemoteState {
+                available: false,
+                pairing: Pairing::Idle,
+                signing_in: SigningIn::Idle,
             },
-        };
-        Ok(RemoteState {
-            managed: true,
-            signed_in,
-            signing_in: managing.signing_in(),
-            devices,
-            problem,
         })
     })
     .await
     .map(Json)
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PairingOffer {
-    code: String,
-    /// The link to scan, as the dots of a QR code: a row a line, `#` for dark.
-    qr: Vec<String>,
-    expires_in_ms: u32,
+async fn pair(State(inner): Shared) -> Answer<Pairing> {
+    with_remote(&inner, |inner, remote| {
+        let pairing = remote.pair()?;
+        if matches!(pairing, Pairing::Offered { .. }) {
+            inner
+                .activity
+                .note("device", "A pairing code was shown on the page.");
+        }
+        Ok(pairing)
+    })
+    .await
+    .map(Json)
 }
 
-async fn pair_device(State(inner): Shared) -> Answer<PairingOffer> {
-    blocking(&inner, |inner| {
-        let offer = inner.source.remote().ok_or(NOT_MANAGED)?.offer()?;
-        inner
-            .activity
-            .note("device", "A pairing code was shown on the page.");
-        Ok(PairingOffer {
-            qr: remote::qr(&offer.link),
-            code: offer.code,
-            expires_in_ms: offer.expires_in_ms,
-        })
+async fn answer_device(State(inner): Shared, Json(answer): Json<PairAnswer>) -> Answer<Pairing> {
+    with_remote(&inner, move |inner, remote| {
+        let control = answer.control;
+        let pairing = remote.answer(answer)?;
+        if let Pairing::Answered { device, allowed } = &pairing {
+            inner.activity.note(
+                "device",
+                match (allowed, control) {
+                    (false, _) => format!("{device} was refused, from the page."),
+                    (true, false) => format!("{device} was let in to watch, from the page."),
+                    (true, true) => {
+                        format!("{device} was let in to watch and type, from the page.")
+                    }
+                },
+            );
+        }
+        Ok(pairing)
+    })
+    .await
+    .map(Json)
+}
+
+async fn stop_pairing(State(inner): Shared) -> Answer<Pairing> {
+    with_remote(&inner, |_, remote| {
+        remote.stop_pairing();
+        Ok(remote.pairing())
     })
     .await
     .map(Json)
 }
 
 #[derive(Deserialize)]
-struct DeviceAnswer {
-    grant: String,
-    #[serde(flatten)]
-    answer: remote::Answer,
-}
-
-async fn answer_device(State(inner): Shared, Json(given): Json<DeviceAnswer>) -> Answer<Done> {
-    blocking(&inner, move |inner| {
-        let managing = inner.source.remote().ok_or(NOT_MANAGED)?;
-        // Named in the record by what the host says it is called, not by what the page sent.
-        let name = managing
-            .devices()
-            .ok()
-            .and_then(|all| all.asking.into_iter().find(|a| a.grant == given.grant))
-            .map_or_else(|| "A device".to_owned(), |asking| asking.name);
-        managing.answer(&given.grant, given.answer.clone())?;
-        let answer = &given.answer;
-        inner.activity.note(
-            "device",
-            match (answer.allow, answer.control) {
-                (false, _) => format!("{name} was refused, from the page."),
-                (true, false) => format!("{name} was let in to watch, from the page."),
-                (true, true) => format!("{name} was let in to watch and type, from the page."),
-            },
-        );
-        Ok(Done { done: true })
-    })
-    .await
-    .map(Json)
-}
-
-async fn revoke_device(State(inner): Shared, Path(grant): Path<String>) -> Answer<Done> {
-    blocking(&inner, move |inner| {
-        let name = inner.source.remote().ok_or(NOT_MANAGED)?.revoke(&grant)?;
-        inner
-            .activity
-            .note("device", format!("{name} was taken off, from the page."));
-        Ok(Done { done: true })
-    })
-    .await
-    .map(Json)
-}
-
-#[derive(Deserialize)]
-struct RemoteSignIn {
+struct ServerSignIn {
     server: String,
+    #[serde(default)]
     name: String,
 }
 
-async fn begin_remote_sign_in(
+async fn remote_sign_in(
     State(inner): Shared,
-    Json(wanted): Json<RemoteSignIn>,
-) -> Answer<remote::SigningIn> {
-    let (server, name) = (
-        wanted.server.trim().to_owned(),
-        wanted.name.trim().to_owned(),
-    );
-    if server.is_empty() || name.is_empty() {
-        return Err(Failed(
-            "Give the server's address, and a name for this computer.".into(),
-        ));
-    }
-    blocking(&inner, move |inner| {
-        let begun = inner
-            .source
-            .remote()
-            .ok_or(NOT_MANAGED)?
-            .begin_sign_in(&server, &name)?;
+    Json(asked): Json<ServerSignIn>,
+) -> Answer<SigningIn> {
+    with_remote(&inner, move |inner, remote| {
+        let server = asked.server.trim();
+        let begun = remote.sign_in(server, asked.name.trim())?;
+        *inner
+            .signed_in_recorded
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
         inner.activity.note(
             "remote",
-            format!("A sign-in to {} was started, from the page.", begun.server),
+            format!(
+                "A sign-in to {} was started, from the page.",
+                without_password(server)
+            ),
         );
         Ok(begun)
     })
@@ -1200,51 +1200,40 @@ async fn begin_remote_sign_in(
 }
 
 #[derive(Deserialize)]
-struct Returned {
+struct Pasted {
     address: String,
 }
 
-async fn finish_remote_sign_in(
-    State(inner): Shared,
-    Json(returned): Json<Returned>,
-) -> Answer<Done> {
-    blocking(&inner, move |inner| {
-        inner
-            .source
-            .remote()
-            .ok_or(NOT_MANAGED)?
-            .finish_sign_in(returned.address.trim())?;
-        let at = inner
-            .source
-            .about()
-            .remote
-            .map(|link| format!("{} as {}", link.server_url, link.name));
+async fn remote_pasted(State(inner): Shared, Json(pasted): Json<Pasted>) -> Answer<SigningIn> {
+    with_remote(&inner, move |inner, remote| {
+        let signing_in = remote.pasted(&pasted.address)?;
+        record_signed_in(inner, &signing_in);
+        Ok(signing_in)
+    })
+    .await
+    .map(Json)
+}
+
+async fn stop_remote_sign_in(State(inner): Shared) -> Answer<SigningIn> {
+    with_remote(&inner, |_, remote| {
+        remote.stop_signing_in();
+        Ok(remote.signing_in())
+    })
+    .await
+    .map(Json)
+}
+
+async fn remote_sign_out(State(inner): Shared) -> Answer<Done> {
+    with_remote(&inner, |inner, remote| {
+        remote.sign_out()?;
         inner.activity.note(
             "remote",
-            format!(
-                "This computer was signed in to {}, from the page.",
-                at.as_deref().unwrap_or("a server")
-            ),
+            "This computer was signed out of its server, from the page.",
         );
         Ok(Done { done: true })
     })
     .await
     .map(Json)
-}
-
-async fn cancel_remote_sign_in(State(inner): Shared) -> Answer<Done> {
-    blocking(&inner, |inner| {
-        inner.source.remote().ok_or(NOT_MANAGED)?.cancel_sign_in();
-        Ok(Done { done: true })
-    })
-    .await
-    .map(Json)
-}
-
-// ── What was done ───────────────────────────────────────────────────────────────────────────
-
-async fn list_activity(State(inner): Shared) -> Json<Vec<crate::activity::Entry>> {
-    Json(inner.activity.list())
 }
 
 #[cfg(test)]

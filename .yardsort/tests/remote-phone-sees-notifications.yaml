@@ -1,0 +1,92 @@
+id: remote-phone-sees-notifications
+name: A phone is told what finished on the computer, and seen there is seen here
+description: >-
+  Turns Remote on in the real window against the stand-in server and pairs a pretend phone that
+  may watch and type. The phone follows the computer's Notifications list and starts an agent,
+  which is really a shell: it prints for ten seconds, as one at work does, and then waits. The
+  computer says its list changed, and the phone reads the agent's row as finished and not seen,
+  with the workspace and the terminal it started. The phone marks the row seen, and the
+  computer has it under Earlier at once. Then the real window is looked at: nothing is unseen on
+  its Notifications row, and that workspace's row is under Earlier. The phone app's own screens
+  are not driven here; their tests are in apps/mobile/test. Linux only, since it stands in for
+  the browser with xdg-open. A window opens while it runs; nothing needs clicking.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_app
+    action: run
+    program: bun
+    args: [tauri, build, --debug, --no-bundle]
+    timeout: 20m
+  - id: build_stand_in
+    action: run
+    program: cargo
+    args: [build, -q, -p, yardsort-server, --example, stand-in]
+    timeout: 15m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: seed
+    action: shell
+    line: sh .yardsort/tests/support/app.sh seed
+  - id: open_app
+    action: shell
+    line: sh .yardsort/tests/support/app.sh open
+  - id: window_up
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+
+steps:
+  - id: add_the_project
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", add-project, "{{ run.dir }}"]
+    timeout: 60s
+  - id: turn_on
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", turn-on, "{{ run.dir }}"]
+    timeout: 90s
+  - id: show_a_code
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", pairing-code, "{{ run.dir }}"]
+  - id: phone_asks
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", ask]
+  - id: let_it_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", let-it-in]
+  - id: phone_sees_notifications
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", sees-notifications, Smoke computer]
+    timeout: 180s
+    expect:
+      stdout_contains: saw the notifications
+  - id: window_has_it_seen
+    action: run
+    program: bun
+    args:
+      [.yardsort/tests/support/window.ts, "{{ run.port }}", seen-from-the-phone, "{{ run.dir }}"]
+    timeout: 60s
+    expect:
+      stdout_contains: seen from the phone
+
+teardown:
+  - id: close_everything
+    action: shell
+    line: sh .yardsort/tests/support/app.sh stop-everything

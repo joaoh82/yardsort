@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { errorMessage, ipc, type Step, type WorkflowCheck } from "@/lib/ipc";
+import { useNotificationsStore } from "@/stores/notifications";
 import { useProjectsStore } from "@/stores/projects";
 import {
   NEW_WORKFLOW,
@@ -113,6 +114,19 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
   useEffect(() => {
     if (shownRun) void useWorkflowStore.getState().loadSteps(shownRun);
   }, [shownRun]);
+
+  // The run on screen is being looked at: the Notifications list marks its ending seen. Coming
+  // back to the window is looking, too.
+  const lookedAt = view === "runs" ? shownRun : null;
+  useEffect(() => {
+    const look = () => useNotificationsStore.getState().lookingAtRun(lookedAt);
+    look();
+    window.addEventListener("focus", look);
+    return () => {
+      window.removeEventListener("focus", look);
+      useNotificationsStore.getState().lookingAtRun(null);
+    };
+  }, [lookedAt]);
 
   useEffect(() => {
     let current = true;

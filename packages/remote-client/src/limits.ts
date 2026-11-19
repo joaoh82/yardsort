@@ -8,8 +8,8 @@
 
 /** The major this client speaks. */
 export const PROTOCOL_MAJOR = 1;
-/** The minor this client speaks: 14, committing, pushing, and opening and merging a pull request. */
-export const PROTOCOL_MINOR = 14;
+/** The minor this client speaks: 15, a computer's Notifications list. */
+export const PROTOCOL_MINOR = 15;
 
 /** The largest JSON message either side reads, in bytes. */
 export const MAX_CONTROL_FRAME = 64 * 1024;
@@ -109,6 +109,13 @@ export const MAX_PULL_CHECKS = 40;
 export const MAX_CHECK_NAME = 100;
 /** The most reviewers, and the most reviews waited for, a pull request is described with. Minor 11. */
 export const MAX_REVIEWERS = 12;
+/** The most rows one reply to `notification.list` carries. Minor 15. */
+export const MAX_NOTIFICATIONS = 100;
+/** Longest line of substance on a row of a computer's Notifications list, in characters. Minor 15. */
+export const MAX_NOTIFICATION_LINE = 240;
+/** The most rows one `notification.seen` names. Minor 15. */
+export const MAX_NOTIFICATIONS_SEEN = 200;
+
 /** The most workspaces one pull request names. Minor 11. */
 export const MAX_PULL_WORKSPACES = 8;
 

@@ -62,6 +62,10 @@ impl ComputerHome for AppComputer {
     fn changed(&self) {
         let _ = OtherComputersChanged {}.emit(&self.0);
     }
+
+    fn notifications_changed(&self) {
+        crate::notifications::changed(&self.0);
+    }
 }
 
 fn platform_name() -> &'static str {
@@ -339,7 +343,7 @@ pub struct OtherActivity {
     pub workspace: String,
 }
 
-fn ipc(failure: Failure) -> IpcError {
+pub(crate) fn ipc(failure: Failure) -> IpcError {
     IpcError::new(failure.code, failure.message)
 }
 

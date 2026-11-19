@@ -1,0 +1,115 @@
+id: host-delete
+name: A computer with no screen deletes its account, and keeps everything it runs
+description: >-
+  R7 slice 2 on a computer with no screen (docs/design/46-remote-r7.md §10). Against the stand-in
+  server: yardsort-host signed in and serving a shell, and a pretend phone on the same account.
+  `yardsort-host account delete` is refused with no terminal, and deletes nothing when what is
+  typed is not delete. Confirmed at a terminal of the operator's own, it prints a sign-in again,
+  which a script follows as a browser would; a wrong address pasted is said, and the right one
+  deletes. Remote is then off on the computer, the shell still runs, the phone is told its account
+  was deleted, and signing in again finds an empty account. Linux only. No window opens.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build
+    action: shell
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: a_repository
+    action: shell
+    line: >-
+      mkdir -p "$YS_RUN_DIR/widgets" "$YS_RUN_DIR/profile" && git -C "$YS_RUN_DIR/widgets" init -q &&
+      git -C "$YS_RUN_DIR/widgets" -c user.name=Smoke -c user.email=smoke@example.invalid -c
+      commit.gpgsign=false commit -q --allow-empty -m first && cp
+      .yardsort/tests/support/headless-settings.toml "$YS_RUN_DIR/profile/settings.toml"
+
+steps:
+  - id: sign_in_the_computer
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", sign-in, Smoke box]
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: serve
+    action: shell
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: a_shell_runs
+    action: shell
+    line: >-
+      sh .yardsort/tests/support/headless.sh ys project add "$YS_RUN_DIR/widgets" && sh
+      .yardsort/tests/support/headless.sh ys workspace new widgets smoke --harness sh
+    expect:
+      stdout_contains: agent  sh
+  - id: a_phone_signs_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", signs-in]
+    expect:
+      stdout_contains: signed in
+  - id: refused_with_no_terminal
+    action: shell
+    line: >-
+      if sh .yardsort/tests/support/headless.sh yardsort-host account delete < /dev/null >
+      "$YS_RUN_DIR/refused" 2>&1; then exit 1; fi; cat "$YS_RUN_DIR/refused"; grep -q "needs a person
+      at a terminal" "$YS_RUN_DIR/refused" && echo refused
+    expect:
+      stdout_contains: refused
+  - id: deleted_from_its_terminal
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", deletes]
+    timeout: 120s
+    expect:
+      stdout_contains: Remote is off on this computer
+  - id: remote_is_off_here
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, yardsort-host, status]
+    expect:
+      stdout_contains: "Remote: off."
+  - id: the_shell_kept_running
+    action: shell
+    line: sh .yardsort/tests/support/headless.sh ys session list
+    expect:
+      stdout_contains: running
+  - id: the_phone_is_told
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", told-deleted]
+    expect:
+      stdout_contains: "told: This account was deleted from the server"
+  - id: the_server_kept_nothing
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", starts-empty]
+    expect:
+      stdout_contains: "an empty account: this phone, no computers, no records"
+
+teardown:
+  - id: stop_serving
+    action: shell
+    line: >-
+      kill "$(cat "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon
+      .*$YS_RUN_DIR/profile"; pkill -f "yardsort-daemon .*$YS_RUN_DIR/profile"; true

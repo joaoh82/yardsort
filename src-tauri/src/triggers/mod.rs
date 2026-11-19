@@ -298,6 +298,7 @@ fn look(handle: &AppHandle, woken: &Receiver<()>) {
 
         if changed {
             let _ = TriggersChanged {}.emit(handle);
+            crate::notifications::look(handle);
         }
     }
 }

@@ -175,6 +175,6 @@ a screen showing them asks again each minute while it is in front.
 
 - **See it on a phone**, iPhone and Android, against a real repository.
 - A push notification when a check fails or a review arrives: issue #263.
-- Merging and marking ready for review from the phone.
+- Marking ready for review from the phone. Merging was built after: [48](48-phone-merge.md).
 - On a computer with no window, the pull requests a workspace follows in another repository.
 - The description and the conversation of a pull request, which the desktop's Summary shows.

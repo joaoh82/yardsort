@@ -17,6 +17,9 @@
 //! with the link's state: online, connecting, or offline since when. What was last read stays shown
 //! while the host is away, said to be from then. Nothing a host sends is written to disk here.
 //!
+//! **A host's Notifications list is read with the rest** ([`notifications`]), when the host
+//! keeps one, and read again as soon as the host says it changed.
+//!
 //! **A terminal is watched through the same link** ([`terminal`]): attached, attached again after
 //! the link drops, and typed into only once its person here takes control. Work is started there
 //! through it too ([`start`]), by that host's ids.
@@ -26,6 +29,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub mod look;
+pub mod notifications;
 pub mod publish;
 pub mod start;
 pub mod terminal;
@@ -86,6 +90,9 @@ pub trait ComputerHome: Send + Sync + 'static {
     fn client_name(&self) -> String;
     /// A host's link or what it shows changed, or the list of hosts did.
     fn changed(&self);
+    /// What a host's Notifications list holds is not what it was, or the host came or went:
+    /// whoever shows the lists together reads them again.
+    fn notifications_changed(&self) {}
 }
 
 /// The session, the hosts paired with, and a link to each it may reach.
@@ -158,6 +165,9 @@ pub struct Shown {
     pub workspaces: Vec<(WorkspaceSummary, SessionPage)>,
     /// The newest first, at most [`ACTIVITY_SHOWN`].
     pub activity: Vec<ActivityEvent>,
+    /// Its Notifications list, as much of it as this computer is shown. `None` for a host that
+    /// keeps none, an earlier Yardsort, or one that lets this computer see none of it.
+    pub notifications: Option<remote_proto::notification::NotificationPage>,
     pub read_at_ms: i64,
 }
 
@@ -488,9 +498,18 @@ async fn watch<H: ComputerHome>(
 fn set_link(home: &impl ComputerHome, view: &Mutex<HostView>, link: Link) {
     let mut view = view.lock().expect("host view");
     if view.link != link {
+        // A host that is away shows no rows, and one that is back shows them again.
+        let listed = view
+            .shown
+            .as_ref()
+            .is_some_and(|shown| shown.notifications.is_some());
+        let comes_or_goes = (view.link == Link::Online) != (link == Link::Online);
         view.link = link;
         drop(view);
         home.changed();
+        if listed && comes_or_goes {
+            home.notifications_changed();
+        }
     }
 }
 
@@ -534,11 +553,25 @@ async fn reach<H: ComputerHome>(
     } else {
         None
     };
+    // Told when its list changes, where it keeps one and says so. Without that the list is
+    // read when everything else is.
+    if notifications::follows(channel.host()) {
+        let _ = channel.follow_notifications().await;
+    }
     loop {
         match read(&channel).await {
             Ok(shown) => {
-                view.lock().expect("host view").shown = Some(shown);
+                let listed = {
+                    let mut view = view.lock().expect("host view");
+                    let before = view.shown.as_ref().and_then(|s| s.notifications.as_ref());
+                    let listed = before != shown.notifications.as_ref();
+                    view.shown = Some(shown);
+                    listed
+                };
                 home.changed();
+                if listed {
+                    home.notifications_changed();
+                }
             }
             Err(_) if !channel.is_open() => {}
             Err(error) => return Err(error.to_string()),
@@ -556,6 +589,7 @@ async fn reach<H: ComputerHome>(
         tokio::select! {
             end = channel.ended() => return Ok(end.text),
             _ = moved => {}
+            () = channel.notifications_changed() => {}
             () = home.computer().reread.notified() => {}
             () = tokio::time::sleep(REREAD_EVERY) => {}
         }
@@ -596,11 +630,18 @@ async fn read(channel: &Channel) -> remote_client::channel::Result<Shown> {
     }
     activity.sort_by_key(|event| std::cmp::Reverse(event.occurred_at));
     activity.truncate(ACTIVITY_SHOWN);
+    // A host that would not give it — this computer may not watch there — shows none of it.
+    let notifications = if notifications::lists(channel.host()) {
+        channel.notifications().await.ok()
+    } else {
+        None
+    };
     Ok(Shown {
         host: channel.host().clone(),
         projects: page.projects,
         workspaces,
         activity,
+        notifications,
         read_at_ms: now_ms(),
     })
 }

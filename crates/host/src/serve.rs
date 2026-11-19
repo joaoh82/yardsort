@@ -2,7 +2,8 @@
 //!
 //! It holds the profile's lock (as the app does, so the two never share a sign-in), connects to
 //! the profile's terminal daemon or starts one, settles the records, drains the activity inbox as
-//! it fills, keeps the link to the server's relay when signed in, serves the dashboard on
+//! it fills, keeps the Notifications list (`yardsort_core::notifications`) for the devices that
+//! read it, keeps the link to the server's relay when signed in, serves the dashboard on
 //! 127.0.0.1 unless told not to, and answers this computer's own commands on the control socket.
 //! Stopped (`SIGTERM`, `SIGINT`), it closes the link, the dashboard and the socket and exits; the
 //! daemon and the programs in it carry on, and the next `serve` finds them.
@@ -43,14 +44,18 @@ pub async fn run(profile: Profile) -> Result<(), String> {
         yardsort_core::daemon::connect(
             &data_dir,
             Arc::new(move |event| {
-                let HostEvent::Exited { id, exit } = &event else {
+                let Some(home) = events.get() else {
                     return;
                 };
-                if let Some(home) = events.get() {
-                    runtime::exited(&home.store, &home.profile.data_dir, &id.0, exit);
+                let mut ended = None;
+                if let HostEvent::Exited { id, exit } = &event {
+                    ended = runtime::exited(&home.store, &home.profile.data_dir, &id.0, exit);
                     // An agent's last hooks ran just before it exited.
                     home.look_again();
                 }
+                // The Notifications list hears of a turn that ended and of an agent that stopped.
+                home.notifications
+                    .observe(&home.store, &event, ended.as_deref());
             }),
         )
     })
@@ -66,14 +71,16 @@ pub async fn run(profile: Profile) -> Result<(), String> {
                 .into(),
         );
     }
-    let alive: Vec<String> = connected
-        .host
-        .list()
-        .into_iter()
-        .map(|session| session.id.0)
+    let sessions = connected.host.list();
+    let alive: Vec<String> = sessions
+        .iter()
+        .map(|session| session.id.0.clone())
         .collect();
     let home = HostHome::open(profile, Some(connected))?;
     let settled = runtime::settle_at_start(&home.store, &home.profile.data_dir, &alive)?;
+    // After the records are settled: an agent that stopped printing while nothing served, and
+    // whatever came to wait meanwhile, is listed from the start.
+    home.notifications.start(&home.store, &sessions);
     runtime::track_seen(&home.store, &settled.pull_requests, || {
         yardsort_core::git::Git::new(home.env()).ok()
     });
@@ -92,10 +99,13 @@ pub async fn run(profile: Profile) -> Result<(), String> {
                 .capture_grok
                 .then(|| runtime::grok_home(home.env()))
                 .flatten();
-            runtime::drain(&home.store, &dir, grok_home.as_deref(), cursors, || {
+            let pending = runtime::drain(&home.store, &dir, grok_home.as_deref(), cursors, || {
                 yardsort_core::git::Git::new(home.env()).ok()
             })
-            .pending
+            .pending;
+            // What agents' hooks reported: a permission asked for, a turn that ended.
+            home.notifications.read_events(&home.store);
+            pending
         })
     };
     match watching {
@@ -173,6 +183,12 @@ async fn answer(home: &Arc<HostHome>, stream: UnixStream) {
                     ),
                     _ => why.say("Pairing", "pair"),
                 },
+            },
+        },
+        Ok(Some(Ask::AccountDelete)) => match refusal {
+            None => return delete(home, &mut line).await,
+            Some(why) => Reply::Failed {
+                message: why.say("Deleting the account", "account delete"),
             },
         },
         Ok(Some(ask)) if refusal.is_some() && ask.guarded() => {
@@ -259,7 +275,7 @@ async fn one(home: &Arc<HostHome>, ask: Ask) -> account::Result<Reply> {
         Ask::AccountExport => Reply::Export {
             export: Box::new(remote_host::export::export(home.as_ref()).await?),
         },
-        Ask::Pair | Ask::Answer { .. } => Reply::Failed {
+        Ask::Pair | Ask::Answer { .. } | Ask::AccountDelete | Ask::Pasted { .. } => Reply::Failed {
             message: "Not here.".into(),
         },
     })
@@ -327,11 +343,6 @@ async fn devices(home: &HostHome) -> account::Result<Vec<Device>> {
             return Err(error);
         }
     }
-    let_in(home)
-}
-
-/// The devices let in, as this computer has them.
-pub(crate) fn let_in(home: &HostHome) -> account::Result<Vec<Device>> {
     let names = project_names(home);
     Ok(host::local_grants(&home.store)
         .map_err(|e| account::Failure::new("remote_store", e.to_string()))?
@@ -357,7 +368,7 @@ pub(crate) fn let_in(home: &HostHome) -> account::Result<Vec<Device>> {
         .collect())
 }
 
-pub(crate) fn project_names(home: &HostHome) -> Vec<Project> {
+fn project_names(home: &HostHome) -> Vec<Project> {
     home.store
         .projects()
         .unwrap_or_default()
@@ -367,6 +378,63 @@ pub(crate) fn project_names(home: &HostHome) -> Vec<Project> {
             name: p.name,
         })
         .collect()
+}
+
+/// An `account delete`: a confirming sign-in, its address given to the operator to open in a
+/// browser anywhere, then the code that browser brings back, by the forwarded port or pasted. The
+/// sign-in's verifier stays in this process. Nothing is deleted if the operator goes first.
+async fn delete(home: &Arc<HostHome>, line: &mut Line) {
+    let failed = |failure: account::Failure| Reply::Failed {
+        message: failure.message,
+    };
+    let sign_in = match remote_host::delete::begin(home.as_ref()).await {
+        Ok((_client, sign_in)) => sign_in,
+        Err(failure) => {
+            let _ = line.send(&failed(failure)).await;
+            return;
+        }
+    };
+    let confirm = Reply::Confirm {
+        url: sign_in.url().to_string(),
+        port: sign_in.redirect_port(),
+    };
+    if line.send(&confirm).await.is_err() {
+        return;
+    }
+    let code = {
+        let returned = sign_in.returned(remote_client::SIGN_IN_TIMEOUT);
+        tokio::pin!(returned);
+        loop {
+            tokio::select! {
+                code = &mut returned => break code,
+                asked = line.next::<Ask>() => match asked {
+                    Ok(Some(Ask::Pasted { address })) => match sign_in.pasted(&address) {
+                        Ok(code) => break Ok(code),
+                        Err(error) => {
+                            let message = error.to_string();
+                            if line.send(&Reply::NotThatAddress { message }).await.is_err() {
+                                return;
+                            }
+                        }
+                    },
+                    // Gone, or something else: nothing is deleted.
+                    _ => return,
+                },
+            }
+        }
+    };
+    let reply = match code {
+        Ok(code) => match remote_host::delete::finish(home.as_ref(), sign_in, code).await {
+            Ok(deleted) => Reply::Deleted {
+                devices: deleted.devices,
+                hosts: deleted.hosts,
+                records: deleted.records,
+            },
+            Err(failure) => failed(failure),
+        },
+        Err(error) => failed(account::failed(error)),
+    };
+    let _ = line.send(&reply).await;
 }
 
 /// A `pair`: an offer, then each device that asks, told to the operator and answered as they

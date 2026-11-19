@@ -26,7 +26,9 @@ import { folds } from "../lib/folds";
 import { moment } from "../lib/format";
 import type { ObservedComputer, ObservedWorkspaces } from "../lib/observed";
 import { byWorkspace, routeOf, toneWords } from "../lib/pulls";
+import { MARK_WORDS, marksOf } from "../lib/notifications";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
+import { Corner, useEveryList, useListOf, useLists } from "../ui/notifications";
 import { canStart } from "./start";
 import { Body, Button, Fold, Group, Problem, Row, Screen, Waiting } from "../ui/parts";
 import { PullBadge, usePulls } from "../ui/pull";
@@ -132,7 +134,18 @@ function Computer({ host }: { host: HostId }) {
   };
 
   const name = channel?.host.name ?? computer?.name ?? "Computer";
-  const title = <Stack.Screen options={{ title: name }} />;
+  // The bell counts what needs you on every computer, so the others are read here too; this
+  // one's list also marks its workspaces.
+  useListOf(host, name, channel, reach);
+  useEveryList(host, asked);
+  const { held } = useLists();
+  const marks = useMemo(() => marksOf(held.get(host)?.page), [held, host]);
+  const title = (
+    <>
+      <Stack.Screen options={{ title: name }} />
+      <Corner />
+    </>
+  );
 
   if (reach?.kind === "gone") {
     return (
@@ -191,20 +204,36 @@ function Computer({ host }: { host: HostId }) {
         const here = shown?.filter((workspace) => workspace.project === project.id) ?? [];
         if (here.length === 0) return null;
         const open = !folds.has(host, project.id);
-        // What a folded project would otherwise hide: that agents are at work inside it.
+        // What a folded project would otherwise hide: what waits inside it, and that agents
+        // are at work there.
         const running = here.reduce((sum, workspace) => sum + workspace.running, 0);
+        const needs = here.filter((workspace) => marks.get(workspace.id) === "needs").length;
+        const finished = here.filter((workspace) => marks.get(workspace.id) === "finished").length;
+        const inside = [
+          needs > 0 ? `${needs} ${needs === 1 ? "needs" : "need"} you` : "",
+          finished > 0 ? `${finished} finished` : "",
+          running > 0 ? `${running} running` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
         return (
           <Fold
             key={project.id}
             title={project.name}
             note={here.length}
-            attention={!open && running > 0 ? `${running} running` : undefined}
+            attention={!open && inside ? inside : undefined}
             open={open}
             onToggle={() => fold(project.id)}
           >
             <Group>
               {here.map((workspace) => {
-                const badge = workspace.running > 0 ? `${workspace.running} running` : "";
+                // What waits for its person says more than that something is running.
+                const mark = marks.get(workspace.id);
+                const badge = mark
+                  ? MARK_WORDS[mark]
+                  : workspace.running > 0
+                    ? `${workspace.running} running`
+                    : "";
                 const [pull, ...others] = pullsOf.get(workspace.id) ?? [];
                 return (
                   <Row
@@ -212,7 +241,7 @@ function Computer({ host }: { host: HostId }) {
                     title={workspace.name}
                     {...(workspace.detail ? { detail: workspace.detail } : {})}
                     monoDetail
-                    {...(badge ? { badge } : {})}
+                    {...(badge ? { badge, badgeKind: mark ?? "now" } : {})}
                     {...(pull
                       ? {
                           trailing: (

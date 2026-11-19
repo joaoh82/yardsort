@@ -143,6 +143,22 @@ button.primary {
   font-weight: 600;
 }
 
+a.button {
+  display: inline-block;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+}
+
+a.button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
 button.danger {
   border-color: var(--bad);
   color: var(--bad);
@@ -632,54 +648,6 @@ details[open] {
   overflow: hidden;
 }
 
-/* Remote: signing in, and letting devices in */
-
-.stack {
-  display: grid;
-  gap: 12px;
-}
-
-.steps {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding-left: 20px;
-  overflow-wrap: anywhere;
-}
-
-.asking {
-  display: grid;
-  gap: 10px;
-}
-
-.asking label.check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.choices {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 16px;
-}
-
-.pair-offer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 20px;
-}
-
-.qr {
-  border-radius: 6px;
-}
-
-.pair-code {
-  font-size: 22px;
-}
-
 /* What was done */
 
 .activity {
@@ -798,4 +766,42 @@ details[open] {
   .activity .what {
     grid-column: 1 / -1;
   }
+}
+
+/* Pairing */
+
+.pairing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: center;
+}
+
+/* Dark on light, whatever the page's colours: what a phone's camera reads best. */
+.qr {
+  width: 200px;
+  height: 200px;
+  padding: 12px;
+  background: #ffffff;
+  border-radius: 8px;
+}
+
+.pair-code {
+  font-family: var(--mono);
+  font-size: 1.6em;
+  letter-spacing: 0.08em;
+}
+
+.choices {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.choices label.check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 8px;
+  font-size: 14px;
 }

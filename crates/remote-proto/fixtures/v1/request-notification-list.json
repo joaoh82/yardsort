@@ -1,0 +1,6 @@
+{
+  "requestId": "r-60",
+  "protocol": { "major": 1, "minor": 15 },
+  "op": "notification.list",
+  "params": {}
+}

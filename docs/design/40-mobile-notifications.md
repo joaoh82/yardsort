@@ -23,6 +23,7 @@ and the body. The computer does not send words, a project name, a prompt, or a o
 | `workflow`      | `question`  | `question:{run}:{step}:{opened}`        | A workflow has a question          |
 | `workflow`      | `approval`  | `approval:{run}:{step}:{opened}`        | A workflow is waiting for approval |
 | `agent`         | `approval`  | `{run}:approval:{asked}`                | An agent needs you                 |
+| `agent`         | `finished`  | `{row}:finished:{finished}`             | An agent finished                  |
 
 The event key the computer submits, and the server stores, is the category prefix plus the
 SHA-256 of that rest, written in hex. Two computers hash the same rest, so they still dedupe.
@@ -46,8 +47,8 @@ case letters, digits, and `:._-`. Upper case is refused, so a one-time code cann
 the key. A field the server does not know, including `code`, is refused.
 
 The body is a fixed sentence. It says to open the item on the phone. A workflow question or
-approval says to answer or approve there. An agent's says to open its terminal there. Installing a
-desktop update stays on the computer.
+approval says to answer or approve there. An agent's says to open its terminal there, or to open
+it to see where it stands. Installing a desktop update stays on the computer.
 
 ### An agent that needs you
 
@@ -71,6 +72,35 @@ as the other seen rows do.
 
 Only a computer signed in to a server as a host queues one. An ended run does not, since there is
 no terminal left to open.
+
+### An agent that finished
+
+Added with the Notifications list ([49](49-notifications.md), its slice 5). The list has a row
+for an agent that finished a stretch of work and was not looked at. A row that stays unseen is
+told to the phone: the `agent` category's second kind, `finished`.
+
+- **Only what went unseen.** Each time the computer hands over its outbox, about every 20
+  seconds, it looks at the list first (`notify::agents_finished`). A finished row it finds
+  unseen is only noted. One still unseen ten seconds or more after that is queued. So a row
+  made while its terminal is on screen, which the window marks seen within a second, is never
+  told of, and neither is one the phone marked seen by watching that agent.
+- **One notice is one finish.** `row` is the list's id for the row and `finished` is when the
+  agent finished. An agent that finishes again before anyone looked moves its row to the later
+  time, and that finish is told of too.
+- **Only what is news.** A row older than ten minutes when it is first found is not told of:
+  an agent that finished while Yardsort was closed, or before the computer signed in to a
+  server, is in the list and is not pushed.
+- **Only that it finished.** Not a turn that failed, a process that stopped with an error, or
+  a workflow's run: those are in the list, and a failed run has its own notice.
+- It carries the workspace and the terminal, as an agent that needs you does, and the phone
+  opens that conversation. Opening it there marks the row seen.
+
+Nothing is read from the terminal. What the agent said, its workspace's name and its project
+stay on the computer: the push says **An agent finished** and no more.
+
+It is a kind and not a category of its own so that a phone app from before it opens the notice
+as it opens an agent's: by its terminal. A server from before it refuses the kind, and the
+computer drops the notice.
 
 ## Delivery
 
@@ -130,14 +160,20 @@ token exchange logs its status and leaves the notice queued.
 each for `task`, `review`, `failure`, `desktopUpdate`, `workflow`, and `agent`. Any device signed
 in to the account may read or replace them. The default is all on, and not muted.
 
-`agent` came later than the rest, so it may be absent both ways. A phone from before it saves
-without it, and the stored value is kept. A server from before it does not send it, and the phone
-then does not show the switch.
+The `agent` category has two flags, one for each of its kinds: `agent` for an agent that needs
+you, and `agentFinished` for one that finished (migration `0013`). Every other category has one.
+
+`agent` and `agentFinished` came later than the rest, so each may be absent both ways. A phone
+from before one saves without it, and the stored value is kept. A server from before one does
+not send it, and the phone then does not show the switch, and does not send the field back.
 
 The phone's Settings → Notifications is that screen. The mute and the categories are for the
 account in use, and the section is titled for that account. Mute covers every category. A
 category that is off, or a mute, stores the notice so the same event is not sent later when the
-setting is turned back on. A new event after that is sent.
+setting is turned back on. A new event after that is sent. A notice already waiting for a phone that could not be reached
+is dropped when its switch is off by the time the phone is back. On PostgreSQL that did not
+cover an agent that needs you until `agentFinished` was added: the list of what to drop named
+the first five categories only.
 
 ## Deduplication
 

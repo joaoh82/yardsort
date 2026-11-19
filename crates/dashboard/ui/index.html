@@ -53,11 +53,11 @@
         </div>
         <nav id="tabs" class="tabs" aria-label="Sections">
           <a href="#overview" data-tab="overview">Overview</a>
+          <a href="#remote" data-tab="remote">Remote</a>
           <a href="#agents" data-tab="agents">Agents</a>
           <a href="#git" data-tab="git">Git</a>
           <a href="#commands" data-tab="commands">Commands</a>
           <a href="#terminal" data-tab="terminal">Terminal</a>
-          <a href="#remote" data-tab="remote">Remote</a>
           <a href="#access" data-tab="access">Access</a>
           <a href="#activity" data-tab="activity">Activity</a>
         </nav>
@@ -86,6 +86,93 @@
           <article class="card">
             <h2>Projects</h2>
             <div id="overview-projects"></div>
+          </article>
+        </section>
+
+        <!-- Remote -->
+        <section id="tab-remote" class="tab" hidden>
+          <article id="remote-elsewhere" class="card" hidden>
+            <h2>Remote</h2>
+            <p class="muted">
+              Sign this computer in and pair devices from the Yardsort app's window:
+              <b>Settings → Remote</b>.
+            </p>
+          </article>
+
+          <article id="server-card" class="card" hidden>
+            <h2>Yardsort server</h2>
+            <p id="server-state" class="state"></p>
+            <form id="server-form" class="form" hidden>
+              <p class="muted">
+                Sign this computer in as a host, so the devices you pair with it reach it. You sign
+                in at the server in a browser, as yourself.
+              </p>
+              <label>
+                Server
+                <input
+                  id="server-url"
+                  name="server"
+                  placeholder="https://remote.example.com"
+                  spellcheck="false"
+                  autocapitalize="off"
+                  required
+                />
+              </label>
+              <label>
+                Name
+                <input id="server-name" name="name" maxlength="100" spellcheck="false" />
+                <span class="faint"
+                  >What phones call this computer. Left empty, its host name.</span
+                >
+              </label>
+              <div class="actions">
+                <button class="primary" type="submit">Sign in</button>
+              </div>
+            </form>
+            <div id="server-waiting" hidden>
+              <p>
+                <a id="server-open" class="button primary" rel="noreferrer noopener" target="_blank"
+                  >Open the sign-in page</a
+                >
+              </p>
+              <p class="muted">
+                Once signed in, the browser is sent to an address starting
+                <code id="server-back">http://127.0.0.1/signed-in</code>, which goes nowhere unless
+                that port is forwarded to this computer. Copy the whole address from its address
+                bar, and paste it here.
+              </p>
+              <form id="paste-form" class="form inline" autocomplete="off">
+                <input
+                  id="paste-address"
+                  name="address"
+                  placeholder="http://127.0.0.1:…/signed-in?code=…"
+                  spellcheck="false"
+                  autocapitalize="off"
+                  required
+                />
+                <button class="primary" type="submit">Finish signing in</button>
+              </form>
+              <p id="paste-error" class="error" role="alert" hidden></p>
+              <div class="actions">
+                <button id="server-cancel" type="button">Cancel</button>
+              </div>
+            </div>
+            <div class="actions">
+              <button id="server-sign-out" class="danger" type="button" hidden>
+                Sign out of the server
+              </button>
+            </div>
+            <p id="server-error" class="error" role="alert" hidden></p>
+          </article>
+
+          <article id="pair-card" class="card" hidden>
+            <h2>Pair a device</h2>
+            <p class="muted">
+              Let a phone, or the Yardsort app on another computer, reach this one. It asks with a
+              code; you say what it may do. Nothing is let in without your answer.
+            </p>
+            <div id="pair-view"></div>
+            <p id="pair-error" class="error" role="alert" hidden></p>
           </article>
         </section>
 
@@ -241,104 +328,6 @@
             <p id="terminal-error" class="error" role="alert" hidden></p>
             <p id="terminal-none" class="muted">No terminal is open.</p>
             <div id="terminal-view" class="terminal-view" hidden></div>
-          </article>
-        </section>
-
-        <!-- Remote -->
-        <section id="tab-remote" class="tab" hidden>
-          <article class="card">
-            <h2>Yardsort server</h2>
-            <p id="remote-state" class="state"></p>
-            <p id="remote-unmanaged" class="muted" hidden>
-              Remote is set up in the Yardsort app on this computer, under
-              <b>Settings → Remote</b>: signing in, and letting devices in.
-            </p>
-            <div id="remote-signed-out" class="stack" hidden>
-              <p class="muted">
-                Signed in to a Yardsort server, this computer can be reached from your phone and
-                your other computers, once you let each in below. Whoever runs the server can see
-                what passes through it.
-              </p>
-              <form id="remote-form" class="form">
-                <label>
-                  Server
-                  <input
-                    id="remote-server"
-                    name="server"
-                    placeholder="https://remote.example.com"
-                    spellcheck="false"
-                    autocapitalize="off"
-                    autocomplete="off"
-                    required
-                  />
-                </label>
-                <label>
-                  Name
-                  <input id="remote-name" name="name" maxlength="64" autocomplete="off" required />
-                  <span class="faint">What your devices will call this computer.</span>
-                </label>
-                <div class="actions">
-                  <button class="primary" type="submit">Sign in</button>
-                  <span id="remote-said" class="said" role="status"></span>
-                </div>
-              </form>
-            </div>
-            <div id="remote-waiting" class="stack" hidden>
-              <ol class="steps">
-                <li>
-                  Open
-                  <a id="remote-url" rel="noreferrer noopener" target="_blank">the sign-in page</a>
-                  and sign in.
-                </li>
-                <li>
-                  The browser is then sent to an address starting
-                  <code id="remote-back">http://127.0.0.1/signed-in</code>, which shows an error
-                  there: nothing answers at it on the computer you are using. Copy that whole
-                  address from the address bar.
-                </li>
-                <li>Paste it here.</li>
-              </ol>
-              <form id="remote-finish" class="form inline">
-                <input
-                  id="remote-address"
-                  name="address"
-                  class="mono"
-                  placeholder="http://127.0.0.1:…/signed-in?code=…"
-                  spellcheck="false"
-                  autocapitalize="off"
-                  autocomplete="off"
-                  required
-                />
-                <button class="primary" type="submit">Finish</button>
-              </form>
-              <div class="actions">
-                <button id="remote-cancel" type="button">Cancel</button>
-                <span id="remote-finish-said" class="said" role="status"></span>
-              </div>
-            </div>
-          </article>
-
-          <article id="devices-card" class="card" hidden>
-            <h2>Devices</h2>
-            <p class="muted">
-              A device you let in reaches this computer's workspaces and terminals through the
-              server. Whoever is signed in to this dashboard can let one in.
-            </p>
-            <p id="devices-problem" class="error" role="alert" hidden></p>
-            <div id="devices-asking"></div>
-            <div id="devices-list" class="rows"></div>
-            <div class="actions">
-              <button id="pair-start" class="primary" type="button">Pair a device</button>
-              <span id="pair-said" class="said" role="status"></span>
-            </div>
-            <div id="pair-offer" class="pair-offer" hidden>
-              <canvas id="pair-qr" class="qr" width="0" height="0"></canvas>
-              <div>
-                <p>Scan this with the Yardsort app, or type this code in it:</p>
-                <p id="pair-code" class="code pair-code"></p>
-                <p id="pair-left" class="faint"></p>
-              </div>
-            </div>
           </article>
         </section>
 

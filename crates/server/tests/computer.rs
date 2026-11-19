@@ -4,7 +4,8 @@
 //! the host's code, waits for the host's person, shows what the host shows once let in, and loses
 //! it again when the host takes the grant back. A terminal there is watched, typed into once this
 //! computer takes control, and watched again after the link drops. Work is started there, and an
-//! ended conversation resumed, by the host's ids.
+//! ended conversation resumed, by the host's ids. The host's Notifications list is read with the
+//! rest, read again when the host says it changed, and a row seen here is seen there.
 
 mod common;
 
@@ -74,6 +75,8 @@ struct Here {
     terminals: Arc<PtyHost>,
     identity: HostIdentity,
     starting: Option<Arc<dyn Starting>>,
+    /// What keeps its Notifications list, when it keeps one.
+    notifications: Option<yardsort_core::notifications::Keeper>,
 }
 
 impl Serving for Here {
@@ -89,6 +92,7 @@ impl Serving for Here {
             conversations: None,
             tests: None,
             pulls: None,
+            notifications: self.notifications.as_ref(),
         });
     }
 }
@@ -149,6 +153,8 @@ struct Desk {
     store: Store,
     kept: Arc<Kept>,
     changes: AtomicUsize,
+    /// How often it was told that a host's Notifications list is not what it was.
+    listed: AtomicUsize,
 }
 
 struct Shared(Arc<Kept>);
@@ -180,6 +186,9 @@ impl ComputerHome for Desk {
     }
     fn changed(&self) {
         self.changes.fetch_add(1, Ordering::SeqCst);
+    }
+    fn notifications_changed(&self) {
+        self.listed.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -214,6 +223,7 @@ async fn a_computer_pairs_by_code_sees_what_the_host_shows_once_let_in_and_loses
             name: "Workstation".into(),
         },
         starting: None,
+        notifications: None,
     });
     let program = here.terminals.spawn(waits(&workspace.id)).unwrap();
     let _connector = Connector::start(
@@ -233,6 +243,7 @@ async fn a_computer_pairs_by_code_sees_what_the_host_shows_once_let_in_and_loses
         store: Store::open(&desk_dir.path().join("yardsort.db")).unwrap(),
         kept: Arc::default(),
         changes: AtomicUsize::new(0),
+        listed: AtomicUsize::new(0),
     });
     let signed_in = s.sign_in("alice", "Laptop", DeviceKind::Computer).await;
     let device = signed_in.device.clone();
@@ -428,6 +439,7 @@ async fn a_computer_watches_a_terminal_types_once_it_takes_control_and_loses_it_
             name: "Workstation".into(),
         },
         starting: None,
+        notifications: None,
     });
     let program = here.terminals.spawn(echoes(&workspace.id)).unwrap();
     let start_connector = || {
@@ -449,6 +461,7 @@ async fn a_computer_watches_a_terminal_types_once_it_takes_control_and_loses_it_
         store: Store::open(&desk_dir.path().join("yardsort.db")).unwrap(),
         kept: Arc::default(),
         changes: AtomicUsize::new(0),
+        listed: AtomicUsize::new(0),
     });
     let signed_in = s.sign_in("alice", "Laptop", DeviceKind::Computer).await;
     let device = signed_in.device.clone();
@@ -843,6 +856,7 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
             name: "Workstation".into(),
         },
         starting: Some(Arc::clone(&stand) as Arc<dyn Starting>),
+        notifications: None,
     });
     let _connector = Connector::start(
         host_id.clone(),
@@ -860,6 +874,7 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
         store: Store::open(&desk_dir.path().join("yardsort.db")).unwrap(),
         kept: Arc::default(),
         changes: AtomicUsize::new(0),
+        listed: AtomicUsize::new(0),
     });
     let signed_in = s.sign_in("alice", "Laptop", DeviceKind::Computer).await;
     let device = signed_in.device.clone();
@@ -1124,4 +1139,194 @@ async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_i
     for terminal in here.terminals.list() {
         let _ = here.terminals.kill(&terminal.id);
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computer_reads_a_hosts_notifications_hears_of_a_change_and_marks_a_row_seen_there() {
+    use remote_host::computer::notifications;
+    use remote_proto::notification::{NotificationKind, NotificationPart};
+    use yardsort_core::notifications as list;
+    use yardsort_core::store::{now_ms, NewSession};
+
+    let s = Served::start(MemoryRecords::default()).await;
+    let host = s.sign_in("alice", "Workstation", DeviceKind::Host).await;
+    let summary: HostSummary = ok(s
+        .post_as(
+            &host.access,
+            "v1/hosts",
+            Some(&json!({"name": "Workstation"})),
+        )
+        .await)
+    .await;
+    let host_id = summary.id;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("yardsort.db")).unwrap();
+    let project = store.add_project("alpha", "/code/alpha").unwrap();
+    let workspace = store
+        .add_worktree(&project.id, "work", "/code/alpha-wt", None, None)
+        .unwrap();
+    // Two agents' conversations on the host. One has finished a stretch of work nobody saw.
+    let agent = |record: &str, terminal: &str| {
+        store
+            .add_session(&NewSession {
+                id: record,
+                workspace_id: &workspace.id,
+                harness_id: "claude",
+                model: None,
+                effort: None,
+                harness_session_id: None,
+                title: "Cover half-hour zones",
+                forked_from: None,
+                pty_session_id: terminal,
+                prompt: None,
+            })
+            .unwrap();
+    };
+    agent("s-one", "pty-one");
+    agent("s-two", "pty-two");
+    assert!(list::settled_terminal(&store, "pty-one", 30_000, now_ms()).unwrap());
+    let here = Arc::new(Here {
+        _dir: dir,
+        store,
+        git: yardsort_core::git::testing::git(),
+        terminals: Arc::new(PtyHost::new(Arc::new(|_| {}))),
+        identity: HostIdentity {
+            id: host_id.clone(),
+            name: "Workstation".into(),
+        },
+        starting: None,
+        notifications: Some(list::Keeper::new(|| {})),
+    });
+    let _connector = Connector::start(
+        host_id.clone(),
+        Arc::new(HostAccess {
+            base: s.base.to_string(),
+            access: host.access.clone(),
+        }),
+        Arc::clone(&here) as Arc<dyn Serving>,
+    );
+    until("the host is connected", || s.relay.connected(&host_id)).await;
+
+    let desk_dir = tempfile::tempdir().unwrap();
+    let desk = Arc::new(Desk {
+        computer: Computer::default(),
+        store: Store::open(&desk_dir.path().join("yardsort.db")).unwrap(),
+        kept: Arc::default(),
+        changes: AtomicUsize::new(0),
+        listed: AtomicUsize::new(0),
+    });
+    let signed_in = s.sign_in("alice", "Laptop", DeviceKind::Computer).await;
+    let device = signed_in.device.clone();
+    let client = Client::new(s.base.as_str()).unwrap();
+    let server = client.describe().await.unwrap();
+    computer::sign_in(&desk, client, &server, "Laptop", signed_in)
+        .await
+        .unwrap();
+    let offer: Offer = ok(s
+        .post_as(&host.access, &format!("v1/hosts/{host_id}/offers"), None)
+        .await)
+    .await;
+    let asked = computer::pair(&desk, offer.code.expose()).await.unwrap();
+    let _: serde_json::Value = ok(s
+        .post_as(
+            &host.access,
+            &format!("v1/grants/{}/approve", asked.id),
+            Some(&json!({"scopes": ASKED, "projects": {"kind": "all"}})),
+        )
+        .await)
+    .await;
+    keep_approved(
+        &here.store,
+        &asked.id,
+        &DeviceId::new(device.to_string()).unwrap(),
+        "Laptop",
+        &ASKED.into_iter().collect(),
+        &ProjectGrant::All,
+        1,
+    )
+    .unwrap();
+
+    // Let in, it reads the host's list with everything else, each row under the host's name.
+    until("the host's list is read", || {
+        !notifications::listed(&desk).is_empty()
+    })
+    .await;
+    let rows = notifications::listed(&desk);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].host_id, host_id.to_string());
+    assert_eq!(rows[0].host_name, "Workstation");
+    assert_eq!(rows[0].row.kind, NotificationKind::AgentFinished);
+    assert_eq!(rows[0].row.part, NotificationPart::Finished);
+    assert_eq!(rows[0].row.project_name, "alpha");
+    assert_eq!(rows[0].row.workspace_name, "work");
+    assert_eq!(
+        rows[0].row.terminal.as_ref().map(|t| t.as_str()),
+        Some("pty-one")
+    );
+    assert!(
+        desk.listed.load(Ordering::SeqCst) > 0,
+        "the window was told"
+    );
+
+    // The other agent finishes. The host says its list changed, and the computer reads it
+    // again at once, well before it would have by itself.
+    let told = desk.listed.load(Ordering::SeqCst);
+    let began = Instant::now();
+    assert!(list::settled_terminal(&here.store, "pty-two", 45_000, now_ms()).unwrap());
+    until("the new row is shown", || {
+        notifications::listed(&desk).len() == 2
+    })
+    .await;
+    assert!(
+        began.elapsed() < computer::REREAD_EVERY / 2,
+        "it was told, not found at the next reading: {:?}",
+        began.elapsed()
+    );
+    assert!(desk.listed.load(Ordering::SeqCst) > told);
+
+    // One row seen here: seen there, for the host's own window and every other device, and
+    // shown so here at once.
+    let first = rows[0].row.id.clone();
+    notifications::seen(&desk, host_id.as_str(), vec![first.clone()])
+        .await
+        .unwrap();
+    let part_here = |id: &str| {
+        notifications::listed(&desk)
+            .into_iter()
+            .find(|there| there.row.id == id)
+            .map(|there| there.row.part)
+    };
+    assert_eq!(part_here(&first), Some(NotificationPart::Earlier));
+    let there = list::list(&here.store, now_ms() + 1).unwrap();
+    let part_there = |id: &str| there.iter().find(|row| row.id == id).map(|row| row.part);
+    assert_eq!(part_there(&first), Some(list::NotificationPart::Earlier));
+    assert_eq!(
+        there
+            .iter()
+            .filter(|row| row.part == list::NotificationPart::Finished)
+            .count(),
+        1,
+        "the other row was not touched"
+    );
+
+    // All of them, and nothing is left unseen on the host.
+    notifications::seen_all(&desk).await.unwrap();
+    assert!(list::list(&here.store, now_ms() + 1)
+        .unwrap()
+        .iter()
+        .all(|row| row.part == list::NotificationPart::Earlier));
+    until("the host's word agrees", || {
+        notifications::listed(&desk)
+            .iter()
+            .all(|there| there.row.part == NotificationPart::Earlier)
+    })
+    .await;
+
+    // A host that is away shows no rows here.
+    drop(_connector);
+    until("the host is away", || {
+        computer::view(desk.as_ref(), host_id.as_str()).is_none_or(|v| v.link != Link::Online)
+    })
+    .await;
+    assert!(notifications::listed(&desk).is_empty());
 }

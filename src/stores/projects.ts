@@ -109,6 +109,8 @@ interface ProjectsState {
   schedulesOpen: boolean;
   /** The Triggers view is open in the center panel, which it takes over the same way. */
   triggersOpen: boolean;
+  /** The Notifications view is open in the center panel, which it takes over the same way. */
+  notificationsOpen: boolean;
   /** A workspace on another computer this one reaches as a client, open in the center panel as
    *  a local one is. The local selection is kept beneath it, and comes back when it goes. */
   remote: RemoteSelection | null;
@@ -199,6 +201,8 @@ interface ProjectsState {
   /** Show the Triggers view in the center panel, on one workspace or session if given, or
    *  close it. */
   openTriggers: (open: boolean, focus?: TriggersFocus) => void;
+  /** Show the Notifications view in the center panel, or close it. */
+  openNotifications: (open: boolean) => void;
   /** Compose a run inside a workspace that already exists, rather than a new one. */
   composeIn: (workspace: Workspace, prompt?: string, harness?: string) => void;
   /** Compose a new workspace forked from `workspace`: a new branch from its branch, in a new
@@ -293,6 +297,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     testsOpen: false,
     schedulesOpen: false,
     triggersOpen: false,
+    notificationsOpen: false,
     ...NOT_THERE,
     triggersFocus: null,
     ui: {},
@@ -480,6 +485,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           testsOpen: false,
           schedulesOpen: false,
           triggersOpen: false,
+          notificationsOpen: false,
           ...NOT_THERE,
         });
       }
@@ -499,6 +505,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        notificationsOpen: false,
         ...NOT_THERE,
       });
       save(KEYS.selected, workspaceId);
@@ -520,6 +527,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        notificationsOpen: false,
         ...NOT_THERE,
         // Composing inside a collapsed project would hide where the workspace will appear.
         collapsed: state.collapsed.filter((id) => id !== projectId),
@@ -535,6 +543,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        notificationsOpen: false,
         ...NOT_THERE,
         composingProjectId: null,
         composingWorkspaceId: null,
@@ -556,6 +565,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        notificationsOpen: false,
         workflowId: null,
         composingProjectId: null,
         composingWorkspaceId: null,
@@ -577,6 +587,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        notificationsOpen: false,
         workflowId: null,
         composingProjectId: null,
         composingWorkspaceId: null,
@@ -596,6 +607,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        notificationsOpen: false,
         ...NOT_THERE,
         workflowId: null,
         composingProjectId: null,
@@ -615,6 +627,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        notificationsOpen: false,
         ...NOT_THERE,
         usageOpen: false,
         workflowId: null,
@@ -634,6 +647,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        notificationsOpen: false,
         ...NOT_THERE,
         pullRequestsOpen: false,
         usageOpen: false,
@@ -653,6 +667,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: open,
         schedulesOpen: false,
         triggersOpen: false,
+        notificationsOpen: false,
         ...NOT_THERE,
         tasksOpen: false,
         pullRequestsOpen: false,
@@ -672,7 +687,30 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       set({
         schedulesOpen: open,
         triggersOpen: false,
+        notificationsOpen: false,
         ...NOT_THERE,
+        testsOpen: false,
+        tasksOpen: false,
+        pullRequestsOpen: false,
+        usageOpen: false,
+        workflowId: null,
+        composingProjectId: null,
+        composingWorkspaceId: null,
+        composingPrompt: null,
+        composingBranch: null,
+        composingTask: null,
+        composingHarness: null,
+        composingFork: null,
+      });
+    },
+
+    openNotifications(open) {
+      set({
+        notificationsOpen: open,
+        triggersOpen: false,
+        triggersFocus: null,
+        ...NOT_THERE,
+        schedulesOpen: false,
         testsOpen: false,
         tasksOpen: false,
         pullRequestsOpen: false,
@@ -691,6 +729,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     openTriggers(open, focus) {
       set({
         triggersOpen: open,
+        notificationsOpen: false,
         ...NOT_THERE,
         triggersFocus: (open && focus) || null,
         schedulesOpen: false,
@@ -726,6 +765,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        notificationsOpen: false,
         ...NOT_THERE,
       });
       save(KEYS.selected, workspace.id);
@@ -766,6 +806,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        notificationsOpen: false,
         ...NOT_THERE,
         collapsed: state.collapsed.filter((id) => id !== workspace.projectId),
       }));

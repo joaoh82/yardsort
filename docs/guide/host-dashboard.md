@@ -13,8 +13,8 @@ devices in. It is what you would otherwise do over SSH, a command at a time, aft
 
 It is not another Yardsort. There are no workspaces, agents' terminals or conversations in it,
 and it starts no agent: that is the [phone's and the desktop's](remote.md). It does not need
-Remote either, so a server that is not signed in to anything yet serves it all the same, and is
-signed in from it.
+Remote either, so a server that is not signed in to anything yet serves it all the same, and on
+a computer with no screen you can sign it in from the page.
 
 - **On a computer with no screen**, `yardsort-host serve` serves it unless you turn it off.
 - **In the app**, it is off until you turn it on under **Settings → Remote → Host dashboard**.
@@ -32,16 +32,15 @@ guess. A link is good once, for ten minutes; the browser then stays signed in fo
 **Whoever signs in has a shell on that computer, as the user the host runs as.** That is what
 it is for. Treat a sign-in link as you would treat an SSH login there.
 
-**On a computer with no screen, whoever signs in can also let a device in**, and sign the
-computer in to a Yardsort server: its [Remote](#remote) tab does both, so that a server can be
-set up from a browser alone. Everywhere else in Yardsort a device is let in only by a person at
-a terminal of their own or at the app's window. Here it is whoever holds a dashboard session, so
-keep the dashboard's sign-in as close as you would keep pairing.
+**On a computer with no screen, that includes Remote**: whoever signs in can sign it in to a
+Yardsort server, sign it out, and [pair a device](#remote) with it, as you can at a terminal
+there. Anyone who can run commands as that user could do all of that anyway.
 
-It approves no [memory](memory.md) note and turns no sync on: those stay at a terminal of your
-own, or in the app. And only the page's own **Remote** tab pairs: `yardsort-host pair` typed
-into **Commands** or into the page's **Terminal** is refused, as it is for an agent, so a
-command you ran for another reason lets nobody in.
+It approves no [memory](memory.md) note, turns no sync on, and neither exports nor deletes your
+account. Those stay at a terminal of your own, or in the app, so that nothing an agent could reach
+can do them. A command you run from the dashboard is refused them too, and refused pairing:
+`yardsort-host pair` typed into **Commands** or into the page's **Terminal** does not pair a
+device. Only the page's own buttons do, in a browser you signed in.
 
 ## Opening it on a computer with no screen
 
@@ -99,6 +98,35 @@ its link to the server, how many devices are let in, and how many terminals are 
 it, the computer: its system, how busy its processors are, its memory, and how full the disks
 under your home and your workspaces are. Below, the projects there.
 
+### Remote
+
+![The dashboard's Remote tab: the host signed in to a server with a button to sign it out, and a phone asking to watch and type, with whether to let it type, the projects it may reach, and Let it in or Turn it away](../images/host-dashboard-remote.png)
+
+On a computer with no screen, what `yardsort-host sign-in`, `sign-out` and `pair` do at a
+terminal. In the app it only says to use the window: **Settings → Remote** does all of it there.
+
+**Signing in.** Not signed in yet, it asks for the server's address and the name phones will see,
+which is the computer's host name if you leave it empty. **Sign in** gives **Open the sign-in
+page**: sign in there, as yourself. The browser is then sent to an address starting
+`http://127.0.0.1:<port>/signed-in`, which goes nowhere unless you forwarded that port to the
+computer, in which case it finishes by itself. Otherwise copy the whole address from the address
+bar, paste it into the page and press **Finish signing in**. A wrong address is said, and you can
+paste another. The host links to the server at once: there is no stopping and starting it, as
+there is for `yardsort-host sign-in`. **Cancel** gives up a sign-in still waiting for its
+browser. Once the address is taken, the sign-in is finished rather than stopped part way, which
+takes a moment, and **Cancel** says so: sign out afterwards if it was not wanted.
+
+Signed in, it says as whom and how the link is, and **Sign out of the server** removes the
+computer at the server, after asking. Every device paired with it loses it; what runs there keeps
+running.
+
+**Pairing a device.** **Show a pairing code** shows a QR code and the code to type, good once for
+five minutes, as `pair` does. Scan it or type it on the phone, or in the app on another computer.
+When the device asks, the page says its name and what it asks for. Tick **Let it type** if it
+asked to type and you want it to, **Let it approve or answer workflows** if it asked for that,
+and, with more than one project, the projects it may reach. Then **Let it in** or **Turn it
+away**. Nothing is let in without that answer. **Stop** takes the code back.
+
 ### Agents
 
 The agents Yardsort can start on that computer, as its login shell finds them: where each is and
@@ -140,8 +168,8 @@ started.
 `-y`, or whatever the command has for that: `sudo -n apt-get install -y ripgrep`, not
 `sudo apt-get install ripgrep`. For one that must ask, use the [Terminal](#terminal).
 
-**A command is not you at a terminal.** `yardsort-host pair`, `yardsort-host dashboard`, and the
-`sync` and `memory` commands that [only a person may run](headless-host.md#only-a-person-can-pair-a-device)
+**A command is not you at a terminal.** `yardsort-host pair`, `yardsort-host dashboard`,
+`yardsort-host account export` and `account delete`, and the `sync` and `memory` commands that [only a person may run](headless-host.md#only-a-person-can-pair-a-device)
 are refused to a command the dashboard ran, and to anything that command starts.
 
 **Jobs** lists what has been run since the host last started, an agent's install and a GitHub
@@ -177,43 +205,12 @@ It is the dashboard's terminal, not one of your own: `yardsort-host pair` and
 `yardsort-host dashboard` typed into it are refused, as they are in **Commands**. Pair on the
 [Remote](#remote) tab.
 
-### Remote
-
-![The dashboard's Remote tab: the host signed in to a server, a phone asking to watch and type with its answers beside it, one device already let in, and a pairing code with its QR code](../images/host-dashboard-remote.png)
-
-On a computer with no screen, this tab does what `yardsort-host sign-in` and `yardsort-host pair`
-do at a terminal. In the app it only says where the computer is signed in: the app keeps both
-under **Settings → Remote**.
-
-**Signing in to a server.** Give the server's address and a name for this computer, and press
-**Sign in**. Then:
-
-1. Open **the sign-in page** it links to, in any browser, and sign in.
-2. The browser is then sent to an address starting `http://127.0.0.1:<port>/signed-in`, which
-   shows an error: nothing answers there on the computer you are sitting at. Copy that whole
-   address from the address bar.
-3. Paste it into the page and press **Finish**.
-
-The host is signed in at once, with no restart, and its link to the server comes up by itself.
-The address you paste is worth nothing to anyone else: it finishes only the sign-in this host
-started. If you forwarded that port to the server over SSH as well, the sign-in finishes by
-itself and there is nothing to paste. To sign in to a different server, sign out first with
-`yardsort-host sign-out`.
-
-**Letting a device in.** **Pair a device** shows a code and a QR code, good once, for five
-minutes. Scan it with the Yardsort app, or type the code into it. The device then shows on the
-page, asking; choose **Allow watching**, **Allow watching and typing** or **Deny**, whether it
-may also approve or answer workflows, and, with more than one project, which projects it
-reaches. Nothing is let in without that answer.
-
-**Devices** lists the ones let in, and **Take off** ends one's way in at once.
-
 ### Activity
 
 What was done through the dashboard, the newest first: each sign-in and each one refused, each
 command and how it ended, each terminal opened, a change to the tunnel or to Git's name, a
-sign-in to a server, each device let in, refused or taken off. The last 500 are kept, across
-restarts.
+sign-in to a server or out of it from the page, each pairing code shown and each device let in
+or turned away there. The last 500 are kept, across restarts.
 
 - **It never holds what a command printed, a sign-in code, a pairing code or a GitHub token.**
 - **A command is recorded as you typed it**, so a secret typed into a command line is in it, as
@@ -339,9 +336,10 @@ yet.
 - **"Pairing is refused to a command or a terminal the dashboard ran… Or pair from the
   dashboard's Remote tab."** `yardsort-host pair` was typed into the page. Use the **Remote**
   tab's **Pair a device** instead.
-- **"That is not the address this sign-in waits for."** What was pasted on the **Remote** tab is
-  not the address the browser ended at. Copy the whole of it, from `http://127.0.0.1:` to the
-  end. The sign-in still waits, for ten minutes from when it was started.
+- **"This computer is signed in already, as …"** under **Remote**: sign it out first, from the
+  page or with `yardsort-host sign-out`, to sign in to another server.
+- **"No device is asking now. Show a code again."** The code lapsed, or the device's request
+  went, before you answered. Nothing was let in.
 - **"Signed out for now, but … could be neither written nor deleted"** The profile's
   `dashboard` folder cannot be changed, so the sign-out holds only until the host restarts. Fix
   the folder's owner or the full disk, or delete the file it names.

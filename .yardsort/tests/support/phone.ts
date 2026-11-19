@@ -7,9 +7,12 @@
 //   bun .yardsort/tests/support/phone.ts <run dir> sees <name> <expected>
 //   bun .yardsort/tests/support/phone.ts <run dir> refused <name> | ends <name>
 //   bun .yardsort/tests/support/phone.ts <run dir> resumes <name> <message> <expected>
-//   bun .yardsort/tests/support/phone.ts <run dir> registers | opens-notice <name> <pushes file>
+//   bun .yardsort/tests/support/phone.ts <run dir> registers | opens-notice <name> <pushes file> [title]
+//   bun .yardsort/tests/support/phone.ts <run dir> looks-in-time <name> <workspace>
 //   bun .yardsort/tests/support/phone.ts <run dir> lets-a-test-run <name>
 //   bun .yardsort/tests/support/phone.ts <run dir> sees-pull-requests <name>
+//   bun .yardsort/tests/support/phone.ts <run dir> sees-notifications <name>
+//   bun .yardsort/tests/support/phone.ts <run dir> merges <name> [stale]
 //   bun .yardsort/tests/support/phone.ts <run dir> exports
 //   bun .yardsort/tests/support/phone.ts <run dir> signs-in | told-deleted | starts-empty
 //   bun .yardsort/tests/support/phone.ts <run dir> held-back <name> | not-signed-in
@@ -22,13 +25,19 @@
 // one ended conversation the computer can resume, with a message, and waits for the expected text.
 // `registers` gives the server a push token, as a phone allowed to notify does. `opens-notice`
 // takes the one push the stand-in recorded, reads its notice, and checks it names the terminal of
-// the one session running on the computer, and that the push itself names nothing.
+// the one session running on the computer, and that the push itself names nothing. With a
+// title it is that notice and not an agent that needs you: `An agent finished`.
+// `looks-in-time` follows the computer's Notifications list and marks the named workspace's
+// finished row seen the moment it is listed, as someone watching that agent does.
 // `lets-a-test-run` reads the card of the smoke test run waiting in the project's own checkout,
 // is refused letting another file's hash run, lets the one shown run, and leaves the run's id in
 // the run's folder as `test-run`. `sees-pull-requests` asks the computer for its pull requests
 // until it has read them, and checks the one from the project's checkout: its badge's facts, its
-// checks by name with the failed one first, and that one it never read is not found. `exports`
-// signs a phone in and exports the account, every page, to `phone-export.json` in the run's
+// checks by name with the failed one first, and that one it never read is not found.
+// `sees-notifications` follows the computer's Notifications list, starts an agent that works for
+// ten seconds and then waits, is told when the list changes, reads the agent's finished row,
+// marks it seen, and leaves the workspace's name in the run's folder as `seen-workspace`.
+// `exports` signs a phone in and exports the account, every page, to `phone-export.json` in the run's
 // folder, after checking that its own credentials are nowhere in it. `signs-in` signs a phone in
 // and keeps its sign-in; `told-deleted` expects that kept sign-in to be refused, the server saying
 // the account was deleted; `starts-empty` signs a new phone in as the same person and expects an
@@ -328,6 +337,113 @@ switch (doing) {
     channel.close();
     break;
   }
+  case "sees-notifications": {
+    // What a phone that may watch is told of what finished on the computer, and says back.
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    for (const op of ["notification.list", "notification.seen", "notification.follow"]) {
+      if (!channel.host.capabilities.includes(op)) {
+        throw new Error(`The computer does not say it answers ${op}.`);
+      }
+    }
+    const before = await channel.notifications();
+    if (before.finished !== 0 || before.needs !== 0) {
+      throw new Error(`Something is listed before anything ran: ${JSON.stringify(before)}`);
+    }
+    let told = 0;
+    await channel.followNotifications(() => (told += 1));
+
+    // Ten seconds of printing is a stretch of work to whatever watches the terminal; then it
+    // waits, as an agent does when it is done.
+    const project = (await channel.workspaces()).projects.find((p) => p.name === "repo");
+    if (!project) throw new Error("The project is not on the phone.");
+    const started = await channel.startWorkspace({
+      project: project.id,
+      harness: "sh-agent",
+      prompt:
+        "i=0; while [ $i -lt 20 ]; do echo working $i; i=$((i+1)); sleep 0.5; done; echo done; sleep 600",
+    });
+    console.log(`started ${started.harness}`);
+
+    // Nothing is asked until the computer says its list changed.
+    for (let tries = 0; tries < 600 && told === 0; tries++) await Bun.sleep(100);
+    if (told === 0) throw new Error("The computer never said its list changed.");
+    console.log("told that the list changed");
+    let page = await channel.notifications();
+    for (let tries = 0; tries < 50 && page.finished === 0; tries++) {
+      await Bun.sleep(200);
+      page = await channel.notifications();
+    }
+    const row = page.notifications.find((n) => n.part === "finished");
+    if (!row) throw new Error(`No finished row: ${JSON.stringify(page)}`);
+    const facts = {
+      kind: row.kind,
+      workspace: row.workspace,
+      terminal: row.terminal,
+      harness: row.harness,
+      projectName: row.projectName,
+    };
+    const wanted = {
+      kind: "agent.finished",
+      workspace: started.workspace,
+      terminal: started.terminal,
+      harness: "sh-agent",
+      projectName: "repo",
+    };
+    if (JSON.stringify(facts) !== JSON.stringify(wanted)) {
+      throw new Error(`Not the agent that was started: ${JSON.stringify(row)}`);
+    }
+    if (page.finished !== 1 || page.needs !== 0) {
+      throw new Error(`${page.needs} need their person and ${page.finished} finished.`);
+    }
+    console.log(`listed: ${row.workspaceName}, finished and not seen`);
+
+    // Seen here is seen there: read again, the computer has it under Earlier.
+    await channel.notificationsSeen({ ids: [row.id] });
+    const after = await channel.notifications();
+    const seen = after.notifications.find((n) => n.id === row.id);
+    if (seen?.part !== "earlier" || after.finished !== 0) {
+      throw new Error(`Not seen on the computer: ${JSON.stringify(after)}`);
+    }
+    writeFileSync(join(dir, "seen-workspace"), row.workspaceName);
+    console.log("saw the notifications");
+    channel.close();
+    break;
+  }
+  case "merges": {
+    // As the phone's card does (48): where the workspace stands names the commit to merge at.
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    for (const op of ["workspace.publish", "pull_request.merge"]) {
+      if (!channel.host.capabilities.includes(op))
+        throw new Error(`The computer does not answer ${op}.`);
+    }
+    const listed = await channel.workspaces();
+    const project = listed.projects.find((p) => p.name === "repo");
+    const workspace = listed.workspaces.find((w) => w.project === project?.id);
+    if (!project || !workspace) throw new Error("The project's checkout is not on the phone.");
+    const state = await channel.publishState({ workspace: workspace.id, forge: true });
+    const pull = state.pullRequest;
+    if (!state.gh || !pull?.headOid || pull.number !== 12) {
+      throw new Error(`Not the checkout's pull request to merge: ${JSON.stringify(state)}`);
+    }
+    const stale = line === "stale";
+    const headOid = stale ? "1111111111111111111111111111111111111111" : pull.headOid;
+    try {
+      await channel.mergePullRequest({
+        workspace: workspace.id,
+        number: 12,
+        headOid,
+        method: "squash",
+      });
+      console.log(`merged #12 at ${headOid}`);
+    } catch (error) {
+      if (!(error instanceof ClientError) || error.kind !== "remote") throw error;
+      console.log(`refused: ${error.message}`);
+    }
+    channel.close();
+    break;
+  }
   case "sees": {
     // Here `line` is what to see.
     const phone = await session();
@@ -515,8 +631,9 @@ switch (doing) {
     if (Object.keys(alert).sort().join() !== "body,category,deepLink,title") {
       throw new Error(`The push says more than it should: ${pushes[0]}`);
     }
-    if (alert.title !== "An agent needs you" || alert.category !== "agent") {
-      throw new Error(`Not an agent's notice: ${pushes[0]}`);
+    const title = expected ?? "An agent needs you";
+    if (alert.title !== title || alert.category !== "agent") {
+      throw new Error(`Not that notice of an agent's: ${pushes[0]}`);
     }
     const id = /^yardsort:\/\/notice\/agent\/([0-9a-f-]{36})$/.exec(alert.deepLink)?.[1];
     if (!id) throw new Error(`Not a notice's link: ${alert.deepLink}`);
@@ -529,7 +646,36 @@ switch (doing) {
     if (notice.hostId !== host || notice.terminalId !== terminal || !notice.workspaceId) {
       throw new Error(`It opens somewhere else: ${JSON.stringify(notice)}`);
     }
-    console.log("the notice opens the terminal that asked");
+    console.log(
+      expected
+        ? "the notice opens the terminal of the agent that finished"
+        : "the notice opens the terminal that asked",
+    );
+    break;
+  }
+  case "looks-in-time": {
+    // Here `line` is the workspace's name. Looked at within a moment of finishing, an agent
+    // is never told of to the phone.
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    let told = 0;
+    await channel.followNotifications(() => (told += 1));
+    const listed = async () =>
+      (await channel.notifications()).notifications.find(
+        (n) => n.part === "finished" && n.workspaceName === line,
+      );
+    let row = await listed();
+    for (let tries = 0; tries < 600 && !row; tries++) {
+      const heard = told;
+      for (let waits = 0; waits < 20 && told === heard; waits++) await Bun.sleep(50);
+      row = await listed();
+    }
+    if (!row) throw new Error(`${line} never finished.`);
+    await channel.notificationsSeen({ ids: [row.id] });
+    const waited = Date.now() - row.at;
+    if (waited > 8_000) throw new Error(`Seen ${waited} ms after it finished: too late to count.`);
+    console.log(`seen in time: ${line}, ${waited} ms after it finished`);
+    channel.close();
     break;
   }
   case "spend-sign-in": {

@@ -1293,6 +1293,148 @@ describe("A computer", () => {
       expect(within(card).queryByRole("button", { name: /^Open / })).toBeNull();
     });
 
+    describe("merging one from the phone (48)", () => {
+      const HEAD = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+      /** Its checks passed and its review is in: nothing stands in the way. */
+      const ready = () => ({
+        ...failing(),
+        checks: { passed: 6, failed: 0, running: 0 },
+        review: "approved",
+        conflicts: false,
+      });
+      /** A computer that merges, with the workspace's pull request at HEAD. */
+      function merging(...pulls: Record<string, unknown>[]) {
+        const server = reading(...pulls);
+        server.computer.capabilities = [
+          "pull.list",
+          "pull.describe",
+          "workspace.publish",
+          "pull_request.merge",
+        ];
+        server.computer.publish = {
+          branch: "ys/fix-login",
+          base: "main",
+          gh: true,
+          pullRequest: {
+            number: 61,
+            url: "https://github.com/orchard/orchard/pull/61",
+            title: "Retry uploads with backoff",
+            state: "open",
+            checks: "passed",
+            headOid: HEAD,
+            // What the forge says just now, which the card goes by.
+            ...(pulls[0]?.draft ? { draft: true } : {}),
+            ...(pulls[0]?.conflicts ? { conflicting: true } : {}),
+          },
+        };
+        return server;
+      }
+
+      test("asks first, naming the commit, and the computer merges exactly that one", async () => {
+        const server = merging(ready());
+        await paired(new MemoryVault(), server);
+        await fireEvent.press(await open());
+        const card = await screen.findByLabelText("Pull request #61");
+        await fireEvent.press(await within(card).findByRole("button", { name: "Merge…" }));
+        // The workspace's standing was asked of the forge, for the commit at its head.
+        expect(asked(server, "workspace.publish").at(-1)).toEqual({
+          workspace: "workspace-1",
+          forge: true,
+        });
+
+        expect(await screen.findByText("Merge #61?")).toBeTruthy();
+        expect(screen.getByText("a1b2c3d · the commit shown now")).toBeTruthy();
+        expect(screen.getByText("One commit on main, with the pull request's title.")).toBeTruthy();
+        // All its checks passed: no warning.
+        expect(screen.queryByText(/The forge decides whether it may merge/)).toBeNull();
+        await fireEvent.press(screen.getByRole("radio", { name: "Rebase" }));
+        expect(screen.getByRole("button", { name: "Rebase and merge" })).toBeTruthy();
+        await fireEvent.press(screen.getByRole("radio", { name: "Squash" }));
+        expect(asked(server, "pull_request.merge")).toEqual([]);
+
+        await fireEvent.press(screen.getByRole("button", { name: "Squash and merge" }));
+        expect(
+          await screen.findByText(
+            "Squashed into main at a1b2c3d from this phone. The branch ys/fix-login is kept.",
+          ),
+        ).toBeTruthy();
+        expect(asked(server, "pull_request.merge")).toEqual([
+          { workspace: "workspace-1", number: 61, headOid: HEAD, method: "squash" },
+        ]);
+        // Read again: it is merged now, and there is nothing left to merge.
+        expect(await within(card).findByText("Merged")).toBeTruthy();
+        expect(within(card).queryByRole("button", { name: "Merge…" })).toBeNull();
+      });
+
+      test("Cancel sends nothing", async () => {
+        const server = merging(ready());
+        await paired(new MemoryVault(), server);
+        await fireEvent.press(await open());
+        await fireEvent.press(await screen.findByRole("button", { name: "Merge…" }));
+        await fireEvent.press(await screen.findByRole("button", { name: "Cancel" }));
+        expect(asked(server, "pull_request.merge")).toEqual([]);
+      });
+
+      test("checks that did not all pass warn in the sheet, and do not stop it", async () => {
+        const server = merging({ ...ready(), checks: { passed: 5, failed: 0, running: 1 } });
+        await paired(new MemoryVault(), server);
+        await fireEvent.press(await open());
+        await fireEvent.press(await screen.findByRole("button", { name: "Merge…" }));
+        expect(
+          await screen.findByText(
+            "1 check is still running. The forge decides whether it may merge.",
+          ),
+        ).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Squash and merge" })).toBeTruthy();
+      });
+
+      test("a refusal is the computer's own sentence, and is not sent again", async () => {
+        const server = merging(ready());
+        const said =
+          "The pull request changed or is no longer ready to merge. Read it again and look before merging.";
+        server.computer.refuses.set("pull_request.merge", said);
+        await paired(new MemoryVault(), server);
+        await fireEvent.press(await open());
+        await fireEvent.press(await screen.findByRole("button", { name: "Merge…" }));
+        await fireEvent.press(await screen.findByRole("button", { name: "Squash and merge" }));
+        expect(await screen.findByText(said)).toBeTruthy();
+        expect(asked(server, "pull_request.merge")).toHaveLength(1);
+      });
+
+      test("conflicts show Merge… that cannot be pressed, and say why", async () => {
+        const server = merging({ ...ready(), conflicts: true });
+        await paired(new MemoryVault(), server);
+        await fireEvent.press(await open());
+        const card = await screen.findByLabelText("Pull request #61");
+        expect(
+          await within(card).findByText(
+            "Conflicts with main. Resolve them in the workspace first.",
+          ),
+        ).toBeTruthy();
+        const merge = within(card).getByRole("button", { name: "Merge…" });
+        expect(merge.props.accessibilityState.disabled).toBe(true);
+      });
+
+      test("a draft says so, and a computer that does not merge offers nothing", async () => {
+        const server = merging({ ...ready(), draft: true });
+        await paired(new MemoryVault(), server);
+        await fireEvent.press(await open());
+        expect(
+          await screen.findByText("It is a draft. Mark it ready for review on the forge first."),
+        ).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Merge…" })).toBeNull();
+      });
+
+      test("a computer from before merging is not asked where the workspace stands", async () => {
+        const server = reading(ready());
+        await paired(new MemoryVault(), server);
+        await fireEvent.press(await open());
+        await screen.findByLabelText("Pull request #61");
+        expect(screen.queryByRole("button", { name: "Merge…" })).toBeNull();
+        expect(asked(server, "workspace.publish")).toEqual([]);
+      });
+    });
+
     test("pressing a row's badge opens that pull request, with the workspace it came from", async () => {
       const server = reading(failing());
       await paired(new MemoryVault(), server);

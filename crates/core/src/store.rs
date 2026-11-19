@@ -55,6 +55,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0043_sync.sql"),
     include_str!("../migrations/0044_sync_notes.sql"),
     include_str!("../migrations/0045_sync_workspaces.sql"),
+    include_str!("../migrations/0046_notifications.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -6715,9 +6716,10 @@ steps:
             // nullable columns to the notice outbox, 0040 an empty table of the pull
             // requests runs made, 0041 three columns with defaults to schedules and an empty
             // table of the workspaces schedules made, 0042 a column with a default to sessions,
-            // 0043 sync's three empty tables, 0044 six nullable columns to memory entries, and
-            // 0045 an empty table of other hosts' workspaces.
-            assert_eq!(MIGRATIONS.len(), 45);
+            // 0043 sync's three empty tables, 0044 six nullable columns to memory entries,
+            // 0045 an empty table of other hosts' workspaces, and 0046 an empty table of
+            // notifications.
+            assert_eq!(MIGRATIONS.len(), 46);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -6788,9 +6790,10 @@ steps:
             // nullable columns to the notice outbox, 0040 an empty table of the pull
             // requests runs made, 0041 three columns with defaults to schedules and an empty
             // table of the workspaces schedules made, 0042 a column with a default to sessions,
-            // 0043 sync's three empty tables, 0044 six nullable columns to memory entries, and
-            // 0045 an empty table of other hosts' workspaces.
-            assert_eq!(MIGRATIONS.len(), 45);
+            // 0043 sync's three empty tables, 0044 six nullable columns to memory entries,
+            // 0045 an empty table of other hosts' workspaces, and 0046 an empty table of
+            // notifications.
+            assert_eq!(MIGRATIONS.len(), 46);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs

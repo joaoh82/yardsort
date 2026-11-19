@@ -61,6 +61,9 @@ import {
   MAX_LINK,
   MAX_LISTED_BYTES,
   MAX_NOTE,
+  MAX_NOTIFICATION_LINE,
+  MAX_NOTIFICATIONS,
+  MAX_NOTIFICATIONS_SEEN,
   MAX_OID,
   MAX_PAGE,
   MAX_PATH,
@@ -766,6 +769,138 @@ export interface Lease {
 
 const leaseFields = { id: id<LeaseId>(), generation: u64, ttlMs: u32, renewEveryMs: u32 };
 
+// --- a computer's Notifications list (minor 15) -------------------------------------------------
+
+/**
+ * What a row is about, by the computer's own names for its list. One from a newer computer reads
+ * as `other`, and a device shows nothing for it.
+ */
+export const NOTIFICATION_KINDS = [
+  "agent.asks",
+  "agent.finished",
+  "agent.failed",
+  "agent.stopped",
+  "workflow.approval",
+  "workflow.question",
+  "workflow.succeeded",
+  "workflow.failed",
+  "test.waits",
+  "schedule.refused",
+  "schedule.noWorkspace",
+  "trigger.refused",
+  "trigger.capped",
+  "trigger.noWorkspace",
+  "other",
+] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
+
+/**
+ * Where a row is in the list. `needs`: waiting for an answer, or to be put right. `finished`:
+ * finished, and not seen yet. `earlier`: answered or seen, and kept a week.
+ */
+export type NotificationPart = "needs" | "finished" | "earlier" | "other";
+
+/** One row of a computer's Notifications list. */
+export interface NotificationSummary {
+  /** The computer's id for the row: what `notification.seen` names. */
+  id: string;
+  kind: NotificationKind;
+  part: NotificationPart;
+  project: ProjectId;
+  projectName: string;
+  /** The workspace it happened in. Only a schedule or a trigger can be without one. */
+  workspace?: WorkspaceId;
+  /** What that workspace is called, or was. Empty for a schedule that makes its own. */
+  workspaceName: string;
+  branch?: string;
+  /** The agent's conversation, for a row about an agent. */
+  session?: SessionRecordId;
+  /** What the row is about within its workspace: the conversation's name, or the workflow's,
+   *  the test's, the schedule's or the trigger's. */
+  title: string;
+  /** Which agent: `claude`, `codex`… */
+  harness?: string;
+  /** The conversation's terminal, while its process runs. */
+  terminal?: TerminalId;
+  /** The workflow's run, for a row about one: what `workflow.run.get` names. */
+  run?: string;
+  /** The step that waits, for a workflow's question or approval. */
+  step?: string;
+  /** When it happened, in epoch milliseconds. */
+  at: number;
+  /** When it was answered or seen. */
+  settledAt?: number;
+  /** How long the agent worked before it finished, when that is known. */
+  workedMs?: number;
+  /** What its process exited with, for one that stopped. */
+  exitCode?: number;
+  /** The command an agent wants to run, while its question is open. */
+  command?: string;
+  /** The start of what the agent said last, or of what a workflow asks. */
+  said?: string;
+  /** Why, for something that went wrong. */
+  note?: string;
+}
+
+/**
+ * `notification.list`: what still waits, the newest first, then the newest of what left. The
+ * counts are of everything this device may see, not only of the rows in this reply.
+ */
+export interface NotificationPage {
+  notifications: NotificationSummary[];
+  needs: number;
+  finished: number;
+  /** The list was cut to what one reply carries: what still waits went first. */
+  more: boolean;
+}
+
+/**
+ * `notification.seen`: these finished rows were looked at, or every one this device may see. A
+ * row that waits for an answer is not marked: it leaves when it gets one.
+ */
+export interface NotificationSeenParams {
+  ids: string[];
+  all: boolean;
+}
+
+const notificationLine = optional(text(MAX_NOTIFICATION_LINE));
+const exitCode = (value: unknown, path: string) => {
+  const code = i64(value, path);
+  if (code < -0x8000_0000 || code > 0x7fff_ffff) throw new DecodeError(path, "is not an exit code");
+  return code;
+};
+
+const notificationSummary = object({
+  id: text(MAX_ID_LEN),
+  kind: oneOf(NOTIFICATION_KINDS, "other"),
+  part: oneOf(["needs", "finished", "earlier", "other"] as const, "other"),
+  project: id<ProjectId>(),
+  projectName: text(MAX_TEXT),
+  workspace: optional(id<WorkspaceId>()),
+  workspaceName: text(MAX_TEXT),
+  branch: optional(text(MAX_TEXT)),
+  session: optional(id<SessionRecordId>()),
+  title: text(MAX_TEXT),
+  harness: optional(text(MAX_LABEL)),
+  terminal: optional(id<TerminalId>()),
+  run: optional(text(MAX_ID_LEN)),
+  step: optional(text(MAX_ID_LEN)),
+  at: i64,
+  settledAt: optional(i64),
+  workedMs: optional(i64),
+  exitCode: optional(exitCode),
+  command: notificationLine,
+  said: notificationLine,
+  note: notificationLine,
+});
+
+const notificationPageFields = {
+  notifications: array(notificationSummary, MAX_NOTIFICATIONS),
+  needs: u32,
+  finished: u32,
+  more: bool,
+};
+
 /** Something a host tells a client without being asked. */
 export type Event =
   | { event: "terminal.resized"; stream: StreamId; position: StreamPosition; size: TermSize }
@@ -773,7 +908,9 @@ export type Event =
   | { event: "terminal.control"; stream: StreamId; controller: Controller }
   | { event: "terminal.exited"; stream: StreamId; exit: { code: number; success: boolean } }
   | ({ event: "activity.events" } & ActivityBatch)
-  | ({ event: "activity.ended" } & SubscriptionEnded);
+  | ({ event: "activity.ended" } & SubscriptionEnded)
+  /** The Notifications list this client follows changed: it reads the list again. Minor 15. */
+  | { event: "notifications.changed" };
 
 export const EVENTS = [
   "terminal.resized",
@@ -782,6 +919,7 @@ export const EVENTS = [
   "terminal.exited",
   "activity.events",
   "activity.ended",
+  "notifications.changed",
 ] as const;
 
 export const event: Decoder<Event> = tagged<Event>("event", {
@@ -802,6 +940,7 @@ export const event: Decoder<Event> = tagged<Event>("event", {
     newer: cursor,
   }),
   "activity.ended": variant("event", "activity.ended", { subscription: u32, error: remoteError }),
+  "notifications.changed": variant("event", "notifications.changed", {}),
 });
 
 // --- requests ----------------------------------------------------------------------------------
@@ -1824,7 +1963,11 @@ export type Operation =
   | { op: "workspace.commit"; params: WorkspaceCommitParams }
   | { op: "workspace.push"; params: { workspace: WorkspaceId } }
   | { op: "pull_request.open"; params: PullRequestOpenParams }
-  | { op: "pull_request.merge"; params: PullRequestMergeParams };
+  | { op: "pull_request.merge"; params: PullRequestMergeParams }
+  | { op: "notification.list"; params: Record<string, never> }
+  | { op: "notification.seen"; params: NotificationSeenParams }
+  | { op: "notification.follow" }
+  | { op: "notification.unfollow" };
 
 export type OperationName = Operation["op"];
 
@@ -1875,6 +2018,10 @@ export const OPERATIONS: readonly OperationName[] = [
   "workspace.push",
   "pull_request.open",
   "pull_request.merge",
+  "notification.list",
+  "notification.seen",
+  "notification.follow",
+  "notification.unfollow",
 ];
 
 const leaseRefFields = { terminal: id<TerminalId>(), lease: id<LeaseId>(), generation: u64 };
@@ -2016,7 +2163,20 @@ const params: Record<string, Decoder<unknown>> = {
     headOid: text(),
     method: oneOf(MERGE_METHODS),
   }),
+  "notification.list": object({}),
+  "notification.seen": object({
+    ids: orElse(array(text()), () => []),
+    all: orElse(bool, () => false),
+  }),
 };
+
+/** The operations that carry no `params` at all. */
+const BARE: readonly OperationName[] = [
+  "host.describe",
+  "harness.list",
+  "notification.follow",
+  "notification.unfollow",
+];
 
 /** The scope a caller needs for an operation. `null` for `host.describe`, which any grant may ask. */
 export function scopeOf(op: OperationName): Scope | null {
@@ -2038,7 +2198,8 @@ export function scopeOf(op: OperationName): Scope | null {
     op === "terminal.attach" ||
     op === "terminal.detach" ||
     op === "conversation.read" ||
-    op === "test.waiting"
+    op === "test.waiting" ||
+    op.startsWith("notification.")
   ) {
     return "terminal:read";
   }
@@ -2062,7 +2223,7 @@ export const request: Decoder<Request> = (value, path) => {
   const op = head.op as OperationName;
   if (!OPERATIONS.includes(op)) throw new DecodeError("op", "is not an operation this build knows");
   const out: Record<string, unknown> = { requestId: head.requestId, protocol: head.protocol, op };
-  if (op !== "host.describe" && op !== "harness.list") {
+  if (!BARE.includes(op)) {
     out.params = (params[op] as Decoder<unknown>)(
       (value as Record<string, unknown>).params,
       "params",
@@ -2175,6 +2336,12 @@ export function validate(operation: Operation): string | null {
       return operation.params.number === 0 || !OID.test(operation.params.headOid)
         ? "names no pull request and the commit at its head"
         : null;
+    case "notification.seen": {
+      const { ids, all } = operation.params;
+      if (ids.length > MAX_NOTIFICATIONS_SEEN) return "names more rows than one request may";
+      if (!ids.every(isId)) return "names a row by no id of Yardsort's";
+      return ids.length === 0 && !all ? "names no rows and does not say all of them" : null;
+    }
     default:
       return null;
   }
@@ -2387,6 +2554,7 @@ export type Reply =
   | ({ kind: "file" } & FileChunk)
   | ({ kind: "publish" } & PublishState)
   | ({ kind: "pullRequestOpened" } & PullRequestOpened)
+  | ({ kind: "notifications" } & NotificationPage)
   | { kind: "done" };
 
 export const reply: Decoder<Reply> = tagged<Reply>("kind", {
@@ -2425,6 +2593,7 @@ export const reply: Decoder<Reply> = tagged<Reply>("kind", {
   file: variant("kind", "file", fileChunkFields),
   publish: variant("kind", "publish", publishStateFields),
   pullRequestOpened: variant("kind", "pullRequestOpened", pullRequestOpenedFields),
+  notifications: variant("kind", "notifications", notificationPageFields),
   done: variant("kind", "done", {}),
 });
 

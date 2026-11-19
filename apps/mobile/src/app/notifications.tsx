@@ -114,11 +114,20 @@ export default function Notifications() {
                   onPress={() => toggle({ agent: !preferences.agent })}
                 />
               )}
+              {preferences.agentFinished === undefined ? null : (
+                <Row
+                  title="Agents that finish"
+                  checked={preferences.agentFinished}
+                  disabled={preferences.muted}
+                  onPress={() => toggle({ agentFinished: !preferences.agentFinished })}
+                />
+              )}
             </Group>
             <Body muted>
               A notification opens the item here. An agent that asks for a permission opens its
-              terminal, where you can take control and answer. You install an update on the
-              computer.
+              terminal, where you can take control and answer. One that finished opens its
+              conversation, and is told of only when nobody looked at it within a few seconds. You
+              install an update on the computer.
             </Body>
           </Section>
         </>

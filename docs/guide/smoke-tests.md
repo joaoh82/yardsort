@@ -366,7 +366,8 @@ you want one and no agent is on it.
 ### The approval card
 
 A run waiting for your approval shows at the top of its workspace, above the terminal tabs, and
-the workspace's row in the sidebar carries a count of the runs waiting there. The card is the
+the workspace's row in the sidebar carries a count of the runs waiting there. It is also a row
+of [Notifications](notifications.md), which opens that workspace. The card is the
 whole of what the file does, in words: who asked for the run and with what inputs, then every
 step, phase by phase — _run `bun run seed --user demo@example.test`; expect exit 0_,
 _GET http://localhost:{{ run.port }}/health; expect status 200_, _ask you: Does the dashboard

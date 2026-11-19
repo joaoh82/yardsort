@@ -23,6 +23,8 @@ import {
   useLive,
   useNetworkChanges,
 } from "./live";
+import { countWords } from "../lib/notifications";
+import { useLists, useListsOf } from "./notifications";
 import { Body, Button, Card, Dot, Group, Problem, Row, Section, Waiting } from "./parts";
 
 /** How often the list is asked again while a request waits at a computer (31 §5). */
@@ -71,6 +73,10 @@ export function Computers({ asked }: { asked: number }) {
     else presence.stop();
   }, [live, hosts, presence]);
   useEffect(() => () => presence.stop(), [presence]);
+
+  // Each computer's Notifications list, read through the channel already held to it.
+  useListsOf(list?.computers ?? null, reach, presence);
+  const { held } = useLists();
 
   // A computer that stopped letting this phone in: the list knows what became of it.
   const gone = [...reach.values()].filter((r) => r.kind === "gone").length;
@@ -122,6 +128,14 @@ export function Computers({ asked }: { asked: number }) {
             key={computer.grant}
             computer={computer}
             reach={reach.get(computer.host)}
+            waits={
+              reach.get(computer.host)?.kind === "online"
+                ? countWords(
+                    held.get(computer.host)?.page?.needs ?? 0,
+                    held.get(computer.host)?.page?.finished ?? 0,
+                  )
+                : null
+            }
             onOpen={() => router.push({ pathname: "/computer", params: { host: computer.host } })}
           />
         ))}
@@ -142,10 +156,13 @@ export function Computers({ asked }: { asked: number }) {
 function ComputerRow({
   computer,
   reach,
+  waits,
   onOpen,
 }: {
   computer: Computer;
   reach: Reach | undefined;
+  /** How many things need you there and how many finished, in words, when any do. */
+  waits: string | null;
   onOpen: () => void;
 }) {
   return (
@@ -153,6 +170,7 @@ function ComputerRow({
       title={computer.name}
       detail={describeReach(reach, computer.lastSeenAt)}
       monoDetail
+      attention={waits ?? undefined}
       leading={<Dot kind={reachDot(reach)} />}
       onPress={onOpen}
     />

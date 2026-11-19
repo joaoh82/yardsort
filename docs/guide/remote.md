@@ -85,10 +85,24 @@ running — _api-gateway 3 · 2 running_. Press it again to open it. The phone r
 projects you folded, for each computer, as this window remembers its own sidebar; nothing about
 it is sent anywhere.
 
+A workspace where something waits for you says **needs you** in place of how many are running,
+and one where something finished and was not looked at says **finished**. A folded project's
+line says those too. They come from the computer's
+[Notifications list](notifications.md#on-the-phone), which the bell in the corner opens.
+
+## What waits, on the phone
+
+The bell in the corner of the account's screen and of a computer's screen opens
+**Notifications**: one list of what needs you and what finished unseen, over every computer the
+phone can reach, with the number of things that need you on the bell. Each computer keeps its
+own list and the phone reads it, so a row answered or looked at on either is gone from both.
+What it shows and what each row opens is in [Notifications](notifications.md#on-the-phone).
+
 ## Pull requests on the phone
 
 When this computer has `gh` installed and signed in, the phone shows what became of a workspace's
-branch, as the sidebar here does. It is read-only: nothing on the phone changes a pull request.
+branch, as the sidebar here does. A workspace's own pull request can be merged from the phone;
+nothing else on the phone changes one.
 
 - **On a workspace's row**, a badge with its pull request's number, coloured as here: green for
   one open with nothing pending or wrong, yellow for a draft or one still waiting on checks or a
@@ -100,6 +114,18 @@ branch, as the sidebar here does. It is read-only: nothing on the phone changes 
   conflicts. **Show** opens the checks to each by name, the failed ones first; they are open
   already when one failed. **Open on GitHub** opens its page in the phone's browser. Others the
   workspace opened or follows are listed under the card.
+- **Merge…**, on that card, when the pull request is the workspace's own, open and not a draft, on
+  a computer that lets the phone type and has `gh`. It asks first, in a sheet: what it merges
+  into, at which commit (the one shown now), on which computer, and how: **Squash** (chosen
+  first), **Merge** or **Rebase**. When checks failed or are still running, the sheet says so and
+  still lets you go on, since the forge's own rules decide. That computer merges only the
+  workspace's own pull request, and only if it is still at the commit the sheet showed: one pushed
+  to since is refused, and the card shows its new head to merge at instead. The branch is kept.
+  When it conflicts, **Merge…** cannot be pressed and says why; a draft, or one no workspace there
+  opened, says to go to the forge. If the answer does not come back, the card says it may have
+  been merged and reads it again; it never sends the merge a second time by itself. If the
+  connection had already closed, it says nothing was sent. While the computer cannot be reached,
+  or has not yet said where the workspace stands, there is no **Merge…**.
 - **Pull requests**, on a computer's screen with the count of open ones, lists them over every
   project the phone may see: **Open**, **Merged** and **Closed**. Merged and closed are those
   among the newest fifty of each project.
@@ -250,7 +276,8 @@ For other agents, Chat says the agent is waiting and opens its terminal.
 A [smoke test](smoke-tests.md) from the repository runs only once you have seen what it does. When
 one waits in a workspace — an agent ran `ys test run` on a file that is new or has changed, or the
 project asks to see every run — Chat in any of that workspace's conversations shows
-[the approval card](smoke-tests.md#the-approval-card) this window shows: who asked and with what
+[the approval card](smoke-tests.md#the-approval-card) this window shows, and so does the
+workspace's own screen, above its conversations: who asked and with what
 inputs, every step in words, the names of the project's test environment it can read, and, for a
 file you approved before, the lines that changed. Values of the test environment are never sent.
 
@@ -450,6 +477,10 @@ tabs there. With a workspace there in view, the new workspace shortcut composes 
 in the same project, and the new shell shortcut opens that computer's shell in it. Closing a tab
 there is not offered: its terminals are ended at that computer, or by the program in them.
 
+**In Notifications.** What waits on that computer, and what finished there while nobody looked, is
+listed in this computer's [Notifications](notifications.md#other-computers), each row naming the
+computer. Marking one seen here marks it there. It needs 0.36.0 or later on the other computer.
+
 **This is a device of its own.** Signing in here makes a second device at the server, apart from this
 computer as a host: turning Remote on or off above leaves it signed in, and **Sign out** under Other
 computers leaves this computer's host as it is. Its sign-in is kept in the same credential store. The
@@ -608,7 +639,10 @@ be in the app stores in a few weeks. Its code is in
 
 ## Notifications
 
-With Remote on, this computer can tell your phone when something needs a look.
+With Remote on, this computer can tell your phone when something needs a look. These are the
+notifications the phone's system shows. The list inside the app, of what waits and what
+finished on every computer, is [another thing](#what-waits-on-the-phone), read from the
+computers themselves.
 
 - A task moved forward, or finished.
 - A review needs attention: checks failed, it conflicts, changes were requested, or it has no review yet.
@@ -625,6 +659,14 @@ With Remote on, this computer can tell your phone when something needs a look.
   If the agent asks again before anyone answers, that is the same notification, not a new one.
   Claude Code, OpenCode and Pi say when they ask; the notification says nothing of what was
   asked. A computer with no screen, running `yardsort-host`, sends it too.
+- An agent finished and nobody looked: it stopped after a stretch of work, and its row in
+  [Notifications](notifications.md) stayed unseen. Open it on the phone and it opens that
+  conversation, which also marks it seen. You are told within a minute of its finishing,
+  and only then: an agent whose terminal is in front of you here, or that you are watching on
+  the phone, is seen as it finishes and sends nothing. Every agent can be told of this way,
+  with no switch to turn on. The notification says only that an agent finished, not which, or
+  where, or what it did. A turn that failed, or an agent that stopped with an error, is in the
+  list and is not sent. A computer with no screen sends it too.
 
 The notification opens that item in the phone app. A workflow question or approval opens the
 decision. Installing a desktop update stays on this computer. A one-time code can still appear
@@ -643,8 +685,9 @@ workflow permissions until it states that it speaks them.
 On the phone, Settings → Notifications asks once for permission to send notifications. After
 that, the token is registered for every account this phone is signed in to, when the app starts
 and after a sign-in. The screen can
-mute everything for this account, or turn one of those categories off. **Agents that need
-you** shows only once the server knows that kind of notification. A tap opens the item,
+mute everything for this account, or turn one of those categories off. An agent has two
+switches, **Agents that need you** and **Agents that finish**, both on from the start. Each
+shows only once the server knows that kind of notification. A tap opens the item,
 including when the app was not running. A notice that was skipped while a category was off is not
 sent later if you turn it back on. A new event after that is.
 

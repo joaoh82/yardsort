@@ -10,6 +10,7 @@ import { TasksView } from "@/features/tasks/TasksView";
 import { TestsView } from "@/features/tests/TestsView";
 import { SchedulesView } from "@/features/schedules/SchedulesView";
 import { TriggersView } from "@/features/triggers/TriggersView";
+import { NotificationsView } from "@/features/notifications/NotificationsView";
 import { RemoteComposer } from "@/features/remote/RemoteComposer";
 import { RemoteWorkspaceView } from "@/features/remote/RemoteWorkspaceView";
 import { GettingStarted } from "@/features/onboarding/GettingStarted";
@@ -30,6 +31,7 @@ import { TestRunTab } from "@/features/smoke/TestRunTab";
 import { useSmokeTestsStore } from "@/stores/smokeTests";
 import { WORKFLOW_LIST } from "@/stores/workflows";
 import { useAppStore } from "@/stores/app";
+import { useNotificationsStore } from "@/stores/notifications";
 import { launchable, useHarnessStore } from "@/stores/harnesses";
 import { useShortcutLabel } from "@/stores/preferences";
 import { useProjectsStore, useSelectedWorkspace } from "@/stores/projects";
@@ -57,6 +59,7 @@ export function WorkspacePanel() {
   const testsOpen = useProjectsStore((s) => s.testsOpen);
   const schedulesOpen = useProjectsStore((s) => s.schedulesOpen);
   const triggersOpen = useProjectsStore((s) => s.triggersOpen);
+  const notificationsOpen = useProjectsStore((s) => s.notificationsOpen);
   const remote = useProjectsStore((s) => s.remote);
   const composingThere = useProjectsStore((s) => s.composingThere);
   const runIn =
@@ -102,6 +105,8 @@ export function WorkspacePanel() {
         <SchedulesView />
       ) : triggersOpen ? (
         <TriggersView />
+      ) : notificationsOpen ? (
+        <NotificationsView />
       ) : workflowId === WORKFLOW_LIST ? (
         <WorkflowsView />
       ) : workflowId ? (
@@ -142,10 +147,22 @@ function WorkspaceTerminals(props: {
   useEffect(() => {
     void useSessionsStore.getState().load(workspace.id);
   }, [workspace.id, tabCount]);
-  // Looking at a terminal is what clears its "finished, not seen yet" mark.
+  // Looking at a terminal is what clears its "finished, not seen yet" mark, and takes what its
+  // agent finished out of the Notifications list. A test run's tab in front hides the terminal.
+  // Coming back to the window is looking, too.
+  const inFront = shownRun ? null : (activeId ?? null);
   useEffect(() => {
-    if (activeId) useTerminalStore.getState().activate(activeId);
-  }, [activeId]);
+    const look = () => {
+      if (inFront) useTerminalStore.getState().activate(inFront);
+      useNotificationsStore.getState().looking(inFront);
+    };
+    look();
+    window.addEventListener("focus", look);
+    return () => {
+      window.removeEventListener("focus", look);
+      useNotificationsStore.getState().looking(null);
+    };
+  }, [inFront]);
   const error = useTerminalStore((s) => s.error);
   const dismissError = useTerminalStore((s) => s.dismissError);
   const open = useTerminalStore((s) => s.open);

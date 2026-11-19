@@ -38,10 +38,11 @@ pub struct HostHome {
     pub watcher: OnceLock<InboxWatcher>,
     /// What a paired device that may type starts agents with.
     starting: Arc<HostStarting>,
+    /// What keeps this host's Notifications list, for the devices that read it. It has nobody
+    /// here to tell: a device that follows the list is told by its own channel.
+    pub notifications: yardsort_core::notifications::Keeper,
     /// The dashboard, while it is served (`dashboard.rs`).
     pub dashboard: std::sync::Mutex<Option<host_dashboard::Dashboard>>,
-    /// A sign-in to a server started from the dashboard, while it waits for its browser.
-    pub signing_in: std::sync::Mutex<crate::dashboard::SignIn>,
     /// The projects' pull requests, read here when a device asks about them.
     pulls: Arc<yardsort_core::remote::pull::polled::Polled>,
 }
@@ -63,8 +64,8 @@ impl HostHome {
             asked: tokio::sync::broadcast::channel(8).0,
             watcher: OnceLock::new(),
             starting: Arc::new(HostStarting(home.clone())),
+            notifications: yardsort_core::notifications::Keeper::new(|| {}),
             dashboard: std::sync::Mutex::new(None),
-            signing_in: std::sync::Mutex::default(),
             pulls: Arc::new(pulls(home.clone())),
         }))
     }
@@ -149,6 +150,7 @@ impl Home for HostHome {
             conversations: Some(&conversations),
             tests: None,
             pulls: Some(Arc::clone(&self.pulls) as Arc<dyn PullRequests>),
+            notifications: Some(&self.notifications),
         });
     }
 

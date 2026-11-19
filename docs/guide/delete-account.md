@@ -45,11 +45,13 @@ sign-in comes back.
   example `https://remote.example.com/account/delete`. Press **Sign in again to delete**, sign in,
   type **delete** and press **Delete my account**. The account you signed in as is deleted. The
   page only works in the browser that started it.
+- **On a computer with no screen:** `yardsort-host account delete`, at a terminal of your own on it,
+  then sign in again in a browser on any computer and paste back the address it lands on. See
+  [Deleting your account](headless-host.md#deleting-your-account) in its guide.
 
-A computer with no screen has no command for it. Delete from your computer, your phone or the web
-page, and [`yardsort-host status`](headless-host.md#when-the-account-is-deleted) then says the
-account was deleted.
+Deleted from somewhere else, a computer with no screen says so in
+[`yardsort-host status`](headless-host.md#when-the-account-is-deleted-elsewhere).
 
-From a computer or the phone, if you signed in again as someone else, the server says so and
-deletes nothing. A server too old
-to delete accounts says so too; its operator updates it.
+From a computer, the phone or a computer with no screen, if you signed in again as someone else,
+the server says so and deletes nothing. A server too old to delete accounts says so too; its
+operator updates it.

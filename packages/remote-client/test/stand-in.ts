@@ -115,6 +115,16 @@ export class StandIn {
   removeHost = () => this.#ask<null>({ op: "removeHost" });
   note = (text: string) => this.#ask<null>({ op: "note", text });
   conversation = (title: string) => this.#ask<null>({ op: "conversation", title });
+  /**
+   * The agent of the newest conversation finished a turn: a row in the host's Notifications
+   * list. False when the list did not change, as with no conversation to have finished.
+   */
+  agentFinished = () => this.#ask<boolean>({ op: "agentFinished" });
+  /**
+   * That agent asks for a permission, as its hook reports it: a row of the list that needs its
+   * person. False with no conversation to have asked.
+   */
+  agentWaits = () => this.#ask<boolean>({ op: "agentWaits" });
   hostOffline = () => this.#ask<null>({ op: "hostOffline" });
   hostOnline = () => this.#ask<null>({ op: "hostOnline" });
   /** The host says an agent on its program's terminal asked for a permission: the notice's id. */

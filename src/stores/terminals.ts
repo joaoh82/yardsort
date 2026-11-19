@@ -68,6 +68,9 @@ interface TerminalState {
   markBusy: (id: SessionId) => void;
   /** Returns the tab if this was work worth telling the user about, else `null`. */
   markQuiet: (id: SessionId, busyMs: number, watched: boolean) => TerminalTab | null;
+  /** Mark these tabs "finished, not seen yet" and no other: what the Notifications list, which
+   *  the core keeps, says is unseen. */
+  ringOnly: (unseen: ReadonlySet<SessionId>) => void;
   setRenderer: (kind: RendererKind) => void;
   setLastSize: (size: TermSize) => void;
   dismissError: () => void;
@@ -244,6 +247,17 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }));
     return notable ? tab : null;
   },
+  ringOnly: (unseen) =>
+    set((state) => {
+      let changed = false;
+      const tabs = state.tabs.map((tab) => {
+        const attention = unseen.has(tab.id);
+        if (attention === tab.attention) return tab;
+        changed = true;
+        return { ...tab, attention };
+      });
+      return changed ? { tabs } : state;
+    }),
   setRenderer: (renderer) => set({ renderer }),
   setLastSize: (lastSize) => set({ lastSize }),
   dismissError: () => set({ error: null }),

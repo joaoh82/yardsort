@@ -6,8 +6,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use host_dashboard::remote::{self, SignInState, SigningIn};
-use host_dashboard::{About, Project, RemoteLink, Source};
+use host_dashboard::{
+    About, PairAnswer, PairProject, Pairing, Project, Remote, RemoteLink, SigningIn, Source,
+};
 use yardsort_core::env::{EnvSource, ShellEnv};
 use yardsort_core::settings::SettingsFile;
 
@@ -18,142 +19,118 @@ pub struct StandIn {
     pub about: About,
     /// Where a clone "goes".
     pub projects_dir: PathBuf,
-    /// Remote as the page manages it, for a stand-in that lets it: `about`'s link is then this
-    /// one's.
+    /// Signing in and pairing from the page, as a host with no screen lets them be done. None,
+    /// as the app gives.
     pub remote: Option<StandInRemote>,
 }
 
-/// A server and its devices, made up: signing in takes the address `…/signed-in?code=good`, and
-/// a pairing code is asked after at once by a phone that wants everything.
+/// A host's Remote, which a test drives: a device asks when the test says, and every answer is
+/// kept to be looked at. An address with `code=good` in it is the sign-in's.
 #[derive(Default)]
-pub struct StandInRemote(pub Mutex<Managed>);
-
-#[derive(Default)]
-pub struct Managed {
-    pub signed_in: Option<RemoteLink>,
-    pub signing: SignInState,
-    pub name: String,
-    pub devices: Vec<remote::Device>,
-    pub asking: Vec<remote::Asking>,
-    pub offers: u32,
+pub struct StandInRemote {
+    pub pairing: Mutex<Option<Pairing>>,
+    pub signing_in: Mutex<Option<SigningIn>>,
+    pub answers: Mutex<Vec<PairAnswer>>,
+    pub signed_out: Mutex<bool>,
 }
 
-/// The port the made-up sign-in sends a browser back to.
-pub const BACK_PORT: u16 = 49152;
-
-impl remote::Remote for StandInRemote {
-    fn devices(&self) -> Result<remote::Devices, String> {
-        let managed = self.0.lock().unwrap();
-        Ok(remote::Devices {
-            devices: managed.devices.clone(),
-            asking: managed.asking.clone(),
-            projects: ["my-service", "website"]
-                .into_iter()
-                .map(|name| remote::Choice {
-                    id: format!("project-{name}"),
-                    name: name.to_owned(),
-                })
-                .collect(),
-        })
-    }
-
-    fn offer(&self) -> Result<remote::Offer, String> {
-        let mut managed = self.0.lock().unwrap();
-        if managed.signed_in.is_none() {
-            return Err("Remote is off: sign in to a server first.".into());
-        }
-        managed.offers += 1;
-        let n = managed.offers;
-        managed.asking.push(remote::Asking {
-            grant: format!("grant-{n}"),
-            name: "Pixel 9".into(),
-            wants_control: true,
-            wants_workflows: true,
+impl StandInRemote {
+    /// A device asks, on an offer that is out.
+    pub fn asks(&self, device: &str, wants_control: bool) {
+        *self.pairing.lock().unwrap() = Some(Pairing::Asked {
+            grant: "grant-1".into(),
+            device: device.into(),
+            wants_control,
+            wants_workflows: false,
+            projects: vec![
+                PairProject {
+                    id: "p1".into(),
+                    name: "widgets".into(),
+                },
+                PairProject {
+                    id: "p2".into(),
+                    name: "gadgets".into(),
+                },
+            ],
         });
-        Ok(remote::Offer {
-            code: "K7QF-2M9X".into(),
-            link: format!(
-                "yardsort://pair?server=https%3A%2F%2Fremote.example.test&secret=offer-secret-{n}"
-            ),
-            expires_in_ms: 300_000,
-        })
+    }
+}
+
+impl Remote for StandInRemote {
+    fn pairing(&self) -> Pairing {
+        self.pairing
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or(Pairing::Idle)
     }
 
-    fn answer(&self, grant: &str, answer: remote::Answer) -> Result<(), String> {
-        let mut managed = self.0.lock().unwrap();
-        let at = managed
-            .asking
-            .iter()
-            .position(|asking| asking.grant == grant)
-            .ok_or("That device is no longer waiting. Show a new code to pair it.")?;
-        let asked = managed.asking.remove(at);
-        if answer.allow {
-            managed.devices.push(remote::Device {
-                grant: asked.grant,
-                name: asked.name,
-                control: answer.control,
-                projects: answer.projects.map(|ids| {
-                    ids.iter()
-                        .map(|id| id.trim_start_matches("project-").to_owned())
-                        .collect()
-                }),
-            });
-        }
-        Ok(())
-    }
-
-    fn revoke(&self, grant: &str) -> Result<String, String> {
-        let mut managed = self.0.lock().unwrap();
-        let at = managed
-            .devices
-            .iter()
-            .position(|device| device.grant == grant)
-            .ok_or("No such device is let in.")?;
-        Ok(managed.devices.remove(at).name)
-    }
-
-    fn begin_sign_in(&self, server: &str, name: &str) -> Result<SigningIn, String> {
-        let mut managed = self.0.lock().unwrap();
-        if managed.signed_in.is_some() {
-            return Err("This computer is signed in already.".into());
-        }
-        if !server.starts_with("https://") {
-            return Err("That is not a server's address.".into());
-        }
-        managed.name = name.to_owned();
-        let told = SigningIn {
-            url: format!("{server}/authorize?state=made-up"),
-            port: BACK_PORT,
-            server: server.to_owned(),
+    fn pair(&self) -> Result<Pairing, String> {
+        let offered = Pairing::Offered {
+            code: "ABCD-1234".into(),
+            qr: vec!["101".into(), "010".into(), "101".into()],
+            lapses_in_ms: 300_000,
         };
-        managed.signing = SignInState::Waiting(told.clone());
-        Ok(told)
+        *self.pairing.lock().unwrap() = Some(offered.clone());
+        Ok(offered)
     }
 
-    fn signing_in(&self) -> SignInState {
-        self.0.lock().unwrap().signing.clone()
-    }
-
-    fn finish_sign_in(&self, address: &str) -> Result<(), String> {
-        let mut managed = self.0.lock().unwrap();
-        let SignInState::Waiting(waiting) = managed.signing.clone() else {
-            return Err("No sign-in is waiting. Start one first.".into());
+    fn answer(&self, answer: PairAnswer) -> Result<Pairing, String> {
+        let device = match &*self.pairing.lock().unwrap() {
+            Some(Pairing::Asked { grant, device, .. }) if *grant == answer.grant => device.clone(),
+            _ => return Err("No device is asking now. Show a code again.".into()),
         };
-        if address != format!("http://127.0.0.1:{BACK_PORT}/signed-in?code=good") {
+        let allowed = answer.allow;
+        self.answers.lock().unwrap().push(answer);
+        let answered = Pairing::Answered { device, allowed };
+        *self.pairing.lock().unwrap() = Some(answered.clone());
+        Ok(answered)
+    }
+
+    fn stop_pairing(&self) {
+        *self.pairing.lock().unwrap() = None;
+    }
+
+    fn signing_in(&self) -> SigningIn {
+        self.signing_in
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or(SigningIn::Idle)
+    }
+
+    fn sign_in(&self, server: &str, name: &str) -> Result<SigningIn, String> {
+        if server.is_empty() {
+            return Err("Name the server.".into());
+        }
+        let waiting = SigningIn::Waiting {
+            url: format!("{server}/v1/login?name={name}"),
+            port: 45999,
+            problem: None,
+        };
+        *self.signing_in.lock().unwrap() = Some(waiting.clone());
+        Ok(waiting)
+    }
+
+    fn pasted(&self, address: &str) -> Result<SigningIn, String> {
+        if !address.contains("code=good") {
             return Err("That is not the address this sign-in waits for.".into());
         }
-        managed.signed_in = Some(RemoteLink {
-            server_url: waiting.server,
-            name: managed.name.clone(),
-            link: "connecting".into(),
-            devices: 0,
-        });
-        managed.signing = SignInState::None;
-        Ok(())
+        let done = SigningIn::SignedIn {
+            name: "Build box".into(),
+            server_url: "https://remote.example.test".into(),
+        };
+        *self.signing_in.lock().unwrap() = Some(done.clone());
+        Ok(done)
     }
 
-    fn cancel_sign_in(&self) {
-        self.0.lock().unwrap().signing = SignInState::None;
+    fn stop_signing_in(&self) {
+        *self.signing_in.lock().unwrap() = None;
+    }
+
+    fn sign_out(&self) -> Result<(), String> {
+        *self.signed_out.lock().unwrap() = true;
+        Ok(())
     }
 }
 
@@ -190,7 +167,7 @@ impl StandIn {
                     server_url: "https://remote.example.test".into(),
                     name: "Build box".into(),
                     link: "connected, 1 device(s) on it now".into(),
-                    devices: 1,
+                    devices: 2,
                 }),
                 terminals: 3,
                 notices: Vec::new(),
@@ -200,42 +177,11 @@ impl StandIn {
             remote: None,
         }
     }
-
-    /// The same, with Remote managed from the page: signed out, or signed in as `about` says
-    /// with one phone let in.
-    pub fn managing(mut self, signed_in: bool) -> Self {
-        let link = self.about.remote.take();
-        self.remote = Some(StandInRemote(Mutex::new(Managed {
-            devices: if signed_in {
-                vec![remote::Device {
-                    grant: "grant-0".into(),
-                    name: "iPhone".into(),
-                    control: true,
-                    projects: None,
-                }]
-            } else {
-                Vec::new()
-            },
-            signed_in: link.filter(|_| signed_in),
-            ..Managed::default()
-        })));
-        self
-    }
 }
 
 impl Source for StandIn {
     fn about(&self) -> About {
-        let mut about = self.about.clone();
-        if let Some(managing) = &self.remote {
-            about.remote = managing.0.lock().unwrap().signed_in.clone();
-        }
-        about
-    }
-
-    fn remote(&self) -> Option<&dyn remote::Remote> {
-        self.remote
-            .as_ref()
-            .map(|managing| managing as &dyn remote::Remote)
+        self.about.clone()
     }
 
     fn env(&self) -> Arc<ShellEnv> {
@@ -248,6 +194,10 @@ impl Source for StandIn {
 
     fn projects(&self) -> Vec<Project> {
         self.projects.lock().unwrap().clone()
+    }
+
+    fn remote(&self) -> Option<&dyn Remote> {
+        self.remote.as_ref().map(|remote| remote as &dyn Remote)
     }
 
     /// "Clones" by name alone: the last part of the address. An address with `missing` in it is

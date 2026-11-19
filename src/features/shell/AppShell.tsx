@@ -26,6 +26,7 @@ import { listenForPairingRequests } from "@/stores/remote";
 import { listenForOtherComputers, useOtherComputersStore } from "@/stores/otherComputers";
 import { listenForTestRuns } from "@/stores/smokeTests";
 import { listenForSchedules } from "@/stores/schedules";
+import { listenForNotifications } from "@/stores/notifications";
 import { listenForTriggers } from "@/stores/triggers";
 import { listenForWorkflowRuns } from "@/stores/workflows";
 import { useUpdatesStore } from "@/stores/updates";
@@ -86,6 +87,7 @@ export function AppShell() {
     const testRuns = listenForTestRuns();
     const schedules = listenForSchedules();
     const triggers = listenForTriggers();
+    const notifications = listenForNotifications();
     const pairing = listenForPairingRequests();
     const others = listenForOtherComputers();
     return () => {
@@ -94,6 +96,7 @@ export function AppShell() {
       void testRuns.then((stop) => stop());
       void schedules.then((stop) => stop());
       void triggers.then((stop) => stop());
+      void notifications.then((stop) => stop());
       void pairing.then((stop) => stop());
       void others.then((stop) => stop());
     };

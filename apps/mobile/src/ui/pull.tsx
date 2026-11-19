@@ -19,7 +19,7 @@ import {
   type PullsOf,
   type PullSummary,
 } from "@yardsort/remote-client";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { messageOf } from "../lib/accounts";
@@ -242,10 +242,13 @@ export function PullCard({
   pull,
   detail,
   now,
+  children,
 }: {
   pull: PullSummary;
   detail: PullDetail | null;
   now: number;
+  /** What the card offers to do, above the way out to the forge: merging it (48). */
+  children?: ReactNode;
 }) {
   const colors = useColors();
   const verdict = checksVerdict(pull.checks);
@@ -382,6 +385,7 @@ export function PullCard({
           </Text>
         </View>
       )}
+      {children}
       {url !== undefined && (
         <Button title={openWords(url)} onPress={() => void Linking.openURL(url).catch(() => {})} />
       )}

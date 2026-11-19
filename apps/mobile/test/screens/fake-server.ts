@@ -81,6 +81,22 @@ export class FakeServer {
   grants: Grant[] = [];
   /** The notices a phone may open, by id, as the server's read answers them. */
   notices = new Map<string, Record<string, unknown>>();
+  /**
+   * What the account is set to receive, as the server answers it. A server from before a
+   * switch leaves it out: delete the field. Null for one from before any of this.
+   */
+  preferences: Record<string, boolean> | null = {
+    muted: false,
+    task: true,
+    review: true,
+    failure: true,
+    desktopUpdate: true,
+    workflow: true,
+    agent: true,
+    agentFinished: true,
+  };
+  /** Each replacement of them a phone sent, as it came. */
+  savedPreferences: Record<string, boolean>[] = [];
   /** What a pairing may redeem, by what it presents. Each goes once. */
   offers = new Set<string>(["ABCD2345"]);
   /** Every offer presented to this server, as it was presented. */
@@ -182,7 +198,19 @@ export class FakeServer {
     pullDetails: {} as Record<string, Record<string, unknown>>,
     /** How many more answers say it is still reading them from the forge. */
     pullsReading: 0,
+    /** Its Notifications list, as `notification.list` gives it: what waits first. */
+    notifications: [] as Record<string, unknown>[],
+    /** Whether that list says it was cut to what one answer carries. */
+    notificationsCut: false,
+    /** What `workspace.publish` answers: where a workspace stands, with its pull request. */
+    publish: null as Record<string, unknown> | null,
   };
+  /** Another computer's Notifications list, by its id: one not named has `computer`'s. */
+  listsOf = new Map<string, Record<string, unknown>[]>();
+  /** What `notification.seen` was sent, each as it came, with the computer it was sent to. */
+  seen: { host: string; ids: string[]; all: boolean }[] = [];
+  /** Sockets told when their computer's list changes. */
+  #listFollowers = new Set<Socket>();
   /** The questions answered, each as it came. */
   answers: { ask: string; decision: string }[] = [];
   /** What `test.decide` was sent. */
@@ -295,6 +323,16 @@ export class FakeServer {
             { code: "not_found", message: "Not found.", retryable: false },
             { status: 404 },
           );
+    }
+    if (url.pathname === "/v1/notifications/preferences" && this.preferences) {
+      if (method === "GET") return Response.json(this.preferences);
+      if (method === "POST") {
+        const sent = JSON.parse(String(init?.body)) as Record<string, boolean>;
+        this.savedPreferences.push(sent);
+        // What a phone leaves out, the server keeps as it was.
+        this.preferences = { ...this.preferences, ...sent };
+        return new Response(null, { status: 204 });
+      }
     }
     if (method === "GET" && url.pathname === "/v1/account/export") {
       if (!this.exports) {
@@ -426,7 +464,7 @@ export class FakeServer {
                 protocol,
                 host: {
                   host,
-                  name: "Workstation",
+                  name: this.hosts.find((h) => h.id === host)?.name ?? "Workstation",
                   platform: "linux",
                   appVersion: "0",
                   protocol,
@@ -459,6 +497,7 @@ export class FakeServer {
         this.relaySockets.delete(socket);
         this.#hostOf.delete(socket);
         this.#following.delete(socket);
+        this.#listFollowers.delete(socket);
         this.#watching.delete(socket);
         this.sockets.open -= 1;
         setTimeout(() => socket.onclose?.({ code, reason: "" }), 0);
@@ -656,6 +695,45 @@ export class FakeServer {
           ...computer.pullDetails[`${pull.followed ?? ""}#${pull.number}`],
         };
       }
+      case "notification.list": {
+        const rows = this.#listOf(socket);
+        const count = (part: string) => rows.filter((row) => row.part === part).length;
+        return {
+          kind: "notifications",
+          notifications: rows,
+          needs: count("needs"),
+          finished: count("finished"),
+          more: computer.notificationsCut,
+        };
+      }
+      case "notification.seen": {
+        const ids = params.ids as unknown as string[];
+        const all = params.all as unknown as boolean;
+        this.seen.push({ host: this.#hostOf.get(socket) ?? "", ids, all });
+        for (const row of this.#listOf(socket)) {
+          if (row.part === "finished" && (all || ids.includes(row.id as string))) {
+            row.part = "earlier";
+            row.settledAt = 1_700_000_400_000;
+          }
+        }
+        this.listChanged();
+        return { kind: "done" };
+      }
+      case "notification.follow":
+        this.#listFollowers.add(socket);
+        return { kind: "done" };
+      case "notification.unfollow":
+        this.#listFollowers.delete(socket);
+        return { kind: "done" };
+      case "workspace.publish":
+        if (!computer.publish) throw new NotThere();
+        return { kind: "publish", ahead: 0, behind: 0, ...computer.publish };
+      case "pull_request.merge": {
+        const pull = computer.pulls.find((held) => held.number === params.number) as
+          Record<string, unknown> | undefined;
+        if (pull) pull.state = "merged";
+        return { kind: "done" };
+      }
       case "harness.list":
         return { kind: "harnesses", harnesses: computer.harnesses };
       case "workspace.start":
@@ -699,6 +777,20 @@ export class FakeServer {
           protocol: { major: 1, minor: 4 },
           capabilities: computer.capabilities,
         };
+    }
+  }
+
+  #listOf(socket: Socket): Record<string, unknown>[] {
+    return this.listsOf.get(this.#hostOf.get(socket) ?? "") ?? this.computer.notifications;
+  }
+
+  /** A computer's list changing, told to whoever follows it. */
+  listChanged(): void {
+    for (const socket of this.#listFollowers) {
+      setTimeout(
+        () => socket.onmessage?.({ data: JSON.stringify({ event: "notifications.changed" }) }),
+        0,
+      );
     }
   }
 
@@ -766,6 +858,35 @@ export class FakeServer {
       refresh,
     });
   }
+}
+
+/** What a computer that keeps a Notifications list, and says when it changes, answers. */
+export const LIST_CAPABILITIES = [
+  "notification.list",
+  "notification.seen",
+  "notification.follow",
+  "notification.unfollow",
+];
+
+/** A row of a computer's Notifications list as it sends one: an agent that finished, unless said. */
+export function notification(id: string, change: Record<string, unknown> = {}) {
+  return {
+    id,
+    kind: "agent.finished",
+    part: "finished",
+    project: "project-1",
+    projectName: "demo",
+    workspace: "workspace-1",
+    workspaceName: "fix-login",
+    branch: "ys/fix-login",
+    session: "session-1",
+    title: "The login page times out",
+    harness: "claude",
+    terminal: "terminal-1",
+    at: Date.now() - 4 * 60_000,
+    workedMs: 12 * 60_000,
+    ...change,
+  };
 }
 
 /** An activity event as a computer sends it. */
