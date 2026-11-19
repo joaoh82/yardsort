@@ -557,13 +557,15 @@ mod tests {
     use yardsort_core::env::EnvSource;
 
     fn env(home: &std::path::Path) -> ShellEnv {
+        // A prompt that can be waited for, whatever the machine's shell is. It is set in the
+        // home's own profile, which a login shell reads last: the machine's `/etc/profile`
+        // replaces a `PS1` it is handed (`$ ` on Ubuntu, the host's name on macOS).
+        std::fs::write(home.join(".profile"), "PS1='ready> '\n").unwrap();
         ShellEnv {
             vars: BTreeMap::from([
                 ("HOME".to_owned(), home.display().to_string()),
                 ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
                 ("SHELL".to_owned(), "/bin/sh".to_owned()),
-                // A prompt that can be waited for, whatever the machine's shell is.
-                ("PS1".to_owned(), "ready> ".to_owned()),
                 ("ENV".to_owned(), String::new()),
             ]),
             source: EnvSource::Process,
