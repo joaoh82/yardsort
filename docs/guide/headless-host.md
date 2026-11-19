@@ -592,6 +592,8 @@ already. The browser is sent to an address starting `http://127.0.0.1:<port>/sig
 nowhere there: paste it back, or forward the port over SSH first and it finishes by itself. Signing
 in again is what deletes, and it has to be within five minutes and as the same person: as someone
 else, the server says so and deletes nothing. Stop the command before then and nothing is deleted.
+If the host stops answering after it printed the address, the command cannot tell whether the
+account went, and says so: `yardsort-host status` tells, once the host runs again.
 
 Like `pair`, it is refused from any terminal Yardsort started and from anything an agent runs or the
 [dashboard](host-dashboard.md) runs. `serve` has to be running. You can also delete the account from

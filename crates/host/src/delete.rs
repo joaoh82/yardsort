@@ -40,27 +40,56 @@ pub async fn run(profile: &Profile) -> Result<(), String> {
     }
     let mut line = control::connect(profile).await?;
     line.send(&Ask::AccountDelete).await?;
+    converse(&mut line, &mut typed).await
+}
+
+/// Once the host has given the confirming sign-in, the browser may bring it back at any moment,
+/// by the forwarded port or a paste, and the host then deletes before it answers. So a host that
+/// goes quiet after that may have deleted: it is said that the outcome is not known.
+const UNKNOWN: &str = "The host stopped answering after it gave the sign-in to confirm with, so \
+                       whether the account was deleted is not known. It may have been: run \
+                       `yardsort-host status` once the host is running again, or look on another \
+                       device.";
+
+/// The conversation with the host, from the ask to its answer.
+async fn converse(
+    line: &mut control::Line,
+    typed: &mut mpsc::UnboundedReceiver<String>,
+) -> Result<(), String> {
+    let mut confirming = false;
+    let lost = |confirming: bool, why: String| {
+        if confirming {
+            UNKNOWN.to_owned()
+        } else {
+            format!("{why} Nothing was deleted.")
+        }
+    };
     loop {
         let reply = tokio::select! {
-            reply = line.next::<Reply>() => reply?,
+            reply = line.next::<Reply>() => reply,
             pasted = typed.recv() => match pasted {
                 Some(address) if address.trim().is_empty() => {
                     eprint!("Address: ");
                     continue;
                 }
                 Some(address) => {
-                    line.send(&Ask::Pasted { address }).await?;
+                    if let Err(why) = line.send(&Ask::Pasted { address }).await {
+                        return Err(lost(confirming, why));
+                    }
                     continue;
                 }
                 // No more input: the forwarded port may still bring the browser back.
-                None => line.next::<Reply>().await?,
+                None => line.next::<Reply>().await,
             },
         };
-        let Some(reply) = reply else {
-            return Err("The host closed the connection. Nothing was deleted.".into());
+        let reply = match reply {
+            Ok(Some(reply)) => reply,
+            Ok(None) => return Err(lost(confirming, "The host closed the connection.".into())),
+            Err(why) => return Err(lost(confirming, why)),
         };
         match reply {
             Reply::Confirm { url, port } => {
+                confirming = true;
                 println!("Open this address in a browser, on any computer, and sign in again:\n");
                 println!("  {url}\n");
                 println!(
@@ -118,4 +147,100 @@ fn typed() -> mpsc::UnboundedReceiver<String> {
 /// `1 device`, `3 devices`.
 fn counted(n: u32, what: &str) -> String {
     format!("{n} {what}{}", if n == 1 { "" } else { "s" })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A host on the other end of a socket pair, which answers the ask as `host` says, then goes.
+    async fn against<F, Fut>(host: F, typed: &[&str]) -> Result<(), String>
+    where
+        F: FnOnce(control::Line) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send,
+    {
+        let (here, there) = tokio::net::UnixStream::pair().unwrap();
+        let hosting = tokio::spawn(async move {
+            let mut there = control::Line::new(there);
+            assert!(matches!(
+                there.next::<Ask>().await.unwrap(),
+                Some(Ask::AccountDelete)
+            ));
+            host(there).await;
+        });
+        let (send, mut lines) = mpsc::unbounded_channel();
+        for line in typed {
+            send.send((*line).to_owned()).unwrap();
+        }
+        let mut here = control::Line::new(here);
+        here.send(&Ask::AccountDelete).await.unwrap();
+        let said = converse(&mut here, &mut lines).await;
+        hosting.await.unwrap();
+        said
+    }
+
+    fn confirm() -> Reply {
+        Reply::Confirm {
+            url: "https://remote.example.test/v1/login?purpose=confirm".into(),
+            port: 45999,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_host_gone_before_it_gave_the_sign_in_deleted_nothing() {
+        let said = against(|_gone| async {}, &[]).await.unwrap_err();
+        assert_eq!(said, "The host closed the connection. Nothing was deleted.");
+    }
+
+    #[tokio::test]
+    async fn a_host_gone_after_the_address_was_pasted_may_have_deleted_and_says_it_is_not_known() {
+        let said = against(
+            |mut there| async move {
+                there.send(&confirm()).await.unwrap();
+                // The address arrives, the server deletes, and the answer never comes back.
+                assert!(matches!(
+                    there.next::<Ask>().await.unwrap(),
+                    Some(Ask::Pasted { .. })
+                ));
+            },
+            &["http://127.0.0.1:45999/signed-in?code=the-code"],
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(said, UNKNOWN);
+        assert!(!said.contains("Nothing was deleted"));
+    }
+
+    #[tokio::test]
+    async fn a_host_gone_after_giving_the_sign_in_may_have_deleted_by_the_forwarded_port() {
+        let said = against(
+            |mut there| async move {
+                there.send(&confirm()).await.unwrap();
+            },
+            &[],
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(said, UNKNOWN);
+    }
+
+    #[tokio::test]
+    async fn the_hosts_word_that_it_deleted_is_success() {
+        let said = against(
+            |mut there| async move {
+                there.send(&confirm()).await.unwrap();
+                there
+                    .send(&Reply::Deleted {
+                        devices: 2,
+                        hosts: 1,
+                        records: 3,
+                    })
+                    .await
+                    .unwrap();
+            },
+            &[],
+        )
+        .await;
+        assert_eq!(said, Ok(()));
+    }
 }
