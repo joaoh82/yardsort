@@ -10,6 +10,7 @@
 //   bun .yardsort/tests/support/phone.ts <run dir> registers | opens-notice <name> <pushes file>
 //   bun .yardsort/tests/support/phone.ts <run dir> lets-a-test-run <name>
 //   bun .yardsort/tests/support/phone.ts <run dir> sees-pull-requests <name>
+//   bun .yardsort/tests/support/phone.ts <run dir> merges <name> [stale]
 //   bun .yardsort/tests/support/phone.ts <run dir> exports
 //   bun .yardsort/tests/support/phone.ts <run dir> signs-in | told-deleted | starts-empty
 //   bun .yardsort/tests/support/phone.ts <run dir> held-back <name> | not-signed-in
@@ -325,6 +326,40 @@ switch (doing) {
       throw new Error(`One it never read was not refused as not found: ${String(unread)}`);
     }
     console.log("saw the pull requests");
+    channel.close();
+    break;
+  }
+  case "merges": {
+    // As the phone's card does (48): where the workspace stands names the commit to merge at.
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    for (const op of ["workspace.publish", "pull_request.merge"]) {
+      if (!channel.host.capabilities.includes(op))
+        throw new Error(`The computer does not answer ${op}.`);
+    }
+    const listed = await channel.workspaces();
+    const project = listed.projects.find((p) => p.name === "repo");
+    const workspace = listed.workspaces.find((w) => w.project === project?.id);
+    if (!project || !workspace) throw new Error("The project's checkout is not on the phone.");
+    const state = await channel.publishState({ workspace: workspace.id, forge: true });
+    const pull = state.pullRequest;
+    if (!state.gh || !pull?.headOid || pull.number !== 12) {
+      throw new Error(`Not the checkout's pull request to merge: ${JSON.stringify(state)}`);
+    }
+    const stale = line === "stale";
+    const headOid = stale ? "1111111111111111111111111111111111111111" : pull.headOid;
+    try {
+      await channel.mergePullRequest({
+        workspace: workspace.id,
+        number: 12,
+        headOid,
+        method: "squash",
+      });
+      console.log(`merged #12 at ${headOid}`);
+    } catch (error) {
+      if (!(error instanceof ClientError) || error.kind !== "remote") throw error;
+      console.log(`refused: ${error.message}`);
+    }
     channel.close();
     break;
   }

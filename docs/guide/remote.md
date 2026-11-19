@@ -87,7 +87,8 @@ it is sent anywhere.
 ## Pull requests on the phone
 
 When this computer has `gh` installed and signed in, the phone shows what became of a workspace's
-branch, as the sidebar here does. It is read-only: nothing on the phone changes a pull request.
+branch, as the sidebar here does. A workspace's own pull request can be merged from the phone;
+nothing else on the phone changes one.
 
 - **On a workspace's row**, a badge with its pull request's number, coloured as here: green for
   one open with nothing pending or wrong, yellow for a draft or one still waiting on checks or a
@@ -99,6 +100,18 @@ branch, as the sidebar here does. It is read-only: nothing on the phone changes 
   conflicts. **Show** opens the checks to each by name, the failed ones first; they are open
   already when one failed. **Open on GitHub** opens its page in the phone's browser. Others the
   workspace opened or follows are listed under the card.
+- **Merge…**, on that card, when the pull request is the workspace's own, open and not a draft, on
+  a computer that lets the phone type and has `gh`. It asks first, in a sheet: what it merges
+  into, at which commit (the one shown now), on which computer, and how: **Squash** (chosen
+  first), **Merge** or **Rebase**. When checks failed or are still running, the sheet says so and
+  still lets you go on, since the forge's own rules decide. That computer merges only the
+  workspace's own pull request, and only if it is still at the commit the sheet showed: one pushed
+  to since is refused, and the card shows its new head to merge at instead. The branch is kept.
+  When it conflicts, **Merge…** cannot be pressed and says why; a draft, or one no workspace there
+  opened, says to go to the forge. If the answer does not come back, the card says it may have
+  been merged and reads it again; it never sends the merge a second time by itself. If the
+  connection had already closed, it says nothing was sent. While the computer cannot be reached,
+  or has not yet said where the workspace stands, there is no **Merge…**.
 - **Pull requests**, on a computer's screen with the count of open ones, lists them over every
   project the phone may see: **Open**, **Merged** and **Closed**. Merged and closed are those
   among the newest fifty of each project.
