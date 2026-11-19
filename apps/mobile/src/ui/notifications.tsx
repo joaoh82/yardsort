@@ -2,7 +2,7 @@
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 /**
- * The Notifications list as screens show it (48): the bell in a header's corner with how many
+ * The Notifications list as screens show it (49): the bell in a header's corner with how many
  * things need their person, a row of the list, and the hooks that keep every computer's list
  * read while a screen is in front.
  *

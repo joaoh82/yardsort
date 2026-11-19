@@ -72,6 +72,11 @@ has the downloads and the full commit lists.
   projects' pull requests with its own `gh` when the phone asks, so the badges, the card and the
   **Pull requests** list show for it as for a desktop. Those a workspace follows in another
   repository are not read there yet. See [Pull requests on the phone](docs/guide/remote.md#pull-requests-on-the-phone).
+- **Merge a pull request from the phone** (Remote, under development). A workspace's own pull
+  request has **Merge…** on its card, which asks first: into which branch, at which commit, and
+  squash, merge or rebase. The computer merges it with its own `gh`, only at the commit you were
+  shown, and keeps the branch. It needs a computer on this release; nothing changes on the
+  computer's side. See [Pull requests on the phone](docs/guide/remote.md#pull-requests-on-the-phone).
 - **Export your account** (Remote, under development). **Settings → Remote → Your account → Export
   my account's data…** saves everything the server keeps of your account as one JSON file: your
   devices and computers, which phones get notifications, and every synced project, note and
@@ -83,8 +88,9 @@ has the downloads and the full commit lists.
   my account…** deletes everything the server keeps of your account, for every device, once you have
   typed delete and signed in again in the browser. Nothing on your computers or phones is deleted,
   and Remote turns off here. Your other devices say the account was deleted the next time they
-  reach the server. The phone has it under **Settings → Your account**, and the server has a web
-  page for it, `/account/delete`. It needs a server of this version. See
+  reach the server. The phone has it under **Settings → Your account**, a computer with no screen
+  has `yardsort-host account delete`, and the server has a web page for it, `/account/delete`. It
+  needs a server of this version. See
   [Deleting your account](docs/guide/delete-account.md).
 - **A server counts what each account uses, and can ask about plans** (Remote, under development).
   The server now keeps, for each account and day, how many of its devices made a request, the most

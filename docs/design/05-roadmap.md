@@ -1405,7 +1405,7 @@ screen.
 
 ## M34 — Notifications
 
-Proposed in Figma and answered on 2026-11-17 ([48-notifications](48-notifications.md)): one list,
+Proposed in Figma and answered on 2026-11-17 ([49-notifications](49-notifications.md)): one list,
 on the desktop and on the phone, of what needs a person and what finished while they were not
 looking.
 
@@ -1466,6 +1466,16 @@ Built the same day, in one piece: [47-host-dashboard](47-host-dashboard.md).
 _Exit:_ a person installs `yardsort-host` on a new server with one line, signs it in, opens the
 dashboard and finishes the rest there, an agent, GitHub and their repositories, without typing
 another command over SSH but the agent's own sign-in.
+
+## M36 — Merging from the phone
+
+Asked for by the owner on 2026-11-18, after the phone's pull requests (45). Built the same day:
+[48-phone-merge](48-phone-merge.md). No host or protocol change.
+
+- [x] **Merge…** on a workspace's own pull request card, with a sheet naming the commit, Squash
+      by default, a warning for checks, and the branch kept.
+- [x] A smoke test, `headless-phone-merges.yaml`: a stale commit is refused, the head merges.
+- [ ] Run on the iPhone against `yardsort-box`.
 
 ## Later (unordered)
 

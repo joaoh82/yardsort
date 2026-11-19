@@ -2,7 +2,7 @@
 -- looking. One row is one thing that happened: to an agent's conversation, to a workflow's run,
 -- to a smoke test's run, to a schedule or to a trigger. The core writes it when the thing
 -- happens and settles it when it is answered or seen; the window, and later a phone, read it.
--- See docs/design/48-notifications.md.
+-- See docs/design/49-notifications.md.
 --
 -- The words a row is shown with are not kept here. A command an agent wants to run is read from
 -- its open question, what it said last from its own session file, and a workflow's question

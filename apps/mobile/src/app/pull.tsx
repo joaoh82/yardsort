@@ -3,7 +3,8 @@
 
 /**
  * One pull request, as the computer last read it (45): its card, and the workspaces it came out
- * of. Reached from a workspace row's badge, and from the list of them all. Read-only.
+ * of. Reached from a workspace row's badge, and from the list of them all. A workspace's own can
+ * be merged from here (48): the computer merges it, at the commit the sheet showed.
  */
 
 import type { Channel, HostId, ProjectId, PullDetail, WorkspaceId } from "@yardsort/remote-client";
@@ -14,6 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 import { readsPulls, refOf } from "../lib/pulls";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useLive, useRead } from "../ui/live";
 import { Body, Group, Problem, Row, Screen, Section, Waiting } from "../ui/parts";
+import { PullMerge } from "../ui/merge";
 import { PullCard, PULLS_EVERY_MS, useNow } from "../ui/pull";
 
 export default function PullScreen() {
@@ -102,6 +104,7 @@ function Pull({
   }, [channel, from]);
 
   const pull = detail.answer?.pull;
+
   const title = <Stack.Screen options={{ title: pull ? refOf(pull) : "Pull request" }} />;
 
   if (reach?.kind === "gone") {
@@ -133,7 +136,17 @@ function Pull({
           than it reads now.
         </Body>
       )}
-      {detail.answer && pull && <PullCard pull={pull} detail={detail.answer} now={now} />}
+      {detail.answer && pull && (
+        <PullCard pull={pull} detail={detail.answer} now={now}>
+          <PullMerge
+            key={`${pull.project}#${pull.number}`}
+            channel={channel}
+            pull={pull}
+            again={asked}
+            onDone={() => setAsked((n) => n + 1)}
+          />
+        </PullCard>
+      )}
       {pull && pull.workspaces.length > 0 && (
         <Section title={pull.followed ? "Followed from" : "Opened from"}>
           <Group>

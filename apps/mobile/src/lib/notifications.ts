@@ -2,7 +2,7 @@
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 /**
- * The Notifications list (48): what waits for its person on each computer, and what finished
+ * The Notifications list (49): what waits for its person on each computer, and what finished
  * while they were not looking. Each computer keeps its own list, the one its window shows. The
  * phone reads it from every computer it can reach, is told when it changes, and says back when
  * a finished row was looked at, so seen is one fact, kept on the computer.

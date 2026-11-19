@@ -1,4 +1,4 @@
-# 48. Notifications
+# 49. Notifications
 
 Status: proposed in Figma and answered by the owner on 2026-11-17. Built: all five slices.
 

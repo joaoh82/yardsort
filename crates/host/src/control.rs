@@ -121,6 +121,14 @@ pub enum Ask {
     /// Everything the server keeps of this computer's account, every page put together. Refused
     /// unless a person at a terminal asked: it holds every synced note and workspace name.
     AccountExport,
+    /// Delete this computer's account at its server, for every device: a confirming sign-in in a
+    /// browser, then each address pasted back as an [`Ask::Pasted`], until one is the sign-in's.
+    /// Refused unless a person at a terminal asked: an agent never deletes the account.
+    AccountDelete,
+    /// On an `AccountDelete` connection: the address the browser was sent back to.
+    Pasted {
+        address: String,
+    },
 }
 
 impl Ask {
@@ -158,6 +166,7 @@ impl Ask {
                 ("Opening a tunnel to the dashboard", "dashboard tunnel on")
             }
             Ask::AccountExport => ("Exporting the account", "account export"),
+            Ask::AccountDelete => ("Deleting the account", "account delete"),
             _ => return None,
         })
     }
@@ -205,6 +214,22 @@ pub enum Reply {
     /// The account's export, for the command to save.
     Export {
         export: Box<remote_proto::export::AccountExport>,
+    },
+    /// Open `url` in a browser and sign in again, which confirms the deletion. The browser is
+    /// then sent to 127.0.0.1 at `port`, here.
+    Confirm {
+        url: String,
+        port: u16,
+    },
+    /// A pasted address that is not the confirming sign-in's: paste another.
+    NotThatAddress {
+        message: String,
+    },
+    /// The account is gone at the server, with how much went with it. Remote is off here.
+    Deleted {
+        devices: u32,
+        hosts: u32,
+        records: u32,
     },
     /// Done, in words.
     Done {
@@ -493,6 +518,7 @@ mod tests {
                 text: None,
             },
             Ask::AccountExport,
+            Ask::AccountDelete,
         ] {
             assert!(ask.guarded(), "{ask:?}");
         }

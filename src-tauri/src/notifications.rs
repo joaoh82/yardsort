@@ -1,6 +1,6 @@
 //! The Notifications list's home in the app: the core's keeper of it, told what only the app
 //! hears, and the window's commands. The rules, and the list itself, are the core's
-//! (`yardsort_core::notifications`). See `docs/design/48-notifications.md`.
+//! (`yardsort_core::notifications`). See `docs/design/49-notifications.md`.
 //!
 //! The window is shown one list: this computer's rows, and with them the rows of each other
 //! computer this one reaches, as last read ([`remote_host::computer::notifications`]). A row

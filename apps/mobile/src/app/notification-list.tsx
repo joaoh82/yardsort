@@ -2,7 +2,7 @@
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 /**
- * Notifications (48): one list over every computer this phone can reach. What needs you, what
+ * Notifications (49): one list over every computer this phone can reach. What needs you, what
  * finished and was not seen, and what left, kept a week by its computer. A computer that is
  * offline shows a line and no rows. Which notices are pushed to this phone is chosen elsewhere,
  * under Settings → Notifications, reached from the foot of this list too.

@@ -75,7 +75,7 @@ no terminal left to open.
 
 ### An agent that finished
 
-Added with the Notifications list ([48](48-notifications.md), its slice 5). The list has a row
+Added with the Notifications list ([49](49-notifications.md), its slice 5). The list has a row
 for an agent that finished a stretch of work and was not looked at. A row that stays unseen is
 told to the phone: the `agent` category's second kind, `finished`.
 
