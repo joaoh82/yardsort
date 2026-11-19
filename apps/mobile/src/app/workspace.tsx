@@ -41,6 +41,7 @@ import {
   useColors,
   Waiting,
 } from "../ui/parts";
+import { PullMerge } from "../ui/merge";
 import { PullBadge, PullCard, useNow, usePullDetail, usePulls } from "../ui/pull";
 
 export default function WorkspaceScreen() {
@@ -160,7 +161,14 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
 
       {pull && (
         <Section title="Pull request">
-          <PullCard pull={pullDetail?.pull ?? pull} detail={pullDetail} now={now} />
+          <PullCard pull={pullDetail?.pull ?? pull} detail={pullDetail} now={now}>
+            <PullMerge
+              channel={channel}
+              pull={pullDetail?.pull ?? pull}
+              again={pulls}
+              onDone={() => setAsked((n) => n + 1)}
+            />
+          </PullCard>
         </Section>
       )}
       {otherPulls.length > 0 && (

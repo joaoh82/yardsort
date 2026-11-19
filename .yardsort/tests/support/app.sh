@@ -78,7 +78,7 @@ TEST
     ;;
   seed-a-pull-request)
     # The repository as one on a forge, on a branch with a pull request, and a `gh` that answers
-    # for it from a file: no forge is asked, and nobody's sign-in is used.
+    # for it from a file, and says yes to a merge: no forge is asked, and nobody's sign-in is used.
     # The second pull request is someone else's: its head is a commit this checkout never had,
     # since one whose head was made here is this checkout's own, whatever its branch is called.
     repo="$YS_RUN_DIR/repo"
@@ -138,6 +138,8 @@ LIST
 echo "\$*" >> "$app/gh/asked"
 case "\$1 \$2" in
   "pr list") cat "$app/gh/list.json" ;;
+  # Says yes to a merge, which only a test that merges asks for: the others check it was not.
+  "pr merge") exit 0 ;;
   *) echo "gh: this is a smoke test's stand-in; '\$1 \$2' is not answered" >&2; exit 1 ;;
 esac
 GH

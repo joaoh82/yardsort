@@ -182,6 +182,8 @@ export class FakeServer {
     pullDetails: {} as Record<string, Record<string, unknown>>,
     /** How many more answers say it is still reading them from the forge. */
     pullsReading: 0,
+    /** What `workspace.publish` answers: where a workspace stands, with its pull request. */
+    publish: null as Record<string, unknown> | null,
   };
   /** The questions answered, each as it came. */
   answers: { ask: string; decision: string }[] = [];
@@ -655,6 +657,15 @@ export class FakeServer {
           waitingOn: [],
           ...computer.pullDetails[`${pull.followed ?? ""}#${pull.number}`],
         };
+      }
+      case "workspace.publish":
+        if (!computer.publish) throw new NotThere();
+        return { kind: "publish", ahead: 0, behind: 0, ...computer.publish };
+      case "pull_request.merge": {
+        const pull = computer.pulls.find((held) => held.number === params.number) as
+          Record<string, unknown> | undefined;
+        if (pull) pull.state = "merged";
+        return { kind: "done" };
       }
       case "harness.list":
         return { kind: "harnesses", harnesses: computer.harnesses };
