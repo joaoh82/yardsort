@@ -332,10 +332,11 @@ Also in [06-open-questions](06-open-questions.md).
    `rustunnel setup` all want a terminal, and jobs have none. A terminal in the browser would
    finish the "no SSH at all" story, and is a good deal more than a host management page: it is
    a shell on the internet behind one cookie.
-3. **Pairing a device from the dashboard** is left out on purpose, and refused to its commands
+3. **Pairing a device from the dashboard.** The owner said yes on 2026-11-19; to be built. It was left out on purpose, and refused to its commands
    (above). If the owner wants the phone's QR code there, the dashboard's sign-in becomes part
    of what guards pairing, and should be thought of that way first.
-4. **Signing the host in to a Yardsort server from the dashboard.** Today that is
+4. **Signing the host in to a Yardsort server from the dashboard.** The owner said yes on
+   2026-11-19; to be built. Today that is
    `yardsort-host sign-in`, with `serve` stopped.
 5. **Another tunnel, or a reverse proxy of your own.** Only rustunnel's host name is taken as
    the dashboard's address. A list of further names in the settings would open it to others,
