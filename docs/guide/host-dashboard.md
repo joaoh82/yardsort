@@ -12,7 +12,8 @@ set it up. It is what you would otherwise do over SSH, a command at a time, afte
 
 It is not another Yardsort. There are no workspaces, terminals or conversations in it, and it
 starts no agent: that is the [phone's and the desktop's](remote.md). It does not need Remote
-either, so a server that is not signed in to anything yet serves it all the same.
+either, so a server that is not signed in to anything yet serves it all the same, and on a
+computer with no screen you can sign it in from the page.
 
 - **On a computer with no screen**, `yardsort-host serve` serves it unless you turn it off.
 - **In the app**, it is off until you turn it on under **Settings → Remote → Host dashboard**.
@@ -30,11 +31,15 @@ guess. A link is good once, for ten minutes; the browser then stays signed in fo
 **Whoever signs in can run commands on that computer, as the user the host runs as.** That is
 what it is for. Treat a sign-in link as you would treat a shell on that computer.
 
-It lets no device in, approves no [memory](memory.md) note, turns no sync on, and neither exports
-nor deletes your account. Those stay at a
-terminal of your own, or in the app, so that nothing an agent could reach can do them, and a
-command you run from the dashboard is refused them too: `yardsort-host pair` typed into
-**Commands** does not pair a device.
+**On a computer with no screen, that includes Remote**: whoever signs in can sign it in to a
+Yardsort server, sign it out, and [pair a device](#remote) with it, as you can at a terminal
+there. Anyone who can run commands as that user could do all of that anyway.
+
+It approves no [memory](memory.md) note, turns no sync on, and neither exports nor deletes your
+account. Those stay at a terminal of your own, or in the app, so that nothing an agent could reach
+can do them. A command you run from the dashboard is refused them too, and refused pairing:
+`yardsort-host pair` typed into **Commands** does not pair a device. Only the page's own buttons
+do, in a browser you signed in.
 
 ## Opening it on a computer with no screen
 
@@ -91,6 +96,31 @@ How the host stands: the program and its version, the user it runs as, whether R
 its link to the server, how many devices are let in, and how many terminals are running. Beside
 it, the computer: its system, how busy its processors are, its memory, and how full the disks
 under your home and your workspaces are. Below, the projects there.
+
+### Remote
+
+On a computer with no screen, what `yardsort-host sign-in`, `sign-out` and `pair` do at a
+terminal. In the app it only says to use the window: **Settings → Remote** does all of it there.
+
+**Signing in.** Not signed in yet, it asks for the server's address and the name phones will see,
+which is the computer's host name if you leave it empty. **Sign in** gives **Open the sign-in
+page**: sign in there, as yourself. The browser is then sent to an address starting
+`http://127.0.0.1:<port>/signed-in`, which goes nowhere unless you forwarded that port to the
+computer, in which case it finishes by itself. Otherwise copy the whole address from the address
+bar, paste it into the page and press **Finish signing in**. A wrong address is said, and you can
+paste another. The host links to the server at once: there is no stopping and starting it, as
+there is for `yardsort-host sign-in`. **Cancel** gives up a sign-in still waiting.
+
+Signed in, it says as whom and how the link is, and **Sign out of the server** removes the
+computer at the server, after asking. Every device paired with it loses it; what runs there keeps
+running.
+
+**Pairing a device.** **Show a pairing code** shows a QR code and the code to type, good once for
+five minutes, as `pair` does. Scan it or type it on the phone, or in the app on another computer.
+When the device asks, the page says its name and what it asks for. Tick **Let it type** if it
+asked to type and you want it to, **Let it approve or answer workflows** if it asked for that,
+and, with more than one project, the projects it may reach. Then **Let it in** or **Turn it
+away**. Nothing is let in without that answer. **Stop** takes the code back.
 
 ### Agents
 
@@ -243,6 +273,10 @@ from an image of your own with `rustunnel` in it. This has not been tried yet.
   **Commands**. Run it in an SSH login of your own. Turning the dashboard on and opening a
   tunnel are refused the same way, each named for what was asked. On a computer that is not
   Linux it says it needs Linux, where the host can check who asks.
+- **"This computer is signed in already, as …"** under **Remote**: sign it out first, from the
+  page or with `yardsort-host sign-out`, to sign in to another server.
+- **"No device is asking now. Show a code again."** The code lapsed, or the device's request
+  went, before you answered. Nothing was let in.
 - **"Signed out for now, but … could be neither written nor deleted"** The profile's
   `dashboard` folder cannot be changed, so the sign-out holds only until the host restarts. Fix
   the folder's owner or the full disk, or delete the file it names.

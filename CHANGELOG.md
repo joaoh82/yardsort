@@ -15,7 +15,9 @@ has the downloads and the full commit lists.
   with `yardsort-host dashboard tunnel on --subdomain <name>` for an `https://` address, whose
   server can read what passes through it. A browser signs in with a one-time link that
   `yardsort-host dashboard` prints only at a terminal of your own, as `pair` does, and whoever
-  signs in can run commands there as you. It is not another Yardsort and lets no device in. The
+  signs in can run commands there as you. On a computer with no screen its **Remote** tab signs
+  the computer in to a Yardsort server and pairs a phone, as `yardsort-host sign-in` and `pair`
+  do, with no restart; a command it runs still cannot pair. It is not another Yardsort. The
   app can serve the same page for this computer: **Settings → Remote → Host dashboard**, off
   until you tick it. See [The host dashboard](docs/guide/host-dashboard.md).
 - **Pull requests on the phone from a computer with no screen.** `yardsort-host` now reads its

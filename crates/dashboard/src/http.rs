@@ -29,7 +29,7 @@ use yardsort_core::program::Program;
 use yardsort_core::settings::TunnelSettings;
 
 use crate::jobs::{Step, Summary, Work};
-use crate::{agents, git, system, Inner, Project};
+use crate::{agents, git, system, Inner, PairAnswer, Pairing, Project, Remote, SigningIn};
 
 /// What a request that changes something must carry. A page on another site cannot add it
 /// without the browser asking this server first, and this server never says yes.
@@ -61,6 +61,14 @@ pub fn router(inner: Arc<Inner>) -> Router {
         .route("/api/jobs/{id}", get(read_job))
         .route("/api/jobs/{id}/stop", post(stop_job))
         .route("/api/tunnel", post(set_tunnel))
+        .route("/api/remote", get(read_remote))
+        .route("/api/remote/pair", post(pair))
+        .route("/api/remote/pair/answer", post(answer_device))
+        .route("/api/remote/pair/stop", post(stop_pairing))
+        .route("/api/remote/sign-in", post(remote_sign_in))
+        .route("/api/remote/sign-in/pasted", post(remote_pasted))
+        .route("/api/remote/sign-in/stop", post(stop_remote_sign_in))
+        .route("/api/remote/sign-out", post(remote_sign_out))
         .fallback(|| async { refuse(StatusCode::NOT_FOUND, "not_found", "There is nothing here.") })
         .layer(axum::middleware::from_fn_with_state(inner.clone(), guard))
         .with_state(inner)
@@ -964,4 +972,116 @@ mod tests {
             "git@github.com:me/repo.git"
         );
     }
+}
+
+// ── Remote: signing in, and pairing ─────────────────────────────────────────────────────────
+
+/// What the page may do at the Yardsort server, and how it stands.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteState {
+    /// The program serving the page lets these be done here. The app does not: its window does.
+    available: bool,
+    pairing: Pairing,
+    signing_in: SigningIn,
+}
+
+const NOT_HERE: &str =
+    "Pair devices and sign in from the Yardsort app's window: Settings → Remote.";
+
+/// Run `work` with this program's [`Remote`], off the runtime.
+async fn with_remote<T: Send + 'static>(
+    inner: &Arc<Inner>,
+    work: impl FnOnce(&dyn Remote) -> Result<T, String> + Send + 'static,
+) -> Result<T, Failed> {
+    blocking(inner, move |inner| match inner.source.remote() {
+        Some(remote) => work(remote),
+        None => Err(NOT_HERE.into()),
+    })
+    .await
+}
+
+async fn read_remote(State(inner): Shared) -> Answer<RemoteState> {
+    blocking(&inner, |inner| {
+        Ok(match inner.source.remote() {
+            Some(remote) => RemoteState {
+                available: true,
+                pairing: remote.pairing(),
+                signing_in: remote.signing_in(),
+            },
+            None => RemoteState {
+                available: false,
+                pairing: Pairing::Idle,
+                signing_in: SigningIn::Idle,
+            },
+        })
+    })
+    .await
+    .map(Json)
+}
+
+async fn pair(State(inner): Shared) -> Answer<Pairing> {
+    with_remote(&inner, |remote| remote.pair()).await.map(Json)
+}
+
+async fn answer_device(State(inner): Shared, Json(answer): Json<PairAnswer>) -> Answer<Pairing> {
+    with_remote(&inner, move |remote| remote.answer(answer))
+        .await
+        .map(Json)
+}
+
+async fn stop_pairing(State(inner): Shared) -> Answer<Pairing> {
+    with_remote(&inner, |remote| {
+        remote.stop_pairing();
+        Ok(remote.pairing())
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
+struct ServerSignIn {
+    server: String,
+    #[serde(default)]
+    name: String,
+}
+
+async fn remote_sign_in(
+    State(inner): Shared,
+    Json(asked): Json<ServerSignIn>,
+) -> Answer<SigningIn> {
+    with_remote(&inner, move |remote| {
+        remote.sign_in(asked.server.trim(), asked.name.trim())
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
+struct Pasted {
+    address: String,
+}
+
+async fn remote_pasted(State(inner): Shared, Json(pasted): Json<Pasted>) -> Answer<SigningIn> {
+    with_remote(&inner, move |remote| remote.pasted(&pasted.address))
+        .await
+        .map(Json)
+}
+
+async fn stop_remote_sign_in(State(inner): Shared) -> Answer<SigningIn> {
+    with_remote(&inner, |remote| {
+        remote.stop_signing_in();
+        Ok(remote.signing_in())
+    })
+    .await
+    .map(Json)
+}
+
+async fn remote_sign_out(State(inner): Shared) -> Answer<Done> {
+    with_remote(&inner, |remote| {
+        remote.sign_out()?;
+        Ok(Done { done: true })
+    })
+    .await
+    .map(Json)
 }

@@ -13,6 +13,8 @@ mod control;
 #[cfg(unix)]
 mod dashboard;
 #[cfg(unix)]
+mod dashboard_remote;
+#[cfg(unix)]
 mod delete;
 #[cfg(unix)]
 mod guard;

@@ -121,7 +121,7 @@ pub async fn sign_out(profile: Profile) -> Result<(), String> {
 }
 
 /// This computer's name, as phones would first see it.
-fn host_name() -> Option<String> {
+pub(crate) fn host_name() -> Option<String> {
     let mut buffer = [0u8; 256];
     // SAFETY: the buffer is valid for its length, and `gethostname` writes within it.
     let got = unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) };

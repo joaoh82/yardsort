@@ -4,7 +4,9 @@ Status: built on 2026-11-17, in one piece, at the owner's request, and reviewed 
 the review's four findings are fixed, and are in [After the review](#after-the-review). Its tests
 pass, its page was looked at in a real browser against a stand-in host, and `yardsort-host` was
 run with it on a throwaway profile. **Not yet run through a real tunnel, on a real server, or by the owner.** What
-was and was not checked is in [Checked](#checked).
+was and was not checked is in [Checked](#checked). Its **Remote** tab, signing the host in and
+pairing a device from the page, was added on 2026-11-19 at the owner's answer to questions 3 and
+4: [Remote from the page](#remote-from-the-page).
 
 ## What was asked
 
@@ -319,6 +321,54 @@ were right, and are fixed, each with a test that fails without its fix.
 4. **A tunnel turned off and on could not then be stopped.** The supervisor of the first client
    took the second's and waited for it, holding the lock. See _The tunnel_, above (`tunnel.rs`).
 
+## Remote from the page
+
+Added on 2026-11-19, when the owner answered questions 3 and 4: the host should do most if not all
+of what the clients do. A **Remote** tab, after Overview.
+
+**What it does.** On `yardsort-host`, what `sign-in`, `sign-out` and `pair` do at a terminal:
+
+- **Signing in**, while Remote is off: the server and the name, then the sign-in page's address to
+  open, and the address the browser lands on pasted back, or the port forwarded, as `sign-in`
+  takes them. Run by `serve` itself, which holds the profile, so there is no stopping it first;
+  the link starts at once (`account::enable`, then `account::connect`). The sign-in's verifier
+  stays in the host's process; the page holds the address and the code it pastes, which is worth
+  nothing without it.
+- **Signing out**, after the page asks: `account::disconnect` and `account::disable`, as the
+  control socket's `signOut`.
+- **Pairing**: an offer, its code and its QR code, drawn by the page from the modules the host
+  sends (`Pairing::Offered.qr`, a row of `0` and `1` each); the first device that asks, with what
+  it asks for and the projects to choose among; and the operator's answer, the same choices as
+  `pair` gives, sent with the device's grant id. An answer for any other grant is refused.
+
+**The interface.** `host_dashboard::Remote`, given by `Source::remote`. The app gives none: its
+window does all three, so the tab says to use **Settings → Remote** and every route answers so.
+Routes: `GET /api/remote`; `POST /api/remote/pair`, `/pair/answer`, `/pair/stop`,
+`/sign-in`, `/sign-in/pasted`, `/sign-in/stop` and `/sign-out`. Each needs a session, the page's
+header and no other site's `Origin`, as every other change does. The host's side is
+`crates/host/src/dashboard_remote.rs`.
+
+**Who it lets pair.** Question 3 said the dashboard's sign-in would become part of what guards
+pairing. It does, and nothing more was put in front of it: a browser signed in there already runs
+any command as the host's user, which can read the host's sign-in and do everything pairing does
+by hand. A second check would guard nothing that first one does not open. What still holds:
+
+- **No job pairs.** A command the dashboard runs is refused `pair` by the guard, as before, and
+  holds no session cookie to call the page's routes with; sessions are kept by their hash.
+- **No agent pairs**, for the same two reasons: an agent's terminal is refused by the guard, and
+  has no session.
+- **Nothing is let in unanswered**, and the answer names the device, as at a terminal.
+
+**Proof.** `crates/dashboard/tests/http.rs`, on a stand-in `Remote`: refused signed out and from
+another site's page; an offer with its code and QR code; the device asking, an answer for another
+device refused, and the answer chosen passed through; signing in by the address pasted, a wrong
+one refused, and signing out; and the app's case, every route saying where to go instead. The
+host's QR rows checked in `dashboard_remote.rs`. The smoke test `host-dashboard-remote`, against
+the stand-in server with a real `yardsort-host`: signed in from the page after a wrong address,
+linked with no restart, `pair` refused to a job, a phone paired from the page and reaching the
+computer, signed out. Its steps passed by hand on 2026-11-19. The page was looked at in a browser
+against the dashboard's stand-in example (`--remote`, `--remote-off`), in each state.
+
 ## Open questions
 
 Also in [06-open-questions](06-open-questions.md).
@@ -332,12 +382,10 @@ Also in [06-open-questions](06-open-questions.md).
    `rustunnel setup` all want a terminal, and jobs have none. A terminal in the browser would
    finish the "no SSH at all" story, and is a good deal more than a host management page: it is
    a shell on the internet behind one cookie.
-3. **Pairing a device from the dashboard.** The owner said yes on 2026-11-19; to be built. It was left out on purpose, and refused to its commands
-   (above). If the owner wants the phone's QR code there, the dashboard's sign-in becomes part
-   of what guards pairing, and should be thought of that way first.
-4. **Signing the host in to a Yardsort server from the dashboard.** The owner said yes on
-   2026-11-19; to be built. Today that is
-   `yardsort-host sign-in`, with `serve` stopped.
+3. ~~**Pairing a device from the dashboard.**~~ The owner said yes on 2026-11-19, and it was
+   built that day: [Remote from the page](#remote-from-the-page).
+4. ~~**Signing the host in to a Yardsort server from the dashboard.**~~ The same: built
+   2026-11-19.
 5. **Another tunnel, or a reverse proxy of your own.** Only rustunnel's host name is taken as
    the dashboard's address. A list of further names in the settings would open it to others,
    and would need a rule for which of them is HTTPS.

@@ -51,6 +51,7 @@
         </div>
         <nav id="tabs" class="tabs" aria-label="Sections">
           <a href="#overview" data-tab="overview">Overview</a>
+          <a href="#remote" data-tab="remote">Remote</a>
           <a href="#agents" data-tab="agents">Agents</a>
           <a href="#git" data-tab="git">Git</a>
           <a href="#commands" data-tab="commands">Commands</a>
@@ -81,6 +82,93 @@
           <article class="card">
             <h2>Projects</h2>
             <div id="overview-projects"></div>
+          </article>
+        </section>
+
+        <!-- Remote -->
+        <section id="tab-remote" class="tab" hidden>
+          <article id="remote-elsewhere" class="card" hidden>
+            <h2>Remote</h2>
+            <p class="muted">
+              Sign this computer in and pair devices from the Yardsort app's window:
+              <b>Settings → Remote</b>.
+            </p>
+          </article>
+
+          <article id="server-card" class="card" hidden>
+            <h2>Yardsort server</h2>
+            <p id="server-state" class="state"></p>
+            <form id="server-form" class="form" hidden>
+              <p class="muted">
+                Sign this computer in as a host, so the devices you pair with it reach it. You sign
+                in at the server in a browser, as yourself.
+              </p>
+              <label>
+                Server
+                <input
+                  id="server-url"
+                  name="server"
+                  placeholder="https://remote.example.com"
+                  spellcheck="false"
+                  autocapitalize="off"
+                  required
+                />
+              </label>
+              <label>
+                Name
+                <input id="server-name" name="name" maxlength="100" spellcheck="false" />
+                <span class="faint"
+                  >What phones call this computer. Left empty, its host name.</span
+                >
+              </label>
+              <div class="actions">
+                <button class="primary" type="submit">Sign in</button>
+              </div>
+            </form>
+            <div id="server-waiting" hidden>
+              <p>
+                <a id="server-open" class="button primary" rel="noreferrer noopener" target="_blank"
+                  >Open the sign-in page</a
+                >
+              </p>
+              <p class="muted">
+                Once signed in, the browser is sent to an address starting
+                <code id="server-back">http://127.0.0.1/signed-in</code>, which goes nowhere unless
+                that port is forwarded to this computer. Copy the whole address from its address
+                bar, and paste it here.
+              </p>
+              <form id="paste-form" class="form inline" autocomplete="off">
+                <input
+                  id="paste-address"
+                  name="address"
+                  placeholder="http://127.0.0.1:…/signed-in?code=…"
+                  spellcheck="false"
+                  autocapitalize="off"
+                  required
+                />
+                <button class="primary" type="submit">Finish signing in</button>
+              </form>
+              <p id="paste-error" class="error" role="alert" hidden></p>
+              <div class="actions">
+                <button id="server-cancel" type="button">Cancel</button>
+              </div>
+            </div>
+            <div class="actions">
+              <button id="server-sign-out" class="danger" type="button" hidden>
+                Sign out of the server
+              </button>
+            </div>
+            <p id="server-error" class="error" role="alert" hidden></p>
+          </article>
+
+          <article id="pair-card" class="card" hidden>
+            <h2>Pair a device</h2>
+            <p class="muted">
+              Let a phone, or the Yardsort app on another computer, reach this one. It asks with a
+              code; you say what it may do. Nothing is let in without your answer.
+            </p>
+            <div id="pair-view"></div>
+            <p id="pair-error" class="error" role="alert" hidden></p>
           </article>
         </section>
 
