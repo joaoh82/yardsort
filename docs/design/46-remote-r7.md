@@ -71,8 +71,8 @@ push routes to APNs and FCM (`push.rs`), notices, and sync's records, change log
 
 **Where it runs**: staging, one Machine in `fra`, ZITADEL Cloud's free instance, deployed from
 Actions on request ([28](28-remote-infrastructure.md) §5). Production is an empty Fly app
-(`yardsort-remote`) and a planned ZITADEL Pro instance; its Fly config and its protected GitHub
-environment come with that instance. There is no rollback in the deploy workflow beyond Fly's own
+(`yardsort-remote`) and a planned ZITADEL of its own on Fly (no Pro, since 2026-11-19); its Fly
+config and its protected GitHub environment come with it. There is no rollback in the deploy workflow beyond Fly's own
 release history.
 
 **The managed service's own code** does not exist. [30](30-open-source-and-managed.md) settles how
@@ -100,9 +100,9 @@ the owner's own go-ahead (proposal §15).
 **Settled by the owner on 2026-11-18**: every lean below was taken. For question 6's bucket the
 owner chose Fly's own object store, Tigris: on 2026-11-19 `yardsort-journal-staging` was made for
 staging with `fly storage create`, which put its credentials straight into the app's Fly secrets
-(`AWS_*`, `BUCKET_NAME`); production gets its own with production. Still asked: whether ZITADEL Pro
-can wait for the beta's first users (question 1), so that US$100 a month is not paid for nobody,
-provided it comes before anyone signs in to production, since its custom domain is the issuer.
+(`AWS_*`, `BUCKET_NAME`); production gets its own with production. For question 1, the owner chose
+on 2026-11-19 not to buy ZITADEL Pro (US$100 a month): production runs ZITADEL itself on Fly, at
+`auth.yardsort.sh` from its first day ([28](28-remote-infrastructure.md) §1, §3, §5).
 
 1. **When production starts, and ZITADEL Pro with it** (28 §7). Lean: at slice 5, for an invited
    beta, before billing exists. Not chosen: at launch only, which leaves the drills on staging
@@ -181,16 +181,16 @@ for each deploy.
 
 ## 6 · What only the owner can provide
 
-| What                                                                    | For           |
-| ----------------------------------------------------------------------- | ------------- |
-| The answers to §3                                                       | Every slice   |
-| ZITADEL Pro, `auth.yardsort.sh`, production's database and Fly Machines | Slice 5       |
-| The journal's bucket, and its credentials straight into Fly             | Slice 3       |
-| Go-ahead for each staging and production deploy, and the load test      | Slices 1 to 6 |
-| Store accounts' listings, submissions and review answers                | Slice 8       |
-| Terms, privacy policy and counsel's reading                             | Slices 8, 9   |
-| The payment provider's account, plans and prices                        | Slice 9       |
-| The status service's account, and the `status` record on Cloudflare     | Slice 10      |
+| What                                                                                  | For           |
+| ------------------------------------------------------------------------------------- | ------------- |
+| The answers to §3                                                                     | Every slice   |
+| Go-ahead for ZITADEL on Fly at `auth.yardsort.sh`, production's database and Machines | Slice 5       |
+| The journal's bucket, and its credentials straight into Fly                           | Slice 3       |
+| Go-ahead for each staging and production deploy, and the load test                    | Slices 1 to 6 |
+| Store accounts' listings, submissions and review answers                              | Slice 8       |
+| Terms, privacy policy and counsel's reading                                           | Slices 8, 9   |
+| The payment provider's account, plans and prices                                      | Slice 9       |
+| The status service's account, and the `status` record on Cloudflare                   | Slice 10      |
 
 **Not needed** for slices 1, 2, 4 and 6's isolation test: no new service, secret or paid plan.
 

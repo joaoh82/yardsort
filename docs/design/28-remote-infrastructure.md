@@ -8,11 +8,11 @@ choices, credentials and paid provisioning are owner-supplied). Section 5 is the
 
 ## 1 · Environments
 
-| Environment    | Runs on                                 | Identity provider                                     | Database                  | Who uses it                     |
-| -------------- | --------------------------------------- | ----------------------------------------------------- | ------------------------- | ------------------------------- |
-| **Local**      | Docker Compose on a developer's machine | ZITADEL in a container, throwaway                     | PostgreSQL in a container | Development and tests           |
-| **Staging**    | Fly.io `fra`, one small Machine         | ZITADEL Cloud, the free instance                      | PostgreSQL (see §2)       | The team, and beta testers      |
-| **Production** | Fly.io `fra`, two Machines              | ZITADEL Cloud Pro, its own instance and custom domain | Fly Managed Postgres      | Everyone on the managed service |
+| Environment    | Runs on                                 | Identity provider                         | Database                  | Who uses it                     |
+| -------------- | --------------------------------------- | ----------------------------------------- | ------------------------- | ------------------------------- |
+| **Local**      | Docker Compose on a developer's machine | ZITADEL in a container, throwaway         | PostgreSQL in a container | Development and tests           |
+| **Staging**    | Fly.io `fra`, one small Machine         | ZITADEL Cloud, the free instance          | PostgreSQL (see §2)       | The team, and beta testers      |
+| **Production** | Fly.io `fra`, two Machines              | ZITADEL run on Fly, at `auth.yardsort.sh` | Fly Managed Postgres      | Everyone on the managed service |
 
 Self-hosters run the same server image with the self-host recipe (R2's third slice): their own
 ZITADEL, their own PostgreSQL, behind their own reverse proxy. Nothing in it calls our
@@ -98,29 +98,29 @@ as the server.
 
 ## 3 · What it costs to start
 
-| Item                                               | Staging          | Production at launch                          |
-| -------------------------------------------------- | ---------------- | --------------------------------------------- |
-| Fly Machines (shared-cpu-1x, 512 MB, US$3.69 each) | 1 → ~US$4        | 2 → ~US$7.50                                  |
-| Fly outbound traffic (US$0.02/GB in NA and EU)     | ~US$0            | Relay traffic: measure in beta (proposal §12) |
-| Dedicated IPv4                                     | US$0 (shared)    | US$2                                          |
-| PostgreSQL                                         | Neon free: US$0  | Fly Managed Postgres Basic: US$38 + storage   |
-| ZITADEL Cloud                                      | Free: US$0       | Pro: US$100                                   |
-| Domain and DNS                                     | the owner's      | the owner's                                   |
-| **About**                                          | **US$5 a month** | **US$150 a month**, before relay traffic      |
+| Item                                               | Staging          | Production at launch                                                |
+| -------------------------------------------------- | ---------------- | ------------------------------------------------------------------- |
+| Fly Machines (shared-cpu-1x, 512 MB, US$3.69 each) | 1 → ~US$4        | 2 → ~US$7.50                                                        |
+| Fly outbound traffic (US$0.02/GB in NA and EU)     | ~US$0            | Relay traffic: measure in beta (proposal §12)                       |
+| Dedicated IPv4                                     | US$0 (shared)    | US$2                                                                |
+| PostgreSQL                                         | Neon free: US$0  | Fly Managed Postgres Basic: US$38 + storage                         |
+| ZITADEL                                            | Cloud free: US$0 | On Fly: one Machine, ~US$4–7, its database in production's Postgres |
+| Domain and DNS                                     | the owner's      | the owner's                                                         |
+| **About**                                          | **US$5 a month** | **US$55 a month**, before relay traffic                             |
 
 ## 4 · Names
 
 The domain is `yardsort.sh`. The website keeps `www.yardsort.sh` on Vercel.
 
-| Name                         | What                                                                                                                |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `remote.yardsort.sh`         | The production server, which the app and the phone connect to: sign-in, devices, and later the relay                |
-| `remote-staging.yardsort.sh` | Staging                                                                                                             |
-| `auth.yardsort.sh`           | Production's ZITADEL custom domain (Pro): the sign-in pages people see. Staging keeps its `*.zitadel.cloud` address |
-| `status.yardsort.sh`         | The managed service's status page, on a service of its own outside Fly ([46](46-remote-r7.md), slice 10)            |
-| `<server>/v1/login/callback` | The one redirect URI registered at ZITADEL for each environment (27 §2)                                             |
-| `yardsort://signed-in`       | The app's redirect, allowed by the server, never registered at ZITADEL                                              |
-| `http://127.0.0.1/signed-in` | A computer's redirect, on any port                                                                                  |
+| Name                         | What                                                                                                        |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `remote.yardsort.sh`         | The production server, which the app and the phone connect to: sign-in, devices, and later the relay        |
+| `remote-staging.yardsort.sh` | Staging                                                                                                     |
+| `auth.yardsort.sh`           | Production's ZITADEL, run on Fly: the sign-in pages people see. Staging keeps its `*.zitadel.cloud` address |
+| `status.yardsort.sh`         | The managed service's status page, on a service of its own outside Fly ([46](46-remote-r7.md), slice 10)    |
+| `<server>/v1/login/callback` | The one redirect URI registered at ZITADEL for each environment (27 §2)                                     |
+| `yardsort://signed-in`       | The app's redirect, allowed by the server, never registered at ZITADEL                                      |
+| `http://127.0.0.1/signed-in` | A computer's redirect, on any port                                                                          |
 
 Fly app names are global, so the ones below may need a suffix.
 
@@ -155,6 +155,10 @@ Settled on 2026-10-23:
 - **Hosting: Fly.io**, over Render (§2).
 - **Domain:** `yardsort.sh`, with the names in §4. Its DNS is on Cloudflare.
 - **ZITADEL:** the Cloud free plan to begin with, and Pro once there is something to launch.
+  **Changed by the owner on 2026-11-19:** no Pro, whose US$100 a month is too much before there
+  are users. Production runs ZITADEL itself on Fly, unmodified (its AGPL allows that), at
+  `auth.yardsort.sh` from its first day, since the issuer is part of every account and changing
+  it later signs everyone out. We keep its updates, backups and uptime, as for the server.
 
 **B. ZITADEL Cloud, for staging first**
 
@@ -232,7 +236,8 @@ None of them is a secret.
 
 **Production, at launch:**
 
-- Do B again on Pro: a `yardsort-production` instance with `auth.yardsort.sh` as its custom domain.
+- Not B again: production's ZITADEL is a Fly app of its own (`yardsort-auth`), unmodified, with its
+  database in production's Postgres and `auth.yardsort.sh` as its domain (2026-11-19).
 - Do C, D and E again for `yardsort-remote`.
 
 ## 6 · What gets built, and when
@@ -300,7 +305,7 @@ minutes; and a Machine holding a host's link stays up.
 
 ## 7 · Open decisions
 
-- When "something to launch" is, for ZITADEL Pro: the public beta, or launch (R7).
+- ~~When "something to launch" is, for ZITADEL Pro~~: settled 2026-11-19, no Pro; ZITADEL on Fly.
 - Whether beta testers sign up for themselves or are invited.
 - Whether DNS records stay a hand step in Cloudflare's dashboard or a script does them, with an
   API token limited to editing `yardsort.sh`'s DNS. By hand for staging; production adds
