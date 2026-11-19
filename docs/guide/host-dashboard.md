@@ -164,6 +164,12 @@ sign-in, `sudo` with a password, `rustunnel setup`.
   terminals.
 - **It ends** when you close it, when [every browser is signed out](#access), and when the host
   stops. Unlike an agent's terminal in Yardsort, it does not outlast a restart of the host.
+- **Closing is a hang-up, and then an end.** The shell and what it is running are hung up on, as
+  when a terminal's window is closed, and a second and a half later whatever is left of the
+  shell and of the program in the foreground is ended, so one that ignores a hang-up does not
+  stay behind. What you put in the background to outlive the terminal (`nohup`, `setsid`,
+  `tmux`) does outlive it, as it would an SSH login. When the host itself stops there is only
+  the hang-up.
 - **Nothing typed or shown in it is recorded.** [Activity](#activity) says only that one was
   opened, and when it ended.
 

@@ -356,8 +356,16 @@ password, `rustunnel setup`.
 - **In memory, and bounded.** Four open at once; the newest megabyte of each one's output is
   kept, so a browser that comes back, or another one, sees what was printed meanwhile. A
   terminal ends when it is closed, when every browser is signed out, and when the host stops:
-  a shell nobody can reach is not left running. Closing hangs up on the shell, lets go of the
-  pseudo-terminal, and after a moment kills its process group if it shrugged that off.
+  a shell nobody can reach is not left running. Closing hangs up on the shell and lets go of
+  the pseudo-terminal, and a second and a half later kills what is left: the shell's process
+  group, and the group it had in the foreground when it was closed, which the pseudo-terminal
+  names and which job control keeps apart from the shell's. That is done whether or not the
+  shell went, and before the shell is waited for (`waitid` with `WNOWAIT` sees it go), so that
+  its id, which is its session's, is still its own and tells its foreground group from a
+  stranger's that took the number. As first built the kill was skipped once the shell had
+  gone, and a foreground program deaf to a hang-up outlived its terminal; a review found it.
+  A background job that ignores a hang-up is left, as an SSH login leaves it, and when the
+  host stops there is only the hang-up.
 - **The page asks; nothing is pushed.** Output is read by a request that waits up to twenty
   seconds for there to be any, and what is typed goes up one request at a time, in order. That
   keeps the server at HTTP/1.1, through a tunnel as well as a forward, at the cost of a round

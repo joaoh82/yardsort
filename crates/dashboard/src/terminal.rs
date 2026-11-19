@@ -11,11 +11,16 @@
 //!
 //! Terminals live in memory and end with the program that started them, and when every browser
 //! is signed out: a shell nobody can reach is not left running.
+//!
+//! Closing one hangs up on it, as closing a terminal's window does, and a moment later ends
+//! what is still there of the shell and of the program it had in the foreground: one that
+//! shrugs a hang-up off does not outlive its terminal. What was put in the background to
+//! outlive it (`nohup`, `setsid`, a terminal multiplexer) does, as it outlives an SSH login.
 
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
@@ -29,6 +34,8 @@ pub const OPEN_AT_ONCE: usize = 4;
 const KEPT: usize = 8;
 /// The most typed in one request.
 pub const LONGEST_INPUT: usize = 64 * 1024;
+/// How long what runs in a closed terminal has to go by itself, hung up on, before it is ended.
+const GRACE: Duration = Duration::from_millis(1500);
 
 /// A terminal's size in characters, kept within what a screen could be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,9 +95,26 @@ struct Terminal {
     inner: Mutex<Inner>,
     /// Woken when there is more output, and when it ends.
     changed: tokio::sync::Notify,
-    io: Mutex<Io>,
+    /// The pseudo-terminal, until the terminal is closed or its shell is gone.
+    master: Mutex<Option<Box<dyn MasterPty + Send>>>,
+    /// Where what is typed goes. Apart from `master`: a program that is not reading holds this
+    /// for as long as it likes, and closing must not wait for it.
+    writer: Mutex<Option<Box<dyn Write + Send>>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+    leaving: Mutex<Leaving>,
     seen: Option<Seen>,
+}
+
+/// The end of a terminal's shell. Held while a signal is sent to it or to what it ran, and
+/// while it is waited for: after that its id is not its own, and nothing is sent to it.
+#[derive(Default)]
+struct Leaving {
+    /// Closed from the page: when what is still running is ended, and the process group that
+    /// was in the foreground then.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    closing: Option<(Instant, Option<i32>)>,
+    /// The shell has been waited for.
+    waited_for: bool,
 }
 
 struct Inner {
@@ -101,11 +125,6 @@ struct Inner {
     closed: bool,
 }
 
-struct Io {
-    master: Option<Box<dyn MasterPty + Send>>,
-    writer: Option<Box<dyn Write + Send>>,
-}
-
 /// Told of a terminal when it opens and when it ends.
 type Seen = Arc<dyn Fn(&Summary) + Send + Sync>;
 
@@ -114,8 +133,12 @@ impl Terminal {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn io(&self) -> MutexGuard<'_, Io> {
-        self.io.lock().unwrap_or_else(PoisonError::into_inner)
+    fn master(&self) -> MutexGuard<'_, Option<Box<dyn MasterPty + Send>>> {
+        self.master.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn leaving(&self) -> MutexGuard<'_, Leaving> {
+        self.leaving.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn summary(&self) -> Summary {
@@ -148,10 +171,10 @@ impl Terminal {
             }
             first
         };
-        {
-            let mut io = self.io();
-            io.writer = None;
-            io.master = None;
+        *self.master() = None;
+        // Not waited for: see `kill`.
+        if let Ok(mut writer) = self.writer.try_lock() {
+            *writer = None;
         }
         self.changed.notify_waiters();
         if first {
@@ -161,44 +184,133 @@ impl Terminal {
         }
     }
 
-    /// End the shell and what runs in it. The waiter thread sees it go, and ends the terminal.
+    /// End the shell and what runs in it: a hang-up now, and an end to what is left after
+    /// [`GRACE`]. The waiter thread sees the shell go, and ends the terminal.
     fn kill(self: &Arc<Self>) {
         {
             let mut inner = self.lock();
+            let again = inner.closed;
             inner.closed = true;
-            if inner.ended.is_some() {
+            if again || inner.ended.is_some() {
                 return;
             }
         }
-        // A hang-up, as closing a terminal's window is. On Windows a kill that worked is
-        // reported as an error (portable-pty 0.9), so the answer is not looked at.
-        let _ = self
-            .killer
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .kill();
-        // The pseudo-terminal goes too, which hangs up on whatever still has it open. Not
-        // waited for: a write to a program that is not reading holds it until that program ends.
-        if let Ok(mut io) = self.io.try_lock() {
-            io.writer = None;
-            io.master = None;
+        {
+            let mut master = self.master();
+            let mut leaving = self.leaving();
+            if !leaving.waited_for {
+                // What the shell has in the foreground is in a process group of its own, which
+                // only the pseudo-terminal can name, and only while it is still open.
+                #[cfg(unix)]
+                let foreground = master.as_ref().and_then(|m| m.process_group_leader());
+                #[cfg(not(unix))]
+                let foreground = None;
+                leaving.closing = Some((Instant::now() + GRACE, foreground));
+                // A hang-up, as closing a terminal's window is. On Windows a kill that worked
+                // is reported as an error (portable-pty 0.9), so the answer is not looked at.
+                let _ = self
+                    .killer
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .kill();
+            }
+            // The pseudo-terminal goes too, which hangs up on whatever still has it open.
+            *master = None;
         }
-        // A shell that shrugs a hang-up off is not left running behind a closed terminal.
+        // Not waited for: a write to a program that is not reading holds it until that program
+        // ends.
+        if let Ok(mut writer) = self.writer.try_lock() {
+            *writer = None;
+        }
+        // A shell that shrugs a hang-up off is not left running behind a closed terminal. One
+        // that went, leaving something behind, is seen to by the waiter thread.
         #[cfg(unix)]
-        if let Some(pid) = self.pid {
+        {
             let terminal = self.clone();
             let _ = std::thread::Builder::new()
                 .name(format!("dashboard-terminal-{}-ender", self.id))
                 .spawn(move || {
-                    std::thread::sleep(Duration::from_millis(1500));
-                    // Still not reaped by the waiter, so the id is still its own.
-                    if terminal.lock().ended.is_none() {
-                        // SAFETY: a signal to a process group; nothing is read or written.
-                        unsafe { libc::killpg(pid as libc::pid_t, libc::SIGKILL) };
+                    std::thread::sleep(GRACE);
+                    let leaving = terminal.leaving();
+                    if !leaving.waited_for {
+                        terminal.end_what_is_left(&leaving);
                     }
                 });
         }
         self.changed.notify_waiters();
+    }
+
+    /// End what a closed terminal still has running: the shell's process group, and the one it
+    /// had in the foreground. With `leaving` held and the shell not yet waited for, so that the
+    /// shell's id, which is its session's and its group's, is still its own.
+    #[cfg(unix)]
+    fn end_what_is_left(&self, leaving: &Leaving) {
+        let (Some(shell), Some((_, foreground))) = (self.pid, leaving.closing) else {
+            return;
+        };
+        let shell = shell as libc::pid_t;
+        // SAFETY: signals to process groups, and a question about a process; nothing is read
+        // or written.
+        unsafe {
+            libc::killpg(shell, libc::SIGKILL);
+            let Some(group) = foreground.filter(|group| *group != shell && *group > 1) else {
+                return;
+            };
+            // The group's id is its own for as long as anything is in it. Should all of it be
+            // gone, the id may be another program's by now: one that is not in this shell's
+            // session, which is how it is told apart. With no such process at all, what is left
+            // of the group is what its first program left behind: `a | b` with `a` gone.
+            let session = libc::getsid(group);
+            let gone = session == -1
+                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+            if session == shell || gone {
+                libc::killpg(group, libc::SIGKILL);
+            }
+        }
+    }
+
+    /// Wait for the shell, which has just been started as `child`. On a Unix it is first seen
+    /// to be gone without being waited for, which keeps its id its own while a closed
+    /// terminal's leftovers are ended.
+    fn see_out(&self, mut child: Box<dyn portable_pty::Child + Send + Sync>) {
+        #[cfg(unix)]
+        if let Some(pid) = self.pid {
+            loop {
+                // SAFETY: `info` is only written to, and is big enough; `WNOWAIT` leaves the
+                // child to be waited for below.
+                let seen = unsafe {
+                    let mut info: libc::siginfo_t = std::mem::zeroed();
+                    libc::waitid(
+                        libc::P_PID,
+                        pid as libc::id_t,
+                        &mut info,
+                        libc::WEXITED | libc::WNOWAIT,
+                    )
+                };
+                let interrupted = seen == -1
+                    && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted;
+                if !interrupted {
+                    break;
+                }
+            }
+            loop {
+                let mut leaving = self.leaving();
+                if let Some((at, _)) = leaving.closing {
+                    let left = at.saturating_duration_since(Instant::now());
+                    if !left.is_zero() {
+                        drop(leaving);
+                        std::thread::sleep(left);
+                        continue;
+                    }
+                    self.end_what_is_left(&leaving);
+                }
+                let _ = child.wait();
+                leaving.waited_for = true;
+                return;
+            }
+        }
+        let _ = child.wait();
+        self.leaving().waited_for = true;
     }
 
     fn read(&self, from: u64) -> Reading {
@@ -298,11 +410,10 @@ impl Terminals {
                 closed: false,
             }),
             changed: tokio::sync::Notify::new(),
-            io: Mutex::new(Io {
-                master: Some(pair.master),
-                writer: Some(writer),
-            }),
+            master: Mutex::new(Some(pair.master)),
+            writer: Mutex::new(Some(writer)),
             killer: Mutex::new(child.clone_killer()),
+            leaving: Mutex::default(),
             seen: self.seen.clone(),
         });
         let reading = terminal.clone();
@@ -321,7 +432,7 @@ impl Terminals {
         let wait = std::thread::Builder::new()
             .name(format!("dashboard-terminal-{id}-waiter"))
             .spawn(move || {
-                let _ = child.wait();
+                waiting.see_out(child);
                 // What it printed last is still on its way through the reader.
                 std::thread::sleep(Duration::from_millis(50));
                 waiting.end();
@@ -375,8 +486,11 @@ impl Terminals {
     /// Type into a terminal. Blocking: a program that is not reading makes it wait.
     pub fn type_into(&self, id: u64, typed: &[u8]) -> Result<(), String> {
         let terminal = self.find(id).ok_or("No such terminal.")?;
-        let mut io = terminal.io();
-        let writer = io.writer.as_mut().ok_or("That terminal has ended.")?;
+        let mut writer = terminal
+            .writer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let writer = writer.as_mut().ok_or("That terminal has ended.")?;
         writer
             .write_all(typed)
             .and_then(|()| writer.flush())
@@ -385,8 +499,8 @@ impl Terminals {
 
     pub fn resize(&self, id: u64, size: Size) -> Result<(), String> {
         let terminal = self.find(id).ok_or("No such terminal.")?;
-        let io = terminal.io();
-        let master = io.master.as_ref().ok_or("That terminal has ended.")?;
+        let master = terminal.master();
+        let master = master.as_ref().ok_or("That terminal has ended.")?;
         master
             .resize(size.pty())
             .map_err(|e| format!("That terminal could not be resized: {e}"))
@@ -440,7 +554,6 @@ fn shell(env: &ShellEnv) -> (String, Vec<&'static str>) {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
-    use std::time::Instant;
     use yardsort_core::env::EnvSource;
 
     fn env(home: &std::path::Path) -> ShellEnv {
@@ -569,6 +682,50 @@ mod tests {
         );
     }
 
+    /// Wait for the loop that keeps touching `marker` to stop.
+    fn stops_touching(marker: &std::path::Path) {
+        let since = Instant::now();
+        loop {
+            std::thread::sleep(Duration::from_millis(300));
+            let _ = std::fs::remove_file(marker);
+            std::thread::sleep(Duration::from_millis(300));
+            if !marker.exists() {
+                break;
+            }
+            assert!(since.elapsed() < Duration::from_secs(20), "still running");
+        }
+    }
+
+    #[test]
+    fn closing_ends_a_program_that_shrugs_a_hang_up_off_after_its_shell_is_gone() {
+        let home = tempfile::tempdir().unwrap();
+        let terminals = Terminals::default();
+        let opened = terminals
+            .open(&env(home.path()), Size::new(80, 24))
+            .unwrap();
+        until(&terminals, opened.id, "ready> ");
+        // In the foreground, so in a process group of its own, and deaf to the hang-up that
+        // ends the shell: `sleep` inherits that.
+        let marker = home.path().join("stubborn");
+        terminals
+            .type_into(
+                opened.id,
+                format!(
+                    "sh -c 'trap \"\" HUP; while :; do touch {}; sleep 0.05; done'\n",
+                    marker.display()
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        let since = Instant::now();
+        while !marker.exists() {
+            assert!(since.elapsed() < Duration::from_secs(20));
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(terminals.close(opened.id));
+        stops_touching(&marker);
+    }
+
     #[test]
     fn closing_ends_the_shell_and_what_it_ran_and_only_four_are_open_at_once() {
         let home = tempfile::tempdir().unwrap();
@@ -609,16 +766,7 @@ mod tests {
         assert!(!terminals.close(first.id), "it is forgotten");
         assert_eq!(terminals.list().len(), OPEN_AT_ONCE - 1);
         // The loop it was running stops touching the file.
-        let since = Instant::now();
-        loop {
-            std::thread::sleep(Duration::from_millis(300));
-            let _ = std::fs::remove_file(&marker);
-            std::thread::sleep(Duration::from_millis(300));
-            if !marker.exists() {
-                break;
-            }
-            assert!(since.elapsed() < Duration::from_secs(20), "still running");
-        }
+        stops_touching(&marker);
         terminals.open(&env, Size::new(80, 24)).unwrap();
         terminals.close_all();
         assert!(terminals.list().is_empty());
