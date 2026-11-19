@@ -64,9 +64,14 @@ export interface Looked {
 const NONE: Held = new Map();
 
 /**
- * Every computer's list, read through whatever channels the screen in front holds. One is read
- * when its channel opens and again when the computer says it changed, or every
- * {@link LIST_EVERY_MS} from one that does not say.
+ * Every computer's list, read through whatever channels the screen in front holds. One is
+ * followed when its channel opens, read once the computer has taken that, and read again when
+ * the computer says it changed. One that does not say, or that would not be followed, is read
+ * every {@link LIST_EVERY_MS}.
+ *
+ * Followed first, and only then read: the computer tells of changes from the moment it takes
+ * the follow, and sends no word for how the list stood then. Read first, a change between the
+ * reading and the follow would be in neither.
  */
 export class Lists {
   #held: Held = NONE;
@@ -76,6 +81,9 @@ export class Lists {
   /** Rows said to be seen that their computer has not shown as seen yet, by computer. */
   #marked = new Map<HostId, Set<string>>();
   #listeners = new Set<() => void>();
+
+  /** `everyMs`: how often a list nobody tells of is read again. */
+  constructor(readonly everyMs = LIST_EVERY_MS) {}
 
   subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener);
@@ -209,16 +217,30 @@ export class Lists {
     const keeps = keepsList(channel);
     this.#put(host, { host, name, keeps, ...(keeps ? {} : { page: null, problem: null }) });
     if (!keeps) return;
-    void this.read(host);
-    if (channel.host.capabilities.includes(NOTIFICATION_FOLLOW)) {
-      // Refused or dropped, the list still shows as it was read.
-      channel.followNotifications(() => void this.read(host)).catch(() => {});
-    } else {
-      this.#timers.set(
-        host,
-        setInterval(() => void this.read(host), LIST_EVERY_MS),
-      );
+    if (!channel.host.capabilities.includes(NOTIFICATION_FOLLOW)) {
+      this.#poll(host, channel);
+      void this.read(host);
+      return;
     }
+    channel
+      .followNotifications(() => void this.read(host))
+      .catch((error: unknown) => {
+        // It would not be followed: it is asked on a clock, as one that never says. A channel
+        // that closed is the reach's to tell of.
+        if (!(error instanceof ChannelClosed)) this.#poll(host, channel);
+      })
+      // The first reading, once the computer tells of every change from here on.
+      .finally(() => void this.read(host));
+  }
+
+  /** Read `host`'s list every {@link everyMs}, for as long as `channel` is the one held to it. */
+  #poll(host: HostId, channel: Channel): void {
+    if (this.#channels.get(host) !== channel) return;
+    clearInterval(this.#timers.get(host));
+    this.#timers.set(
+      host,
+      setInterval(() => void this.read(host), this.everyMs),
+    );
   }
 
   /** Let go of the channel to `host`, which is closed or about to be. What was read stays. */

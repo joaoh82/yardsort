@@ -682,3 +682,77 @@ fn an_agent_that_was_looked_at_in_time_is_not_told_to_the_phone() {
     assert!(agents_finished(&f.store, t + 70_000).unwrap().is_empty());
     assert!(queued(&f.store, t + 70_000).is_empty());
 }
+
+#[test]
+fn a_quiet_terminal_does_not_answer_a_permission_or_finish_the_agent() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    let keeper = Keeper::new(|| {});
+    keeper.read_events(&f.store);
+    // A little ago, so that what the keeper hears now is later than what its hooks said.
+    let t = now_ms() - 10_000;
+    let asks = [(NotificationKind::AgentAsks, NotificationPart::Needs)];
+
+    // It works for a while, asks for a permission, and goes quiet waiting for the answer.
+    keeper.observe(&f.store, &busy("pty-1"), None);
+    f.event("s1", "approval.requested", t, json!({}));
+    keeper.read_events(&f.store);
+    assert_eq!(f.parts(t + 1), asks);
+    keeper.observe(&f.store, &quiet("pty-1", 9_000), None);
+    // Nobody answered: the question stands, and nothing finished.
+    assert_eq!(f.parts(t + 2), asks);
+    // Told directly, as whoever calls it without the keeper does, it is the same.
+    assert!(!settled_terminal(&f.store, "pty-1", 9_000, t + 3).unwrap());
+    assert_eq!(f.parts(t + 4), asks);
+    assert!(waits_for_an_answer(&f.store, "pty-1").unwrap());
+
+    // Refused, it ends its turn with barely a word. The quiet that was not its turn's end
+    // must not have been taken for one: this is the first word of it, and it is a row.
+    f.event("s1", "turn.completed", t + 5_000, json!({}));
+    keeper.read_events(&f.store);
+    assert!(!waits_for_an_answer(&f.store, "pty-1").unwrap());
+    let mut parts = f.parts(t + 5_001);
+    parts.sort_by_key(|(kind, _)| kind.name());
+    assert_eq!(
+        parts,
+        [
+            (NotificationKind::AgentAsks, NotificationPart::Earlier),
+            (NotificationKind::AgentFinished, NotificationPart::Finished),
+        ]
+    );
+
+    // With nothing asked, a quiet after a stretch of work is its turn's end as before.
+    keeper.observe(&f.store, &busy("pty-1"), None);
+    keeper.observe(&f.store, &quiet("pty-1", 9_000), None);
+    let finished: Vec<_> = f
+        .list(now_ms() + 1)
+        .into_iter()
+        .filter(|n| n.part == NotificationPart::Finished)
+        .collect();
+    assert_eq!(finished.len(), 1);
+    assert!(finished[0].at > t + 5_000, "moved to the later finish");
+}
+
+#[test]
+fn an_agent_that_asked_while_yardsort_was_closed_is_not_caught_up_with_as_finished() {
+    let f = Fixture::new();
+    f.agent("s1", "pty-1");
+    let turns = f.listening();
+    let t = now_ms();
+    // The list has listened before, so what is quiet at the next start can be news.
+    assert!(!catch_up(&f.store, &[], t).unwrap());
+
+    // Closed for an hour. The agent worked, asked ten minutes ago, and has waited since.
+    let open = t + 3_600_000;
+    f.event("s1", "approval.requested", open - 600_000, json!({}));
+    assert!(read_events(&f.store, &turns).unwrap());
+    let alive = [Waiting {
+        terminal: "pty-1".into(),
+        idle_ms: 600_000,
+    }];
+    assert!(!catch_up(&f.store, &alive, open).unwrap());
+    assert_eq!(
+        f.parts(open + 1),
+        [(NotificationKind::AgentAsks, NotificationPart::Needs)]
+    );
+}

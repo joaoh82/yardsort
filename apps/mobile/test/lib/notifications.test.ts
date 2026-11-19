@@ -72,7 +72,13 @@ class Computer {
   asked: string[] = [];
   seen: string[][] = [];
   refuse: Error | null = null;
+  /** What following is refused with, when it is. */
+  refuseFollow: Error | null = null;
   changed: (() => void) | null = null;
+  /** How the list stood when it was last told of, as the host keeps it for a follower. */
+  #told: number | null = null;
+  /** Something that happens on the computer just after it answers its first request. */
+  afterFirst: (() => void) | null = null;
   #end: (end: ChannelEnd) => void = () => {};
   /** Each answer waits for this, when set. */
   after: Promise<void> | null = null;
@@ -90,9 +96,14 @@ class Computer {
       ended,
       notifications: async () => {
         this.asked.push("list");
+        // Answered as it arrives, in the order requests were sent, as a host answers them:
+        // what the answer holds is how the list stood then, however late it gets back.
+        const refuse = this.refuse;
+        const answer = page(this.rows.map((r) => ({ ...r })));
+        this.#first();
         await this.after;
-        if (this.refuse) throw this.refuse;
-        return page(this.rows.map((r) => ({ ...r })));
+        if (refuse) throw refuse;
+        return answer;
       },
       notificationsSeen: async ({ ids = [] }: { ids?: string[] }) => {
         this.asked.push("seen");
@@ -104,11 +115,28 @@ class Computer {
       },
       followNotifications: async (changed: () => void) => {
         this.asked.push("follow");
+        if (this.refuseFollow) throw this.refuseFollow;
+        // As the host does: from here on it tells of changes, and says nothing of now.
+        this.#told = this.rows.length;
         this.changed = changed;
+        this.#first();
         return async () => {};
       },
     };
     return fake as unknown as Channel;
+  }
+
+  #first(): void {
+    const happens = this.afterFirst;
+    this.afterFirst = null;
+    happens?.();
+  }
+
+  /** The host's look at its list, once a second on a real one: a follower is told of a change. */
+  look(): void {
+    if (this.#told === null || this.#told === this.rows.length) return;
+    this.#told = this.rows.length;
+    this.changed?.();
   }
 
   close(): void {
@@ -134,7 +162,8 @@ describe("the lists of the computers a phone can reach", () => {
 
     lists.sync([{ host: MAC, name: "studio-mac", channel, away: false }]);
     await settled();
-    expect(mac.asked).toEqual(["list", "follow"]);
+    // Followed first, then read: the computer tells of every change from the follow on.
+    expect(mac.asked).toEqual(["follow", "list"]);
     const held = lists.getSnapshot();
     expect(held.get(MAC)?.name).toBe("studio-mac");
     expect(needing(held)).toBe(1);
@@ -144,13 +173,73 @@ describe("the lists of the computers a phone can reach", () => {
     // The same channel again is not read again: only what changed is.
     lists.sync([{ host: MAC, name: "studio-mac", channel, away: false }]);
     await settled();
-    expect(mac.asked).toEqual(["list", "follow"]);
+    expect(mac.asked).toEqual(["follow", "list"]);
 
     // The computer says its list changed, and it is read again.
     mac.rows = [row("c", { kind: "agent.asks", part: "needs" }), ...mac.rows];
     mac.changed?.();
     await settled();
     expect(needing(lists.getSnapshot())).toBe(2);
+  });
+
+  test("something that happens while the phone is connecting is not missed", async () => {
+    const mac = new Computer();
+    // An agent asks just after the computer answers the phone's first request, whichever
+    // that is, and before its second.
+    mac.afterFirst = () => {
+      mac.rows = [row("asks", { kind: "agent.asks", part: "needs" })];
+    };
+    const lists = new Lists();
+    lists.sync([{ host: MAC, name: "studio-mac", channel: mac.channel(), away: false }]);
+    await settled();
+    mac.look();
+    await settled();
+    // Read first and followed after, it would be in neither the reading nor a later word:
+    // the computer would count from a list that already had it.
+    expect(needing(lists.getSnapshot())).toBe(1);
+  });
+
+  test("a computer that will not be followed, or never says, is read on a clock", async () => {
+    const refusing = new Computer();
+    refusing.refuseFollow = new ClientError("remote", "Not now.", {
+      code: "internal",
+      message: "Not now.",
+      retryable: true,
+    });
+    const silent = new Computer(["notification.list", "notification.seen"]);
+    const lists = new Lists(15);
+    lists.sync([
+      { host: MAC, name: "studio-mac", channel: refusing.channel(), away: false },
+      { host: BOX, name: "linux-box", channel: silent.channel(), away: false },
+    ]);
+    await settled();
+    expect(refusing.asked).toEqual(["follow", "list"]);
+    expect(silent.asked).toEqual(["list"]);
+
+    // What changes there is found at the next reading, with nobody to say so.
+    refusing.rows = [row("a")];
+    silent.rows = [row("b"), row("c")];
+    await Bun.sleep(60);
+    expect(unseen(lists.getSnapshot())).toBe(3);
+
+    // Its channel closed, it is asked no more.
+    refusing.close();
+    silent.close();
+    await settled();
+    const asked = refusing.asked.length + silent.asked.length;
+    await Bun.sleep(60);
+    expect(refusing.asked.length + silent.asked.length).toBe(asked);
+  });
+
+  test("a follow that ends with its channel starts no clock", async () => {
+    const mac = new Computer();
+    mac.refuseFollow = new ChannelClosed({ reason: "closed", code: null } as unknown as ChannelEnd);
+    const lists = new Lists(15);
+    lists.sync([{ host: MAC, name: "studio-mac", channel: mac.channel(), away: false }]);
+    await settled();
+    const asked = mac.asked.length;
+    await Bun.sleep(60);
+    expect(mac.asked.length).toBe(asked);
   });
 
   test("a computer that is away shows no rows, and one between two channels keeps them", async () => {

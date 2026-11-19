@@ -193,7 +193,10 @@ agent has a **Capture what it reports** switch, off until you turn it on
 
 - an agent that **asks for a permission** is listed under **Needs you**. Claude Code, OpenCode,
   pi and OMP report that they ask; Codex, Grok and Cursor do not, and have no such row. Without
-  the switch Yardsort cannot know that any agent is asking;
+  the switch Yardsort cannot know that any agent is asking. An agent waiting for your answer has
+  gone quiet too, and is not listed as finished for it: its question stays under **Needs you**
+  until it is answered. Without the switch, or for an agent that does not report, a wait looks
+  like a finished stretch of work, and is listed as one;
 - a finished turn is known the moment the agent reports it, however short it was, and a row for
   a minute or more of work says how long the agent worked since your last message;
 - the command it wants to run is shown for Claude Code. Other agents' rows say only that they

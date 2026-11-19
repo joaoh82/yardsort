@@ -107,6 +107,12 @@ slice 3, so `yardsort-host` keeps a list as the app does.
 - One turn is one row. An agent's turn ends in up to two signals, the terminal's quiet after
   eight seconds of printing and its harness's own `turn.completed`; the fold triggers use
   (`crates/core/src/trigger/turns.rs`) makes them one.
+- **A quiet terminal does not answer a question.** An agent that asked for a permission and
+  was not answered goes quiet because it waits. While its question is open, that quiet is not
+  its turn's end: no finished row is made, the question stays under _Needs you_, and the fold
+  is not told, so the turn's real end is still its first word. The same holds at start, for an
+  agent that asked while the app was closed. Found in review of the pull request: before, the
+  quiet settled the question and listed the blocked agent as finished.
 - Hook events are read from `agent_events` from where the list last stopped, as triggers read
   them. The first read starts at the newest event: what happened before there was a list is not
   news.
@@ -338,8 +344,13 @@ client's `notifications`, `notificationsSeen` and `followNotifications`.
 
 **One reading of every computer's list** (`apps/mobile/src/lib/notifications.ts`, `Lists`). It is
 kept in memory for the profile in use, and never on the phone's disk. A screen hands it the
-channels it holds; a computer's list is read when its channel opens and again when the computer
-says it changed (or every 20 seconds from one that does not say). A computer that is offline,
+channels it holds; a computer's list is followed when its channel opens, read once the
+computer has taken that, and read again when the computer says it changed. One that does not
+say, or that refuses to be followed, is read every 20 seconds. Following comes first because
+the computer tells of changes from the moment it takes the follow and sends no word for how
+the list stood then: read first, as it was until review of the pull request found it, a change
+between the reading and the follow was in neither, and the list and the bell stayed wrong
+until something else changed. A computer that is offline,
 refuses the phone or is gone loses its rows at once; one between two channels keeps them, so a
 dropped connection does not empty the screen. A computer that does not answer
 `notification.list` is not asked, and the list says it runs an earlier Yardsort.

@@ -547,6 +547,10 @@ pub fn settled_terminal(
     let Some(agent) = agent_in(&conn, terminal)? else {
         return Ok(false);
     };
+    // Quiet because it waits for an answer: it has not finished, and its question stands.
+    if open_row(&conn, &agent.session, "needs")?.is_some() {
+        return Ok(false);
+    }
     let worked = worked_since_prompt(&conn, &agent.session, now)?.or(Some(i64::from(busy_ms)));
     finished(
         &conn,
@@ -556,6 +560,16 @@ pub fn settled_terminal(
         worked,
         None,
     )
+}
+
+/// Whether the agent in `terminal` asked for something and has not been answered. Its terminal
+/// going quiet then says only that it waits: the turn has not ended.
+pub fn waits_for_an_answer(store: &Store, terminal: &str) -> StoreResult<bool> {
+    let conn = store.conn();
+    let Some(agent) = agent_in(&conn, terminal)? else {
+        return Ok(false);
+    };
+    Ok(open_row(&conn, &agent.session, "needs")?.is_some())
 }
 
 /// The list is hearing from the terminals at `now`. Call it every few seconds while it is,
@@ -593,6 +607,11 @@ pub fn catch_up(store: &Store, waiting: &[Waiting], now: i64) -> StoreResult<boo
         let Some(agent) = agent_in(&conn, &terminal.terminal)? else {
             continue;
         };
+        // It asked for something while nothing listened, which was read on the way in: it is
+        // quiet because it waits, and has finished nothing.
+        if open_row(&conn, &agent.session, "needs")?.is_some() {
+            continue;
+        }
         // Its harness may have reported the turn itself, in a row made from its event.
         let told: bool = conn.query_row(
             "SELECT EXISTS (SELECT 1 FROM notifications
@@ -1060,6 +1079,14 @@ impl Keeper {
     pub fn observe(&self, store: &Store, event: &HostEvent, ended: Option<&str>) {
         let now = crate::store::now_ms();
         self.hearing(store, now);
+        // An agent that asked and was not answered goes quiet because it waits. That quiet is
+        // not its turn's end, to the list or to the fold: the turn's end is still to come, and
+        // must not be taken for one already told.
+        if let HostEvent::Quiet { id, .. } = event {
+            if waits_for_an_answer(store, &id.0).unwrap_or(false) {
+                return;
+            }
+        }
         let settled = matches!(self.turns.observe(event, now), Some(Change::Settled { .. }));
         let changed = match event {
             HostEvent::Quiet { id, busy_ms } if settled => {
