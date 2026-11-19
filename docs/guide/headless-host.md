@@ -138,6 +138,10 @@ Sign in while `yardsort-host serve` is stopped: one sign-in held by two programs
 the server, so `sign-in` refuses while anything runs on the profile. Signing in again later, as the
 same name or another, keeps this computer as the same host, with its devices still paired.
 
+**Or sign in from the [dashboard](host-dashboard.md#remote)**, while `serve` runs: its **Remote**
+tab asks for the server and the name, and takes the pasted address the same way. The host links at
+once, with no restart.
+
 **The sign-in is this computer's identity at the server.** It is kept in a folder only its user can
 read: `credentials` in the profile, or the folder `YARDSORT_CREDENTIALS_DIR` names. Anyone who can read
 that folder can act as this host, so keep it out of backups others can read, and out of images.
@@ -441,6 +445,9 @@ all of them if you just press Enter. Nothing is let in without your answer.
 The device can be a phone, or the desktop app on another computer, signed in under **Settings → Remote →
 Other computers** ([Reaching another computer](remote.md#reaching-another-computer)). The app asks to
 watch and to type, as a phone does, and `pair` asks the same questions it asks a phone.
+
+Or pair from the [dashboard](host-dashboard.md#remote)'s **Remote** tab, in a browser you signed in
+to it: the same code, QR code and questions, answered on the page.
 
 `pair` is refused from any terminal Yardsort started, and from anything an agent runs: the host checks
 who is at the other end of its socket, and refuses a process that carries a launched session's

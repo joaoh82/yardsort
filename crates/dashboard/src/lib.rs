@@ -14,10 +14,13 @@
 //! forward, or by a rustunnel tunnel ([`tunnel`]) when one is turned on.
 //!
 //! **What it adds for whoever is signed in**: what this computer's user can do at a shell of
-//! their own, less what the operator's guard keeps for a person at a terminal. It lets no device
-//! in, approves no note and turns no sync on, and a command it runs is refused those too: every
-//! job is marked ([`jobs::JOB_ENV`]) and is the host's own child, and the guard
-//! (`crates/host/src/guard.rs`) refuses both. So a session here is not a way round that guard.
+//! their own. On a host with no screen that includes signing it in to a Yardsort server and
+//! pairing a device ([`Remote`]), from the page's own buttons: a session here is as good as a
+//! person at a terminal there, which it already was, since it runs commands as that user. It
+//! approves no note and turns no sync on, and a command it runs is refused every one of the
+//! guarded acts, pairing included: every job is marked ([`jobs::JOB_ENV`]) and is the host's own
+//! child, and the guard (`crates/host/src/guard.rs`) refuses both. So no agent, and nothing a job
+//! runs, gets round that guard through the page.
 //!
 //! See `docs/design/47-host-dashboard.md` and `docs/guide/host-dashboard.md`.
 
@@ -33,7 +36,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use yardsort_core::env::ShellEnv;
 use yardsort_core::settings::{SettingsFile, TunnelSettings};
 
@@ -54,6 +57,123 @@ pub trait Source: Send + Sync + 'static {
     fn projects(&self) -> Vec<Project>;
     /// Clone a repository into the folder for clones, and add it as a project.
     fn clone_project(&self, remote: &str) -> Result<Project, String>;
+    /// Signing in to a Yardsort server and pairing devices from the page, where the program
+    /// serving it lets them be done there. The app does them in its own window, and gives none.
+    fn remote(&self) -> Option<&dyn Remote> {
+        None
+    }
+}
+
+/// What the page may do at this computer's Yardsort server: sign it in or out, and pair a device.
+/// Every method may block, as [`Source`]'s do.
+pub trait Remote: Send + Sync {
+    /// How pairing stands.
+    fn pairing(&self) -> Pairing;
+    /// Make an offer, or keep the one there is.
+    fn pair(&self) -> Result<Pairing, String>;
+    /// Answer the device that asked.
+    fn answer(&self, answer: PairAnswer) -> Result<Pairing, String>;
+    /// Drop the offer, and any device asking: nothing is decided.
+    fn stop_pairing(&self);
+    /// How a sign-in begun here stands, if one was.
+    fn signing_in(&self) -> SigningIn;
+    /// Begin signing in to `server` as `name` (this computer's host name when empty), while
+    /// Remote is off.
+    fn sign_in(&self, server: &str, name: &str) -> Result<SigningIn, String>;
+    /// The address the browser came back to. A wrong one is refused, and the sign-in goes on.
+    fn pasted(&self, address: &str) -> Result<SigningIn, String>;
+    /// Give up a sign-in still waiting.
+    fn stop_signing_in(&self);
+    /// Sign this computer out at its server, which removes it there.
+    fn sign_out(&self) -> Result<(), String>;
+}
+
+/// How pairing a device from the page stands.
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum Pairing {
+    /// Nothing offered.
+    Idle,
+    /// A code and a QR code, waiting for a device to ask.
+    Offered {
+        code: String,
+        /// The QR code's modules, a row each: `1` dark, `0` light, with no quiet zone.
+        qr: Vec<String>,
+        lapses_in_ms: u64,
+    },
+    /// A device asks to be let in.
+    Asked {
+        grant: String,
+        device: String,
+        wants_control: bool,
+        wants_workflows: bool,
+        /// The projects to choose among, when there is more than one.
+        projects: Vec<PairProject>,
+    },
+    Answered {
+        device: String,
+        allowed: bool,
+    },
+    /// The offer lapsed with nobody asking.
+    Lapsed,
+    Failed {
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairProject {
+    pub id: String,
+    pub name: String,
+}
+
+/// The operator's answer to a device, as `yardsort-host pair` takes it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairAnswer {
+    pub grant: String,
+    pub allow: bool,
+    /// Typing, not only watching.
+    #[serde(default)]
+    pub control: bool,
+    /// Approving and answering workflows.
+    #[serde(default)]
+    pub workflows: bool,
+    /// Only these projects, by id; all of them when absent.
+    pub projects: Option<Vec<String>>,
+}
+
+/// How signing in from the page stands.
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum SigningIn {
+    Idle,
+    /// Open `url` in a browser and sign in. The browser is then sent to 127.0.0.1 at `port` on
+    /// this computer, which reaches it only through a forwarded port; otherwise paste the
+    /// address it was sent to.
+    Waiting {
+        url: String,
+        port: u16,
+        /// Why the last address pasted was not taken.
+        problem: Option<String>,
+    },
+    /// Signed in, and linked.
+    SignedIn {
+        name: String,
+        server_url: String,
+    },
+    Failed {
+        message: String,
+    },
 }
 
 /// How the host stands, as `yardsort-host status` says it.

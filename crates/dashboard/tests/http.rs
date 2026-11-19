@@ -182,7 +182,25 @@ impl Served {
     }
 
     fn start_in(home: tempfile::TempDir) -> Self {
-        let source = Arc::new(common::StandIn::new(home.path(), &home.path().join("bin")));
+        Self::start_with(home, None)
+    }
+
+    /// A host that lets the page sign it in and pair devices, as `yardsort-host` does.
+    fn start_remote() -> Self {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir(home.path().join("bin")).unwrap();
+        std::fs::write(
+            home.path().join("settings.toml"),
+            format!("[dashboard]\nport = {}\n", free_port()),
+        )
+        .unwrap();
+        Self::start_with(home, Some(common::StandInRemote::default()))
+    }
+
+    fn start_with(home: tempfile::TempDir, remote: Option<common::StandInRemote>) -> Self {
+        let mut source = common::StandIn::new(home.path(), &home.path().join("bin"));
+        source.remote = remote;
+        let source = Arc::new(source);
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -1017,4 +1035,151 @@ fn the_dashboard_listens_on_this_computer_alone() {
         assert!(reached.is_err(), "the dashboard answered at {ip}:{port}");
     }
     let _ = served.source;
+}
+
+#[test]
+fn where_the_app_serves_the_page_it_neither_pairs_nor_signs_in_and_says_where_to() {
+    let mut served = Served::start();
+    for path in ["/api/remote/pair", "/api/remote/sign-in"] {
+        let refused =
+            refusal(served.post(path, json!({ "server": "https://remote.example.test" })));
+        assert_eq!(
+            refused,
+            (StatusCode::UNAUTHORIZED, "signed_out".into()),
+            "{path}"
+        );
+    }
+    served.sign_in();
+    let remote = served.get("/api/remote");
+    assert_eq!(remote["available"], false);
+    assert_eq!(remote["pairing"]["state"], "idle");
+    let refused = served.post("/api/remote/pair", json!({}));
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let said: Value = refused.json().unwrap();
+    assert!(
+        said["message"]
+            .as_str()
+            .unwrap()
+            .contains("Settings → Remote"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_signed_in_browser_pairs_a_device_with_the_answer_it_chose() {
+    let mut served = Served::start_remote();
+    // Signed out, nothing is offered, read or answered.
+    for path in ["/api/remote/pair", "/api/remote/pair/answer"] {
+        let refused = refusal(served.post(path, json!({ "grant": "grant-1", "allow": true })));
+        assert_eq!(
+            refused,
+            (StatusCode::UNAUTHORIZED, "signed_out".into()),
+            "{path}"
+        );
+    }
+    let refused = refusal(served.page(Method::Get, "/api/remote").send().unwrap());
+    assert_eq!(refused, (StatusCode::UNAUTHORIZED, "signed_out".into()));
+    // Nor from another site's page, signed in or not.
+    served.sign_in();
+    let elsewhere = served
+        .page(Method::Post, "/api/remote/pair")
+        .header(ORIGIN, "https://evil.example")
+        .json(&json!({}))
+        .send()
+        .unwrap();
+    assert_eq!(
+        refusal(elsewhere),
+        (StatusCode::FORBIDDEN, "not_the_page".into())
+    );
+    assert_eq!(served.get("/api/remote")["pairing"]["state"], "idle");
+
+    let offered: Value = served.post("/api/remote/pair", json!({})).json().unwrap();
+    assert_eq!(offered["state"], "offered");
+    assert_eq!(offered["code"], "ABCD-1234");
+    assert_eq!(offered["qr"], json!(["101", "010", "101"]));
+    assert_eq!(offered["lapsesInMs"], 300_000);
+
+    let remote = served.source.remote.as_ref().unwrap();
+    remote.asks("Ana's phone", true);
+    let asked = served.get("/api/remote");
+    assert_eq!(asked["available"], true);
+    assert_eq!(asked["pairing"]["state"], "asked");
+    assert_eq!(asked["pairing"]["device"], "Ana's phone");
+    assert_eq!(asked["pairing"]["wantsControl"], true);
+    assert_eq!(asked["pairing"]["projects"][1]["name"], "gadgets");
+
+    // An answer for another device decides nothing.
+    let wrong = served.post(
+        "/api/remote/pair/answer",
+        json!({ "grant": "grant-2", "allow": true }),
+    );
+    assert_eq!(wrong.status(), StatusCode::BAD_REQUEST);
+    assert!(remote.answers.lock().unwrap().is_empty());
+
+    let answered: Value = served
+        .post(
+            "/api/remote/pair/answer",
+            json!({ "grant": "grant-1", "allow": true, "control": false, "projects": ["p2"] }),
+        )
+        .json()
+        .unwrap();
+    assert_eq!(answered["state"], "answered");
+    assert_eq!(answered["allowed"], true);
+    let answers = remote.answers.lock().unwrap();
+    assert_eq!(answers.len(), 1);
+    assert!(answers[0].allow && !answers[0].control && !answers[0].workflows);
+    assert_eq!(answers[0].projects.as_deref(), Some(&["p2".to_owned()][..]));
+}
+
+#[test]
+fn a_signed_in_browser_signs_the_host_in_by_the_address_pasted_and_out_again() {
+    let mut served = Served::start_remote();
+    let refused = refusal(served.post(
+        "/api/remote/sign-in",
+        json!({ "server": "https://remote.example.test" }),
+    ));
+    assert_eq!(refused, (StatusCode::UNAUTHORIZED, "signed_out".into()));
+    served.sign_in();
+
+    let waiting: Value = served
+        .post(
+            "/api/remote/sign-in",
+            json!({ "server": " https://remote.example.test ", "name": "Build box" }),
+        )
+        .json()
+        .unwrap();
+    assert_eq!(waiting["state"], "waiting");
+    assert_eq!(
+        waiting["url"], "https://remote.example.test/v1/login?name=Build box",
+        "the server and the name are taken trimmed"
+    );
+    assert_eq!(waiting["port"], 45999);
+
+    let wrong = served.post(
+        "/api/remote/sign-in/pasted",
+        json!({ "address": "http://127.0.0.1:1/signed-in?code=bad" }),
+    );
+    assert_eq!(wrong.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(served.get("/api/remote")["signingIn"]["state"], "waiting");
+
+    let done: Value = served
+        .post(
+            "/api/remote/sign-in/pasted",
+            json!({ "address": "http://127.0.0.1:45999/signed-in?code=good" }),
+        )
+        .json()
+        .unwrap();
+    assert_eq!(done["state"], "signedIn");
+    assert_eq!(done["serverUrl"], "https://remote.example.test");
+
+    let out = served.post("/api/remote/sign-out", json!({}));
+    assert_eq!(out.status(), StatusCode::OK);
+    assert!(*served
+        .source
+        .remote
+        .as_ref()
+        .unwrap()
+        .signed_out
+        .lock()
+        .unwrap());
 }

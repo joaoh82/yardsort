@@ -153,7 +153,7 @@ $("sign-out").addEventListener("click", async () => {
 
 // ── The frame ────────────────────────────────────────────────────────────────────────────────
 
-const TABS = ["overview", "agents", "git", "commands", "access"];
+const TABS = ["overview", "remote", "agents", "git", "commands", "access"];
 let tab = null;
 let timers = [];
 const watchers = new Map();
@@ -199,6 +199,7 @@ function showTab() {
   }
   // The header and the overview are the same reading; every tab keeps the header true.
   every(5000, readStatus);
+  if (tab === "remote") every(2000, readRemote);
   if (tab === "agents") void readAgents();
   if (tab === "git") void readGit();
   if (tab === "commands") every(3000, readJobs);
@@ -503,6 +504,297 @@ async function readStatus() {
     tunnelFormFilled = true;
   }
 }
+
+// ── Remote: the server, and pairing ──────────────────────────────────────────────────────────
+
+let remote = null;
+/** The answer being chosen for the device asking, kept while the view is drawn again. */
+let choosing = null;
+
+function said(id, message) {
+  const node = $(id);
+  node.hidden = !message;
+  node.textContent = message ?? "";
+}
+
+async function readRemote() {
+  // Whether this computer is signed in is the status's to say: read once, if not yet.
+  if (!status) await readStatus();
+  remote = await ask("GET", "/api/remote");
+  $("remote-elsewhere").hidden = remote.available;
+  $("server-card").hidden = !remote.available;
+  if (!remote.available) {
+    $("pair-card").hidden = true;
+    return;
+  }
+  const on = status?.host.remote ?? null;
+  const signing = remote.signingIn;
+  const waiting = signing.state === "waiting";
+
+  $("server-form").hidden = Boolean(on) || waiting;
+  $("server-waiting").hidden = !waiting;
+  $("server-sign-out").hidden = !on;
+  if (on) {
+    replace($("server-state"), [
+      el("span", { class: "dot good" }),
+      `Signed in as ${on.name} at ${on.serverUrl}. Link: ${on.link}.`,
+    ]);
+  } else if (waiting) {
+    $("server-state").textContent = "Waiting for you to sign in, in the browser.";
+    $("server-open").href = signing.url;
+    $("server-back").textContent = `http://127.0.0.1:${signing.port}/signed-in`;
+    said("paste-error", signing.problem);
+  } else {
+    replace($("server-state"), [el("span", { class: "dot" }), "Not signed in to a server."]);
+    if (!$("server-name").value && status?.machine.hostName) {
+      $("server-name").placeholder = status.machine.hostName;
+    }
+  }
+  said("server-error", signing.state === "failed" ? signing.message : null);
+
+  $("pair-card").hidden = !on;
+  if (on) drawPairing(remote.pairing);
+}
+
+function drawPairing(pairing) {
+  const view = $("pair-view");
+  if (pairing.state !== "asked") {
+    choosing = null;
+    delete view.dataset.grant;
+  }
+  switch (pairing.state) {
+    case "offered":
+      replace(
+        view,
+        el(
+          "div",
+          { class: "pairing" },
+          qrCode(pairing.qr),
+          el(
+            "div",
+            {},
+            el("p", { text: "Scan this with the Yardsort app, or type this code in it:" }),
+            el("p", { class: "pair-code", text: pairing.code }),
+            el("p", {
+              class: "faint",
+              text: `Good once, for ${lasted(pairing.lapsesInMs / 1000)} more. Waiting for a device to ask…`,
+            }),
+            el(
+              "div",
+              { class: "actions" },
+              el("button", { type: "button", onclick: stopPairing, text: "Stop" }),
+            ),
+          ),
+        ),
+      );
+      return;
+    case "asked":
+      if (choosing?.grant !== pairing.grant) {
+        choosing = {
+          grant: pairing.grant,
+          control: false,
+          workflows: false,
+          projects: new Set(pairing.projects.map((p) => p.id)),
+        };
+      }
+      // Drawn once per device: the operator's ticks are not reset under them.
+      if (view.dataset.grant === pairing.grant) return;
+      view.dataset.grant = pairing.grant;
+      replace(view, askedView(pairing));
+      return;
+    case "answered":
+      replace(
+        view,
+        el("p", {
+          class: "state",
+          text: pairing.allowed
+            ? `${pairing.device} was let in.`
+            : `${pairing.device} was turned away.`,
+        }),
+        pairButton("Pair another device"),
+      );
+      break;
+    case "lapsed":
+      replace(
+        view,
+        el("p", { class: "muted", text: "The code lapsed with no device asking." }),
+        pairButton("Show a new code"),
+      );
+      break;
+    case "failed":
+      replace(view, el("p", { class: "error", text: pairing.message }), pairButton("Try again"));
+      break;
+    default:
+      replace(view, pairButton("Show a pairing code"));
+  }
+}
+
+function pairButton(text) {
+  return el(
+    "div",
+    { class: "actions" },
+    el("button", { class: "primary", type: "button", onclick: startPairing, text }),
+  );
+}
+
+function askedView(pairing) {
+  const typing = el("input", {
+    type: "checkbox",
+    onchange: (event) => (choosing.control = event.target.checked),
+  });
+  const workflows = el("input", {
+    type: "checkbox",
+    onchange: (event) => (choosing.workflows = event.target.checked),
+  });
+  const projects = pairing.projects.map((project) =>
+    el(
+      "label",
+      { class: "check" },
+      el("input", {
+        type: "checkbox",
+        checked: true,
+        onchange: (event) => {
+          if (event.target.checked) choosing.projects.add(project.id);
+          else choosing.projects.delete(project.id);
+        },
+      }),
+      el("span", { text: project.name }),
+    ),
+  );
+  return [
+    el("p", {
+      class: "state",
+      text: `${pairing.device} asks to ${
+        pairing.wantsControl
+          ? "watch and type into this computer's terminals."
+          : "watch this computer's terminals."
+      }`,
+    }),
+    pairing.wantsWorkflows &&
+      el("p", { class: "muted", text: "Watching includes reading workflow runs." }),
+    el(
+      "div",
+      { class: "choices" },
+      pairing.wantsControl &&
+        el(
+          "label",
+          { class: "check" },
+          typing,
+          el("span", { text: "Let it type, not only watch" }),
+        ),
+      pairing.wantsWorkflows &&
+        el(
+          "label",
+          { class: "check" },
+          workflows,
+          el("span", { text: "Let it approve or answer workflows" }),
+        ),
+    ),
+    projects.length > 0 && el("p", { class: "muted", text: "The projects it may reach:" }),
+    projects.length > 0 && el("div", { class: "choices" }, projects),
+    el(
+      "div",
+      { class: "actions" },
+      el("button", {
+        class: "primary",
+        type: "button",
+        onclick: () => answerDevice(true),
+        text: "Let it in",
+      }),
+      el("button", {
+        class: "danger",
+        type: "button",
+        onclick: () => answerDevice(false),
+        text: "Turn it away",
+      }),
+    ),
+  ];
+}
+
+/** The QR code, drawn as an SVG of its dark modules. */
+function qrCode(rows) {
+  const NS = "http://www.w3.org/2000/svg";
+  const size = rows.length;
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("class", "qr");
+  svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+  svg.setAttribute("shape-rendering", "crispEdges");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "A QR code to scan with the Yardsort app");
+  let path = "";
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) if (row[x] === "1") path += `M${x} ${y}h1v1h-1z`;
+  });
+  const dark = document.createElementNS(NS, "path");
+  dark.setAttribute("d", path);
+  dark.setAttribute("fill", "#000000");
+  svg.append(dark);
+  return svg;
+}
+
+async function remoteDo(errorId, work) {
+  said(errorId, null);
+  try {
+    await work();
+  } catch (error) {
+    if (!quiet(error)) said(errorId, error.message);
+  }
+  await readStatus().catch(() => {});
+  await readRemote().catch(() => {});
+}
+
+const startPairing = () => remoteDo("pair-error", () => ask("POST", "/api/remote/pair"));
+const stopPairing = () => remoteDo("pair-error", () => ask("POST", "/api/remote/pair/stop"));
+
+function answerDevice(allow) {
+  const asked = remote?.pairing;
+  if (!choosing || asked?.state !== "asked") return;
+  const projects = asked.projects.length > 0 ? [...choosing.projects] : null;
+  if (allow && projects?.length === 0) {
+    said("pair-error", "Choose at least one project, or turn it away.");
+    return;
+  }
+  void remoteDo("pair-error", () =>
+    ask("POST", "/api/remote/pair/answer", {
+      grant: choosing.grant,
+      allow,
+      control: allow && choosing.control,
+      workflows: allow && choosing.workflows,
+      projects: allow ? projects : null,
+    }),
+  );
+}
+
+$("server-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void remoteDo("server-error", () =>
+    ask("POST", "/api/remote/sign-in", {
+      server: $("server-url").value,
+      name: $("server-name").value,
+    }),
+  );
+});
+
+$("paste-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void remoteDo("paste-error", async () => {
+    await ask("POST", "/api/remote/sign-in/pasted", { address: $("paste-address").value });
+    $("paste-address").value = "";
+  });
+});
+
+$("server-cancel").addEventListener("click", () => {
+  void remoteDo("server-error", () => ask("POST", "/api/remote/sign-in/stop"));
+});
+
+$("server-sign-out").addEventListener("click", async () => {
+  const yes = await confirmed({
+    title: "Sign out of the server?",
+    text: "This computer is removed at its server, and every device paired with it loses it. Its projects, workspaces and agents stay here and keep running.",
+    yes: "Sign out",
+  });
+  if (yes) void remoteDo("server-error", () => ask("POST", "/api/remote/sign-out"));
+});
 
 // ── Agents ───────────────────────────────────────────────────────────────────────────────────
 

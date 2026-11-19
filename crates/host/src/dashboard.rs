@@ -18,11 +18,14 @@ const ON_BY_DEFAULT: bool = true;
 
 const OFF: &str = "The dashboard is off. Turn it on with `yardsort-host dashboard on`.";
 
-struct HostSource(Arc<HostHome>);
+struct HostSource {
+    home: Arc<HostHome>,
+    remote: crate::dashboard_remote::HostRemote,
+}
 
 impl Source for HostSource {
     fn about(&self) -> About {
-        let status = crate::serve::status(&self.0);
+        let status = crate::serve::status(&self.home);
         About {
             program: "yardsort-host".into(),
             version: env!("CARGO_PKG_VERSION").into(),
@@ -39,22 +42,20 @@ impl Source for HostSource {
                 .iter()
                 .map(control::EarlierDaemon::words)
                 .collect(),
-            remote_off_hint: "At a terminal on this computer, stop the host, run \
-                              `yardsort-host sign-in <server>`, and start it again."
-                .into(),
+            remote_off_hint: "Sign it in to a Yardsort server under Remote.".into(),
         }
     }
 
     fn env(&self) -> Arc<ShellEnv> {
-        self.0.env().clone()
+        self.home.env().clone()
     }
 
     fn settings(&self) -> &SettingsFile {
-        &self.0.settings
+        &self.home.settings
     }
 
     fn projects(&self) -> Vec<Project> {
-        self.0
+        self.home
             .store
             .projects()
             .unwrap_or_default()
@@ -67,8 +68,12 @@ impl Source for HostSource {
             .collect()
     }
 
+    fn remote(&self) -> Option<&dyn host_dashboard::Remote> {
+        Some(&self.remote)
+    }
+
     fn clone_project(&self, remote: &str) -> Result<Project, String> {
-        let (id, name) = self.0.clone_project(remote).map_err(|e| e.message)?;
+        let (id, name) = self.home.clone_project(remote).map_err(|e| e.message)?;
         let path = self
             .projects()
             .into_iter()
@@ -95,7 +100,10 @@ async fn start(home: &Arc<HostHome>) -> Result<String, String> {
         return Ok(dashboard.address());
     }
     let dashboard = Dashboard::start(
-        Arc::new(HostSource(home.clone())),
+        Arc::new(HostSource {
+            home: home.clone(),
+            remote: crate::dashboard_remote::HostRemote::new(home.clone()),
+        }),
         Options {
             state_dir: home.profile.data_dir.join("dashboard"),
         },
