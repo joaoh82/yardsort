@@ -8,7 +8,7 @@
 
 import type { Channel, MergeMethod, PublishState, PullSummary } from "@yardsort/remote-client";
 import { MERGE_METHODS } from "@yardsort/remote-client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -65,34 +65,41 @@ export function PullMerge({
     };
   }, [can, channel, through, again]);
   const offer: MergeOffer = can ? mergeOffer(pull, publish) : { kind: "none" };
-  const [asking, setAsking] = useState(false);
+  // What the sheet shows, fixed when Merge… is pressed: a read that lands while it is open does
+  // not change the commit the person is reading. The computer refuses it if the head moved.
+  const [asking, setAsking] = useState<Extract<MergeOffer, { kind: "ready" }> | null>(null);
   const [merging, setMerging] = useState(false);
+  const sent = useRef(false);
   const [said, setSaid] = useState<{ words: string; bad: boolean } | null>(null);
 
   const merge = async (method: MergeMethod) => {
-    setAsking(false);
-    if (!channel || offer.kind !== "ready") return;
+    const shown = asking;
+    setAsking(null);
+    // One press, one merge: a second tap before the first is answered sends nothing.
+    if (!channel || !shown || sent.current) return;
+    sent.current = true;
     setMerging(true);
     setSaid(null);
     try {
       await channel.mergePullRequest({
-        workspace: offer.workspace,
+        workspace: shown.workspace,
         number: pull.number,
-        headOid: offer.head,
+        headOid: shown.head,
         method,
       });
-      setSaid({ words: mergedWords(method, offer.base, offer.head, pull.branch), bad: false });
+      setSaid({ words: mergedWords(method, shown.base, shown.head, pull.branch), bad: false });
     } catch (error) {
       const failure = mergeFailure(error);
-      setSaid({ words: failure.words, bad: failure.kind === "refused" });
+      setSaid({ words: failure.words, bad: failure.kind !== "lost" });
     } finally {
+      sent.current = false;
       setMerging(false);
       // Read again either way. The merge itself is never sent again by itself.
       onDone();
     }
   };
 
-  if (offer.kind === "none" && said === null) return null;
+  if (offer.kind === "none" && said === null && !asking) return null;
   return (
     <>
       <MergeArea
@@ -100,16 +107,18 @@ export function PullMerge({
         said={said?.words ?? null}
         saidBad={said?.bad ?? false}
         busy={merging}
-        onMerge={() => setAsking(true)}
+        onMerge={() => {
+          if (offer.kind === "ready" && !merging) setAsking(offer);
+        }}
       />
-      {offer.kind === "ready" && channel && (
+      {asking && channel && (
         <MergeSheet
-          visible={asking}
+          visible
           pull={pull}
-          head={offer.head}
-          base={offer.base}
+          head={asking.head}
+          base={asking.base}
           computer={channel.host.name}
-          onCancel={() => setAsking(false)}
+          onCancel={() => setAsking(null)}
           onConfirm={(method) => void merge(method)}
         />
       )}

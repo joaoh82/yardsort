@@ -163,6 +163,7 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
         <Section title="Pull request">
           <PullCard pull={pullDetail?.pull ?? pull} detail={pullDetail} now={now}>
             <PullMerge
+              key={`${pull.project}#${pull.number}`}
               channel={channel}
               pull={pullDetail?.pull ?? pull}
               again={pulls}

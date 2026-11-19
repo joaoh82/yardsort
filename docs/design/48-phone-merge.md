@@ -50,8 +50,10 @@ merge it on the forge, since the host merges only a workspace's own. A draft say
 
 **When it is shown but cannot be pressed**, with the reason under it:
 
-- the forge says it conflicts: "Conflicts with main. Resolve them in the workspace first.";
-- the computer is not reachable just now.
+- the forge says it conflicts: "Conflicts with main. Resolve them in the workspace first.".
+
+As built, an unreachable computer shows no button rather than a disabled one: with no answer
+from it there is no commit to name.
 
 **Pressing it** opens a sheet:
 
@@ -115,3 +117,14 @@ Answered by the owner on 2026-11-18, after the Figma frames:
   passed on 2026-11-18, run by hand: a merge at a stale commit was refused and `gh` was not asked
   to merge; at the head, `gh` was asked `pr merge 12 --squash --match-head-commit <head>`. The
   stand-in `gh` of `app.sh seed-a-pull-request` says yes to a merge for it.
+
+## Found in review (2026-11-19)
+
+Fixed before merging: the sheet keeps the commit it opened with, so a read that lands while it
+is open cannot change what is merged; a second tap before the answer sends nothing; a merge that
+never left the phone (the connection had closed) says nothing was merged, not that it may have
+been; the forge's answer just now (draft, conflicts) wins over the list read earlier; the card's
+merging is keyed to its pull request, so one merged earlier is not said of the next; a draft says
+so only once the computer answered, so a phone let only watch sees nothing. Left as it is: the
+card asks the forge again with each reading of the list (each minute, or every few seconds
+while the computer is still reading), which costs the computer a `gh` call each time.

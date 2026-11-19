@@ -9,6 +9,7 @@
 
 import {
   type Channel,
+  ChannelClosed,
   ClientError,
   type MergeMethod,
   type PublishState,
@@ -48,10 +49,8 @@ export function mergeOffer(pull: PullSummary, publish: PublishState | null): Mer
   if (pull.followed || pull.workspaces.length === 0) {
     return { kind: "note", why: "No workspace on this computer opened it. Merge it on the forge." };
   }
-  if (pull.draft) {
-    return { kind: "note", why: "It is a draft. Mark it ready for review on the forge first." };
-  }
-  // Until the computer said where the workspace stands, there is no commit to name.
+  // Until the computer said where the workspace stands, there is no commit to name, and nothing
+  // is said: a phone let only watch is never told, and is shown nothing.
   if (!publish) return { kind: "none" };
   if (!publish.gh) {
     return {
@@ -60,10 +59,13 @@ export function mergeOffer(pull: PullSummary, publish: PublishState | null): Mer
     };
   }
   const own = publish.pullRequest;
-  if (!own || own.number !== pull.number || own.state !== "open" || own.draft || !own.headOid) {
-    return { kind: "none" };
+  if (!own || own.number !== pull.number || own.state !== "open") return { kind: "none" };
+  // The forge's answer just now wins over the list the computer read earlier.
+  if (own.draft) {
+    return { kind: "note", why: "It is a draft. Mark it ready for review on the forge first." };
   }
-  if (pull.conflicts || own.conflicting) {
+  if (!own.headOid) return { kind: "none" };
+  if (own.conflicting) {
     return {
       kind: "blocked",
       why: `Conflicts with ${pull.base ?? publish.base ?? "its base branch"}. Resolve them in the workspace first.`,
@@ -132,11 +134,24 @@ export function mergedWords(
  * the card is read again. An answer that never came may still have been a merge: it says so, and
  * nothing is sent again.
  */
-export type MergeFailure = { kind: "refused"; words: string } | { kind: "lost"; words: string };
+export type MergeFailure =
+  | { kind: "refused"; words: string }
+  | { kind: "lost"; words: string }
+  | { kind: "unsent"; words: string };
 
 export function mergeFailure(error: unknown): MergeFailure {
   if (error instanceof ClientError && error.kind === "remote") {
     return { kind: "refused", words: error.message };
+  }
+  // Refused here, before anything went: the computer was never asked.
+  if (
+    error instanceof ChannelClosed ||
+    (error instanceof ClientError && error.kind === "invalid")
+  ) {
+    return {
+      kind: "unsent",
+      words: "It was not sent: the connection to the computer closed. Nothing was merged.",
+    };
   }
   return { kind: "lost", words: "It may have been merged. Reading it again." };
 }

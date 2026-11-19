@@ -102,7 +102,9 @@ describe("what the card offers", () => {
   });
 
   test("a draft says so", () => {
-    expect(mergeOffer(pull({ draft: true }), publish())).toEqual({
+    const draft = publish();
+    draft.pullRequest = { ...draft.pullRequest!, draft: true };
+    expect(mergeOffer(pull(), draft)).toEqual({
       kind: "note",
       why: "It is a draft. Mark it ready for review on the forge first.",
     });
@@ -117,7 +119,8 @@ describe("what the card offers", () => {
 
   test("conflicts show the button and say why it cannot be pressed", () => {
     const why = "Conflicts with main. Resolve them in the workspace first.";
-    expect(mergeOffer(pull({ conflicts: true }), publish())).toEqual({ kind: "blocked", why });
+    // The list the computer read earlier is not the last word: the forge's answer just now is.
+    expect(mergeOffer(pull({ conflicts: true, draft: true }), publish()).kind).toBe("ready");
     const conflicting = publish();
     conflicting.pullRequest = { ...conflicting.pullRequest!, conflicting: true };
     expect(mergeOffer(pull(), conflicting)).toEqual({ kind: "blocked", why });
@@ -173,6 +176,13 @@ describe("a merge that did not come back done", () => {
       "The pull request changed or is no longer ready to merge. Read it again and look before merging.";
     const error = ClientError.from({ code: "conflict", message: said } as never);
     expect(mergeFailure(error)).toEqual({ kind: "refused", words: said });
+  });
+
+  test("a merge that never left the phone says nothing was merged", () => {
+    expect(mergeFailure(new ClientError("invalid", "The channel is not open yet."))).toEqual({
+      kind: "unsent",
+      words: "It was not sent: the connection to the computer closed. Nothing was merged.",
+    });
   });
 
   test("an answer that never came may have been a merge", () => {

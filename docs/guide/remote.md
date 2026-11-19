@@ -109,7 +109,9 @@ nothing else on the phone changes one.
   to since is refused, and the card shows its new head to merge at instead. The branch is kept.
   When it conflicts, **Merge…** cannot be pressed and says why; a draft, or one no workspace there
   opened, says to go to the forge. If the answer does not come back, the card says it may have
-  been merged and reads it again; it never sends the merge a second time by itself.
+  been merged and reads it again; it never sends the merge a second time by itself. If the
+  connection had already closed, it says nothing was sent. While the computer cannot be reached,
+  or has not yet said where the workspace stands, there is no **Merge…**.
 - **Pull requests**, on a computer's screen with the count of open ones, lists them over every
   project the phone may see: **Open**, **Merged** and **Closed**. Merged and closed are those
   among the newest fifty of each project.

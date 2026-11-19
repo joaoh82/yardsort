@@ -139,6 +139,7 @@ function Pull({
       {detail.answer && pull && (
         <PullCard pull={pull} detail={detail.answer} now={now}>
           <PullMerge
+            key={`${pull.project}#${pull.number}`}
             channel={channel}
             pull={pull}
             again={asked}

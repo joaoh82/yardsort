@@ -1322,6 +1322,9 @@ describe("A computer", () => {
             state: "open",
             checks: "passed",
             headOid: HEAD,
+            // What the forge says just now, which the card goes by.
+            ...(pulls[0]?.draft ? { draft: true } : {}),
+            ...(pulls[0]?.conflicts ? { conflicting: true } : {}),
           },
         };
         return server;
