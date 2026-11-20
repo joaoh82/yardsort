@@ -36,6 +36,9 @@ struct Marks {
     began: HashMap<String, Instant>,
     /// When the last one that took in every open one began.
     began_full: HashMap<String, Instant>,
+    /// When something a device did last changed each project's pull requests. A reading begun
+    /// before then may not have seen it.
+    changed: HashMap<String, Instant>,
 }
 
 /// Which projects are being read for a device, and when they last were: so a second question
@@ -62,7 +65,13 @@ impl Readings {
                 .get(project_id)
                 .is_none_or(|at| now.saturating_duration_since(*at) >= gap)
         };
-        let recent = recent_due(last) && since(&marks.began, AGAIN_AFTER);
+        let changed = marks.changed.get(project_id).is_some_and(|changed| {
+            marks
+                .began
+                .get(project_id)
+                .is_none_or(|began| began < changed)
+        });
+        let recent = changed || recent_due(last) && since(&marks.began, AGAIN_AFTER);
         // Every open one cannot be read of a forge `gh` does not speak to, and what was last
         // read never says they were: so it is asked for no more often than anything is read.
         let full = open_due(last, every_open) && since(&marks.began_full, OLD_AFTER);
@@ -75,6 +84,16 @@ impl Readings {
             marks.began_full.insert(project_id.to_owned(), now);
         }
         Some(full)
+    }
+
+    /// Something a device did changed `project_id`'s pull requests: the next question reads them
+    /// again, however fresh what was read.
+    fn changed(&self, project_id: &str, now: Instant) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .changed
+            .insert(project_id.to_owned(), now);
     }
 
     fn done(&self, project_id: &str) {
@@ -127,9 +146,25 @@ impl AppPulls {
     pub fn new(app: &AppHandle) -> Self {
         Self {
             app: app.clone(),
-            readings: Arc::default(),
+            readings: shared(app),
         }
     }
+}
+
+/// The app's one record of readings for devices, kept in its state so that what a device's
+/// channel changes elsewhere reaches it.
+fn shared(app: &AppHandle) -> Arc<Readings> {
+    if let Some(readings) = app.try_state::<Arc<Readings>>() {
+        return Arc::clone(&readings);
+    }
+    let readings = Arc::<Readings>::default();
+    app.manage(Arc::clone(&readings));
+    Arc::clone(&app.state::<Arc<Readings>>())
+}
+
+/// Something a device did changed `project_id`'s pull requests: a merge, a push, one opened.
+pub fn changed(app: &AppHandle, project_id: &str) {
+    shared(app).changed(project_id, Instant::now());
 }
 
 impl PullRequests for AppPulls {
@@ -290,5 +325,24 @@ mod tests {
         .join();
         assert!(stopped.is_err());
         assert!(!readings.reading("p"));
+    }
+
+    #[test]
+    fn a_change_a_device_made_has_the_next_question_read_again_however_fresh() {
+        let readings = Readings::default();
+        let start = Instant::now();
+        let after = |seconds: u64| start + Duration::from_secs(seconds);
+        let fresh = read(1, None, true);
+        assert_eq!(readings.begin("p", None, false, start), Some(false));
+        // Merged while that reading was still away.
+        readings.changed("p", after(1));
+        readings.done("p");
+        assert_eq!(
+            readings.begin("p", Some(&fresh), false, after(2)),
+            Some(false)
+        );
+        readings.done("p");
+        // Read since the change: fresh again.
+        assert_eq!(readings.begin("p", Some(&fresh), false, after(3)), None);
     }
 }

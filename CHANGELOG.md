@@ -5,6 +5,11 @@ has the downloads and the full commit lists.
 
 ## 0.36.0
 
+- A pull request merged from the phone shows as merged on its card at once. The computer kept
+  the list it had read for up to 45 seconds, so the card stayed open, even after a pull to
+  refresh, until the screen was opened again. A push, a commit or a pull request opened from the
+  phone now has the list read again too, on the desktop app and on `yardsort-host`.
+
 - **Notifications.** A new first row in the sidebar opens one list of what is waiting for you and
   what finished while you were looking elsewhere, over every project: an agent that asks for a
   permission, one that finished a stretch of work, one whose turn failed or that stopped with an

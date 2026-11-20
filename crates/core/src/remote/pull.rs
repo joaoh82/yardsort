@@ -36,6 +36,10 @@ pub trait PullRequests: Send + Sync {
     /// ([`ProjectPulls::reading`]). `every_open` asks that the next reading take in every open
     /// one, not only the newest.
     fn of_project(&self, project_id: &str, every_open: bool) -> ProjectPulls;
+
+    /// Something a device did changed a project's pull requests (a merge, a push, one opened):
+    /// what was read is kept to show, but the next question reads them again at once.
+    fn changed(&self, _project_id: &str) {}
 }
 
 /// A project's pull requests as its host last read them.

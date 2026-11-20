@@ -205,6 +205,22 @@ impl AppStarting {
         })
     }
 
+    /// [`with`](Self::with), for what changes a workspace's pull requests when it is done: its
+    /// project's are read again at the next question, not when what was read grows old.
+    fn changing<T>(
+        &self,
+        workspace: &str,
+        f: impl FnOnce(&Starter<'_>) -> IpcResult<T>,
+    ) -> IpcResult<T> {
+        self.with(|starter| {
+            let done = f(starter)?;
+            if let Ok(Some(row)) = starter.store.workspace(workspace) {
+                crate::publish::lent::changed(&self.0, &row.project_id);
+            }
+            Ok(done)
+        })
+    }
+
     /// A device renamed, archived or deleted a workspace, or cloned a project: the window reads
     /// its projects again.
     fn changed(&self) {
@@ -308,10 +324,10 @@ impl Starting for AppStarting {
         workspace: &str,
         message: &str,
     ) -> IpcResult<remote_proto::publish::PublishState> {
-        self.with(|starter| starter.commit(workspace, message))
+        self.changing(workspace, |starter| starter.commit(workspace, message))
     }
     fn push(&self, workspace: &str) -> IpcResult<remote_proto::publish::PublishState> {
-        self.with(|starter| starter.push(workspace))
+        self.changing(workspace, |starter| starter.push(workspace))
     }
     fn open_pull_request(
         &self,
@@ -320,7 +336,9 @@ impl Starting for AppStarting {
         body: &str,
         draft: bool,
     ) -> IpcResult<remote_proto::publish::PullRequestOpened> {
-        self.with(|starter| starter.open_pull_request(workspace, title, body, draft))
+        self.changing(workspace, |starter| {
+            starter.open_pull_request(workspace, title, body, draft)
+        })
     }
     fn merge_pull_request(
         &self,
@@ -329,7 +347,9 @@ impl Starting for AppStarting {
         head_oid: &str,
         method: remote_proto::publish::MergeMethod,
     ) -> IpcResult<()> {
-        self.with(|starter| starter.merge_pull_request(workspace, number, head_oid, method))
+        self.changing(workspace, |starter| {
+            starter.merge_pull_request(workspace, number, head_oid, method)
+        })
     }
 
     fn session(
