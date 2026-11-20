@@ -1483,7 +1483,9 @@ Asked for by the owner on 2026-11-18, after the phone's pull requests (45). Buil
 - [x] **Merge…** on a workspace's own pull request card, with a sheet naming the commit, Squash
       by default, a warning for checks, and the branch kept.
 - [x] A smoke test, `headless-phone-merges.yaml`: a stale commit is refused, the head merges.
-- [ ] Run on the iPhone against `yardsort-box`.
+- [x] Run on the iPhone against `yardsort-box` (TestFlight 0.1.12, 2026-11-20): the sheet,
+      Cancel, a stale commit refused, a merge, a draft and a conflict. It found the card staying
+      open after a merge, fixed in [#288](https://github.com/joaoh82/yardsort/pull/288).
 
 ## Later (unordered)
 
