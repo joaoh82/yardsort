@@ -1,6 +1,6 @@
 # 48. Merging from the phone
 
-Status: proposed, answered and built on 2026-11-18. Not yet seen on a phone. The screens are on the page **Merge ·
+Status: proposed, answered and built on 2026-11-18; run on the iPhone on 2026-11-20. The screens are on the page **Merge ·
 proposal** of the phone's Figma file (frames M1 to M5).
 
 ## The problem
@@ -139,3 +139,7 @@ and nothing told it a device had changed them. Each host now marks the project c
 merge, a push, a commit or a pull request opened from a device, and the next question reads
 it again (`PullRequests::changed`). One merge on that run, of a pull request at a commit pushed
 after a refusal, could not be accounted for and did not happen again.
+
+Rechecked on 2026-11-20 with that fix on `yardsort-box`: the card showed merged as soon as the
+merge was answered. A draft showed its note, and once marked ready, its conflict with main
+showed as a Merge… that cannot be pressed, with the reason.
