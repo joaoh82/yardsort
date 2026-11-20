@@ -114,6 +114,22 @@ RUN case "$TARGETARCH" in \
     && rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_$TARGETARCH" \
     && gh --version
 
+# rustunnel's client, which the host dashboard's tunnel runs: a container's own 127.0.0.1 is not
+# reached by a published port, so a tunnel is how its dashboard is opened (`yardsort-host dashboard
+# tunnel on`, with RUSTUNNEL_TOKEN or `rustunnel setup`). AGPL-3.0, unmodified.
+# https://github.com/joaoh82/rustunnel/releases/download/v0.8.9/SHA256SUMS
+ARG RUSTUNNEL_VERSION=0.8.9
+RUN case "$TARGETARCH" in \
+       amd64) triple=x86_64-unknown-linux-gnu sum=7b16feffb253ddd4d231d4827e6b0fe3cda73d20bc210823547a3555fc287c3d ;; \
+       arm64) triple=aarch64-unknown-linux-gnu sum=c6a73f3bf485eea0148fc8f480195efebf4c5252248d1dc1d26a96d413b36615 ;; \
+       *) echo "no rustunnel for $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && fetch "https://github.com/joaoh82/rustunnel/releases/download/v$RUSTUNNEL_VERSION/rustunnel-v$RUSTUNNEL_VERSION-$triple.tar.gz" "$sum" /tmp/rustunnel.tar.gz \
+    && mkdir /tmp/rustunnel && tar -xzf /tmp/rustunnel.tar.gz -C /tmp/rustunnel --no-same-owner \
+    && install -m 755 /tmp/rustunnel/rustunnel /usr/local/bin/rustunnel \
+    && rm -rf /tmp/rustunnel /tmp/rustunnel.tar.gz \
+    && rustunnel --version
+
 # The harnesses that may be redistributed, with their whole tree as the lockfile pins it. Their
 # install scripts run: OpenCode's puts its binary in place. Each package keeps its own licence file.
 # OpenCode's script picks the build for the CPU it runs on, the build machine's, and npm installs

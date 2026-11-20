@@ -415,22 +415,26 @@ From the first slice in [37-floor-manager](37-floor-manager.md), 2026-11-09.
 
 ## The host dashboard
 
-From its one slice in [47-host-dashboard](47-host-dashboard.md), 2026-11-17. None of these was
-put to the owner before it was built.
+From [47-host-dashboard](47-host-dashboard.md). The six it was first left with, 56 to 61, were not
+put to the owner before it was built; the owner answered all six on 2026-11-19, and each was built
+that week ([47, Remote from the page](47-host-dashboard.md#remote-from-the-page) and
+[the other four](47-host-dashboard.md#the-owners-other-answers-2026-11-19)).
 
-56. **How is the dashboard reached in a container?** It listens on the container's own
-    127.0.0.1, which a published port does not reach, and the images carry no `rustunnel`. A
-    listen address the image sets, published on the computer's loopback alone, or `rustunnel` in
-    the full image.
-57. **Should the page have a terminal?** An agent's own sign-in, `sudo` with a password and
-    `rustunnel setup` want one, and a job has none. It would finish the setup without SSH, and
-    make the dashboard a shell on the internet behind one cookie.
+56. ~~**How is the dashboard reached in a container?**~~ **Settled 2026-11-19: through a tunnel,
+    with `rustunnel` in the full image.** The images still publish no port.
+57. ~~**Should the page have a terminal?**~~ **Settled 2026-11-19: yes.** A shell in the page, for
+    what asks a question. It is the dashboard's, as a job is, so the guard refuses it what it
+    refuses a job.
 58. ~~**Should a device be paired from the dashboard?**~~ **Settled by the owner 2026-11-19: yes.**
     The host should do most if not all of what the clients do. Built that day: the **Remote**
     tab ([47](47-host-dashboard.md#remote-from-the-page)).
 59. ~~**Should the dashboard sign the host in to a Yardsort server?**~~ **Settled by the owner
     2026-11-19: yes**, for the same reason, and built that day in the same tab.
-60. **Other tunnels, and a reverse proxy of one's own.** Only rustunnel's host name is taken as
-    the dashboard's address.
-61. **Should what was run be recorded?** Jobs are forgotten when the host stops, and nothing is
-    logged.
+60. ~~**Other tunnels, and a reverse proxy of one's own.**~~ **Settled 2026-11-19: rustunnel
+    only**, and the page says so, with a link to rustunnel.com.
+61. ~~**Should what was run be recorded?**~~ **Settled 2026-11-19: yes.** An activity log: the
+    last 500 things done through the dashboard, never their output.
+62. ~~**Should the page sign the host out of its server?**~~ **Settled 2026-11-19: it does.** The
+    Remote tab's **Sign out**, which says what it ends first, as `yardsort-host sign-out` does.
+63. **Should the app's dashboard manage Remote too?** Its Settings do. The page only says so,
+    and points to the app's window.

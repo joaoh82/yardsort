@@ -1455,17 +1455,25 @@ Built the same day, in one piece: [47-host-dashboard](47-host-dashboard.md).
 - [x] A web page a host serves to itself on 127.0.0.1, port 28680: how the host and the computer
       stand, installing agents, Git and GitHub, cloning, and running setup commands as jobs.
 - [x] A browser signs in with a one-time code that only a person is given, by
-      `yardsort-host dashboard` behind the operator's guard or by the app's window. It can do
-      nothing that guard is there to stop.
+      `yardsort-host dashboard` behind the operator's guard or by the app's window. What it runs
+      can do nothing that guard is there to stop.
 - [x] On by default in `yardsort-host serve`; off in the app, under **Settings → Remote**.
 - [x] A rustunnel tunnel, with a subdomain, for an address beyond that computer. Off until asked
       for, and the token is rustunnel's to keep.
+- [x] The owner's six answers, 2026-11-19 ([47](47-host-dashboard.md#remote-from-the-page), and
+      [the other four](47-host-dashboard.md#the-owners-other-answers-2026-11-19)):
+      a terminal in the page; signing the host in to a server and pairing a device from the
+      page, which makes the dashboard's sign-in part of what guards pairing; an activity log;
+      rustunnel as the one tunnel, and in the full image, which is how a container's dashboard
+      is reached. Found on the way: a terminal's library needs style sheets the page's policy
+      refused, so the page is now served with a nonce; and a refused sign-in must not make the
+      host write a file each time, since anyone can cause one.
 - [ ] Run on a real server, and through a real tunnel, by the owner.
-- [ ] Reachable in a container (47, open question 1).
+- [ ] A real phone paired from the page.
 
-_Exit:_ a person installs `yardsort-host` on a new server with one line, signs it in, opens the
-dashboard and finishes the rest there, an agent, GitHub and their repositories, without typing
-another command over SSH but the agent's own sign-in.
+_Exit:_ a person installs `yardsort-host` on a new server with one line, asks it for a sign-in
+link once over SSH, opens the dashboard and finishes the rest there: an agent and its sign-in,
+GitHub, their repositories, the server's own sign-in and their phone.
 
 ## M36 — Merging from the phone
 

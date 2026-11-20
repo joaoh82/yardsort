@@ -7,6 +7,8 @@
     <meta name="color-scheme" content="dark light" />
     <title>Yardsort host</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="style-nonce" content="__STYLE_NONCE__" />
+    <link rel="stylesheet" href="/vendor/xterm.css" />
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
@@ -55,7 +57,9 @@
           <a href="#agents" data-tab="agents">Agents</a>
           <a href="#git" data-tab="git">Git</a>
           <a href="#commands" data-tab="commands">Commands</a>
+          <a href="#terminal" data-tab="terminal">Terminal</a>
           <a href="#access" data-tab="access">Access</a>
+          <a href="#activity" data-tab="activity">Activity</a>
         </nav>
         <button id="sign-out" type="button">Sign out</button>
       </header>
@@ -305,6 +309,28 @@
           </article>
         </section>
 
+        <!-- Terminal -->
+        <section id="tab-terminal" class="tab" hidden>
+          <article class="card">
+            <h2>Terminal</h2>
+            <p class="muted">
+              A shell on this computer as <b id="terminal-user">its user</b>, in the home folder,
+              for what asks a question: an agent's own sign-in, <code>sudo</code> with a password,
+              <code>rustunnel setup</code>. It stays open when you leave this page, and ends when
+              you close it, when every browser is signed out, or when the host stops. What is typed
+              and shown here is not recorded.
+            </p>
+            <div class="terminal-bar">
+              <div id="terminal-list" class="terminal-list" role="tablist"></div>
+              <button id="terminal-new" class="primary" type="button">New terminal</button>
+              <button id="terminal-close" type="button" hidden>Close</button>
+            </div>
+            <p id="terminal-error" class="error" role="alert" hidden></p>
+            <p id="terminal-none" class="muted">No terminal is open.</p>
+            <div id="terminal-view" class="terminal-view" hidden></div>
+          </article>
+        </section>
+
         <!-- Access -->
         <section id="tab-access" class="tab" hidden>
           <article class="card">
@@ -320,17 +346,16 @@
           <article class="card">
             <h2>Tunnel</h2>
             <p class="muted">
-              A
-              <a
-                href="https://github.com/joaoh82/rustunnel"
-                rel="noreferrer noopener"
-                target="_blank"
-                >rustunnel</a
+              A tunnel gives the dashboard an <code>https://</code> address anyone can open, with
+              its sign-in as the only lock. Tunnels are made with
+              <a href="https://rustunnel.com" rel="noreferrer noopener" target="_blank">rustunnel</a
+              >, and with nothing else: its server carries, and can read, everything that passes. It
+              needs the <code>rustunnel</code> client installed for this user, with its token set by
+              <code>rustunnel setup</code>;
+              <a href="https://rustunnel.com" rel="noreferrer noopener" target="_blank"
+                >rustunnel.com</a
               >
-              tunnel gives the dashboard an <code>https://</code> address anyone can open, with its
-              sign-in as the only lock. The tunnel's server carries, and can read, everything that
-              passes. It needs the <code>rustunnel</code> client installed for this user, with its
-              token set by <code>rustunnel setup</code>.
+              has the client and an account.
             </p>
             <p id="tunnel-state" class="state"></p>
             <form id="tunnel-form" class="form">
@@ -392,6 +417,20 @@
             </div>
           </article>
         </section>
+
+        <!-- Activity -->
+        <section id="tab-activity" class="tab" hidden>
+          <article class="card">
+            <h2>Activity</h2>
+            <p class="muted">
+              What was done through this dashboard, the newest first: who signed in, what was run
+              and how it ended, what was changed. The last 500 are kept on this computer, across
+              restarts. Never what a command printed, nor a token or a code.
+            </p>
+            <p id="activity-none" class="muted" hidden>Nothing yet.</p>
+            <ol id="activity-list" class="activity"></ol>
+          </article>
+        </section>
       </main>
     </div>
 
@@ -407,6 +446,8 @@
       </form>
     </dialog>
 
+    <script src="/vendor/xterm.js" defer></script>
+    <script src="/vendor/addon-fit.js" defer></script>
     <script src="/app.js" defer></script>
   </body>
 </html>

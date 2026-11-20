@@ -15,6 +15,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, PoisonError};
+use std::time::Duration;
 
 use axum::extract::{Path, Query, Request, State};
 use axum::http::header::{self, HeaderMap, HeaderName, HeaderValue};
@@ -29,7 +30,9 @@ use yardsort_core::program::Program;
 use yardsort_core::settings::TunnelSettings;
 
 use crate::jobs::{Step, Summary, Work};
-use crate::{agents, git, system, Inner, PairAnswer, Pairing, Project, Remote, SigningIn};
+use crate::{
+    agents, git, system, terminal, Inner, PairAnswer, Pairing, Project, Remote, SigningIn,
+};
 
 /// What a request that changes something must carry. A page on another site cannot add it
 /// without the browser asking this server first, and this server never says yes.
@@ -45,6 +48,9 @@ pub fn router(inner: Arc<Inner>) -> Router {
         .route("/app.js", get(script))
         .route("/app.css", get(style))
         .route("/favicon.svg", get(icon))
+        .route("/vendor/xterm.js", get(terminal_script))
+        .route("/vendor/addon-fit.js", get(terminal_fit_script))
+        .route("/vendor/xterm.css", get(terminal_style))
         .route("/api/session", get(session).post(sign_in).delete(sign_out))
         .route("/api/sessions/end", post(sign_everyone_out))
         .route("/api/status", get(status))
@@ -61,6 +67,12 @@ pub fn router(inner: Arc<Inner>) -> Router {
         .route("/api/jobs/{id}", get(read_job))
         .route("/api/jobs/{id}/stop", post(stop_job))
         .route("/api/tunnel", post(set_tunnel))
+        .route("/api/activity", get(list_activity))
+        .route("/api/terminals", get(list_terminals).post(open_terminal))
+        .route("/api/terminals/{id}/output", get(read_terminal))
+        .route("/api/terminals/{id}/input", post(type_into_terminal))
+        .route("/api/terminals/{id}/size", post(resize_terminal))
+        .route("/api/terminals/{id}/close", post(close_terminal))
         .route("/api/remote", get(read_remote))
         .route("/api/remote/pair", post(pair))
         .route("/api/remote/pair/answer", post(answer_device))
@@ -137,13 +149,17 @@ async fn guard(State(inner): Shared, request: Request, next: Next) -> Response {
     }
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
-    for (name, value) in [
-        // Nothing but its own files, and nothing may frame it or be framed by it.
-        (
+    // The page says its own, with the nonce it was given.
+    if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+        headers.insert(
             header::CONTENT_SECURITY_POLICY,
-            "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; \
-             connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-        ),
+            HeaderValue::from_static(
+                "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; \
+                 connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+            ),
+        );
+    }
+    for (name, value) in [
         (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         (header::X_FRAME_OPTIONS, "DENY"),
         (header::REFERRER_POLICY, "no-referrer"),
@@ -261,10 +277,64 @@ async fn blocking<T: Send + 'static>(
 
 // ── The page ────────────────────────────────────────────────────────────────────────────────
 
-async fn page() -> impl IntoResponse {
+/// What stands in the page for the nonce its style sheets are let in by.
+const NONCE: &str = "__STYLE_NONCE__";
+
+/// The page, and what it may load: nothing but its own files, and nothing may frame it or be
+/// framed by it. The terminal's library writes style sheets of its own into the page as it draws,
+/// and colours single characters with a `style` attribute. So a style sheet is let in only with
+/// this answer's nonce, which the page's script gives to the ones that library makes and which
+/// markup put into the page from elsewhere would not have; and a `style` attribute, which reaches
+/// no further than its own element, is allowed.
+async fn page() -> Response {
+    let mut random = [0u8; 16];
+    if getrandom::fill(&mut random).is_err() {
+        return refuse(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "no_random",
+            "This computer gave no random numbers.",
+        );
+    }
+    let nonce: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+    let policy = format!(
+        "default-src 'none'; script-src 'self'; style-src 'self' 'nonce-{nonce}'; \
+         style-src-attr 'unsafe-inline'; img-src 'self'; connect-src 'self'; base-uri 'none'; \
+         form-action 'none'; frame-ancestors 'none'"
+    );
+    let Ok(policy) = HeaderValue::from_str(&policy) else {
+        return refuse(StatusCode::INTERNAL_SERVER_ERROR, "no_policy", "No page.");
+    };
     (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        include_str!("../ui/index.html"),
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/html; charset=utf-8"),
+            ),
+            (header::CONTENT_SECURITY_POLICY, policy),
+        ],
+        include_str!("../ui/index.html").replace(NONCE, &nonce),
+    )
+        .into_response()
+}
+
+async fn terminal_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../ui/vendor/xterm.js"),
+    )
+}
+
+async fn terminal_fit_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../ui/vendor/addon-fit.js"),
+    )
+}
+
+async fn terminal_style() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../ui/vendor/xterm.css"),
     )
 }
 
@@ -310,7 +380,15 @@ struct Code {
 }
 
 async fn sign_in(State(inner): Shared, headers: HeaderMap, Json(typed): Json<Code>) -> Response {
+    let via = match addressed_to(&headers, inner.tunnel.host().as_deref()) {
+        Some(Via::Tunnel) => "through the tunnel",
+        _ => "on this computer",
+    };
     let Some(token) = inner.auth.redeem(&typed.code) else {
+        inner.activity.note(
+            "session",
+            format!("A sign-in was refused, {via}: not a code this computer gave."),
+        );
         return refuse(
             StatusCode::UNAUTHORIZED,
             "wrong_code",
@@ -318,6 +396,9 @@ async fn sign_in(State(inner): Shared, headers: HeaderMap, Json(typed): Json<Cod
              than ten minutes old. Ask for another.",
         );
     };
+    inner
+        .activity
+        .note("session", format!("A browser signed in, {via}."));
     // Only ever sent back over HTTPS when it was given over HTTPS.
     let secure = match addressed_to(&headers, inner.tunnel.host().as_deref()) {
         Some(Via::Tunnel) => "; Secure",
@@ -338,7 +419,11 @@ async fn sign_in(State(inner): Shared, headers: HeaderMap, Json(typed): Json<Cod
 async fn sign_out(State(inner): Shared, headers: HeaderMap) -> Response {
     let name = cookie_name(&inner);
     let ended = match cookie(&headers, &name) {
-        Some(token) => inner.auth.end(token),
+        Some(token) => {
+            let ended = inner.auth.end(token);
+            inner.activity.note("session", "A browser signed out.");
+            ended
+        }
         None => Ok(()),
     };
     // The browser forgets its cookie whether or not the file could be written.
@@ -363,7 +448,13 @@ struct Ended {
 }
 
 async fn sign_everyone_out(State(inner): Shared) -> Response {
-    match inner.auth.end_all() {
+    let ended = inner.auth.end_all();
+    // A shell nobody can reach any more is not left open.
+    inner.terminals.close_all();
+    inner
+        .activity
+        .note("session", "Every browser was signed out, from the page.");
+    match ended {
         Ok(ended) => Json(Ended { ended }).into_response(),
         Err(why) => not_kept(&why),
     }
@@ -630,7 +721,11 @@ struct Done {
 
 async fn set_identity(State(inner): Shared, Json(identity): Json<Identity>) -> Answer<Done> {
     blocking(&inner, move |inner| {
-        git::set_identity(&inner.source.env(), &identity.name, &identity.email)
+        git::set_identity(&inner.source.env(), &identity.name, &identity.email)?;
+        inner
+            .activity
+            .note("git", "Git's name and email for commits were set.");
+        Ok(())
     })
     .await
     .map(|()| Json(Done { done: true }))
@@ -829,13 +924,313 @@ struct Tunnel {
 
 async fn set_tunnel(State(inner): Shared, Json(wanted): Json<Tunnel>) -> Answer<crate::Standing> {
     blocking(&inner, move |inner| {
+        let said = match (wanted.enabled, wanted.subdomain.as_deref().map(str::trim)) {
+            (false, _) => "The tunnel was turned off, from the page.".to_owned(),
+            (true, Some(name)) if !name.is_empty() => {
+                format!("The tunnel was set from the page: on, as {name}.")
+            }
+            (true, _) => "The tunnel was set from the page: on.".to_owned(),
+        };
         inner.set_tunnel(TunnelSettings {
             enabled: wanted.enabled,
             subdomain: wanted.subdomain,
             region: wanted.region,
             server: wanted.server,
         })?;
+        inner.activity.note("tunnel", said);
         Ok(inner.standing())
+    })
+    .await
+    .map(Json)
+}
+
+// ── Terminals ───────────────────────────────────────────────────────────────────────────────
+
+/// The longest a reader is kept waiting for output: under what a tunnel gives an answer.
+const LONGEST_WAIT: Duration = Duration::from_secs(25);
+
+#[derive(Deserialize)]
+struct TerminalSize {
+    cols: u16,
+    rows: u16,
+}
+
+async fn list_terminals(State(inner): Shared) -> Json<Vec<terminal::Summary>> {
+    Json(inner.terminals.list())
+}
+
+async fn open_terminal(
+    State(inner): Shared,
+    Json(size): Json<TerminalSize>,
+) -> Answer<terminal::Summary> {
+    blocking(&inner, move |inner| {
+        inner.terminals.open(
+            &inner.source.env(),
+            terminal::Size::new(size.cols, size.rows),
+        )
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
+struct Waiting {
+    #[serde(default)]
+    from: u64,
+    /// How long to wait for output when there is none, in milliseconds.
+    #[serde(default)]
+    wait: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalOutput {
+    from: u64,
+    next: u64,
+    /// Bytes, as base64: a terminal's output need not be text, nor whole characters.
+    data: String,
+    ended: bool,
+}
+
+async fn read_terminal(
+    State(inner): Shared,
+    Path(id): Path<u64>,
+    Query(asked): Query<Waiting>,
+) -> Response {
+    use base64::Engine as _;
+    let wait = Duration::from_millis(asked.wait).min(LONGEST_WAIT);
+    match inner.terminals.read(id, asked.from, wait).await {
+        Some(reading) => Json(TerminalOutput {
+            from: reading.from,
+            next: reading.next,
+            data: base64::engine::general_purpose::STANDARD.encode(&reading.data),
+            ended: reading.ended,
+        })
+        .into_response(),
+        None => refuse(StatusCode::NOT_FOUND, "not_found", "No such terminal."),
+    }
+}
+
+#[derive(Deserialize)]
+struct Typed {
+    data: String,
+}
+
+async fn type_into_terminal(
+    State(inner): Shared,
+    Path(id): Path<u64>,
+    Json(typed): Json<Typed>,
+) -> Answer<Done> {
+    if typed.data.len() > terminal::LONGEST_INPUT {
+        return Err(Failed("That is too much to type at once.".into()));
+    }
+    blocking(&inner, move |inner| {
+        inner.terminals.type_into(id, typed.data.as_bytes())
+    })
+    .await
+    .map(|()| Json(Done { done: true }))
+}
+
+async fn resize_terminal(
+    State(inner): Shared,
+    Path(id): Path<u64>,
+    Json(size): Json<TerminalSize>,
+) -> Answer<Done> {
+    inner
+        .terminals
+        .resize(id, terminal::Size::new(size.cols, size.rows))
+        .map(|()| Json(Done { done: true }))
+        .map_err(Failed)
+}
+
+async fn close_terminal(State(inner): Shared, Path(id): Path<u64>) -> Json<Done> {
+    Json(Done {
+        done: inner.terminals.close(id),
+    })
+}
+
+// ── What was done ───────────────────────────────────────────────────────────────────────────
+
+async fn list_activity(State(inner): Shared) -> Json<Vec<crate::activity::Entry>> {
+    Json(inner.activity.list())
+}
+
+// ── Remote: signing in, and pairing ─────────────────────────────────────────────────────────
+
+/// What the page may do at the Yardsort server, and how it stands.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteState {
+    /// The program serving the page lets these be done here. The app does not: its window does.
+    available: bool,
+    pairing: Pairing,
+    signing_in: SigningIn,
+}
+
+const NOT_HERE: &str =
+    "Pair devices and sign in from the Yardsort app's window: Settings → Remote.";
+
+/// Run `work` with this program's [`Remote`], off the runtime.
+async fn with_remote<T: Send + 'static>(
+    inner: &Arc<Inner>,
+    work: impl FnOnce(&Inner, &dyn Remote) -> Result<T, String> + Send + 'static,
+) -> Result<T, Failed> {
+    blocking(inner, move |inner| match inner.source.remote() {
+        Some(remote) => work(inner, remote),
+        None => Err(NOT_HERE.into()),
+    })
+    .await
+}
+
+/// Record a sign-in to a server that has come through, once: whichever request sees it first
+/// says so, since the browser's own return finishes one as well as a pasted address does.
+fn record_signed_in(inner: &Inner, signing_in: &SigningIn) {
+    let SigningIn::SignedIn { name, server_url } = signing_in else {
+        return;
+    };
+    let mut recorded = inner
+        .signed_in_recorded
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !std::mem::replace(&mut *recorded, true) {
+        inner.activity.note(
+            "remote",
+            format!("This computer was signed in to {server_url} as {name}, from the page."),
+        );
+    }
+}
+
+async fn read_remote(State(inner): Shared) -> Answer<RemoteState> {
+    blocking(&inner, |inner| {
+        Ok(match inner.source.remote() {
+            Some(remote) => {
+                let signing_in = remote.signing_in();
+                record_signed_in(inner, &signing_in);
+                RemoteState {
+                    available: true,
+                    pairing: remote.pairing(),
+                    signing_in,
+                }
+            }
+            None => RemoteState {
+                available: false,
+                pairing: Pairing::Idle,
+                signing_in: SigningIn::Idle,
+            },
+        })
+    })
+    .await
+    .map(Json)
+}
+
+async fn pair(State(inner): Shared) -> Answer<Pairing> {
+    with_remote(&inner, |inner, remote| {
+        let pairing = remote.pair()?;
+        if matches!(pairing, Pairing::Offered { .. }) {
+            inner
+                .activity
+                .note("device", "A pairing code was shown on the page.");
+        }
+        Ok(pairing)
+    })
+    .await
+    .map(Json)
+}
+
+async fn answer_device(State(inner): Shared, Json(answer): Json<PairAnswer>) -> Answer<Pairing> {
+    with_remote(&inner, move |inner, remote| {
+        let control = answer.control;
+        let pairing = remote.answer(answer)?;
+        if let Pairing::Answered { device, allowed } = &pairing {
+            inner.activity.note(
+                "device",
+                match (allowed, control) {
+                    (false, _) => format!("{device} was refused, from the page."),
+                    (true, false) => format!("{device} was let in to watch, from the page."),
+                    (true, true) => {
+                        format!("{device} was let in to watch and type, from the page.")
+                    }
+                },
+            );
+        }
+        Ok(pairing)
+    })
+    .await
+    .map(Json)
+}
+
+async fn stop_pairing(State(inner): Shared) -> Answer<Pairing> {
+    with_remote(&inner, |_, remote| {
+        remote.stop_pairing();
+        Ok(remote.pairing())
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
+struct ServerSignIn {
+    server: String,
+    #[serde(default)]
+    name: String,
+}
+
+async fn remote_sign_in(
+    State(inner): Shared,
+    Json(asked): Json<ServerSignIn>,
+) -> Answer<SigningIn> {
+    with_remote(&inner, move |inner, remote| {
+        let server = asked.server.trim();
+        let begun = remote.sign_in(server, asked.name.trim())?;
+        *inner
+            .signed_in_recorded
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
+        inner.activity.note(
+            "remote",
+            format!(
+                "A sign-in to {} was started, from the page.",
+                without_password(server)
+            ),
+        );
+        Ok(begun)
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
+struct Pasted {
+    address: String,
+}
+
+async fn remote_pasted(State(inner): Shared, Json(pasted): Json<Pasted>) -> Answer<SigningIn> {
+    with_remote(&inner, move |inner, remote| {
+        let signing_in = remote.pasted(&pasted.address)?;
+        record_signed_in(inner, &signing_in);
+        Ok(signing_in)
+    })
+    .await
+    .map(Json)
+}
+
+async fn stop_remote_sign_in(State(inner): Shared) -> Answer<SigningIn> {
+    with_remote(&inner, |_, remote| {
+        remote.stop_signing_in();
+        Ok(remote.signing_in())
+    })
+    .await
+    .map(Json)
+}
+
+async fn remote_sign_out(State(inner): Shared) -> Answer<Done> {
+    with_remote(&inner, |inner, remote| {
+        remote.sign_out()?;
+        inner.activity.note(
+            "remote",
+            "This computer was signed out of its server, from the page.",
+        );
+        Ok(Done { done: true })
     })
     .await
     .map(Json)
@@ -972,116 +1367,4 @@ mod tests {
             "git@github.com:me/repo.git"
         );
     }
-}
-
-// ── Remote: signing in, and pairing ─────────────────────────────────────────────────────────
-
-/// What the page may do at the Yardsort server, and how it stands.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteState {
-    /// The program serving the page lets these be done here. The app does not: its window does.
-    available: bool,
-    pairing: Pairing,
-    signing_in: SigningIn,
-}
-
-const NOT_HERE: &str =
-    "Pair devices and sign in from the Yardsort app's window: Settings → Remote.";
-
-/// Run `work` with this program's [`Remote`], off the runtime.
-async fn with_remote<T: Send + 'static>(
-    inner: &Arc<Inner>,
-    work: impl FnOnce(&dyn Remote) -> Result<T, String> + Send + 'static,
-) -> Result<T, Failed> {
-    blocking(inner, move |inner| match inner.source.remote() {
-        Some(remote) => work(remote),
-        None => Err(NOT_HERE.into()),
-    })
-    .await
-}
-
-async fn read_remote(State(inner): Shared) -> Answer<RemoteState> {
-    blocking(&inner, |inner| {
-        Ok(match inner.source.remote() {
-            Some(remote) => RemoteState {
-                available: true,
-                pairing: remote.pairing(),
-                signing_in: remote.signing_in(),
-            },
-            None => RemoteState {
-                available: false,
-                pairing: Pairing::Idle,
-                signing_in: SigningIn::Idle,
-            },
-        })
-    })
-    .await
-    .map(Json)
-}
-
-async fn pair(State(inner): Shared) -> Answer<Pairing> {
-    with_remote(&inner, |remote| remote.pair()).await.map(Json)
-}
-
-async fn answer_device(State(inner): Shared, Json(answer): Json<PairAnswer>) -> Answer<Pairing> {
-    with_remote(&inner, move |remote| remote.answer(answer))
-        .await
-        .map(Json)
-}
-
-async fn stop_pairing(State(inner): Shared) -> Answer<Pairing> {
-    with_remote(&inner, |remote| {
-        remote.stop_pairing();
-        Ok(remote.pairing())
-    })
-    .await
-    .map(Json)
-}
-
-#[derive(Deserialize)]
-struct ServerSignIn {
-    server: String,
-    #[serde(default)]
-    name: String,
-}
-
-async fn remote_sign_in(
-    State(inner): Shared,
-    Json(asked): Json<ServerSignIn>,
-) -> Answer<SigningIn> {
-    with_remote(&inner, move |remote| {
-        remote.sign_in(asked.server.trim(), asked.name.trim())
-    })
-    .await
-    .map(Json)
-}
-
-#[derive(Deserialize)]
-struct Pasted {
-    address: String,
-}
-
-async fn remote_pasted(State(inner): Shared, Json(pasted): Json<Pasted>) -> Answer<SigningIn> {
-    with_remote(&inner, move |remote| remote.pasted(&pasted.address))
-        .await
-        .map(Json)
-}
-
-async fn stop_remote_sign_in(State(inner): Shared) -> Answer<SigningIn> {
-    with_remote(&inner, |remote| {
-        remote.stop_signing_in();
-        Ok(remote.signing_in())
-    })
-    .await
-    .map(Json)
-}
-
-async fn remote_sign_out(State(inner): Shared) -> Answer<Done> {
-    with_remote(&inner, |remote| {
-        remote.sign_out()?;
-        Ok(Done { done: true })
-    })
-    .await
-    .map(Json)
 }

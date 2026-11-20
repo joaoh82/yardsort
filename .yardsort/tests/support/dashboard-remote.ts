@@ -139,7 +139,7 @@ switch (doing) {
   case "pair": {
     const bin = (await Bun.file(`${dir}/bin`).text()).trim();
     const through = await ran(`script -qefc '${bin}/yardsort-host pair' /dev/null`);
-    if (!through.includes("is refused to a command the dashboard ran"))
+    if (!through.includes("is refused to a command or a terminal the dashboard ran"))
       fail(`A command the dashboard ran was not refused pairing:\n${through}`);
     console.log("refused: a command the dashboard ran, pairing");
 

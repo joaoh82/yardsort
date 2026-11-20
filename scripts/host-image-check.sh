@@ -22,7 +22,7 @@ done
 # crash fails the check.
 tools='
   [ "$(id -un)" = yardsort ] || { echo "runs as $(id -un), not yardsort" >&2; exit 1; }
-  for tool in codex opencode pi omp gh node npm bun go cargo rustc python3 rg jq git; do
+  for tool in codex opencode pi omp gh rustunnel node npm bun go cargo rustc python3 rg jq git; do
     case "$tool" in go) args=version ;; *) args=--version ;; esac
     if ! out="$("$tool" $args 2>&1)"; then
       printf "%s failed:\n%s\n" "$tool" "$out" >&2

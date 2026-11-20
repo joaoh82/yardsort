@@ -2511,9 +2511,11 @@ name = "host-dashboard"
 version = "0.35.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "dunce",
  "getrandom 0.3.4",
  "libc",
+ "portable-pty",
  "serde",
  "serde_json",
  "sha2 0.10.9",

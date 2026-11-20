@@ -727,23 +727,31 @@ remote ever talks to it directly. Instead:
 ## The host dashboard (`crates/dashboard/`)
 
 A web page a computer serves to itself for looking after it as a host: its state, its agents, Git
-and GitHub, and the commands that set it up ([47](47-host-dashboard.md)). It is the one part of a
+and GitHub, the commands that set it up, a terminal, and on a host its sign-in to a server and
+its devices ([47](47-host-dashboard.md)). It is the one part of a
 host that listens for connections for longer than a sign-in takes, and it listens on 127.0.0.1
 alone.
 
 - **One crate, two programs.** `host-dashboard` holds an `axum` server, the sign-in, the jobs, the
-  tunnel and the page, three plain files built into the program. `yardsort-host serve` serves it
+  terminals, the activity record, the tunnel and the page: plain files built into the program,
+  with xterm.js kept beside them for the terminal. `yardsort-host serve` serves it
   unless told not to; the app serves it once it is turned on in Settings. Each gives what it
   knows of itself through one trait, `Source`.
 - **Who gets in.** A browser signs in with a one-time code, made only where a person is: by
   `yardsort-host dashboard` behind the operator's guard, or by the app's window. Every request is
   refused unless it is addressed to a loopback name or the tunnel's own, comes from the page
   itself, and carries a session.
-- **What it adds: that user's own shell, less what the guard keeps for a person.** It runs
-  commands as the host's user. It lets no device in, approves no note and turns no sync on, and
-  the guard refuses those to a command the dashboard ran as it does to an agent's terminal: a
-  job is marked, and descends from the host. So a session in the dashboard is not a way round
-  the guard.
+- **What it adds: that user's own shell.** It runs commands as the host's user, and opens a
+  terminal: a login shell in a pseudo-terminal of the dashboard's own, read by a request that
+  waits for output, in memory, ended with the host. What the guard keeps for a person at a
+  terminal is refused to a command or a terminal the dashboard ran, as to an agent's: each is
+  marked, and descends from the host.
+- **The page itself pairs, on a host.** `yardsort-host` gives the dashboard a second trait,
+  `remote::Remote`: sign in to a server inside the running host, show a pairing offer, answer a
+  device, take one off. So a device is let in by whoever holds a dashboard session, which the
+  owner chose on 2026-11-19; the app gives none of it, and keeps these in its Settings.
+- **What was done is kept**, a sentence each, the last 500, in the profile: never output, a
+  code or a token.
 - **Beyond the computer**: an SSH forward, or a rustunnel tunnel whose client the host runs as a
   child and reads by its `--json` events. The tunnel's token is rustunnel's own to keep.
 

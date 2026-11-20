@@ -193,9 +193,9 @@ is.
 ## The dashboard
 
 While it runs, the host serves a web page for looking after this computer from a browser: how the
-host and the computer stand, installing agents, Git and GitHub, cloning repositories, and running
-the commands that set a server up. It is on unless you turn it off, and listens on `127.0.0.1`,
-port 28680, alone.
+host and the computer stand, installing agents, Git and GitHub, cloning repositories, running the
+commands that set a server up, a terminal, signing in to a Yardsort server, and letting devices in.
+It is on unless you turn it off, and listens on `127.0.0.1`, port 28680, alone.
 
 ```sh
 yardsort-host dashboard                                   # where it is, and a one-time link to sign a browser in
@@ -204,9 +204,10 @@ yardsort-host dashboard tunnel on --subdomain build-box   # or give it an https 
 yardsort-host dashboard off                               # stop serving it, now and at every start
 ```
 
-A sign-in link is given only to a person at a terminal of their own, as `pair` is, and whoever signs
-in can run commands here as you. [The host dashboard](host-dashboard.md) has all of it: what each
-tab does, the tunnel and what its server can see, and how to turn it off.
+A sign-in link is given only to a person at a terminal of their own, as `pair` is. **Whoever signs in
+has a shell here as you, and can let a device in**: the dashboard's sign-in is as much to keep as
+pairing is. [The host dashboard](host-dashboard.md) has all of it: what each tab does, the tunnel
+and what its server can see, and how to turn it off.
 
 ## In a container
 
@@ -214,7 +215,8 @@ Each release publishes two images, for x86_64 (amd64) and arm64, in the GitHub C
 is tagged with the release's version and with `latest`:
 
 - **`ghcr.io/joaoh82/yardsort-host-full`**, the one to start from. It has the tools agents use: Node.js,
-  Bun, Go, Rust, Python, the GitHub CLI, `git`, `ripgrep`, `jq` and the build basics. It also has the
+  Bun, Go, Rust, Python, the GitHub CLI, `git`, `ripgrep`, `jq`, the build basics, and the `rustunnel`
+  client [the dashboard's tunnel](host-dashboard.md#in-a-container) runs. It also has the
   agents whose licences let anyone hand them on: Codex CLI, OpenCode, Pi and Oh My Pi. Claude Code,
   Cursor's CLI and Grok are not in it: [`install-agent`](#installing-an-agent) installs those from each
   vendor, into the home volume, where a new container finds them.
@@ -249,7 +251,8 @@ pasting the address back, as above: forwarding the port does not reach into the 
   you would `/credentials`.
 - **It publishes no port**: the host only reaches out. Never give it the Docker socket, which is root
   on the computer it runs on. [The dashboard](host-dashboard.md#in-a-container) is served on the
-  container's own `127.0.0.1`, which a published port would not reach.
+  container's own `127.0.0.1`, which a published port would not reach: there it is opened through a
+  rustunnel tunnel, whose client the full image carries.
 
 **Stopping or restarting the container ends the agents**, since the terminal daemon lives inside it.
 Their workspaces, worktrees and records stay in the volumes, and so do their conversations, which
@@ -459,8 +462,15 @@ to it: the same code, QR code and questions, answered on the page.
 `pair` is refused from any terminal Yardsort started, and from anything an agent runs: the host checks
 who is at the other end of its socket, and refuses a process that carries a launched session's
 markers, descends from the terminal daemon, or types at one of the daemon's terminals, and one whose
-input is not a terminal at all. A command run from [the dashboard](#the-dashboard) is refused the
-same way: it is the host's own child, and marked as one. **This is a guard, not a wall.** A program running as the same user can
+input is not a terminal at all. A command run from [the dashboard](#the-dashboard), or typed into its
+terminal, is refused the same way: it is the host's own child, and marked as one.
+
+**The dashboard's own Remote tab does pair**, for whoever is signed in to the dashboard: a code, the
+same questions, the same answers ([Remote](host-dashboard.md#remote)). That is the one way a device
+is let in without a terminal of your own, and it is why the dashboard's sign-in link is itself given
+only at one.
+
+**This is a guard, not a wall.** A program running as the same user can
 read everything the host can, its sign-in included. What the guard stops is an agent letting a device
 in by accident, or because something it read told it to: nothing an agent is given can approve a
 device.

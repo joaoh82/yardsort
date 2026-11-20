@@ -67,9 +67,11 @@ crates/remote-host/  The host's outbound connector: keeps the link to the server
                      answers each device on it from the core (remote::serve). The app runs it;
                      a headless host will.
 crates/dashboard/    The host dashboard: a web page a computer serves to itself on 127.0.0.1, for
-                     setting it up from a browser. Its sign-in, its jobs, its tunnel and the page
-                     (ui/, plain files built into the program). `yardsort-host` and the app both
-                     serve it, each through the one trait it asks of them. Tested over real HTTP.
+                     setting it up from a browser. Its sign-in, its jobs, its terminals, its
+                     tunnel, its record of what was done and the page (ui/, plain files built into
+                     the program; ui/vendor is xterm.js, as the app installs it). `yardsort-host`
+                     and the app both serve it, each through the one trait it asks of them, and
+                     the host gives a second for Remote. Tested over real HTTP.
 packages/remote-client/
                      The same device's side in TypeScript, for the phone app: the protocol's
                      types and their limits, signing in, pairing and relay channels. Its own Bun

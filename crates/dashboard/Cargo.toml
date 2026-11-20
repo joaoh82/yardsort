@@ -16,10 +16,15 @@ workspace = true
 yardsort-core = { path = "../core" }
 # The same server the relay's stand-ins use, with nothing but HTTP/1.1: the page polls.
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+# A terminal's output is bytes, and goes to the page as text.
+base64 = "0.22"
 # A folder's real path without Windows' `\\?\` in front, to find the disk it is on.
 dunce = "1"
 # Sign-in codes and session tokens.
 getrandom = "0.3"
+# The pseudo-terminal a terminal in the page is a shell in: the one the terminal daemon uses.
+portable-pty = "0.9"
+# A pairing offer as a code to scan: the dots only, which the page draws.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # A session is kept by its hash, never by its token.
@@ -34,6 +39,7 @@ libc = "0.2"
 
 [dev-dependencies]
 yardsort-core = { path = "../core", features = ["testing"] }
+base64 = "0.22"
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 

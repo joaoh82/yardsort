@@ -609,6 +609,75 @@ details[open] {
   min-width: 0;
 }
 
+/* A terminal */
+
+.terminal-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.terminal-list {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.terminal-list button {
+  display: inline-flex;
+  align-items: center;
+  border-color: transparent;
+  background: transparent;
+}
+
+.terminal-list button[aria-selected="true"] {
+  background: var(--raised);
+  border-color: var(--line);
+}
+
+.terminal-view {
+  height: min(62vh, 640px);
+  min-height: 240px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--canvas);
+  overflow: hidden;
+}
+
+/* What was done */
+
+.activity {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activity li {
+  display: grid;
+  grid-template-columns: 9em 6em 1fr;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+}
+
+.activity li:first-child {
+  border-top: 0;
+}
+
+.activity .kind {
+  color: var(--ink-muted);
+}
+
+.activity .what {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* The question before something is done */
 
 .dialog {
@@ -687,6 +756,15 @@ details[open] {
 
   .row {
     flex-wrap: wrap;
+  }
+
+  .activity li {
+    grid-template-columns: max-content 1fr;
+    gap: 2px 10px;
+  }
+
+  .activity .what {
+    grid-column: 1 / -1;
   }
 }
 

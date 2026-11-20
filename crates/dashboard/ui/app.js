@@ -32,12 +32,15 @@ function replace(node, ...children) {
 
 class SignedOut extends Error {}
 class Unreachable extends Error {}
+class GivenUp extends Error {}
 
-async function ask(method, path, body) {
+/** Ask the host. `signal` gives the request up, for one that waits and is no longer wanted. */
+async function ask(method, path, body, signal) {
   let response;
   try {
     response = await fetch(path, {
       method,
+      signal,
       // What tells the host this is its own page asking: no form or link can add a header.
       headers: {
         "X-Yardsort-Dashboard": "1",
@@ -48,6 +51,8 @@ async function ask(method, path, body) {
       cache: "no-store",
     });
   } catch {
+    // Given up from here: the host was not asked whether it answers.
+    if (signal?.aborted) throw new GivenUp("No longer asked.");
     lost(true);
     throw new Unreachable("This computer is not answering.");
   }
@@ -73,7 +78,8 @@ function lost(is) {
 }
 
 /** Whether an error is one the page already shows in its own way. */
-const quiet = (error) => error instanceof SignedOut || error instanceof Unreachable;
+const quiet = (error) =>
+  error instanceof SignedOut || error instanceof Unreachable || error instanceof GivenUp;
 
 // ── Words for numbers ────────────────────────────────────────────────────────────────────────
 
@@ -153,7 +159,7 @@ $("sign-out").addEventListener("click", async () => {
 
 // ── The frame ────────────────────────────────────────────────────────────────────────────────
 
-const TABS = ["overview", "remote", "agents", "git", "commands", "access"];
+const TABS = ["overview", "remote", "agents", "git", "commands", "terminal", "access", "activity"];
 let tab = null;
 let timers = [];
 const watchers = new Map();
@@ -174,6 +180,7 @@ function stopEverything() {
   timers = [];
   for (const watcher of watchers.values()) watcher.stop();
   watchers.clear();
+  leaveTerminal();
   tab = null;
 }
 
@@ -191,6 +198,7 @@ function showTab() {
   if (next === tab) return;
   for (const timer of timers) clearInterval(timer);
   timers = [];
+  if (tab === "terminal") leaveTerminal();
   tab = next;
   for (const name of TABS) $(`tab-${name}`).hidden = name !== tab;
   for (const link of $("tabs").querySelectorAll("a")) {
@@ -203,7 +211,9 @@ function showTab() {
   if (tab === "agents") void readAgents();
   if (tab === "git") void readGit();
   if (tab === "commands") every(3000, readJobs);
+  if (tab === "terminal") every(4000, readTerminals);
   if (tab === "access") tunnelFormFilled = false;
+  if (tab === "activity") every(5000, readActivity);
 }
 
 window.addEventListener("hashchange", () => {
@@ -395,7 +405,7 @@ function tunnelWords(tunnel) {
     case "missing":
       return [
         el("span", { class: "dot bad" }),
-        "There is no rustunnel on this user's PATH. Install it, run rustunnel setup there, and save again.",
+        "There is no rustunnel on this user's PATH. Get it from rustunnel.com, run rustunnel setup there, and save again.",
       ];
     default:
       return [tunnel.state];
@@ -410,6 +420,7 @@ async function readStatus() {
   $("host-sub").textContent = `${host.program} ${host.version}`;
   document.title = `${$("host-name").textContent} · Yardsort host`;
   $("command-user").textContent = status.user ?? "its user";
+  $("terminal-user").textContent = status.user ?? "its user";
   $("command-shell").textContent = status.shell;
 
   replace(
@@ -527,8 +538,11 @@ async function readRemote() {
     $("pair-card").hidden = true;
     return;
   }
-  const on = status?.host.remote ?? null;
   const signing = remote.signingIn;
+  // A sign-in the browser's own return finished: the status says so only at its next reading,
+  // and until then this would show the form again, as if nothing had come of it.
+  if (signing.state === "signedIn" && !status?.host.remote) await readStatus().catch(() => {});
+  const on = status?.host.remote ?? null;
   const waiting = signing.state === "waiting";
 
   $("server-form").hidden = Boolean(on) || waiting;
@@ -1060,6 +1074,217 @@ $("command-form").addEventListener("submit", async (event) => {
   }
 });
 
+// ── Terminal ─────────────────────────────────────────────────────────────────────────────────
+
+// The terminal's library writes style sheets into the page as it draws. The page lets a style
+// sheet in only with the nonce it was served with, so the ones made here are given it.
+{
+  const nonce = document.querySelector('meta[name="style-nonce"]')?.content;
+  const create = document.createElement.bind(document);
+  document.createElement = (tag, options) => {
+    const node = create(tag, options);
+    if (nonce && String(tag).toLowerCase() === "style") node.nonce = nonce;
+    return node;
+  };
+}
+
+/** The terminal on show: its id, what draws it, and how to stop following it. */
+let shown = null;
+
+function terminalColours() {
+  const style = getComputedStyle(document.documentElement);
+  const colour = (name) => style.getPropertyValue(name).trim();
+  return {
+    background: colour("--canvas"),
+    foreground: colour("--ink"),
+    cursor: colour("--accent"),
+    cursorAccent: colour("--canvas"),
+    selectionBackground: colour("--line"),
+  };
+}
+
+function leaveTerminal() {
+  if (!shown) return;
+  shown.stop();
+  shown = null;
+  $("terminal-view").hidden = true;
+  $("terminal-close").hidden = true;
+}
+
+function terminalError(message) {
+  $("terminal-error").hidden = !message;
+  $("terminal-error").textContent = message ?? "";
+}
+
+/** Show terminal `id`, from the start of what is still kept of it, and follow it. */
+function showTerminal(id) {
+  leaveTerminal();
+  const view = $("terminal-view");
+  view.hidden = false;
+  $("terminal-none").hidden = true;
+  $("terminal-close").hidden = false;
+  const term = new Terminal({
+    cursorBlink: true,
+    fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono").trim(),
+    fontSize: 13,
+    scrollback: 5000,
+    theme: terminalColours(),
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  replace(view);
+  term.open(view);
+
+  let stopped = false;
+  let next = 0;
+  let timer = null;
+  // What gives up the reading that waits for output, once this view is left. Left waiting, each
+  // holds one of the few connections a browser keeps to a host, for twenty seconds, and a
+  // handful of terminals looked at in turn leave none for typing or for the rest of the page.
+  const leaving = new AbortController();
+  const typed = [];
+  let sending = false;
+
+  // One request at a time, in the order typed.
+  const send = async () => {
+    if (sending) return;
+    sending = true;
+    while (typed.length > 0 && !stopped) {
+      const data = typed.splice(0).join("");
+      try {
+        await ask("POST", `/api/terminals/${id}/input`, { data });
+      } catch (error) {
+        if (!quiet(error)) terminalError(error.message);
+        break;
+      }
+    }
+    sending = false;
+  };
+  term.onData((data) => {
+    typed.push(data);
+    void send();
+  });
+
+  const sized = () => {
+    if (stopped || view.hidden) return;
+    try {
+      fit.fit();
+    } catch {
+      // Not laid out yet.
+    }
+  };
+  term.onResize(({ cols, rows }) => {
+    void ask("POST", `/api/terminals/${id}/size`, { cols, rows }).catch(() => {});
+  });
+  const watching = new ResizeObserver(sized);
+  watching.observe(view);
+
+  const read = async () => {
+    if (stopped) return;
+    let reading;
+    try {
+      reading = await ask(
+        "GET",
+        `/api/terminals/${id}/output?from=${next}&wait=20000`,
+        undefined,
+        leaving.signal,
+      );
+    } catch (error) {
+      if (stopped) return;
+      if (error instanceof Unreachable) timer = setTimeout(read, 2000);
+      else if (!quiet(error)) {
+        // Closed from another browser, or the host started again.
+        leaveTerminal();
+        void readTerminals().catch(() => {});
+      }
+      return;
+    }
+    if (stopped) return;
+    // The start of a long output is no longer kept: say so, rather than join the two ends.
+    if (reading.from > next && next > 0) term.write("\r\n[…]\r\n");
+    if (reading.data) {
+      term.write(Uint8Array.from(atob(reading.data), (c) => c.charCodeAt(0)));
+    }
+    next = reading.next;
+    if (reading.ended) {
+      term.write("\r\n\x1b[2m[This terminal has ended.]\x1b[0m\r\n");
+      void readTerminals().catch(() => {});
+      return;
+    }
+    void read();
+  };
+
+  shown = {
+    id,
+    stop() {
+      stopped = true;
+      leaving.abort();
+      clearTimeout(timer);
+      watching.disconnect();
+      term.dispose();
+    },
+  };
+  sized();
+  // The shell is told the size this browser shows it at, whoever opened it.
+  void ask("POST", `/api/terminals/${id}/size`, { cols: term.cols, rows: term.rows }).catch(
+    () => {},
+  );
+  void read();
+  term.focus();
+}
+
+async function readTerminals() {
+  const terminals = await ask("GET", "/api/terminals");
+  if (shown && !terminals.some((terminal) => terminal.id === shown.id)) leaveTerminal();
+  if (!shown && tab === "terminal") {
+    const open = terminals.findLast((terminal) => terminal.ended === null);
+    if (open) showTerminal(open.id);
+  }
+  $("terminal-none").hidden = shown !== null;
+  replace(
+    $("terminal-list"),
+    terminals.map((terminal) =>
+      el(
+        "button",
+        {
+          type: "button",
+          role: "tab",
+          ariaSelected: terminal.id === shown?.id ? "true" : "false",
+          onclick: () => {
+            showTerminal(terminal.id);
+            void readTerminals().catch(() => {});
+          },
+        },
+        el("span", { class: `dot ${terminal.ended === null ? "good" : ""}` }),
+        `${terminal.title} ${terminal.id}`,
+      ),
+    ),
+  );
+}
+
+$("terminal-new").addEventListener("click", async () => {
+  terminalError();
+  try {
+    const terminal = await ask("POST", "/api/terminals", { cols: 80, rows: 24 });
+    showTerminal(terminal.id);
+    await readTerminals();
+  } catch (error) {
+    if (!quiet(error)) terminalError(error.message);
+  }
+});
+
+$("terminal-close").addEventListener("click", async () => {
+  if (!shown) return;
+  const id = shown.id;
+  leaveTerminal();
+  try {
+    await ask("POST", `/api/terminals/${id}/close`);
+    await readTerminals();
+  } catch (error) {
+    if (!quiet(error)) terminalError(error.message);
+  }
+});
+
 // ── Access ───────────────────────────────────────────────────────────────────────────────────
 
 const throughTheTunnel = !["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
@@ -1117,6 +1342,54 @@ $("sign-everyone-out").addEventListener("click", async () => {
   }
   showGate();
 });
+
+// ── Activity ─────────────────────────────────────────────────────────────────────────────────
+
+const ACTIVITY_WORDS = {
+  session: "Sign-in",
+  job: "Run",
+  terminal: "Terminal",
+  tunnel: "Tunnel",
+  git: "Git",
+  device: "Device",
+  remote: "Remote",
+};
+
+function when(at) {
+  const date = new Date(at);
+  const today = new Date().toDateString() === date.toDateString();
+  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return today
+    ? time
+    : `${date.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+}
+
+async function readActivity() {
+  const entries = await ask("GET", "/api/activity");
+  $("activity-none").hidden = entries.length > 0;
+  replace(
+    $("activity-list"),
+    entries.map((entry) =>
+      el(
+        "li",
+        {},
+        el("time", {
+          class: "faint",
+          dateTime: new Date(entry.at).toISOString(),
+          title: new Date(entry.at).toLocaleString(),
+          text: when(entry.at),
+        }),
+        el("span", { class: "kind", text: ACTIVITY_WORDS[entry.kind] ?? entry.kind }),
+        el(
+          "span",
+          { class: "what" },
+          entry.text,
+          entry.times > 1 && el("span", { class: "faint", text: ` ×${entry.times}` }),
+        ),
+      ),
+    ),
+  );
+}
 
 // ── Starting ─────────────────────────────────────────────────────────────────────────────────
 

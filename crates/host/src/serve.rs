@@ -125,8 +125,8 @@ pub async fn run(profile: Profile) -> Result<(), String> {
             );
         }
         _ => println!(
-            "Serving, with Remote off: sign in with `yardsort-host sign-in <server>`, after \
-             stopping this."
+            "Serving, with Remote off: sign in from the dashboard's Remote tab, or with \
+             `yardsort-host sign-in <server>` after stopping this."
         ),
     }
     if let Some(said) = crate::dashboard::start_if_wanted(&home).await {
@@ -175,7 +175,14 @@ async fn answer(home: &Arc<HostHome>, stream: UnixStream) {
         Ok(Some(Ask::Pair)) => match refusal {
             None => return pair(home, &mut line).await,
             Some(why) => Reply::Failed {
-                message: why.say("Pairing", "pair"),
+                message: match why {
+                    // The page itself can: say where.
+                    crate::guard::Refusal::Job => format!(
+                        "{} Or pair from the dashboard's Remote tab.",
+                        why.say("Pairing", "pair")
+                    ),
+                    _ => why.say("Pairing", "pair"),
+                },
             },
         },
         Ok(Some(Ask::AccountDelete)) => match refusal {

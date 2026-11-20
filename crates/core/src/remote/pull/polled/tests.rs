@@ -41,15 +41,22 @@ fn settle(polled: &Polled, project: &str) {
 #[test]
 fn the_first_question_starts_a_reading_and_the_next_has_what_it_found() {
     let asked = Arc::new(AtomicUsize::new(0));
+    // The reading is held back until the first question has been answered: it is on a thread
+    // of its own, and is otherwise sometimes over before that answer is put together.
+    let (answered, held) = std::sync::mpsc::channel::<()>();
+    let held = Mutex::new(held);
     let polled = Polled::new(Arc::new({
         let asked = Arc::clone(&asked);
         move |_: &str, _: bool| {
             asked.fetch_add(1, Ordering::SeqCst);
+            let _ = held.lock().unwrap().recv();
             Some(reading(&[7, 3]))
         }
     }));
     let first = polled.of_project("p", false);
+    assert!(first.reading);
     assert!(first.pull_requests.is_empty());
+    answered.send(()).unwrap();
     settle(&polled, "p");
     let second = polled.of_project("p", false);
     assert!(!second.reading);

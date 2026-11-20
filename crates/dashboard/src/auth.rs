@@ -305,7 +305,7 @@ fn now_ms() -> i64 {
 
 /// Write `contents` to `path`, in a folder and a file that only this user can read, made that
 /// way from the start and renamed into place.
-fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let dir = path.parent().unwrap_or(Path::new("."));
     make_private_dir(dir)?;

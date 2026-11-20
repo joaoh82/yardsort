@@ -1,12 +1,14 @@
 # 47. The host dashboard
 
 Status: built on 2026-11-17, in one piece, at the owner's request, and reviewed the same day:
-the review's four findings are fixed, and are in [After the review](#after-the-review). Its tests
-pass, its page was looked at in a real browser against a stand-in host, and `yardsort-host` was
-run with it on a throwaway profile. **Not yet run through a real tunnel, on a real server, or by the owner.** What
-was and was not checked is in [Checked](#checked). Its **Remote** tab, signing the host in and
-pairing a device from the page, was added on 2026-11-19 at the owner's answer to questions 3 and
-4: [Remote from the page](#remote-from-the-page).
+the review's four findings are fixed, and are in [After the review](#after-the-review). Merged as
+#277. On 2026-11-19 the owner answered its six open questions, and each was built. Pairing and
+signing in to a server from the page came first, as #285: [Remote from the page](#remote-from-the-page).
+The other four are in [The owner's other answers](#the-owners-other-answers-2026-11-19): a
+terminal in the page, a record of what was done, and rustunnel alone, in the full image. Its
+tests pass, its page was looked at in a real browser against a stand-in host, and
+`yardsort-host` was run with it on a throwaway profile. **Not yet run through a real tunnel, on
+a real server, or by the owner.** What was and was not checked is in [Checked](#checked).
 
 ## What was asked
 
@@ -26,13 +28,17 @@ for that, in these words:
 
 ## What it is, and is not
 
-A page with five tabs: **Overview** (the host, the computer, the projects), **Agents**, **Git**,
-**Commands** and **Access**. It reads how things stand and starts _jobs_: an agent's install, a
-GitHub sign-in, a clone, a command. A job's output is shown as it comes.
+A page with eight tabs: **Overview** (the host, the computer, the projects), **Remote**,
+**Agents**, **Git**, **Commands**, **Terminal**, **Access** and **Activity**. It reads how things stand
+and starts _jobs_: an agent's install, a GitHub sign-in, a clone, a command. A job's output is
+shown as it comes. The first build had five of them; Remote, Terminal and Activity came with the
+owner's answers: [Remote from the page](#remote-from-the-page) and
+[the other four](#the-owners-other-answers-2026-11-19).
 
-It has no workspaces, terminals, conversations, pull requests or tasks, and starts no agent. Those
-are the phone's and the desktop's, through Remote. It needs no Remote either: a host that is not
-signed in to any server serves it all the same, which is when it is most useful.
+It has no workspaces, agents' terminals, conversations, pull requests or tasks, and starts no
+agent. Those are the phone's and the desktop's, through Remote. It needs no Remote either: a host
+that is not signed in to any server serves it all the same, which is when it is most useful, and
+is signed in from it.
 
 ## Decisions
 
@@ -92,13 +98,19 @@ identity provider is a cost per sign-in ([28](28-remote-infrastructure.md)).
 The link carries its code after the `#`, which a browser sends to nobody. The page takes it out
 of the address before it does anything else.
 
-### A session in the dashboard is not a way past the operator's guard
+### What the dashboard runs is not a way past the operator's guard
+
+**Changed on 2026-11-19.** As first built, nothing the guard keeps for a person at a terminal
+could be done from the dashboard at all. The owner has since chosen that the page itself lets a
+device in and signs the host in to a server ([Remote from the page](#remote-from-the-page)).
+What this section says still holds for everything the dashboard _runs_: a job, and now a
+terminal. It no longer holds for the page's own Remote tab.
 
 The dashboard runs commands as the host's user, so a signed-in browser can do what that user
 can at a shell, with one exception that is the point of this section: what the operator's guard
-keeps for a person at a terminal. Letting a device in, approving a note, turning sync on, and
-opening the dashboard itself up are not in the dashboard, and are refused to a command the
-dashboard runs.
+keeps for a person at a terminal. Approving a note, turning sync on, and opening the dashboard
+itself up are not in the dashboard, and they and `yardsort-host pair` are refused to a command
+the dashboard runs.
 
 Leaving them out of the page was not enough, and the first build stopped there. A command typed
 into **Run a command** is a child of the host, not of the terminal daemon, and carries none of a
@@ -118,7 +130,8 @@ sheds both its mark and its ancestry gets past, as an agent that sheds its own d
 guard, not a wall, here as there ([35](35-remote-r4-r5.md)).
 
 So the sign-in protects the computer from the network, and the guard still protects pairing
-from the agents, and from the dashboard.
+from the agents, and from what the dashboard runs. Since 2026-11-19 it does not protect pairing
+from the dashboard's own page: whoever is signed in can pair there, by the owner's choice.
 
 ### What the server takes from a request
 
@@ -229,7 +242,9 @@ Plain HTML, CSS and JavaScript, three files built into the program (`crates/dash
 framework and no build step: the host's tarball gains no Node, and the page is small. It uses
 Yardsort's own colours and sizes, follows the browser's light or dark setting, and folds to one
 column on a phone. It asks the host every few seconds; nothing is pushed. Everything a job
-prints, and every name, is set as text and never as markup.
+prints, and every name, is set as text and never as markup. The terminal added later is the one
+part drawn by a library, xterm.js, kept beside the page; what that did to the page's policy is
+[below](#a-terminal-in-the-page-question-2-yes).
 
 ## Settings
 
@@ -247,20 +262,24 @@ server = "tunnel.example.com:4040"   # a rustunnel server of your own
 
 ## Where it is
 
-| What                                         | Where                                                      |
-| -------------------------------------------- | ---------------------------------------------------------- |
-| The server, its guard and the page's answers | `crates/dashboard/src/http.rs`                             |
-| Codes and sessions                           | `crates/dashboard/src/auth.rs`                             |
-| Jobs                                         | `crates/dashboard/src/jobs.rs`                             |
-| Agents and how each is installed             | `crates/dashboard/src/agents.rs`                           |
-| Git and the GitHub CLI                       | `crates/dashboard/src/git.rs`                              |
-| The tunnel                                   | `crates/dashboard/src/tunnel.rs`                           |
-| The computer's load, memory and disks        | `crates/dashboard/src/system.rs`                           |
-| The page                                     | `crates/dashboard/ui/`                                     |
-| The host's part, and its commands            | `crates/host/src/dashboard.rs`, `control.rs`, `main.rs`    |
-| The app's part, and Settings                 | `src-tauri/src/dashboard.rs`, `HostDashboardSettings.tsx`  |
-| A stand-in host, to look at the page         | `cargo run -p host-dashboard --example dashboard-stand-in` |
-| The settings                                 | `DashboardSettings` in `crates/core/src/settings.rs`       |
+| What                                         | Where                                                                            |
+| -------------------------------------------- | -------------------------------------------------------------------------------- |
+| The server, its guard and the page's answers | `crates/dashboard/src/http.rs`                                                   |
+| Codes and sessions                           | `crates/dashboard/src/auth.rs`                                                   |
+| Jobs                                         | `crates/dashboard/src/jobs.rs`                                                   |
+| Terminals                                    | `crates/dashboard/src/terminal.rs`, `ui/vendor/`                                 |
+| Remote from the page, and the QR code's dots | `Remote` in `crates/dashboard/src/lib.rs`, `crates/host/src/dashboard_remote.rs` |
+| What was done                                | `crates/dashboard/src/activity.rs`                                               |
+| Agents and how each is installed             | `crates/dashboard/src/agents.rs`                                                 |
+| Git and the GitHub CLI                       | `crates/dashboard/src/git.rs`                                                    |
+| The tunnel                                   | `crates/dashboard/src/tunnel.rs`                                                 |
+| The computer's load, memory and disks        | `crates/dashboard/src/system.rs`                                                 |
+| The page                                     | `crates/dashboard/ui/`                                                           |
+| The host's part, and its commands            | `crates/host/src/dashboard.rs`, `control.rs`, `main.rs`                          |
+| The host signing in and pairing for the page | `HostRemote` in `crates/host/src/dashboard.rs`                                   |
+| The app's part, and Settings                 | `src-tauri/src/dashboard.rs`, `HostDashboardSettings.tsx`                        |
+| A stand-in host, to look at the page         | `cargo run -p host-dashboard --example dashboard-stand-in`                       |
+| The settings                                 | `DashboardSettings` in `crates/core/src/settings.rs`                             |
 
 ## Checked
 
@@ -334,12 +353,30 @@ of what the clients do. A **Remote** tab, after Overview.
   the link starts at once (`account::enable`, then `account::connect`). The sign-in's verifier
   stays in the host's process; the page holds the address and the code it pastes, which is worth
   nothing without it.
+- **Giving a sign-in up** stops it while it waits for its browser, and not after: once the
+  code is in hand the host redeems it, registers itself and keeps the sign-in, and stopping
+  between those would leave a host at the server that nothing here knows of. So from there it
+  runs to its end, **Cancel** says that it does, and another sign-in is not begun over it. The
+  check and the code's taking are one step under the sign-in's lock, so one given up a moment
+  earlier redeems nothing. As first built the task was aborted wherever it was, registering
+  included. A second build of this tab, made the same day on the branch that added the
+  terminal and since dropped for this one, did the opposite and never stopped a sign-in once
+  begun; a review reproduced that one signing in after its cancel, with a server slow to
+  answer. The rule here is the answer to both.
 - **Signing out**, after the page asks: `account::disconnect` and `account::disable`, as the
-  control socket's `signOut`.
+  control socket's `signOut`. A sign-in still waiting for its browser is given up first. One
+  being finished is not, and the sign-out is refused until it is done: `disable` would find no
+  host yet and answer that all is off, and the sign-in would then turn Remote on behind it. A
+  review reproduced that, with a server slow to answer.
 - **Pairing**: an offer, its code and its QR code, drawn by the page from the modules the host
   sends (`Pairing::Offered.qr`, a row of `0` and `1` each); the first device that asks, with what
   it asks for and the projects to choose among; and the operator's answer, the same choices as
   `pair` gives, sent with the device's grant id. An answer for any other grant is refused.
+  A device asking is shown for as long as the server waits for its answer, five minutes, and
+  then no longer: as first built it was shown until answered, and since a new code is only
+  given once the last is done with, a device that gave up left the page with nothing to press
+  until the host was restarted. An answer the server refuses is checked against the devices
+  still waiting there (`account::requests`), and one no longer among them goes the same way.
 
 **The interface.** `host_dashboard::Remote`, given by `Source::remote`. The app gives none: its
 window does all three, so the tab says to use **Settings → Remote** and every route answers so.
@@ -363,31 +400,116 @@ by hand. A second check would guard nothing that first one does not open. What s
 another site's page; an offer with its code and QR code; the device asking, an answer for another
 device refused, and the answer chosen passed through; signing in by the address pasted, a wrong
 one refused, and signing out; and the app's case, every route saying where to go instead. The
-host's QR rows checked in `dashboard_remote.rs`. The smoke test `host-dashboard-remote`, against
+host's QR rows checked in `dashboard_remote.rs`, with what a sign-in and a device asking do
+when given up, finished, signed out over or left unanswered. The smoke test `host-dashboard-remote`, against
 the stand-in server with a real `yardsort-host`: signed in from the page after a wrong address,
 linked with no restart, `pair` refused to a job, a phone paired from the page and reaching the
 computer, signed out. Its steps passed by hand on 2026-11-19. The page was looked at in a browser
 against the dashboard's stand-in example (`--remote`, `--remote-off`), in each state.
 
+## The owner's other answers, 2026-11-19
+
+The six questions this was left with were put to the owner once it had merged, and all six were
+answered. Questions 3 and 4 are [Remote from the page](#remote-from-the-page), above. These are
+the other four. Each is a decision now.
+
+### A terminal in the page (question 2: yes)
+
+**Terminal** is a shell in a pseudo-terminal: the user's own login shell (`$SHELL -l`, or
+`COMSPEC` on Windows), in the home folder, with the login shell's environment, as an SSH login
+would be. It is for what a job cannot do, answer a question: an agent's sign-in, `sudo` with a
+password, `rustunnel setup`.
+
+- **It is the dashboard's, like a job.** It carries the job's mark and is the host's own child,
+  so the guard refuses it what it refuses a job. A real terminal on its input changes nothing:
+  the guard never took a terminal alone for a person.
+- **In memory, and bounded.** Four open at once; the newest megabyte of each one's output is
+  kept, so a browser that comes back, or another one, sees what was printed meanwhile. A
+  terminal ends when it is closed, when every browser is signed out, and when the host stops:
+  a shell nobody can reach is not left running. Closing hangs up on the shell and lets go of
+  the pseudo-terminal, and a second and a half later kills what is left: the shell's process
+  group, and the group it had in the foreground when it was closed, which the pseudo-terminal
+  names and which job control keeps apart from the shell's. That is done whether or not the
+  shell went, and before the shell is waited for (`waitid` with `WNOWAIT` sees it go), so that
+  its id, which is its session's, is still its own and tells its foreground group from a
+  stranger's that took the number. As first built the kill was skipped once the shell had
+  gone, and a foreground program deaf to a hang-up outlived its terminal; a review found it.
+  A background job that ignores a hang-up is left, as an SSH login leaves it, and when the
+  host stops there is only the hang-up.
+- **The page asks; nothing is pushed.** Output is read by a request that waits up to twenty
+  seconds for there to be any, and what is typed goes up one request at a time, in order. That
+  keeps the server at HTTP/1.1, through a tunnel as well as a forward, at the cost of a round
+  trip a keystroke. The request that waits is given up when its view is left (`AbortController`
+  in `showTerminal`). As first built it was left to run out, each holding one of the six
+  connections a browser keeps to a host: a review looked at a quiet terminal seven times and
+  then waited 15.9 seconds for the page's next request, and here eight times made it 14.4
+  seconds, and 5 milliseconds once given up.
+- **Drawn by xterm.js**, the library the app's own terminals use, kept as three files beside the
+  page (`ui/vendor`), since the dashboard has no build step and is compiled where there is no
+  `node_modules`. A test fails when they are not the ones the app installs.
+- **The page's policy changed for it.** xterm.js writes style sheets into the page and colours
+  single characters with a `style` attribute, both of which `style-src 'self'` refuses. So the
+  page is now served with a nonce, new each time, that its script gives to the style sheets made
+  there (`style-src 'self' 'nonce-…'`), and `style` attributes are allowed
+  (`style-src-attr 'unsafe-inline'`), which reach no further than their own element. Scripts are
+  as they were: the dashboard's own files and nothing else. Looked at in Chromium: no violation,
+  and true colour drawn.
+- **Nothing typed or shown is recorded**, anywhere.
+
+### A record of what was done (question 6: yes)
+
+**Activity** lists what was done through the dashboard, the newest first: sign-ins and refused
+ones, each job's start and end, each terminal opened and ended, the tunnel and Git's identity
+changed, and what the Remote tab did: a sign-in to a server started and come through, a
+sign-out, a pairing code shown, a device let in or turned away. The last 500, in
+`dashboard/activity.json` in the profile, mode 0600, across restarts.
+
+- **A sentence each, never output.** No job's output, no sign-in or pairing code, no token. A
+  command is recorded as typed, so a secret typed into one is in it, as in a shell's history;
+  the guide says so.
+- **The same thing in a row is one line, counted**, and is written to the file at most every
+  five seconds: anyone who can reach the sign-in page can try a wrong code, and must not be able
+  to fill the record or make the host write a file per try.
+- **A record, not a control.** Whoever is signed in has a shell and can delete it. It is for the
+  operator to read.
+
+### rustunnel, and only rustunnel (question 5), and in the full image (question 1)
+
+- **No other tunnel and no proxy of one's own.** The dashboard answers to a loopback name or to
+  the host name its own rustunnel client reported, and to nothing else; that stays. The page
+  says so, and links to [rustunnel.com](https://rustunnel.com) for the client and an account.
+- **The full image carries the `rustunnel` client**, pinned by version and checksum like the
+  rest of it (0.8.9, AGPL-3.0, unmodified, listed in its notice). A container's own 127.0.0.1 is
+  not reached by a published port, so a tunnel is how a container's dashboard is opened: give it
+  `RUSTUNNEL_TOKEN`, then `docker exec -it … yardsort-host dashboard tunnel on`. The slim image
+  stays as it was, and the images still publish no port.
+
+### Checked, for these
+
+- **The crate's tests**: a terminal that is a real shell, answers a question, resizes, wakes a
+  waiting reader, and ends with what it ran when closed and when every browser is signed out,
+  a program deaf to the hang-up included; the page's nonce; the activity, without its secrets,
+  across a restart, and what the Remote tab did in it, a sign-in recorded once.
+- **The host's test**: on the real `yardsort-host`, `pair` and `dashboard` typed into the page's
+  terminal are refused, and the refusal of `pair` names the Remote tab.
+- **The page**, in headless Chromium against the stand-in host: the terminal typed into as a
+  keyboard would, and the Activity tab.
+
+Not checked: **a real tunnel**, still; the full image **built** with rustunnel in it (CI's
+image job does that; here only the pinned download was run and its checksum matched); the
+terminal on macOS and Windows, which CI only compiles.
+
 ## Open questions
 
-Also in [06-open-questions](06-open-questions.md).
+Also in [06-open-questions](06-open-questions.md). The six this was first left with are settled,
+above. What they leave:
 
-1. **In a container, the dashboard is reachable only through the tunnel.** It listens on the
-   container's own 127.0.0.1, which a published port does not reach, and the images carry no
-   `rustunnel`. The images publish no port on purpose ([35](35-remote-r4-r5.md) §21). The two
-   ways out are a listen address the image sets, with the compose file publishing the port on
-   the computer's loopback alone, or `rustunnel` in the full image. Neither was done unasked.
-2. **A terminal in the page.** An agent's own sign-in, `sudo` with a password and
-   `rustunnel setup` all want a terminal, and jobs have none. A terminal in the browser would
-   finish the "no SSH at all" story, and is a good deal more than a host management page: it is
-   a shell on the internet behind one cookie.
-3. ~~**Pairing a device from the dashboard.**~~ The owner said yes on 2026-11-19, and it was
-   built that day: [Remote from the page](#remote-from-the-page).
-4. ~~**Signing the host in to a Yardsort server from the dashboard.**~~ The same: built
-   2026-11-19.
-5. **Another tunnel, or a reverse proxy of your own.** Only rustunnel's host name is taken as
-   the dashboard's address. A list of further names in the settings would open it to others,
-   and would need a rule for which of them is HTTPS.
-6. **A record of what was run.** Jobs are forgotten when the host stops. Nothing is logged, in
-   keeping with the rest of Remote; a server others share may want the opposite.
+1. **A real tunnel has still not been run.** It is the owner's to try, or to ask for on the
+   test box.
+2. **The app's dashboard does not manage Remote.** Its Settings do. If the app's dashboard is
+   ever used from another computer for that, `Source::remote()` is where it would be given.
+3. **A terminal does not outlast the host.** An agent's terminal in Yardsort does, in the
+   daemon. Putting the dashboard's there would make it one of Yardsort's terminals, which a
+   paired device sees; kept apart on purpose.
+4. **The Remote tab does not list the devices let in, or take one off.** `yardsort-host devices`
+   and `revoke` do, and run from **Commands**. The Overview counts them.

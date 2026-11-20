@@ -307,16 +307,51 @@ fn the_page_is_served_to_anyone_and_nothing_else_is_until_a_browser_signs_in() {
     let policy = page.headers()["content-security-policy"].clone();
     assert!(policy.contains("default-src 'none'") && policy.contains("frame-ancestors 'none'"));
     assert_eq!(page.headers()["cache-control"], "no-store");
+    for file in [
+        "/app.js",
+        "/app.css",
+        "/favicon.svg",
+        "/vendor/xterm.js",
+        "/vendor/addon-fit.js",
+        "/vendor/xterm.css",
+    ] {
+        let served = served.page(Method::Get, file).send().unwrap();
+        assert_eq!(served.status(), StatusCode::OK, "{file}");
+        // Only the page itself lets a style sheet in by a nonce.
+        assert!(
+            !served.headers()["content-security-policy"].contains("nonce"),
+            "{file}"
+        );
+    }
+    // A style sheet is let in only with a nonce that is the page's own, new each time it is
+    // served, and no script is let in but the dashboard's own files.
+    let nonce_of = |page: &Response| -> String {
+        let policy = &page.headers()["content-security-policy"];
+        let nonce = policy
+            .split("'nonce-")
+            .nth(1)
+            .and_then(|rest| rest.split('\'').next())
+            .expect("a nonce")
+            .to_owned();
+        assert!(policy.contains("script-src 'self';"), "{policy}");
+        assert!(!policy.contains("script-src 'self' "), "{policy}");
+        assert_eq!(nonce.len(), 32);
+        nonce
+    };
+    let first = nonce_of(&page);
     assert!(page
         .text()
         .unwrap()
         .contains("<title>Yardsort host</title>"));
-    for file in ["/app.js", "/app.css", "/favicon.svg"] {
-        assert_eq!(
-            served.page(Method::Get, file).send().unwrap().status(),
-            StatusCode::OK
-        );
-    }
+    let again = served.page(Method::Get, "/").send().unwrap();
+    let second = nonce_of(&again);
+    assert_ne!(first, second);
+    let markup = again.text().unwrap();
+    assert!(
+        markup.contains(&format!("content=\"{second}\"")),
+        "the page knows its nonce"
+    );
+    assert!(!markup.contains("__STYLE_NONCE__"));
 
     assert_eq!(served.get("/api/session")["signedIn"], false);
     for path in [
@@ -325,6 +360,8 @@ fn the_page_is_served_to_anyone_and_nothing_else_is_until_a_browser_signs_in() {
         "/api/git",
         "/api/jobs",
         "/api/jobs/1",
+        "/api/terminals",
+        "/api/terminals/1/output",
     ] {
         let refused = refusal(served.page(Method::Get, path).send().unwrap());
         assert_eq!(
@@ -336,6 +373,8 @@ fn the_page_is_served_to_anyone_and_nothing_else_is_until_a_browser_signs_in() {
     let refused = refusal(served.post("/api/commands", json!({ "command": "touch ran" })));
     assert_eq!(refused, (StatusCode::UNAUTHORIZED, "signed_out".into()));
     assert!(!served.home.path().join("ran").exists());
+    let refused = refusal(served.post("/api/terminals", json!({ "cols": 80, "rows": 24 })));
+    assert_eq!(refused, (StatusCode::UNAUTHORIZED, "signed_out".into()));
     // A cookie of the right name and a made-up value is nobody's session.
     let forged = served
         .page(Method::Get, "/api/status")
@@ -490,10 +529,14 @@ fn a_command_runs_in_the_home_as_a_shell_would_run_it_and_can_be_stopped() {
         output.starts_with("$ echo one && pwd; echo two >&2; exit 4\n"),
         "{output}"
     );
+    // What it wrote to its output and to its errors come as two streams, so `two` may land
+    // anywhere among the lines of the first.
     let home = std::fs::canonicalize(served.home.path()).unwrap();
+    let lines: Vec<&str> = output.lines().filter(|line| *line != "two").collect();
+    assert_eq!(lines[1], "one", "{output}");
     assert!(
-        output.contains(&format!("one\n{}\n", home.display()))
-            || output.contains(&format!("one\n{}\n", served.home.path().display())),
+        lines[2] == home.display().to_string()
+            || lines[2] == served.home.path().display().to_string(),
         "{output}"
     );
     assert!(
@@ -960,6 +1003,255 @@ fn a_browser_stays_signed_in_when_the_host_restarts_and_every_browser_can_be_sig
     assert_eq!(again.dashboard().sign_everyone_out(), Ok(0));
 }
 
+/// What terminal `id` has printed from byte `from` on, once `wanted` is in it.
+fn printed(served: &Served, id: u64, wanted: &str) -> String {
+    use base64::Engine as _;
+    let since = Instant::now();
+    let mut all = Vec::new();
+    let mut next = 0;
+    loop {
+        let reading = served.get(&format!("/api/terminals/{id}/output?from={next}&wait=300"));
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(reading["data"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(reading["from"], next, "nothing was skipped");
+        all.extend(data);
+        next = reading["next"].as_u64().unwrap();
+        let text = String::from_utf8_lossy(&all).into_owned();
+        if text.contains(wanted) {
+            return text;
+        }
+        assert!(
+            since.elapsed() < Duration::from_secs(20) && reading["ended"] == false,
+            "never printed {wanted:?}: {text:?}"
+        );
+    }
+}
+
+#[test]
+fn a_terminal_in_the_page_is_a_shell_that_answers_and_ends_when_every_browser_is_signed_out() {
+    let mut served = Served::start();
+    served.sign_in();
+    assert_eq!(served.get("/api/terminals"), json!([]));
+    let opened: Value = served
+        .post("/api/terminals", json!({ "cols": 100, "rows": 30 }))
+        .json()
+        .unwrap();
+    let id = opened["id"].as_u64().expect("a terminal");
+    assert_eq!(opened["ended"], Value::Null);
+    let typed = |text: &str| {
+        let took = served.post(
+            &format!("/api/terminals/{id}/input"),
+            json!({ "data": text }),
+        );
+        assert_eq!(took.status(), StatusCode::OK, "{text:?}");
+    };
+    // A terminal to what runs in it, at the size asked for, in this home, marked as a job is.
+    typed("test -t 0 && stty size && echo home=$HOME mark=$YARDSORT_DASHBOARD_JOB\n");
+    let shown = printed(&served, id, "mark=1");
+    assert!(shown.contains("30 100"), "{shown:?}");
+    assert!(
+        shown.contains(&format!("home={}", served.home.path().display())),
+        "{shown:?}"
+    );
+    // It answers a question, which a command run from the page cannot.
+    typed("read answer; echo \"got <$answer>\"\n");
+    typed("forty-two\n");
+    printed(&served, id, "got <forty-two>");
+    let resized = served.post(
+        &format!("/api/terminals/{id}/size"),
+        json!({ "cols": 132, "rows": 40 }),
+    );
+    assert_eq!(resized.status(), StatusCode::OK);
+    typed("stty size\n");
+    printed(&served, id, "40 132");
+
+    let too_much = served.post(
+        &format!("/api/terminals/{id}/input"),
+        json!({ "data": "x".repeat(70 * 1024) }),
+    );
+    assert_eq!(too_much.status(), StatusCode::BAD_REQUEST);
+    let nowhere = served.post("/api/terminals/999/input", json!({ "data": "x" }));
+    assert_eq!(nowhere.status(), StatusCode::BAD_REQUEST);
+    let none = served
+        .page(Method::Get, "/api/terminals/999/output")
+        .send()
+        .unwrap();
+    assert_eq!(none.status().0, 404);
+
+    // Something left running in it, to see that it ends with the terminal.
+    let marker = served.home.path().join("alive");
+    typed(&format!(
+        "sh -c 'while :; do touch {}; sleep 0.05; done'\n",
+        marker.display()
+    ));
+    let since = Instant::now();
+    while !marker.exists() {
+        assert!(since.elapsed() < Duration::from_secs(20));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // What was typed and shown is in no record; that a terminal was opened is.
+    let activity = served.get("/api/activity").to_string();
+    assert!(
+        activity.contains("A terminal was opened (sh)."),
+        "{activity}"
+    );
+    assert!(!activity.contains("forty-two"), "{activity}");
+
+    // Signing every browser out leaves no shell behind for the next one to find.
+    let ended = served.post("/api/sessions/end", json!({}));
+    assert_eq!(ended.status(), StatusCode::OK);
+    served.cookie = None;
+    served.sign_in();
+    assert_eq!(served.get("/api/terminals"), json!([]));
+    let since = Instant::now();
+    loop {
+        std::thread::sleep(Duration::from_millis(300));
+        let _ = std::fs::remove_file(&marker);
+        std::thread::sleep(Duration::from_millis(300));
+        if !marker.exists() {
+            break;
+        }
+        assert!(since.elapsed() < Duration::from_secs(20), "still running");
+    }
+}
+
+#[test]
+fn the_terminal_library_kept_here_is_the_one_the_app_installs() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let kept = Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/vendor");
+    let installed = root.join("node_modules/@xterm");
+    if !installed.exists() {
+        eprintln!("skipped: no node_modules here");
+        return;
+    }
+    for (ours, theirs) in [
+        ("xterm.js", "xterm/lib/xterm.js"),
+        ("xterm.css", "xterm/css/xterm.css"),
+        ("addon-fit.js", "addon-fit/lib/addon-fit.js"),
+        ("LICENSE-xterm", "xterm/LICENSE"),
+        ("LICENSE-addon-fit", "addon-fit/LICENSE"),
+    ] {
+        assert!(
+            std::fs::read(kept.join(ours)).unwrap()
+                == std::fs::read(installed.join(theirs)).unwrap(),
+            "crates/dashboard/ui/vendor/{ours} is not node_modules/@xterm/{theirs}: copy it \
+             again, and change the version in the README beside it"
+        );
+    }
+    // The page names every file the dashboard serves of it.
+    let page = std::fs::read_to_string(kept.join("../index.html")).unwrap();
+    for file in [
+        "/vendor/xterm.js",
+        "/vendor/addon-fit.js",
+        "/vendor/xterm.css",
+    ] {
+        assert!(page.contains(file), "{file}");
+    }
+}
+
+#[test]
+fn what_was_done_is_recorded_without_its_secrets_and_is_there_after_a_restart() {
+    let mut served = Served::start();
+    stand_in_gh(&served.bin());
+    // Before anyone is signed in, the record is closed too.
+    let closed = refusal(served.page(Method::Get, "/api/activity").send().unwrap());
+    assert_eq!(closed, (StatusCode::UNAUTHORIZED, "signed_out".into()));
+    for _ in 0..3 {
+        let refused = served.post("/api/session", json!({ "code": "AAAA-AAAA-AAAA-AAAA" }));
+        assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+    }
+    served.sign_in();
+    let ran: Value = served
+        .post(
+            "/api/commands",
+            json!({ "command": "echo printed-by-the-command; exit 3" }),
+        )
+        .json()
+        .unwrap();
+    assert_eq!(served.finished(&ran).0, "failed");
+    let token: Value = served
+        .post(
+            "/api/git/github/token",
+            json!({ "token": "github_pat_example" }),
+        )
+        .json()
+        .unwrap();
+    assert_eq!(served.finished(&token).0, "succeeded");
+    let saved = served.post(
+        "/api/git/identity",
+        json!({ "name": "Build Box", "email": "box@example.invalid" }),
+    );
+    assert_eq!(saved.status(), StatusCode::OK);
+
+    let texts = |served: &Served| -> Vec<(String, String, u64)> {
+        // A job's end is written by its own thread, a moment after the page is told of it.
+        let since = Instant::now();
+        loop {
+            let entries = served.get("/api/activity");
+            let entries: Vec<_> = entries
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| {
+                    (
+                        e["kind"].as_str().unwrap().to_owned(),
+                        e["text"].as_str().unwrap().to_owned(),
+                        e["times"].as_u64().unwrap(),
+                    )
+                })
+                .collect();
+            let ended = entries
+                .iter()
+                .filter(|(_, text, _)| text.starts_with("Finished") || text.starts_with("Failed"))
+                .count();
+            if ended == 2 || since.elapsed() > Duration::from_secs(10) {
+                return entries;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let entries = texts(&served);
+    let has = |kind: &str, start: &str| {
+        entries
+            .iter()
+            .any(|(k, text, _)| k == kind && text.starts_with(start))
+    };
+    // The newest first: the identity was the last thing done.
+    assert_eq!(entries[0].0, "git", "{entries:?}");
+    assert!(
+        has("job", "Started: echo printed-by-the-command; exit 3"),
+        "{entries:?}"
+    );
+    assert!(has("job", "Failed after"), "{entries:?}");
+    assert!(has("job", "Started: Sign in to GitHub"), "{entries:?}");
+    assert!(
+        has("session", "A browser signed in, on this computer."),
+        "{entries:?}"
+    );
+    assert!(
+        has("session", "A sign-in link was given at this computer."),
+        "{entries:?}"
+    );
+    // Three wrong codes in a row are one line, counted.
+    let refused = entries
+        .iter()
+        .find(|(_, text, _)| text.starts_with("A sign-in was refused"))
+        .expect("the refusals");
+    assert_eq!(refused.2, 3, "{entries:?}");
+    // What the command printed is not in it, nor the token, nor any code.
+    let all = format!("{entries:?}");
+    assert!(!all.contains("printed-by-the-command\n"), "{all}");
+    assert!(!all.contains("github_pat_example"), "{all}");
+    assert!(!all.contains("AAAA-AAAA"), "{all}");
+
+    let cookie = served.cookie.clone();
+    let before = entries.len();
+    let mut again = Served::start_in(served.stop());
+    again.cookie = cookie;
+    assert_eq!(texts(&again).len(), before);
+}
+
 #[test]
 fn a_port_that_is_taken_is_stepped_past_and_a_run_of_them_is_said() {
     let home = tempfile::tempdir().unwrap();
@@ -1125,10 +1417,23 @@ fn a_signed_in_browser_pairs_a_device_with_the_answer_it_chose() {
         .unwrap();
     assert_eq!(answered["state"], "answered");
     assert_eq!(answered["allowed"], true);
-    let answers = remote.answers.lock().unwrap();
-    assert_eq!(answers.len(), 1);
-    assert!(answers[0].allow && !answers[0].control && !answers[0].workflows);
-    assert_eq!(answers[0].projects.as_deref(), Some(&["p2".to_owned()][..]));
+    {
+        let answers = remote.answers.lock().unwrap();
+        assert_eq!(answers.len(), 1);
+        assert!(answers[0].allow && !answers[0].control && !answers[0].workflows);
+        assert_eq!(answers[0].projects.as_deref(), Some(&["p2".to_owned()][..]));
+    }
+    // Both are in what was done, without the code.
+    let done = served.get("/api/activity").to_string();
+    assert!(
+        done.contains("A pairing code was shown on the page."),
+        "{done}"
+    );
+    assert!(
+        done.contains("Ana's phone was let in to watch, from the page."),
+        "{done}"
+    );
+    assert!(!done.contains("ABCD-1234"), "{done}");
 }
 
 #[test]
@@ -1172,8 +1477,33 @@ fn a_signed_in_browser_signs_the_host_in_by_the_address_pasted_and_out_again() {
     assert_eq!(done["state"], "signedIn");
     assert_eq!(done["serverUrl"], "https://remote.example.test");
 
+    // Recorded once, however often the page looks again.
+    assert_eq!(served.get("/api/remote")["signingIn"]["state"], "signedIn");
+    let texts = |served: &Served| -> Vec<String> {
+        served
+            .get("/api/activity")
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry["kind"] == "remote")
+            .map(|entry| format!("{} x{}", entry["text"].as_str().unwrap(), entry["times"]))
+            .collect()
+    };
+    assert_eq!(
+        texts(&served),
+        [
+            "This computer was signed in to https://remote.example.test as Build box, from the \
+             page. x1",
+            "A sign-in to https://remote.example.test/ was started, from the page. x1",
+        ]
+    );
+
     let out = served.post("/api/remote/sign-out", json!({}));
     assert_eq!(out.status(), StatusCode::OK);
+    assert_eq!(
+        texts(&served)[0],
+        "This computer was signed out of its server, from the page. x1"
+    );
     assert!(*served
         .source
         .remote

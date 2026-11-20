@@ -24,12 +24,14 @@
 //!
 //! See `docs/design/47-host-dashboard.md` and `docs/guide/host-dashboard.md`.
 
+pub mod activity;
 pub mod agents;
 mod auth;
 mod git;
 mod http;
 pub mod jobs;
 mod system;
+pub mod terminal;
 pub mod tunnel;
 
 use std::path::PathBuf;
@@ -89,7 +91,7 @@ pub trait Remote: Send + Sync {
 }
 
 /// How pairing a device from the page stands.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(
     tag = "state",
     rename_all = "camelCase",
@@ -125,7 +127,7 @@ pub enum Pairing {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairProject {
     pub id: String,
@@ -149,7 +151,7 @@ pub struct PairAnswer {
 }
 
 /// How signing in from the page stands.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(
     tag = "state",
     rename_all = "camelCase",
@@ -269,12 +271,19 @@ impl From<&TunnelSettings> for TunnelWanted {
 pub(crate) struct Inner {
     pub source: Arc<dyn Source>,
     pub auth: auth::Auth,
+    /// What was done through the dashboard.
+    pub activity: Arc<activity::Activity>,
     pub jobs: jobs::Jobs,
+    pub terminals: terminal::Terminals,
     pub tunnel: tunnel::Tunnel,
     pub machine: system::Reader,
     pub port: u16,
     /// Each agent's version: asking seven programs for theirs takes a while.
     pub versions: Mutex<Vec<KnownVersion>>,
+    /// The sign-in to a server begun from the page has been recorded as done. It is seen to be
+    /// done by whichever request looks next, since the browser's return ends it as well as a
+    /// pasted address does.
+    pub signed_in_recorded: Mutex<bool>,
 }
 
 /// What a program said its version was, when it was last asked.
@@ -364,14 +373,24 @@ impl Dashboard {
                 options.state_dir.display()
             ));
         }
+        let activity = Arc::new(activity::Activity::open(&options.state_dir));
         let inner = Arc::new(Inner {
             source,
             auth: auth::Auth::open(&options.state_dir),
-            jobs: jobs::Jobs::default(),
+            jobs: jobs::Jobs::watched({
+                let activity = activity.clone();
+                move |job| activity.note("job", job_words(job))
+            }),
+            terminals: terminal::Terminals::watched({
+                let activity = activity.clone();
+                move |terminal| activity.note("terminal", terminal_words(terminal))
+            }),
+            activity,
             tunnel: tunnel::Tunnel::default(),
             machine: system::Reader::default(),
             port,
             versions: Mutex::new(Vec::new()),
+            signed_in_recorded: Mutex::new(false),
         });
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let router = http::router(inner.clone());
@@ -416,6 +435,9 @@ impl Dashboard {
     /// [`CODE_GOOD_FOR`].
     pub fn sign_in(&self) -> SignIn {
         let code = self.inner.auth.offer();
+        self.inner
+            .activity
+            .note("session", "A sign-in link was given at this computer.");
         let public = match self.inner.tunnel.state() {
             tunnel::State::Ready { url } => {
                 Some(format!("{}/#code={code}", url.trim_end_matches('/')))
@@ -433,7 +455,19 @@ impl Dashboard {
     /// Sign every browser out, and void every code. Says how many browsers that was. An error
     /// means they are signed out for now, and that a restart would sign them in again.
     pub fn sign_everyone_out(&self) -> Result<usize, String> {
-        self.inner.auth.end_all()
+        let ended = self.inner.auth.end_all();
+        // A shell nobody can reach any more is not left open.
+        self.inner.terminals.close_all();
+        self.inner.activity.note(
+            "session",
+            "Every browser was signed out, from this computer.",
+        );
+        ended
+    }
+
+    /// What was done through the dashboard, the newest first.
+    pub fn activity(&self) -> Vec<activity::Entry> {
+        self.inner.activity.list()
     }
 
     /// Keep `wanted` in the settings, and make the tunnel so. Blocking: call it off the runtime.
@@ -470,6 +504,7 @@ impl Dashboard {
         }
         self.inner.tunnel.stop();
         self.inner.jobs.stop_all();
+        self.inner.terminals.close_all();
     }
 }
 
@@ -479,6 +514,37 @@ impl Drop for Dashboard {
         if let Some(served) = self.served.take() {
             served.abort();
         }
+    }
+}
+
+/// A terminal's opening or its end, as the activity says it. Never what was typed into it.
+fn terminal_words(terminal: &terminal::Summary) -> String {
+    match terminal.ended {
+        None => format!("A terminal was opened ({}).", terminal.title),
+        Some(ended) => format!(
+            "A terminal ended after {}s ({}).",
+            (ended - terminal.started).max(0) / 1000,
+            terminal.title
+        ),
+    }
+}
+
+/// A job's start or its end, as the activity says it.
+fn job_words(job: &jobs::Summary) -> String {
+    let lasted = |ended: i64| (ended - job.started).max(0) / 1000;
+    match (job.state, job.ended) {
+        (jobs::State::Running, _) => format!("Started: {}", job.title),
+        (jobs::State::Succeeded, Some(ended)) => {
+            format!("Finished after {}s: {}", lasted(ended), job.title)
+        }
+        (jobs::State::Stopped, Some(ended)) => {
+            format!("Stopped after {}s: {}", lasted(ended), job.title)
+        }
+        (_, ended) => format!(
+            "Failed after {}s: {}",
+            lasted(ended.unwrap_or(job.started)),
+            job.title
+        ),
     }
 }
 
