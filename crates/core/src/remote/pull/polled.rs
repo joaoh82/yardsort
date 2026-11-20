@@ -63,6 +63,9 @@ struct Marks {
     reading: HashSet<String>,
     began: HashMap<String, Instant>,
     began_full: HashMap<String, Instant>,
+    /// When something a device did last changed each project's pull requests. A reading begun
+    /// before then may not have seen it.
+    changed: HashMap<String, Instant>,
 }
 
 /// A host's own reading of its projects' pull requests, lent to a device's channel.
@@ -92,8 +95,15 @@ impl Polled {
                 .is_none_or(|at| now.saturating_duration_since(*at) >= gap)
         };
         let kept = marks.kept.get(project_id);
-        let recent = kept.is_none_or(|kept| now.saturating_duration_since(kept.at) >= OLD_AFTER)
-            && since(&marks.began, AGAIN_AFTER);
+        let changed = marks.changed.get(project_id).is_some_and(|changed| {
+            marks
+                .began
+                .get(project_id)
+                .is_none_or(|began| began < changed)
+        });
+        let recent = changed
+            || kept.is_none_or(|kept| now.saturating_duration_since(kept.at) >= OLD_AFTER)
+                && since(&marks.began, AGAIN_AFTER);
         let full = every_open
             && kept
                 .and_then(|kept| kept.open_at)
@@ -108,6 +118,15 @@ impl Polled {
             marks.began_full.insert(project_id.to_owned(), now);
         }
         Some(full)
+    }
+
+    /// [`PullRequests::changed`], at `now`.
+    fn changed_at(&self, project_id: &str, now: Instant) {
+        self.marks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .changed
+            .insert(project_id.to_owned(), now);
     }
 
     /// Reads `project_id` on a thread of its own.
@@ -132,11 +151,10 @@ impl Polled {
                 }
             });
         if spawned.is_err() {
-            marks
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .reading
-                .remove(&project_id);
+            let mut marks = marks.lock().unwrap_or_else(PoisonError::into_inner);
+            marks.reading.remove(&project_id);
+            // Nothing was read: a change since the last reading still wants one.
+            marks.began.remove(&project_id);
         }
     }
 }
@@ -211,6 +229,10 @@ impl Drop for Over {
 }
 
 impl PullRequests for Polled {
+    fn changed(&self, project_id: &str) {
+        self.changed_at(project_id, Instant::now());
+    }
+
     fn of_project(&self, project_id: &str, every_open: bool) -> ProjectPulls {
         if let Some(full) = self.begin(project_id, every_open, Instant::now()) {
             self.start(project_id, full);

@@ -363,7 +363,8 @@ git config --global user.email you@example.com
 [`gh`](https://cli.github.com), here as on a desk computer
 ([Commits and pull requests](commits-and-pull-requests.md)). It is also what the phone's pull request
 badges, cards and list come from: the host reads them with `gh` in each project's checkout when the
-phone asks ([Pull requests on the phone](remote.md#pull-requests-on-the-phone)). `gh` can carry git's
+phone asks, and again at once after a merge, a push or a pull request opened from the phone
+([Pull requests on the phone](remote.md#pull-requests-on-the-phone)). `gh` can carry git's
 pushes too, so
 no SSH key is needed. Install it [as GitHub says](https://github.com/cli/cli/blob/trunk/docs/install_linux.md);
 the full container image has it. Then:

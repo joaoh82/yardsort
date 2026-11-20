@@ -132,7 +132,9 @@ nothing else on the phone changes one.
 The phone asks this computer, never GitHub: it shows what this computer last read, and holds no
 GitHub sign-in of its own. A screen showing pull requests asks again each minute while it is in
 front, and this computer reads them again for it, so they stay current with this window in the
-background. Nothing of them is kept on the phone, so they show only while this computer can be
+background. After a merge, a push or a pull request opened from the phone, it reads them again
+at the phone's next question, so the card shows the change within seconds. Nothing of them is
+kept on the phone, so they show only while this computer can be
 reached.
 
 Without `gh`, or signed out of it, the phone shows no badges and no card, and says nothing about

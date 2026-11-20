@@ -128,3 +128,14 @@ merging is keyed to its pull request, so one merged earlier is not said of the n
 so only once the computer answered, so a phone let only watch sees nothing. Left as it is: the
 card asks the forge again with each reading of the list (each minute, or every few seconds
 while the computer is still reading), which costs the computer a `gh` call each time.
+
+## Found on the phone (2026-11-19)
+
+Run on the iPhone (TestFlight 0.1.12) against `yardsort-box`: the sheet, Cancel, a stale commit
+refused (`gh` asked for no merge, seen through a recorder in front of it), and a merge at the
+head. Found: the card stayed open after a merge, even after a pull to refresh, until the screen
+was opened again. The computer keeps what it read of a project's pull requests for 45 seconds
+and nothing told it a device had changed them. Each host now marks the project changed after a
+merge, a push, a commit or a pull request opened from a device, and the next question reads
+it again (`PullRequests::changed`). One merge on that run, of a pull request at a commit pushed
+after a refusal, could not be accounted for and did not happen again.

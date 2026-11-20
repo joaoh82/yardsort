@@ -198,6 +198,23 @@ impl HostStarting {
         }
         done
     }
+
+    /// [`with`](Self::with), for what changes a workspace's pull requests when it is done: its
+    /// project's are read again at the next question, not when what was read grows old.
+    fn changing<T>(
+        &self,
+        workspace: &str,
+        f: impl FnOnce(&Starter<'_>) -> IpcResult<T>,
+    ) -> IpcResult<T> {
+        // Whatever the answer: a push or a merge can have its effect and still end in an error.
+        let done = self.with(f);
+        if let Some(home) = self.0.upgrade() {
+            if let Ok(Some(row)) = home.store.workspace(workspace) {
+                PullRequests::changed(&*home.pulls, &row.project_id);
+            }
+        }
+        done
+    }
 }
 
 impl Starting for HostStarting {
@@ -274,7 +291,7 @@ impl Starting for HostStarting {
         self.with(|starter| starter.commit(workspace, message))
     }
     fn push(&self, workspace: &str) -> IpcResult<remote_proto::publish::PublishState> {
-        self.with(|starter| starter.push(workspace))
+        self.changing(workspace, |starter| starter.push(workspace))
     }
     fn open_pull_request(
         &self,
@@ -283,7 +300,9 @@ impl Starting for HostStarting {
         body: &str,
         draft: bool,
     ) -> IpcResult<remote_proto::publish::PullRequestOpened> {
-        self.with(|starter| starter.open_pull_request(workspace, title, body, draft))
+        self.changing(workspace, |starter| {
+            starter.open_pull_request(workspace, title, body, draft)
+        })
     }
     fn merge_pull_request(
         &self,
@@ -292,7 +311,9 @@ impl Starting for HostStarting {
         head_oid: &str,
         method: remote_proto::publish::MergeMethod,
     ) -> IpcResult<()> {
-        self.with(|starter| starter.merge_pull_request(workspace, number, head_oid, method))
+        self.changing(workspace, |starter| {
+            starter.merge_pull_request(workspace, number, head_oid, method)
+        })
     }
 
     fn session(
