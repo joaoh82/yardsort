@@ -299,7 +299,11 @@ async fn a_device_the_plan_has_no_room_for_is_not_signed_in(
     assert_eq!(question["action"], "device");
     assert_eq!(question["counts"], json!({"devices": 0}));
     let account = question["account"].as_str().unwrap().to_owned();
-    assert!(!account.contains("ada"), "the server's id, not the subject");
+    // A UUID, which can hold the letters "ada" by chance, so not checked for them.
+    assert!(
+        uuid::Uuid::parse_str(&account).is_ok(),
+        "the server's id, not the subject: {account}"
+    );
     assert!(!question.to_string().contains("Phone"), "no device name");
 
     plans.set("device", Plan::Refuse(Some("Your plan has one device.")));

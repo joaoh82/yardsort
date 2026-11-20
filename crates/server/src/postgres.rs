@@ -35,6 +35,7 @@ use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, Scope, Ser
 use tokio::sync::{broadcast, mpsc};
 use tokio_postgres::{AsyncMessage, Client, IsolationLevel, Row};
 
+use crate::journal::{self, Closed, Entry};
 use crate::records::{
     allowance, refused_notices, AccountId, AccountRow, Allowance, Decision, Deleted, DeliveryEnd,
     Device, GrantFilter, GrantRecord, GrantStatus, GrantView, Handoff, Host, HostOffer,
@@ -106,6 +107,11 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         13,
         "agent_finished",
         include_str!("../migrations/0013_agent_finished.sql"),
+    ),
+    (
+        14,
+        "journal",
+        include_str!("../migrations/0014_journal.sql"),
     ),
 ];
 
@@ -414,52 +420,21 @@ impl Records for PgRecords {
     async fn delete_account(&self, account: &AccountId, now: i64) -> Result<Option<Deleted>> {
         let mut client = self.client().await?;
         let tx = client.transaction().await.map_err(failed)?;
-        // Locked first: a device enrolling or a host registering on it meanwhile waits, then
-        // finds no account.
-        let found = tx
-            .query_opt(
-                "SELECT id FROM accounts WHERE id = $1 FOR UPDATE",
-                &[&account.0],
-            )
-            .await
-            .map_err(failed)?;
-        if found.is_none() {
+        let Some(deleted) = delete_account(&tx, account, now).await? else {
             return Ok(None);
-        }
-        let counts = tx
-            .query_one(
-                "SELECT (SELECT count(*) FROM devices WHERE account = $1),
-                        (SELECT count(*) FROM hosts WHERE account = $1),
-                        (SELECT count(*) FROM sync_records WHERE account = $1)",
-                &[&account.0],
-            )
-            .await
-            .map_err(failed)?;
-        tx.execute(
-            "WITH lapsed AS (DELETE FROM deleted_credentials WHERE expires_at <= $2)
-             INSERT INTO deleted_credentials (hash, expires_at)
-             SELECT c.hash, c.expires_at FROM access_credentials c
-                 JOIN devices d ON d.id = c.device WHERE d.account = $1
-             UNION ALL
-             SELECT c.hash, c.expires_at FROM refresh_credentials c
-                 JOIN devices d ON d.id = c.device WHERE d.account = $1
-             ON CONFLICT (hash) DO NOTHING",
-            &[&account.0, &now],
+        };
+        write_entry(
+            &tx,
+            &Entry::new(
+                now,
+                Closed::AccountDeleted {
+                    account: account.0.clone(),
+                },
+            ),
         )
-        .await
-        .map_err(failed)?;
-        // Everything else of the account cascades from its row: tests/records.rs checks that
-        // every table naming an account, a device or a host does.
-        tx.execute("DELETE FROM accounts WHERE id = $1", &[&account.0])
-            .await
-            .map_err(failed)?;
+        .await?;
         tx.commit().await.map_err(failed)?;
-        let count = |at: usize| usize::try_from(counts.get::<_, i64>(at)).unwrap_or(usize::MAX);
-        Ok(Some(Deleted {
-            devices: count(0),
-            hosts: count(1),
-            records: count(2),
-        }))
+        Ok(Some(deleted))
     }
 
     async fn deleted_credential(&self, credential: &TokenHash, now: i64) -> Result<bool> {
@@ -817,6 +792,18 @@ impl Records for PgRecords {
             )
             .await
             .map_err(failed)?;
+            write_entry(
+                &tx,
+                &Entry::new(
+                    now,
+                    Closed::DevicesRevoked {
+                        account: device.account.0.clone(),
+                        devices: vec![device.id.as_str().to_owned()],
+                        reason: journal::Reason::RefreshReused,
+                    },
+                ),
+            )
+            .await?;
             Rotation::Reused(device.account.clone())
         } else if expires_at <= now {
             Rotation::Expired
@@ -908,30 +895,37 @@ impl Records for PgRecords {
         device: &DeviceId,
         revoked: Revoked,
     ) -> Result<bool> {
-        // An earlier revocation, and its reason, stand.
-        let client = self.client().await?;
-        let changed = client
-            .execute(
-                "UPDATE devices SET revoked_at = COALESCE(revoked_at, $3),
-                                    revoked_reason = COALESCE(revoked_reason, $4)
-                 WHERE id = $1 AND account = $2",
-                &[
-                    &device.as_str(),
-                    &account.0,
-                    &revoked.at,
-                    &reason_spelled(revoked.reason),
-                ],
-            )
-            .await
-            .map_err(failed)?;
-        client
-            .execute(
-                "DELETE FROM push_tokens WHERE device = $1 AND account = $2",
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        let found = tx
+            .query_opt(
+                "SELECT 1 FROM devices WHERE id = $1 AND account = $2 FOR UPDATE",
                 &[&device.as_str(), &account.0],
             )
             .await
             .map_err(failed)?;
-        Ok(changed > 0)
+        if found.is_none() {
+            return Ok(false);
+        }
+        // An earlier revocation, and its reason, stand.
+        let newly =
+            revoke_devices(&tx, account, Some(&[device.as_str().to_owned()]), revoked).await?;
+        if !newly.is_empty() {
+            write_entry(
+                &tx,
+                &Entry::new(
+                    revoked.at,
+                    Closed::DevicesRevoked {
+                        account: account.0.clone(),
+                        devices: newly,
+                        reason: revoked.reason.into(),
+                    },
+                ),
+            )
+            .await?;
+        }
+        tx.commit().await.map_err(failed)?;
+        Ok(true)
     }
 
     async fn revoke_account(
@@ -940,34 +934,37 @@ impl Records for PgRecords {
         subject: &str,
         revoked: Revoked,
     ) -> Result<Option<usize>> {
-        let row = self
-            .client()
-            .await?
-            .query_one(
-                "WITH account AS (
-                     SELECT id FROM accounts WHERE issuer = $1 AND subject = $2
-                 ), revoked AS (
-                     UPDATE devices SET revoked_at = $3, revoked_reason = $4
-                     WHERE account IN (SELECT id FROM account) AND revoked_at IS NULL
-                     RETURNING 1
-                 ), dropped AS (
-                     DELETE FROM push_tokens
-                     WHERE account IN (SELECT id FROM account)
-                     RETURNING 1
-                 )
-                 SELECT (SELECT count(*) FROM account), (SELECT count(*) FROM revoked),
-                        (SELECT count(*) FROM dropped)",
-                &[
-                    &issuer,
-                    &subject,
-                    &revoked.at,
-                    &reason_spelled(revoked.reason),
-                ],
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        let Some(row) = tx
+            .query_opt(
+                "SELECT id FROM accounts WHERE issuer = $1 AND subject = $2 FOR UPDATE",
+                &[&issuer, &subject],
             )
             .await
-            .map_err(failed)?;
-        let (accounts, devices): (i64, i64) = (row.get(0), row.get(1));
-        Ok((accounts > 0).then(|| usize::try_from(devices).unwrap_or(usize::MAX)))
+            .map_err(failed)?
+        else {
+            return Ok(None);
+        };
+        let account = AccountId(row.get(0));
+        let newly = revoke_devices(&tx, &account, None, revoked).await?;
+        let count = newly.len();
+        if !newly.is_empty() {
+            write_entry(
+                &tx,
+                &Entry::new(
+                    revoked.at,
+                    Closed::DevicesRevoked {
+                        account: account.0.clone(),
+                        devices: newly,
+                        reason: revoked.reason.into(),
+                    },
+                ),
+            )
+            .await?;
+        }
+        tx.commit().await.map_err(failed)?;
+        Ok(Some(count))
     }
 
     async fn add_host(&self, host: Host) -> Result<()> {
@@ -1255,47 +1252,47 @@ impl Records for PgRecords {
     }
 
     async fn revoke_grant(&self, account: &AccountId, id: &GrantId, now: i64) -> Result<bool> {
-        let row = self
-            .client()
-            .await?
-            .query_one(
-                "WITH revoked AS (
-                     UPDATE grants SET status = 'revoked', decided_at = $3
-                     WHERE id = $1 AND account = $2 AND status IN ('pending', 'approved')
-                 )
-                 SELECT count(*) FROM grants WHERE id = $1 AND account = $2",
-                &[&id.as_str(), &account.0, &now],
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        let Some(open) = revoke_grant(&tx, account, id, now).await? else {
+            return Ok(false);
+        };
+        if open {
+            write_entry(
+                &tx,
+                &Entry::new(
+                    now,
+                    Closed::GrantRevoked {
+                        account: account.0.clone(),
+                        grant: id.as_str().to_owned(),
+                    },
+                ),
             )
-            .await
-            .map_err(failed)?;
-        Ok(row.get::<_, i64>(0) > 0)
+            .await?;
+        }
+        tx.commit().await.map_err(failed)?;
+        Ok(true)
     }
 
     async fn remove_host(&self, account: &AccountId, id: &HostId, now: i64) -> Result<bool> {
         let mut client = self.client().await?;
         let tx = client.transaction().await.map_err(failed)?;
-        let removed = tx
-            .execute(
-                "UPDATE hosts SET removed_at = $3
-                 WHERE id = $1 AND account = $2 AND removed_at IS NULL",
-                &[&id.as_str(), &account.0, &now],
+        let removed = remove_host(&tx, account, id, now).await?;
+        if removed {
+            write_entry(
+                &tx,
+                &Entry::new(
+                    now,
+                    Closed::HostRemoved {
+                        account: account.0.clone(),
+                        host: id.as_str().to_owned(),
+                    },
+                ),
             )
-            .await
-            .map_err(failed)?;
-        if removed > 0 {
-            tx.execute("DELETE FROM host_offers WHERE host = $1", &[&id.as_str()])
-                .await
-                .map_err(failed)?;
-            tx.execute(
-                "UPDATE grants SET status = 'revoked', decided_at = $2
-                 WHERE host = $1 AND status IN ('pending', 'approved')",
-                &[&id.as_str(), &now],
-            )
-            .await
-            .map_err(failed)?;
+            .await?;
         }
         tx.commit().await.map_err(failed)?;
-        Ok(removed > 0)
+        Ok(removed)
     }
 
     async fn put_link(&self, place: LinkPlace) -> Result<()> {
@@ -2217,6 +2214,116 @@ impl Records for PgRecords {
         Ok(true)
     }
 
+    async fn journal_unwritten(&self, limit: usize) -> Result<Vec<journal::Row>> {
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        Ok(self
+            .client()
+            .await?
+            .query(
+                "SELECT key, body FROM journal WHERE NOT written ORDER BY key LIMIT $1",
+                &[&limit],
+            )
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(|row| journal::Row {
+                key: row.get(0),
+                body: row.get(1),
+            })
+            .collect())
+    }
+
+    async fn journal_written(&self, keys: &[String]) -> Result<()> {
+        if keys.is_empty() {
+            return Ok(());
+        }
+        self.client()
+            .await?
+            .execute(
+                "UPDATE journal SET written = TRUE WHERE key = ANY($1)",
+                &[&keys],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    async fn journal_known(&self, keys: &[String]) -> Result<BTreeSet<String>> {
+        if keys.is_empty() {
+            return Ok(BTreeSet::new());
+        }
+        Ok(self
+            .client()
+            .await?
+            .query("SELECT key FROM journal WHERE key = ANY($1)", &[&keys])
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(|row| row.get(0))
+            .collect())
+    }
+
+    async fn journal_latest(&self) -> Result<Option<String>> {
+        Ok(self
+            .client()
+            .await?
+            .query_one("SELECT max(key) FROM journal", &[])
+            .await
+            .map_err(failed)?
+            .get(0))
+    }
+
+    async fn replay(&self, row: &journal::Row, entry: &Entry, now: i64) -> Result<bool> {
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        // Taken first: two replays of one entry take turns, and the second finds it held.
+        let taken = tx
+            .execute(
+                "INSERT INTO journal (key, body, written) VALUES ($1, $2, TRUE)
+                 ON CONFLICT (key) DO NOTHING",
+                &[&row.key, &row.body],
+            )
+            .await
+            .map_err(failed)?;
+        if taken == 0 {
+            return Ok(false);
+        }
+        let changed = match &entry.closed {
+            Closed::DevicesRevoked {
+                account,
+                devices,
+                reason,
+            } => !revoke_devices(
+                &tx,
+                &AccountId(account.clone()),
+                Some(devices),
+                Revoked {
+                    at: entry.at,
+                    reason: (*reason).into(),
+                },
+            )
+            .await?
+            .is_empty(),
+            Closed::GrantRevoked { account, grant } => match GrantId::new(grant.as_str()) {
+                Ok(grant) => revoke_grant(&tx, &AccountId(account.clone()), &grant, entry.at)
+                    .await?
+                    .unwrap_or(false),
+                Err(_) => false,
+            },
+            Closed::HostRemoved { account, host } => match HostId::new(host.as_str()) {
+                Ok(host) => remove_host(&tx, &AccountId(account.clone()), &host, entry.at).await?,
+                Err(_) => false,
+            },
+            Closed::AccountDeleted { account } => {
+                delete_account(&tx, &AccountId(account.clone()), now)
+                    .await?
+                    .is_some()
+            }
+        };
+        tx.commit().await.map_err(failed)?;
+        Ok(changed)
+    }
+
     async fn account_row(&self, account: &AccountId) -> Result<Option<AccountRow>> {
         Ok(self
             .client()
@@ -2574,6 +2681,163 @@ fn projects_spelled(projects: Option<&ProjectGrant>) -> Result<Option<String>> {
     projects
         .map(|p| serde_json::to_string(p).map_err(failed))
         .transpose()
+}
+
+/// A journal row for this entry, not yet written out, in the transaction of what it records.
+async fn write_entry(tx: &Transaction<'_>, entry: &Entry) -> Result<()> {
+    let row = journal::Row::of(entry);
+    tx.execute(
+        "INSERT INTO journal (key, body) VALUES ($1, $2)",
+        &[&row.key, &row.body],
+    )
+    .await
+    .map_err(failed)?;
+    Ok(())
+}
+
+/// Revoke these devices of the account, or every one, unless already revoked, and drop their
+/// push routes. The ones it revoked.
+async fn revoke_devices(
+    tx: &Transaction<'_>,
+    account: &AccountId,
+    only: Option<&[String]>,
+    revoked: Revoked,
+) -> Result<Vec<String>> {
+    let only: Option<Vec<String>> = only.map(<[String]>::to_vec);
+    let newly = tx
+        .query(
+            "UPDATE devices SET revoked_at = $2, revoked_reason = $3
+             WHERE account = $1 AND revoked_at IS NULL
+               AND ($4::TEXT[] IS NULL OR id = ANY($4))
+             RETURNING id",
+            &[
+                &account.0,
+                &revoked.at,
+                &reason_spelled(revoked.reason),
+                &only,
+            ],
+        )
+        .await
+        .map_err(failed)?
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+    tx.execute(
+        "DELETE FROM push_tokens
+         WHERE account = $1 AND ($2::TEXT[] IS NULL OR device = ANY($2))",
+        &[&account.0, &only],
+    )
+    .await
+    .map_err(failed)?;
+    Ok(newly)
+}
+
+/// Revoke a grant that is pending or in force. `None` when the account has no such grant;
+/// otherwise whether it was still open.
+async fn revoke_grant(
+    tx: &Transaction<'_>,
+    account: &AccountId,
+    id: &GrantId,
+    now: i64,
+) -> Result<Option<bool>> {
+    let row = tx
+        .query_one(
+            "WITH revoked AS (
+                 UPDATE grants SET status = 'revoked', decided_at = $3
+                 WHERE id = $1 AND account = $2 AND status IN ('pending', 'approved')
+                 RETURNING 1
+             )
+             SELECT (SELECT count(*) FROM grants WHERE id = $1 AND account = $2),
+                    (SELECT count(*) FROM revoked)",
+            &[&id.as_str(), &account.0, &now],
+        )
+        .await
+        .map_err(failed)?;
+    let (found, revoked): (i64, i64) = (row.get(0), row.get(1));
+    Ok((found > 0).then_some(revoked > 0))
+}
+
+/// [`Records::remove_host`]'s step, without its journal entry.
+async fn remove_host(
+    tx: &Transaction<'_>,
+    account: &AccountId,
+    id: &HostId,
+    now: i64,
+) -> Result<bool> {
+    let removed = tx
+        .execute(
+            "UPDATE hosts SET removed_at = $3
+             WHERE id = $1 AND account = $2 AND removed_at IS NULL",
+            &[&id.as_str(), &account.0, &now],
+        )
+        .await
+        .map_err(failed)?;
+    if removed > 0 {
+        tx.execute("DELETE FROM host_offers WHERE host = $1", &[&id.as_str()])
+            .await
+            .map_err(failed)?;
+        tx.execute(
+            "UPDATE grants SET status = 'revoked', decided_at = $2
+             WHERE host = $1 AND status IN ('pending', 'approved')",
+            &[&id.as_str(), &now],
+        )
+        .await
+        .map_err(failed)?;
+    }
+    Ok(removed > 0)
+}
+
+/// [`Records::delete_account`]'s step, without its journal entry.
+async fn delete_account(
+    tx: &Transaction<'_>,
+    account: &AccountId,
+    now: i64,
+) -> Result<Option<Deleted>> {
+    // Locked first: a device enrolling or a host registering on it meanwhile waits, then finds
+    // no account.
+    let found = tx
+        .query_opt(
+            "SELECT id FROM accounts WHERE id = $1 FOR UPDATE",
+            &[&account.0],
+        )
+        .await
+        .map_err(failed)?;
+    if found.is_none() {
+        return Ok(None);
+    }
+    let counts = tx
+        .query_one(
+            "SELECT (SELECT count(*) FROM devices WHERE account = $1),
+                    (SELECT count(*) FROM hosts WHERE account = $1),
+                    (SELECT count(*) FROM sync_records WHERE account = $1)",
+            &[&account.0],
+        )
+        .await
+        .map_err(failed)?;
+    tx.execute(
+        "WITH lapsed AS (DELETE FROM deleted_credentials WHERE expires_at <= $2)
+         INSERT INTO deleted_credentials (hash, expires_at)
+         SELECT c.hash, c.expires_at FROM access_credentials c
+             JOIN devices d ON d.id = c.device WHERE d.account = $1
+         UNION ALL
+         SELECT c.hash, c.expires_at FROM refresh_credentials c
+             JOIN devices d ON d.id = c.device WHERE d.account = $1
+         ON CONFLICT (hash) DO NOTHING",
+        &[&account.0, &now],
+    )
+    .await
+    .map_err(failed)?;
+    // Everything else of the account cascades from its row: tests/records.rs checks that every
+    // table naming an account, a device or a host does.
+    tx.execute("DELETE FROM accounts WHERE id = $1", &[&account.0])
+        .await
+        .map_err(failed)?;
+    let count = |at: usize| usize::try_from(counts.get::<_, i64>(at)).unwrap_or(usize::MAX);
+    Ok(Some(Deleted {
+        devices: count(0),
+        hosts: count(1),
+        records: count(2),
+    }))
 }
 
 async fn issue(tx: &Transaction<'_>, device: &DeviceId, issued: &Issued) -> Result<()> {

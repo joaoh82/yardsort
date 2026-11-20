@@ -9,6 +9,7 @@ use remote_proto::{Platform, RemoteError, ServerId};
 use reqwest::header::LOCATION;
 use url::Url;
 use yardsort_server::entitlements::Entitlements;
+use yardsort_server::journal::Journal;
 use yardsort_server::oidc::{self, ProviderConfig};
 use yardsort_server::push::PushProvider;
 use yardsort_server::records::Records;
@@ -71,6 +72,7 @@ impl Served {
             vec![APP.into()],
             Some(push),
             Entitlements::none(),
+            Journal::none(),
         )
         .await
     }
@@ -89,6 +91,7 @@ impl Served {
             redirects,
             None,
             Entitlements::none(),
+            Journal::none(),
         )
         .await
     }
@@ -104,7 +107,16 @@ impl Served {
         push: Arc<dyn PushProvider>,
         entitlements: Entitlements,
     ) -> Self {
-        Self::open(records, options, relay, redirects, Some(push), entitlements).await
+        Self::open(
+            records,
+            options,
+            relay,
+            redirects,
+            Some(push),
+            entitlements,
+            Journal::none(),
+        )
+        .await
     }
 
     /// Asking `entitlements` before another device, a connection or more synced data.
@@ -120,6 +132,26 @@ impl Served {
             vec![APP.into()],
             None,
             entitlements,
+            Journal::none(),
+        )
+        .await
+    }
+
+    /// Writing revocations and deletions out to `journal`, and refusing requests while the
+    /// records are behind it.
+    #[allow(dead_code)]
+    pub async fn start_journaled(
+        records: impl Records + Clone + 'static,
+        journal: Journal,
+    ) -> Self {
+        Self::open(
+            records,
+            http::Options::default(),
+            Relay::default(),
+            vec![APP.into()],
+            None,
+            Entitlements::none(),
+            journal,
         )
         .await
     }
@@ -131,6 +163,7 @@ impl Served {
         redirects: Vec<String>,
         push: Option<Arc<dyn PushProvider>>,
         entitlements: Entitlements,
+        journal: Journal,
     ) -> Self {
         let idp = Idp::start(Some(SECRET)).await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -153,7 +186,8 @@ impl Served {
         )
         .unwrap()
         .with_relay(relay)
-        .with_entitlements(entitlements);
+        .with_entitlements(entitlements)
+        .with_journal(journal);
         let service = match push {
             Some(push) => service.with_push(push),
             None => service,

@@ -105,6 +105,14 @@ has the downloads and the full commit lists.
   is room, and nothing already working stops. See
   [When a server's plan has no room](docs/guide/remote.md#when-a-servers-plan-has-no-room) and
   [Running the Yardsort server yourself](crates/server/self-host/README.md#plans-and-entitlements).
+- **A server restored from a backup keeps revoked devices out** (Remote, under development). A
+  server of your own writes each device revoked, host removed and account deleted to a journal
+  outside its database, a directory or an S3-compatible bucket. After the database is restored
+  from a backup, the server refuses every request until `yardsort-server reconcile` has done them
+  again, so nothing closed since the backup opens again. A server without a journal says so as it
+  starts. See
+  [Running the Yardsort server yourself](crates/server/self-host/README.md#the-journal); a server
+  of your own adds one table when it starts.
 - **Pull requests from forks can be code reviewed.** A workspace on a fork's pull request — its
   branch is `pr/<number>`, from **Start workspace** or `ys pr checkout` — now finds that pull
   request by the number its branch follows, so **Request code review** and

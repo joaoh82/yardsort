@@ -125,7 +125,40 @@ What to keep, and where:
 
 Caddy's certificates (the `caddy-data` volume) need no backup: Caddy gets new ones.
 
-**Restoring** the server's database, with the server stopped:
+- **The journal**, if you keep it in a directory (below). Never restore it to an earlier point:
+  it only grows.
+
+## The journal
+
+A backup of the database holds what was open when it was taken. Restored, a device revoked since
+can sign in again, a host removed since is back, and an account deleted since is back. The server
+writes each revocation and deletion outside the database as it happens, to a journal, so that a
+restore can be brought up to date. Without one, the server warns as it starts.
+
+Put it somewhere that is not restored with the database: a bucket of an S3-compatible store, or a
+directory on another disk. Add to the `server` service's `environment` in `compose.yaml` either
+
+```yaml
+YARDSORT_JOURNAL_BUCKET: yardsort-journal
+AWS_ENDPOINT_URL_S3: https://s3.example.com
+AWS_REGION: auto
+AWS_ACCESS_KEY_ID: ${JOURNAL_ACCESS_KEY_ID}
+AWS_SECRET_ACCESS_KEY: ${JOURNAL_SECRET_ACCESS_KEY}
+```
+
+or `YARDSORT_JOURNAL_DIR` with a volume mounted there that the server's user (`nonroot`, uid 65532)
+can write. The bucket is named in the host (`https://yardsort-journal.s3.example.com/…`), or in
+the path for an endpoint at an IP address or `localhost`; set `YARDSORT_JOURNAL_ADDRESSING` to
+`path` or `virtual` if your store wants the other. Its key needs to list, read and write; nothing
+in the server deletes from it. As the server starts, its log says where it journals.
+
+The journal holds ids and times only: which device, grant, host or account, never a name or an
+email. A deleted account's id stays in it, which is what keeps a restore from bringing the account
+back.
+
+## Restoring
+
+The server's database, with the server stopped:
 
 ```sh
 docker compose stop server
@@ -133,7 +166,18 @@ docker compose exec -T postgres pg_restore -U postgres -d yardsort --clean --if-
 docker compose start server
 ```
 
-ZITADEL's restores the same way, with `zitadel-api` and `zitadel-login` stopped instead.
+With a journal, the server then finds the restored database behind it and refuses every request
+with 503, until you bring it up to date:
+
+```sh
+docker compose exec server yardsort-server reconcile
+```
+
+It revokes, removes and deletes again everything the journal has that the database does not,
+says what, and the server serves again within moments. Running it twice does no harm. The
+[restore runbook](../../../docs/operations/restore.md) says more, and what a restore still loses.
+
+ZITADEL's database restores the same way, with `zitadel-api` and `zitadel-login` stopped instead.
 
 ## Upgrading
 

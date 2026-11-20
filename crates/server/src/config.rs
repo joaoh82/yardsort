@@ -26,6 +26,16 @@
 //!   or more synced data. HTTPS, or plain HTTP to a loopback address.
 //! - `YARDSORT_ENTITLEMENTS_TOKEN` (or `_FILE`): sent to it as a bearer credential.
 //!
+//! The journal is optional (`crate::journal`), and a server run for others should have one: without
+//! it, a database restored from a backup can let revoked devices back in and bring deleted
+//! accounts back. One of:
+//! - `YARDSORT_JOURNAL_DIR`: a directory, kept apart from the database and its backups.
+//! - `YARDSORT_JOURNAL_BUCKET`, or `BUCKET_NAME` as `fly storage create` sets it: a bucket of an
+//!   S3-compatible store, at `AWS_ENDPOINT_URL_S3`, in `AWS_REGION` (`auto` unless set), with
+//!   `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (or `_FILE`). The bucket is named in the
+//!   host (`<bucket>.<endpoint>`), as AWS and Tigris expect, or in the path for an endpoint at an
+//!   IP address or `localhost`; `YARDSORT_JOURNAL_ADDRESSING` (`virtual` or `path`) says otherwise.
+//!
 //! Push is optional. With none of these set, notices wait until a provider is configured.
 //! The design is `docs/design/40-mobile-notifications.md`.
 //! - `YARDSORT_APNS_KEY_ID`, `YARDSORT_APNS_TEAM_ID`, `YARDSORT_APNS_BUNDLE_ID`
@@ -64,6 +74,45 @@ pub struct Settings {
     pub instance: Instance,
     pub push: PushSettings,
     pub entitlements: Option<EntitlementsSettings>,
+    pub journal: Option<JournalSettings>,
+}
+
+/// Where the journal is: a directory, or a bucket.
+#[derive(Debug)]
+pub enum JournalSettings {
+    Dir(std::path::PathBuf),
+    Bucket {
+        endpoint: Url,
+        bucket: String,
+        addressing: crate::journal::Addressing,
+        region: String,
+        access_key: String,
+        secret_key: Secret,
+    },
+}
+
+impl JournalSettings {
+    pub fn store(self, http: reqwest::Client) -> crate::journal::Store {
+        match self {
+            Self::Dir(root) => crate::journal::Store::Dir(crate::journal::Dir::new(root)),
+            Self::Bucket {
+                endpoint,
+                bucket,
+                addressing,
+                region,
+                access_key,
+                secret_key,
+            } => crate::journal::Store::S3(crate::journal::S3::new(
+                endpoint,
+                bucket,
+                addressing,
+                region,
+                access_key,
+                secret_key.expose().to_owned(),
+                http,
+            )),
+        }
+    }
 }
 
 /// The entitlements service, when the operator configured one.
@@ -97,6 +146,7 @@ impl std::fmt::Debug for Settings {
                 "entitlements",
                 &self.entitlements.as_ref().map(|e| e.url.as_str()),
             )
+            .field("journal", &self.journal)
             .finish_non_exhaustive()
     }
 }
@@ -173,7 +223,67 @@ impl Settings {
             database_url: database_url(&get)?,
             push: push_settings(&get),
             entitlements: entitlements_settings(&get)?,
+            journal: journal_settings(&get)?,
         })
+    }
+}
+
+fn journal_settings(
+    get: &impl Fn(&str) -> Option<String>,
+) -> Result<Option<JournalSettings>, ConfigError> {
+    let dir = get("YARDSORT_JOURNAL_DIR");
+    let bucket = get("YARDSORT_JOURNAL_BUCKET").or_else(|| get("BUCKET_NAME"));
+    match (dir, bucket) {
+        (Some(_), Some(_)) => Err(ConfigError(
+            "set YARDSORT_JOURNAL_DIR or a bucket (YARDSORT_JOURNAL_BUCKET or BUCKET_NAME), not \
+             both"
+                .into(),
+        )),
+        (Some(dir), None) => Ok(Some(JournalSettings::Dir(dir.trim().into()))),
+        (None, None) => Ok(None),
+        (None, Some(bucket)) => {
+            let need = |name: &str| {
+                get(name).ok_or_else(|| {
+                    ConfigError(format!("the journal's bucket {bucket:?} needs {name}"))
+                })
+            };
+            let endpoint = need("AWS_ENDPOINT_URL_S3")?;
+            let endpoint = Url::parse(endpoint.trim())
+                .map_err(|e| ConfigError(format!("AWS_ENDPOINT_URL_S3 {endpoint:?}: {e}")))?;
+            let loopback = matches!(endpoint.host(), Some(url::Host::Ipv4(ip)) if ip.is_loopback())
+                || matches!(endpoint.host(), Some(url::Host::Ipv6(ip)) if ip.is_loopback());
+            if endpoint.scheme() != "https" && !(endpoint.scheme() == "http" && loopback) {
+                return Err(ConfigError(format!(
+                    "AWS_ENDPOINT_URL_S3 {:?} is not HTTPS (plain HTTP is accepted on a loopback \
+                     address only)",
+                    endpoint.as_str()
+                )));
+            }
+            let access_key = need("AWS_ACCESS_KEY_ID")?;
+            let secret_key = secret(get, "AWS_SECRET_ACCESS_KEY")?.ok_or_else(|| {
+                ConfigError(format!(
+                    "the journal's bucket {bucket:?} needs AWS_SECRET_ACCESS_KEY"
+                ))
+            })?;
+            let addressing = match get("YARDSORT_JOURNAL_ADDRESSING").as_deref().map(str::trim) {
+                None => crate::journal::Addressing::for_endpoint(&endpoint),
+                Some("virtual") => crate::journal::Addressing::Virtual,
+                Some("path") => crate::journal::Addressing::Path,
+                Some(other) => {
+                    return Err(ConfigError(format!(
+                        "YARDSORT_JOURNAL_ADDRESSING {other:?}: virtual or path"
+                    )))
+                }
+            };
+            Ok(Some(JournalSettings::Bucket {
+                endpoint,
+                bucket: bucket.trim().to_owned(),
+                addressing,
+                region: get("AWS_REGION").unwrap_or_else(|| "auto".into()),
+                access_key: access_key.trim().to_owned(),
+                secret_key,
+            }))
+        }
     }
 }
 
@@ -266,11 +376,12 @@ fn fcm_settings(get: &impl Fn(&str) -> Option<String>) -> Option<crate::push::Fc
     Some(fcm)
 }
 
-/// What `yardsort-server revoke-account` needs: the database, and the provider the server signs
-/// in with, if it is set.
+/// What the operator's commands need: the database, the provider the server signs in with, and
+/// the journal, if they are set.
 pub struct AdminSettings {
     pub database_url: Secret,
     pub issuer: Option<String>,
+    pub journal: Option<JournalSettings>,
 }
 
 impl AdminSettings {
@@ -283,6 +394,7 @@ impl AdminSettings {
         Ok(Self {
             database_url: database_url(&get)?,
             issuer: get("YARDSORT_OIDC_ISSUER"),
+            journal: journal_settings(&get)?,
         })
     }
 }
@@ -478,5 +590,105 @@ mod tests {
             settings(&pairs).unwrap().device_redirects,
             ["yardsort://signed-in", "http://127.0.0.1/cb"]
         );
+    }
+
+    #[test]
+    fn a_journal_is_a_directory_or_fly_storage_bucket() {
+        assert!(settings(MINIMAL).unwrap().journal.is_none());
+
+        let mut pairs = MINIMAL.to_vec();
+        pairs.push(("YARDSORT_JOURNAL_DIR", "/var/lib/yardsort/journal"));
+        assert!(matches!(
+            settings(&pairs).unwrap().journal,
+            Some(JournalSettings::Dir(dir)) if dir == std::path::Path::new("/var/lib/yardsort/journal")
+        ));
+
+        // As `fly storage create` leaves the app's secrets.
+        let mut fly = MINIMAL.to_vec();
+        fly.extend([
+            ("BUCKET_NAME", "yardsort-journal-staging"),
+            ("AWS_ENDPOINT_URL_S3", "https://fly.storage.tigris.dev"),
+            ("AWS_ACCESS_KEY_ID", "tid_key"),
+            ("AWS_SECRET_ACCESS_KEY", "tsec_the-bucket-secret"),
+        ]);
+        let s = settings(&fly).unwrap();
+        let Some(JournalSettings::Bucket {
+            endpoint,
+            bucket,
+            addressing,
+            region,
+            access_key,
+            secret_key,
+        }) = &s.journal
+        else {
+            panic!("a bucket: {:?}", s.journal);
+        };
+        assert_eq!(endpoint.as_str(), "https://fly.storage.tigris.dev/");
+        assert_eq!(bucket, "yardsort-journal-staging");
+        assert_eq!(region, "auto");
+        assert_eq!(*addressing, crate::journal::Addressing::Virtual);
+        assert_eq!(access_key, "tid_key");
+        assert_eq!(secret_key.expose(), "tsec_the-bucket-secret");
+        let printed = format!("{s:?}");
+        assert!(printed.contains("yardsort-journal-staging"), "{printed}");
+        assert!(!printed.contains("tsec_the-bucket-secret"), "{printed}");
+
+        // Its own name wins over Fly's.
+        let mut named = fly.clone();
+        named.push(("YARDSORT_JOURNAL_BUCKET", "another"));
+        assert!(matches!(
+            settings(&named).unwrap().journal,
+            Some(JournalSettings::Bucket { bucket, .. }) if bucket == "another"
+        ));
+
+        for missing in [
+            "AWS_ENDPOINT_URL_S3",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+        ] {
+            let without: Vec<_> = fly.iter().filter(|(k, _)| *k != missing).copied().collect();
+            let error = settings(&without).unwrap_err().to_string();
+            assert!(error.contains(missing), "{error}");
+        }
+        let mut plain = fly.clone();
+        plain.retain(|(k, _)| *k != "AWS_ENDPOINT_URL_S3");
+        plain.push(("AWS_ENDPOINT_URL_S3", "http://storage.example.invalid"));
+        assert!(settings(&plain)
+            .unwrap_err()
+            .to_string()
+            .contains("not HTTPS"));
+        plain.retain(|(k, _)| *k != "AWS_ENDPOINT_URL_S3");
+        plain.push(("AWS_ENDPOINT_URL_S3", "http://127.0.0.1:9000"));
+        assert!(
+            matches!(
+                settings(&plain).unwrap().journal,
+                Some(JournalSettings::Bucket {
+                    addressing: crate::journal::Addressing::Path,
+                    ..
+                })
+            ),
+            "plain HTTP to this machine, by path"
+        );
+        plain.push(("YARDSORT_JOURNAL_ADDRESSING", "virtual"));
+        assert!(matches!(
+            settings(&plain).unwrap().journal,
+            Some(JournalSettings::Bucket {
+                addressing: crate::journal::Addressing::Virtual,
+                ..
+            })
+        ));
+        plain.retain(|(k, _)| *k != "YARDSORT_JOURNAL_ADDRESSING");
+        plain.push(("YARDSORT_JOURNAL_ADDRESSING", "sideways"));
+        assert!(settings(&plain)
+            .unwrap_err()
+            .to_string()
+            .contains("virtual or path"));
+
+        let mut both = fly;
+        both.push(("YARDSORT_JOURNAL_DIR", "/journal"));
+        assert!(settings(&both)
+            .unwrap_err()
+            .to_string()
+            .contains("not both"));
     }
 }
