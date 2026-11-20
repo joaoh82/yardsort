@@ -248,7 +248,7 @@ fn a_change_a_device_made_has_the_next_question_read_again_however_fresh() {
     let after = |seconds: u64| start + Duration::from_secs(seconds);
     assert_eq!(polled.begin("p", false, start), Some(false));
     // Merged while that reading was still away: it may not have seen it.
-    polled.changed("p");
+    polled.changed_at("p", after(1) - Duration::from_millis(500));
     keep(&polled.marks, "p", Some(reading(&[1])), start);
     polled.marks.lock().unwrap().reading.remove("p");
     assert_eq!(polled.begin("p", false, after(1)), Some(false));
@@ -256,6 +256,10 @@ fn a_change_a_device_made_has_the_next_question_read_again_however_fresh() {
     polled.marks.lock().unwrap().reading.remove("p");
     // Read since the change: fresh again.
     assert_eq!(polled.begin("p", false, after(2)), None);
-    // A project that did not change is not read again.
+    // A project that did not change is not read again for it.
     assert_eq!(polled.begin("q", false, start), Some(false));
+    keep(&polled.marks, "q", Some(reading(&[2])), start);
+    polled.marks.lock().unwrap().reading.remove("q");
+    polled.changed_at("p", after(3));
+    assert_eq!(polled.begin("q", false, after(4)), None);
 }

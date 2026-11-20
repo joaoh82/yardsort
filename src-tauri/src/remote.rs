@@ -213,11 +213,12 @@ impl AppStarting {
         f: impl FnOnce(&Starter<'_>) -> IpcResult<T>,
     ) -> IpcResult<T> {
         self.with(|starter| {
-            let done = f(starter)?;
+            // Whatever the answer: a push or a merge can have its effect and still end in an error.
+            let done = f(starter);
             if let Ok(Some(row)) = starter.store.workspace(workspace) {
                 crate::publish::lent::changed(&self.0, &row.project_id);
             }
-            Ok(done)
+            done
         })
     }
 
@@ -324,7 +325,7 @@ impl Starting for AppStarting {
         workspace: &str,
         message: &str,
     ) -> IpcResult<remote_proto::publish::PublishState> {
-        self.changing(workspace, |starter| starter.commit(workspace, message))
+        self.with(|starter| starter.commit(workspace, message))
     }
     fn push(&self, workspace: &str) -> IpcResult<remote_proto::publish::PublishState> {
         self.changing(workspace, |starter| starter.push(workspace))

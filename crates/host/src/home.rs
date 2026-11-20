@@ -206,13 +206,14 @@ impl HostStarting {
         workspace: &str,
         f: impl FnOnce(&Starter<'_>) -> IpcResult<T>,
     ) -> IpcResult<T> {
-        let done = self.with(f)?;
+        // Whatever the answer: a push or a merge can have its effect and still end in an error.
+        let done = self.with(f);
         if let Some(home) = self.0.upgrade() {
             if let Ok(Some(row)) = home.store.workspace(workspace) {
                 PullRequests::changed(&*home.pulls, &row.project_id);
             }
         }
-        Ok(done)
+        done
     }
 }
 
@@ -287,7 +288,7 @@ impl Starting for HostStarting {
         workspace: &str,
         message: &str,
     ) -> IpcResult<remote_proto::publish::PublishState> {
-        self.changing(workspace, |starter| starter.commit(workspace, message))
+        self.with(|starter| starter.commit(workspace, message))
     }
     fn push(&self, workspace: &str) -> IpcResult<remote_proto::publish::PublishState> {
         self.changing(workspace, |starter| starter.push(workspace))

@@ -168,6 +168,10 @@ pub fn changed(app: &AppHandle, project_id: &str) {
 }
 
 impl PullRequests for AppPulls {
+    fn changed(&self, project_id: &str) {
+        self.readings.changed(project_id, Instant::now());
+    }
+
     fn of_project(&self, project_id: &str, every_open: bool) -> ProjectPulls {
         let state = self.app.state::<AppState>();
         let last = state.forge.last_read(project_id);

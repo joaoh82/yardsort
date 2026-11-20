@@ -120,6 +120,15 @@ impl Polled {
         Some(full)
     }
 
+    /// [`PullRequests::changed`], at `now`.
+    fn changed_at(&self, project_id: &str, now: Instant) {
+        self.marks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .changed
+            .insert(project_id.to_owned(), now);
+    }
+
     /// Reads `project_id` on a thread of its own.
     fn start(&self, project_id: &str, full: bool) {
         let marks = Arc::clone(&self.marks);
@@ -142,11 +151,10 @@ impl Polled {
                 }
             });
         if spawned.is_err() {
-            marks
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .reading
-                .remove(&project_id);
+            let mut marks = marks.lock().unwrap_or_else(PoisonError::into_inner);
+            marks.reading.remove(&project_id);
+            // Nothing was read: a change since the last reading still wants one.
+            marks.began.remove(&project_id);
         }
     }
 }
@@ -222,11 +230,7 @@ impl Drop for Over {
 
 impl PullRequests for Polled {
     fn changed(&self, project_id: &str) {
-        self.marks
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .changed
-            .insert(project_id.to_owned(), Instant::now());
+        self.changed_at(project_id, Instant::now());
     }
 
     fn of_project(&self, project_id: &str, every_open: bool) -> ProjectPulls {
