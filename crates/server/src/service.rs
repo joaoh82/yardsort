@@ -11,6 +11,7 @@ use remote_proto::{DeviceId, ErrorCode, ErrorReason, ProtocolVersion, RemoteErro
 use url::Url;
 
 use crate::entitlements::{Action, Counts, Entitlements};
+use crate::journal::Journal;
 use crate::oidc::{OidcError, Provider, ProviderConfig, CLOCK_LEEWAY_MS};
 use crate::push::{DisabledPush, PushProvider};
 use crate::records::{
@@ -70,6 +71,7 @@ pub struct ControlService<R> {
     pub(crate) relay: Relay,
     pub(crate) push: Arc<dyn PushProvider>,
     pub(crate) entitlements: Entitlements,
+    pub(crate) journal: Arc<Journal>,
 }
 
 impl<R: Records> ControlService<R> {
@@ -99,6 +101,7 @@ impl<R: Records> ControlService<R> {
             relay: Relay::default(),
             push: Arc::new(DisabledPush),
             entitlements: Entitlements::none(),
+            journal: Arc::new(Journal::none()),
         })
     }
 
@@ -113,6 +116,18 @@ impl<R: Records> ControlService<R> {
     pub fn with_entitlements(mut self, entitlements: Entitlements) -> Self {
         self.entitlements = entitlements;
         self
+    }
+
+    /// Write each revocation and deletion out to `journal`, and refuse every request while the
+    /// records are found behind it. Without, nothing is written out and nothing refused.
+    pub fn with_journal(mut self, journal: Journal) -> Self {
+        self.journal = Arc::new(journal);
+        self
+    }
+
+    /// The journal, to check it before serving.
+    pub fn journal(&self) -> &Journal {
+        &self.journal
     }
 
     pub fn records(&self) -> &R {

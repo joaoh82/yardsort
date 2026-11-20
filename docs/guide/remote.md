@@ -584,6 +584,17 @@ The usual reason is the server seeing this computer's sign-in used twice, which 
 second copy of Yardsort used to cause that. Now only one copy runs on a profile, and starting it again
 [brings up the window it already has](troubleshooting.md#yardsort-is-already-open).
 
+## When the server was restored from a backup
+
+A server whose database was just put back from a backup answers every request, for a few minutes,
+with "This server's records are being brought up to date after a restore. Try again in a few
+minutes." Its operator is making again what was done since the backup: devices revoked, computers
+removed, accounts deleted. A device you revoked stays revoked, and an account you deleted stays
+deleted. Anything else done since the backup may need doing again: a device signed in since
+signs in again, and a phone paired since pairs again. Nothing on your computer or your phone is
+touched. Running a server yourself, see
+[the journal](../../crates/server/self-host/README.md#the-journal).
+
 ## Exporting your account
 
 You can save everything the server keeps of your account as one JSON file, to keep or to read:

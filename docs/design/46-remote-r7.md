@@ -6,7 +6,9 @@ computer with no screen to do what the clients do. Slice 1, exporting an account
 screen on 2026-11-18. Slice 4, entitlements and metering, built the same day (§11). Slices 1, 2
 and 4 merged, and `main` deployed to staging on 2026-11-18: its usage counters checked there. The
 owner chose to skip deleting an account on staging, which would be theirs; deletion's proof is the
-local tests and smoke tests.
+local tests and smoke tests. Slice 3, a restore that cannot resurrect, built on 2026-11-19 (§12):
+its tests pass on both stores; the restore drill on staging waits on a deploy and the owner's
+go-ahead.
 
 This is the plan for the last phase of the proposal ([25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)
 §13): what it has to show, what it starts from, the decisions it needs, and the slices in the order
@@ -426,3 +428,96 @@ server asking a stand-in service whose answers change as it runs; a computer wit
 held back in the plan's words while it stays linked; a phone refused a connection, then let in once
 the plan has room, and the note going up; a new phone refused signing in while the paired one still
 connects; and every question carrying the token and naming nobody.
+
+## 12 · Slice 3, a restore that cannot resurrect
+
+Built on 2026-11-19, on question 6's answer: a bucket in Tigris, Fly's object store.
+
+**What is journaled** (`crates/server/src/journal.rs`). Everything that closes something: a device
+revoked, by its person, by the operator's `revoke-account`, or because a copy of its refresh
+credential was presented; a grant revoked; a host removed, with the grants it revokes; an account
+deleted. Each is an entry of ids and a time and nothing else: `{"v":1,"at":…,"what":
+"devicesRevoked","account":…,"devices":[…],"reason":"byOwner"}`, `grantRevoked`, `hostRemoved`,
+`accountDeleted`. No name, no subject, no email. A revocation of something already revoked writes
+nothing. Its key sorts by time: `journal/<ms, 16 digits>-<uuid>.json`.
+
+**How an entry travels.** The store writes it in the same transaction as what it records, as a row
+of `journal` (migration 0014), not yet written out. Every instance sends waiting rows to the
+journal every five seconds and marks them written; `revoke-account` sends its own at once when
+the journal is configured where it runs. A row
+is never deleted: the keys the records hold are how a restored database is told apart from a
+current one. The one window: a database lost within seconds of a revocation, before any instance
+sent it, loses that entry with it. Nothing is overwritten in the journal: a `PUT` carries
+`If-None-Match: *`, and a key is never made twice.
+
+**Finding a restored database.** Each instance asks the journal for its keys from an hour before
+the latest key its records hold (instances' clocks differ a little), before it serves anything,
+every five minutes after, and whenever another says it reconciled (`Signal::Journal`, a new
+signal an older instance ignores). A key the records do not hold means they were restored: from
+then on every request, `/health` included, gets 503 with `Retry-After: 60` and a retryable error
+saying the records are being brought up to date after a restore. No protocol change: the clients
+already show a server's message and try again. A journal that cannot be asked leaves the instance
+as it was, with a warning: an outage of the bucket never takes the service down. With no journal
+configured, the server says at start that a restore can bring back what was closed, and the rows
+wait in the records for one.
+
+**`yardsort-server reconcile`.** With `DATABASE_URL` and the journal's settings: sends what the
+records hold that the journal lacks, then replays, in key order, every entry the records do not
+hold, each in one transaction with noting its key, so a second run, or one after an interrupted
+run, replays only what is left. A replay closes what is still open and writes no entry of its
+own; a deleted account's credentials are kept as `deleted_credentials` again, so its devices are
+told why they are signed out. It prints what it did again, then signals the running servers,
+which check at once and serve, and close the live sockets of the devices it revoked. An entry a
+newer server wrote is left, named, and the command fails: the records stay behind until that
+server's `reconcile` runs.
+
+**Where it lives.** `YARDSORT_JOURNAL_DIR`, a directory, for a self-hoster whose database backups
+are kept apart from it; or `YARDSORT_JOURNAL_BUCKET`, or `BUCKET_NAME` as `fly storage create`
+leaves it, with `AWS_ENDPOINT_URL_S3`, `AWS_REGION` (`auto` unless set), `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY` (or `_FILE`). Staging's secrets were set that way on 2026-11-19, so its
+next deploy journals to `yardsort-journal-staging`. The bucket is named in the host
+(`<bucket>.fly.storage.tigris.dev`): Tigris refuses the path style for buckets made since February 2025. An endpoint at an IP address or `localhost`, such as MinIO on the same machine, is addressed
+by path; `YARDSORT_JOURNAL_ADDRESSING` says otherwise. Requests are signed with Signature Version
+4 by hand (`hmac` and `sha2`, no SDK), checked against AWS's two published examples. HTTPS only,
+or plain HTTP to a loopback address. Whether Tigris honours `If-None-Match` is to be seen on
+staging; one that ignores it writes the same bytes again, which changes nothing.
+
+**What the journal keeps of a person.** Ids: an account's, its devices', hosts' and grants'. A
+deleted account's id stays in the journal and in the records' `journal` table, linked to nothing
+else, on purpose: it is what keeps a restore from bringing the account back. For slice 8's list of
+what is kept: those ids and times, for as long as backups that could hold the account exist.
+
+**What it does not do yet.** Synced records are as the backup has them: a note revoked or a
+record deleted after the backup is open again on the server, until a device that holds the newer
+state pushes it. Notes revoked by sync are not journaled; whether they should be, and how a
+replay would meet sync's revisions, is a question for the owner before production. The bucket's
+key `fly storage create` made can delete as well as write, so the journal's safety from the
+server itself is that nothing in it deletes. Retention: the journal is kept whole, and is small
+(a revocation a few hundred bytes).
+
+**Proof.** `src/journal.rs`'s tests: AWS's examples of signing a `GET` and a listing, dates in
+UTC, keys sorting by time, an entry read back and a newer one refused, a listing read page by
+page, a bucket named in the host or, at an address, in the path, and a directory journal keeping
+each key once. `src/config.rs`: a directory, or Fly's
+bucket settings, each missing one named, plain HTTP refused off this machine, both at once
+refused, and the secret never printed. `tests/records.rs` on both stores: every closing writes one
+entry in its step and a repeat writes none, with the operator's naming only the devices it
+revoked; rows written out a few at a time and kept; a replay closing what it names once, at the
+entry's time and for its reason, another account's device named with it left alone, and writing
+nothing new. `tests/journal.rs` on both stores, the drill in small: a backup taken (a copy of the
+store; on PostgreSQL a fresh schema with every row copied in), then a tablet revoked, a host
+removed and an account deleted; a server on the backup with no journal letting the tablet back
+in; one with the journal refusing everything with 503, then serving once `reconcile` replayed
+three entries, the tablet signed out, the deleted account's phone told so, the host gone, and the
+others untouched; a second `reconcile` replaying nothing. And: a journal that cannot be asked
+leaving the server serving; a newer server's entry left and named, the records still behind; a
+stand-in S3 that checks every request's signature against what arrived, paging two keys at a time
+with a token that needs escaping, refusing to overwrite and refusing a wrong secret.
+`tests/delete.rs`'s check of every table now names `journal` as holding no account's rows.
+
+**Not run yet: the restore drill on staging** ([the restore runbook](../operations/restore.md)):
+deploy `main` with the journal on, sign a throwaway device in and note the time, revoke it and
+delete a throwaway account, restore staging's database to the time noted as a Neon branch, point
+staging at it, see every request refused, run `reconcile`, and see the device stay out and the
+account stay gone. It needs the owner's go-ahead for the deploy, and a ZITADEL sign-in in the
+browser, which is the owner's.

@@ -29,6 +29,7 @@ use remote_proto::sync::{
 use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, Scope};
 use tokio::sync::broadcast;
 
+use crate::journal::{self, Closed, Entry};
 use crate::sync::{decide, Applied, ProjectState, Pulled, Snapshot, Verdict};
 use crate::tokens::{self, TokenHash};
 use crate::usage::{UsageDay, UsageDelta};
@@ -312,6 +313,9 @@ pub enum Signal {
     Linked(HostId),
     /// A project this host syncs changed: tell it on its link, to pull.
     Synced(HostId),
+    /// The records were reconciled with the journal (`crate::journal`): ask it again now
+    /// whether they are behind.
+    Journal,
 }
 
 impl Signal {
@@ -323,6 +327,7 @@ impl Signal {
             Self::Pairing(host, grant) => format!("pairing {host} {grant}"),
             Self::Linked(host) => format!("linked {host}"),
             Self::Synced(host) => format!("synced {host}"),
+            Self::Journal => "journal".into(),
         }
     }
 
@@ -334,6 +339,7 @@ impl Signal {
                 Some(Self::Recheck(AccountId((*account).to_owned())))
             }
             ["recheck-all"] => Some(Self::RecheckAll),
+            ["journal"] => Some(Self::Journal),
             ["pairing", host, grant] => Some(Self::Pairing(
                 HostId::new(*host).ok()?,
                 GrantId::new(*grant).ok()?,
@@ -739,6 +745,34 @@ pub trait Records: Send + Sync {
         now: i64,
     ) -> impl Future<Output = Result<bool>> + Send;
 
+    /// Up to `limit` rows of the journal not yet written out (`crate::journal`), oldest first.
+    fn journal_unwritten(
+        &self,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<journal::Row>>> + Send;
+
+    /// Note that these rows are written out. Unknown keys are passed over.
+    fn journal_written(&self, keys: &[String]) -> impl Future<Output = Result<()>> + Send;
+
+    /// Which of these keys the records hold, written out or not.
+    fn journal_known(
+        &self,
+        keys: &[String],
+    ) -> impl Future<Output = Result<BTreeSet<String>>> + Send;
+
+    /// The greatest key the records hold.
+    fn journal_latest(&self) -> impl Future<Output = Result<Option<String>>> + Send;
+
+    /// Close what an entry of the journal closed, and note its key as held and written out, in
+    /// one step. Nothing is done, and `false` is the answer, when the records hold the key
+    /// already; otherwise whether anything was still open. Writes no entry of its own.
+    fn replay(
+        &self,
+        row: &journal::Row,
+        entry: &Entry,
+        now: i64,
+    ) -> impl Future<Output = Result<bool>> + Send;
+
     /// The account's own row. `None` when there is no such account.
     fn account_row(
         &self,
@@ -865,6 +899,7 @@ pub enum DeliveryEnd {
     Gone,
 }
 
+#[derive(Clone)]
 struct PushTokenRow {
     account: String,
     platform: String,
@@ -872,6 +907,7 @@ struct PushTokenRow {
     updated_at: i64,
 }
 
+#[derive(Clone)]
 struct NoticeRow {
     id: String,
     account: String,
@@ -889,6 +925,7 @@ struct NoticeRow {
     host_id: Option<String>,
 }
 
+#[derive(Clone)]
 struct DeliveryRow {
     notice: String,
     device: String,
@@ -936,7 +973,7 @@ pub(crate) fn refused_notices(preferences: &NotificationPreferences) -> Vec<Stri
         .collect()
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct State {
     /// Each with when it was made.
     accounts: HashMap<(String, String), (AccountId, i64)>,
@@ -962,10 +999,12 @@ struct State {
     deleted: HashMap<TokenHash, i64>,
     usage: HashMap<(AccountId, i64), UsageDay>,
     usage_devices: HashMap<(AccountId, i64), BTreeSet<DeviceId>>,
+    /// The journal's rows by key: each entry, and whether it is written out.
+    journal: BTreeMap<String, (String, bool)>,
 }
 
 /// One account's synced records.
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct AccountSync {
     head: Cursor,
     floor: Cursor,
@@ -1029,6 +1068,15 @@ impl MemoryRecords {
         Ok(f(&mut state))
     }
 
+    /// A copy of everything as it is now, sharing nothing with it from then on: for a test, the
+    /// backup a database restored from would be.
+    pub fn backup(&self) -> Result<Self> {
+        Ok(Self {
+            state: Arc::new(Mutex::new(self.with(|s| s.clone())?)),
+            signals: broadcast::channel(SIGNALS_KEPT).0,
+        })
+    }
+
     /// How many accounts exist, for a test to check that a refused sign-in created none.
     pub fn account_count(&self) -> usize {
         self.with(|s| s.accounts.len()).unwrap_or_default()
@@ -1036,6 +1084,137 @@ impl MemoryRecords {
 }
 
 impl State {
+    /// [`Records::delete_account`]'s step, without its journal entry.
+    fn delete_account(&mut self, account: &AccountId, now: i64) -> Option<Deleted> {
+        let s = self;
+        let before = s.accounts.len();
+        s.accounts.retain(|_, (id, _)| id != account);
+        if s.accounts.len() == before {
+            return None;
+        }
+        let devices: BTreeSet<String> = s
+            .devices
+            .iter()
+            .filter(|d| d.account == *account)
+            .map(|d| d.id.as_str().to_owned())
+            .collect();
+        let hosts: BTreeSet<HostId> = s
+            .hosts
+            .iter()
+            .filter(|(h, _)| h.account == *account)
+            .map(|(h, _)| h.id.clone())
+            .collect();
+        s.deleted.retain(|_, until| *until > now);
+        let ours = |device: &DeviceId| devices.contains(device.as_str());
+        for (hash, access) in s.access.iter().filter(|(_, a)| ours(&a.device)) {
+            s.deleted.insert(*hash, access.expires_at);
+        }
+        for (hash, refresh) in s.refresh.iter().filter(|(_, r)| ours(&r.device)) {
+            s.deleted.insert(*hash, refresh.expires_at);
+        }
+        s.access.retain(|_, a| !ours(&a.device));
+        s.refresh.retain(|_, r| !ours(&r.device));
+        s.devices.retain(|d| d.account != *account);
+        s.hosts.retain(|(h, _)| h.account != *account);
+        s.offers.retain(|(o, _)| o.account != *account);
+        s.grants.retain(|g| g.account != *account);
+        s.links.retain(|host, _| !hosts.contains(host));
+        s.handoffs.retain(|h| h.account != *account);
+        s.push_tokens.retain(|_, row| row.account != account.0);
+        s.preferences.remove(&account.0);
+        s.usage.retain(|(a, _), _| a != account);
+        s.usage_devices.retain(|(a, _), _| a != account);
+        let notices: BTreeSet<String> = s
+            .notices
+            .iter()
+            .filter(|n| n.account == account.0)
+            .map(|n| n.id.clone())
+            .collect();
+        s.notices.retain(|n| n.account != account.0);
+        s.deliveries
+            .retain(|d| !notices.contains(&d.notice) && !devices.contains(&d.device));
+        let records = s
+            .sync
+            .remove(&account.0)
+            .map_or(0, |sync| sync.records.len());
+        Some(Deleted {
+            devices: devices.len(),
+            hosts: hosts.len(),
+            records,
+        })
+    }
+
+    /// A journal row for this entry, not yet written out.
+    fn write(&mut self, entry: &Entry) {
+        let row = journal::Row::of(entry);
+        self.journal.insert(row.key, (row.body, false));
+    }
+
+    /// Revoke these devices of the account, or every one, unless already revoked. The ones it
+    /// revoked.
+    fn revoke_devices(
+        &mut self,
+        account: &AccountId,
+        only: Option<&[String]>,
+        revoked: Revoked,
+    ) -> Vec<String> {
+        let mut newly = Vec::new();
+        let mut gone = Vec::new();
+        for device in &mut self.devices {
+            if device.account != *account
+                || only.is_some_and(|ids| !ids.iter().any(|id| id == device.id.as_str()))
+            {
+                continue;
+            }
+            gone.push(device.id.as_str().to_owned());
+            if device.revoked.is_none() {
+                device.revoked = Some(revoked);
+                newly.push(device.id.as_str().to_owned());
+            }
+        }
+        for id in gone {
+            self.push_tokens.remove(&id);
+        }
+        newly
+    }
+
+    /// Revoke a grant that is pending or in force. `None` when the account has no such grant;
+    /// otherwise whether it was still open.
+    fn revoke_grant(&mut self, account: &AccountId, id: &GrantId, now: i64) -> Option<bool> {
+        let grant = self
+            .grants
+            .iter_mut()
+            .find(|g| g.id == *id && g.account == *account)?;
+        let open = matches!(grant.status, GrantStatus::Pending | GrantStatus::Approved);
+        if open {
+            grant.status = GrantStatus::Revoked;
+            grant.decided_at = Some(now);
+        }
+        Some(open)
+    }
+
+    /// [`Records::remove_host`]'s step, without its journal entry.
+    fn remove_host(&mut self, account: &AccountId, id: &HostId, now: i64) -> bool {
+        let Some((_, removed)) = self
+            .hosts
+            .iter_mut()
+            .find(|(h, removed)| h.id == *id && h.account == *account && removed.is_none())
+        else {
+            return false;
+        };
+        *removed = Some(now);
+        self.offers.retain(|(o, _)| o.host != *id);
+        for grant in &mut self.grants {
+            if grant.host == *id
+                && matches!(grant.status, GrantStatus::Pending | GrantStatus::Approved)
+            {
+                grant.status = GrantStatus::Revoked;
+                grant.decided_at = Some(now);
+            }
+        }
+        true
+    }
+
     fn issue(&mut self, device: &DeviceId, issued: Issued) {
         self.access.insert(
             issued.access,
@@ -1118,61 +1297,14 @@ impl Records for MemoryRecords {
 
     async fn delete_account(&self, account: &AccountId, now: i64) -> Result<Option<Deleted>> {
         self.with(|s| {
-            let before = s.accounts.len();
-            s.accounts.retain(|_, (id, _)| id != account);
-            if s.accounts.len() == before {
-                return None;
-            }
-            let devices: BTreeSet<String> = s
-                .devices
-                .iter()
-                .filter(|d| d.account == *account)
-                .map(|d| d.id.as_str().to_owned())
-                .collect();
-            let hosts: BTreeSet<HostId> = s
-                .hosts
-                .iter()
-                .filter(|(h, _)| h.account == *account)
-                .map(|(h, _)| h.id.clone())
-                .collect();
-            s.deleted.retain(|_, until| *until > now);
-            let ours = |device: &DeviceId| devices.contains(device.as_str());
-            for (hash, access) in s.access.iter().filter(|(_, a)| ours(&a.device)) {
-                s.deleted.insert(*hash, access.expires_at);
-            }
-            for (hash, refresh) in s.refresh.iter().filter(|(_, r)| ours(&r.device)) {
-                s.deleted.insert(*hash, refresh.expires_at);
-            }
-            s.access.retain(|_, a| !ours(&a.device));
-            s.refresh.retain(|_, r| !ours(&r.device));
-            s.devices.retain(|d| d.account != *account);
-            s.hosts.retain(|(h, _)| h.account != *account);
-            s.offers.retain(|(o, _)| o.account != *account);
-            s.grants.retain(|g| g.account != *account);
-            s.links.retain(|host, _| !hosts.contains(host));
-            s.handoffs.retain(|h| h.account != *account);
-            s.push_tokens.retain(|_, row| row.account != account.0);
-            s.preferences.remove(&account.0);
-            s.usage.retain(|(a, _), _| a != account);
-            s.usage_devices.retain(|(a, _), _| a != account);
-            let notices: BTreeSet<String> = s
-                .notices
-                .iter()
-                .filter(|n| n.account == account.0)
-                .map(|n| n.id.clone())
-                .collect();
-            s.notices.retain(|n| n.account != account.0);
-            s.deliveries
-                .retain(|d| !notices.contains(&d.notice) && !devices.contains(&d.device));
-            let records = s
-                .sync
-                .remove(&account.0)
-                .map_or(0, |sync| sync.records.len());
-            Some(Deleted {
-                devices: devices.len(),
-                hosts: hosts.len(),
-                records,
-            })
+            let deleted = s.delete_account(account, now)?;
+            s.write(&Entry::new(
+                now,
+                Closed::AccountDeleted {
+                    account: account.0.clone(),
+                },
+            ));
+            Some(deleted)
         })
     }
 
@@ -1346,6 +1478,14 @@ impl Records for MemoryRecords {
                         reason: RevokeReason::RefreshReused,
                     });
                 }
+                s.write(&Entry::new(
+                    now,
+                    Closed::DevicesRevoked {
+                        account: device.account.0.clone(),
+                        devices: vec![device.id.as_str().to_owned()],
+                        reason: journal::Reason::RefreshReused,
+                    },
+                ));
                 return Rotation::Reused(device.account.clone());
             }
             if old.expires_at <= now {
@@ -1403,15 +1543,29 @@ impl Records for MemoryRecords {
         device: &DeviceId,
         revoked: Revoked,
     ) -> Result<bool> {
-        self.with(|s| match s.device_mut(device) {
-            Some(d) if d.account == *account => {
-                d.revoked.get_or_insert(revoked);
-                s.push_tokens.remove(device.as_str());
-                true
+        self.with(|s| {
+            if !s
+                .devices
+                .iter()
+                .any(|d| d.id == *device && d.account == *account)
+            {
+                return false;
             }
-            _ => false,
+            let newly = s.revoke_devices(account, Some(&[device.as_str().to_owned()]), revoked);
+            if !newly.is_empty() {
+                s.write(&Entry::new(
+                    revoked.at,
+                    Closed::DevicesRevoked {
+                        account: account.0.clone(),
+                        devices: newly,
+                        reason: revoked.reason.into(),
+                    },
+                ));
+            }
+            true
         })
     }
+
     async fn revoke_account(
         &self,
         issuer: &str,
@@ -1424,19 +1578,17 @@ impl Records for MemoryRecords {
                 .get(&(issuer.to_owned(), subject.to_owned()))?
                 .0
                 .clone();
-            let mut count = 0;
-            let mut gone = Vec::new();
-            for device in &mut s.devices {
-                if device.account == account {
-                    gone.push(device.id.as_str().to_owned());
-                    if device.revoked.is_none() {
-                        device.revoked = Some(revoked);
-                        count += 1;
-                    }
-                }
-            }
-            for id in gone {
-                s.push_tokens.remove(&id);
+            let newly = s.revoke_devices(&account, None, revoked);
+            let count = newly.len();
+            if !newly.is_empty() {
+                s.write(&Entry::new(
+                    revoked.at,
+                    Closed::DevicesRevoked {
+                        account: account.0.clone(),
+                        devices: newly,
+                        reason: revoked.reason.into(),
+                    },
+                ));
             }
             Some(count)
         })
@@ -1591,42 +1743,36 @@ impl Records for MemoryRecords {
     }
 
     async fn revoke_grant(&self, account: &AccountId, id: &GrantId, now: i64) -> Result<bool> {
-        self.with(|s| {
-            let Some(grant) = s
-                .grants
-                .iter_mut()
-                .find(|g| g.id == *id && g.account == *account)
-            else {
-                return false;
-            };
-            if matches!(grant.status, GrantStatus::Pending | GrantStatus::Approved) {
-                grant.status = GrantStatus::Revoked;
-                grant.decided_at = Some(now);
+        self.with(|s| match s.revoke_grant(account, id, now) {
+            None => false,
+            Some(open) => {
+                if open {
+                    s.write(&Entry::new(
+                        now,
+                        Closed::GrantRevoked {
+                            account: account.0.clone(),
+                            grant: id.as_str().to_owned(),
+                        },
+                    ));
+                }
+                true
             }
-            true
         })
     }
 
     async fn remove_host(&self, account: &AccountId, id: &HostId, now: i64) -> Result<bool> {
         self.with(|s| {
-            let Some((_, removed)) = s
-                .hosts
-                .iter_mut()
-                .find(|(h, removed)| h.id == *id && h.account == *account && removed.is_none())
-            else {
-                return false;
-            };
-            *removed = Some(now);
-            s.offers.retain(|(o, _)| o.host != *id);
-            for grant in &mut s.grants {
-                if grant.host == *id
-                    && matches!(grant.status, GrantStatus::Pending | GrantStatus::Approved)
-                {
-                    grant.status = GrantStatus::Revoked;
-                    grant.decided_at = Some(now);
-                }
+            let removed = s.remove_host(account, id, now);
+            if removed {
+                s.write(&Entry::new(
+                    now,
+                    Closed::HostRemoved {
+                        account: account.0.clone(),
+                        host: id.as_str().to_owned(),
+                    },
+                ));
             }
-            true
+            removed
         })
     }
 
@@ -2156,6 +2302,82 @@ impl Records for MemoryRecords {
             }
             sync.links.insert(key);
             true
+        })
+    }
+
+    async fn journal_unwritten(&self, limit: usize) -> Result<Vec<journal::Row>> {
+        self.with(|s| {
+            s.journal
+                .iter()
+                .filter(|(_, (_, written))| !written)
+                .take(limit)
+                .map(|(key, (body, _))| journal::Row {
+                    key: key.clone(),
+                    body: body.clone(),
+                })
+                .collect()
+        })
+    }
+
+    async fn journal_written(&self, keys: &[String]) -> Result<()> {
+        self.with(|s| {
+            for key in keys {
+                if let Some((_, written)) = s.journal.get_mut(key) {
+                    *written = true;
+                }
+            }
+        })
+    }
+
+    async fn journal_known(&self, keys: &[String]) -> Result<BTreeSet<String>> {
+        self.with(|s| {
+            keys.iter()
+                .filter(|k| s.journal.contains_key(*k))
+                .cloned()
+                .collect()
+        })
+    }
+
+    async fn journal_latest(&self) -> Result<Option<String>> {
+        self.with(|s| s.journal.keys().next_back().cloned())
+    }
+
+    async fn replay(&self, row: &journal::Row, entry: &Entry, now: i64) -> Result<bool> {
+        self.with(|s| {
+            if s.journal.contains_key(&row.key) {
+                return false;
+            }
+            let changed = match &entry.closed {
+                Closed::DevicesRevoked {
+                    account,
+                    devices,
+                    reason,
+                } => !s
+                    .revoke_devices(
+                        &AccountId(account.clone()),
+                        Some(devices),
+                        Revoked {
+                            at: entry.at,
+                            reason: (*reason).into(),
+                        },
+                    )
+                    .is_empty(),
+                Closed::GrantRevoked { account, grant } => match GrantId::new(grant.as_str()) {
+                    Ok(grant) => s
+                        .revoke_grant(&AccountId(account.clone()), &grant, entry.at)
+                        .unwrap_or(false),
+                    Err(_) => false,
+                },
+                Closed::HostRemoved { account, host } => match HostId::new(host.as_str()) {
+                    Ok(host) => s.remove_host(&AccountId(account.clone()), &host, entry.at),
+                    Err(_) => false,
+                },
+                Closed::AccountDeleted { account } => {
+                    s.delete_account(&AccountId(account.clone()), now).is_some()
+                }
+            };
+            s.journal.insert(row.key.clone(), (row.body.clone(), true));
+            changed
         })
     }
 

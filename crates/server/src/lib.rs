@@ -24,6 +24,7 @@ mod delete_page;
 pub mod entitlements;
 mod export;
 pub mod http;
+pub mod journal;
 pub mod limit;
 mod notices;
 pub mod oidc;

@@ -141,6 +141,8 @@ pub fn router<R: Records + Clone + 'static>(
     crate::limit::start_sweeping(Arc::downgrade(&service));
     crate::sync::start_pruning(Arc::downgrade(&service));
     crate::usage::start_flushing(Arc::downgrade(&service));
+    crate::journal::start(Arc::downgrade(&service));
+    let restoring = Arc::clone(&service);
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/v1/server", get(describe::<R>))
@@ -245,6 +247,7 @@ pub fn router<R: Records + Clone + 'static>(
         )
         .fallback(|| async { failure(RemoteError::not_found()) })
         .layer(DefaultBodyLimit::max(MAX_BODY))
+        .layer(middleware::from_fn_with_state(restoring, behind::<R>))
         .layer(middleware::from_fn(guard))
         .with_state(service)
 }
@@ -1121,6 +1124,30 @@ fn page(status: StatusCode, message: &str) -> Response {
         format!("{message}\n\nYou can close this window.\n"),
     )
         .into_response()
+}
+
+/// Every request, `/health` included, while the records are found behind the journal: they were
+/// restored from a backup, and serving them could let a revoked device back in or show a deleted
+/// account. Refused until `yardsort-server reconcile` has replayed it (`crate::journal`).
+async fn behind<R: Records>(
+    State(service): State<Service<R>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !service.journal.behind() {
+        return next.run(request).await;
+    }
+    let mut error = RemoteError::new(
+        ErrorCode::Internal,
+        "This server's records are being brought up to date after a restore. Try again in a few \
+         minutes.",
+    );
+    error.retryable = true;
+    let mut response = (StatusCode::SERVICE_UNAVAILABLE, Json(&error)).into_response();
+    response
+        .headers_mut()
+        .insert(header::RETRY_AFTER, HeaderValue::from_static("60"));
+    response
 }
 
 /// On every response: nothing is cached (credentials and codes pass through here), and a page the

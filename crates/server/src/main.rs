@@ -9,6 +9,11 @@
 //! `yardsort-server usage [--from DATE] [--to DATE]` prints what each account used a day at a
 //! time, `YYYY-MM-DD` in UTC, the last seven days unless told otherwise (`crate::usage`). It too
 //! needs only `DATABASE_URL`.
+//!
+//! `yardsort-server reconcile` brings a database restored from a backup up to date with the
+//! journal (`yardsort_server::journal`): every revocation and deletion made since the backup is
+//! made again. It needs `DATABASE_URL` and the journal's settings, and tells the running servers,
+//! which refuse every request until it has run.
 
 use std::io::IsTerminal;
 use std::net::SocketAddr;
@@ -18,13 +23,14 @@ use tracing_subscriber::EnvFilter;
 use yardsort_server::config::{AdminSettings, Settings};
 use yardsort_server::entitlements::Entitlements;
 use yardsort_server::http::{self, now_ms};
+use yardsort_server::journal::{self, Journal, Standing};
 use yardsort_server::postgres::PgRecords;
 use yardsort_server::records::{Records, RevokeReason, Revoked, Signal};
 use yardsort_server::relay::Relay;
 use yardsort_server::{oidc, ControlService, ServerConfig};
 
 const USAGE: &str = "usage: yardsort-server [revoke-account --subject SUBJECT [--issuer ISSUER] \
-                     | usage [--from YYYY-MM-DD] [--to YYYY-MM-DD]]";
+                     | usage [--from YYYY-MM-DD] [--to YYYY-MM-DD] | reconcile]";
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -40,6 +46,8 @@ async fn main() -> ExitCode {
         None => serve().await,
         Some("revoke-account") => revoke_account(&args[1..]).await,
         Some("usage") => usage(&args[1..]).await,
+        Some("reconcile") if args.len() == 1 => reconcile().await,
+        Some("reconcile") => Err(format!("reconcile takes nothing more\n{USAGE}")),
         Some("help" | "-h" | "--help") => {
             println!("{USAGE}");
             Ok(())
@@ -87,7 +95,28 @@ async fn serve() -> Result<(), String> {
     .with_entitlements(match settings.entitlements {
         Some(service) => Entitlements::service(service.url, service.token, http_client.clone()),
         None => Entitlements::none(),
+    })
+    .with_journal(match settings.journal {
+        Some(journal) => Journal::new(journal.store(http_client.clone())),
+        None => Journal::none(),
     });
+    match service.journal().store() {
+        Some(store) => tracing::info!(
+            "revocations and deletions are journaled in {}",
+            store.describe()
+        ),
+        None => tracing::warn!(
+            "no journal (YARDSORT_JOURNAL_DIR or a bucket): a restore of the database from a \
+             backup can let revoked devices back in and bring deleted accounts back"
+        ),
+    }
+    // Before serving anything: records restored from a backup answer nothing until reconciled.
+    if service.journal().check(service.records()).await == Standing::Behind {
+        tracing::error!(
+            "every request is refused with 503 until `yardsort-server reconcile` has run against \
+             this database"
+        );
+    }
     tracing::info!(
         entitlements = service.entitlements_configured(),
         "entitlements are asked when configured; unset, everything is allowed"
@@ -137,6 +166,59 @@ async fn serve() -> Result<(), String> {
         tracing::error!("usage: records: {error}");
     }
     Ok(())
+}
+
+/// Replay the journal into restored records, after sending them what they hold that it lacks.
+async fn reconcile() -> Result<(), String> {
+    let settings = AdminSettings::from_env().map_err(|e| e.to_string())?;
+    let store = settings
+        .journal
+        .ok_or("no journal is configured: set YARDSORT_JOURNAL_DIR, or the bucket's settings")?
+        .store(oidc::http_client().map_err(|e| e.to_string())?);
+    let records = PgRecords::connect(settings.database_url.expose())
+        .await
+        .map_err(|e| e.to_string())?;
+    println!("Reconciling the records with {}.", store.describe());
+    let done = journal::reconcile(&store, &records, now_ms()).await?;
+    if done.sent > 0 {
+        println!("Sent {} the journal did not have yet.", entries(done.sent));
+    }
+    if done.replayed == 0 {
+        println!("Nothing to replay: the records hold every entry of the journal.");
+    } else {
+        println!(
+            "Replayed {} the records did not have: revoked {} again, revoked {} again, removed {} \
+             again, deleted {} again.{}",
+            entries(done.replayed),
+            counted(done.devices, "device", "devices"),
+            counted(done.grants, "grant", "grants"),
+            counted(done.hosts, "host", "hosts"),
+            counted(done.accounts, "account", "accounts"),
+            match done.replayed - done.changed {
+                0 => String::new(),
+                n => format!(" {} closed already.", entries(n)),
+            },
+        );
+    }
+    if !done.unreadable.is_empty() {
+        return Err(format!(
+            "{} written by a newer server, which this one cannot read: run that server's \
+             `reconcile`. Until then the records stay behind, and the servers keep refusing \
+             requests: {}",
+            entries(done.unreadable.len()),
+            done.unreadable.join(", ")
+        ));
+    }
+    println!("Running servers serve again within moments.");
+    Ok(())
+}
+
+fn entries(n: usize) -> String {
+    counted(n, "entry", "entries")
+}
+
+fn counted(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// Print each account's days, from `--from` to `--to`.
@@ -206,6 +288,13 @@ async fn revoke_account(args: &[String]) -> Result<(), String> {
         Some(count) => {
             let devices = if count == 1 { "device" } else { "devices" };
             println!("Revoked {count} {devices} of the account for {subject} at {issuer}.");
+            // Into the journal now, rather than at a running server's next send.
+            if let Some(journal) = settings.journal {
+                let store = journal.store(oidc::http_client().map_err(|e| e.to_string())?);
+                if let Err(error) = Journal::new(store).flush(&records).await {
+                    println!("Running servers write it to the journal within moments ({error}).");
+                }
+            }
             // Running servers close the devices' live sockets now, not at their next check.
             match records.signal(Signal::RecheckAll).await {
                 Ok(()) => println!("Running servers close their live connections now."),

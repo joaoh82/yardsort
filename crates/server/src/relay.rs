@@ -1104,6 +1104,8 @@ pub(crate) fn start_rechecks<R: Records + 'static>(service: Arc<ControlService<R
                         service.relay.tell_synced(&host);
                         Vec::new()
                     }
+                    // The journal's own task hears it (`crate::journal`).
+                    Some(Ok(Signal::Journal)) => Vec::new(),
                     // Started listening, or missed some: everything, as a round does.
                     Some(Ok(Signal::RecheckAll) | Err(broadcast::error::RecvError::Lagged(_))) => {
                         keep_places(&service).await;

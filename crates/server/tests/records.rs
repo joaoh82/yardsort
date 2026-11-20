@@ -15,6 +15,7 @@ use remote_proto::sync::{
 };
 use remote_proto::ErrorCode;
 use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, ProjectId, Scope};
+use yardsort_server::journal::{self, Closed, Entry, Reason};
 use yardsort_server::postgres::PgRecords;
 use yardsort_server::records::{
     AccountId, Allowance, Decision, Device, GrantFilter, GrantRecord, GrantStatus, Handoff, Host,
@@ -95,6 +96,8 @@ for_each_store!(
     usage_adds_up_a_day_at_a_time_and_counts_each_device_once,
     usage_goes_with_its_account_and_past_its_retention,
     sync_bytes_are_the_bodies_an_account_holds,
+    every_closing_writes_one_journal_entry_in_its_step,
+    a_replayed_entry_closes_what_it_names_once_and_writes_nothing,
 );
 
 const T: i64 = 1_800_000_000_000;
@@ -3108,4 +3111,311 @@ async fn sync_bytes_are_the_bodies_an_account_holds(records: Arc<impl Records>) 
     let with_note = records.sync_bytes(&alice).await.unwrap();
     assert!(with_note > before + 12, "{before} then {with_note}");
     assert_eq!(records.sync_bytes(&bob).await.unwrap(), 0);
+}
+
+/// The entries waiting to be written out, as what each closed, oldest first.
+async fn waiting(records: &impl Records) -> Vec<Closed> {
+    records
+        .journal_unwritten(100)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| {
+            let entry = Entry::parse(row.body.as_bytes()).expect("an entry");
+            assert_eq!(journal::key_time(&row.key), Some(entry.at), "{}", row.key);
+            entry.closed
+        })
+        .collect()
+}
+
+async fn every_closing_writes_one_journal_entry_in_its_step(records: Arc<impl Records>) {
+    assert_eq!(records.journal_latest().await.unwrap(), None);
+    let ada = records.account("https://id.one", "ada", T).await.unwrap();
+    let bob = records.account("https://id.one", "bob", T).await.unwrap();
+    let phone = enroll(&*records, &ada, "phone", T).await;
+    let laptop = enroll(&*records, &ada, "laptop", T).await;
+    let tablet = enroll(&*records, &ada, "tablet", T).await;
+    let bobs = enroll(&*records, &bob, "bobs", T).await;
+    let by = |at, reason| Revoked { at, reason };
+    // Opening things writes nothing.
+    assert_eq!(waiting(&*records).await, vec![]);
+
+    // A device revoked; again, and another account's, change nothing and write nothing.
+    assert!(records
+        .revoke(&ada, &phone.id, by(T + 1, RevokeReason::ByOwner))
+        .await
+        .unwrap());
+    assert!(records
+        .revoke(&ada, &phone.id, by(T + 2, RevokeReason::ByOwner))
+        .await
+        .unwrap());
+    assert!(!records
+        .revoke(&ada, &bobs.id, by(T + 2, RevokeReason::ByOwner))
+        .await
+        .unwrap());
+    // The operator's: the devices it revoked, not the one revoked before.
+    assert_eq!(
+        records
+            .revoke_account("https://id.one", "ada", by(T + 3, RevokeReason::ByOperator))
+            .await
+            .unwrap(),
+        Some(2)
+    );
+    assert_eq!(
+        records
+            .revoke_account("https://id.one", "ada", by(T + 4, RevokeReason::ByOperator))
+            .await
+            .unwrap(),
+        Some(0)
+    );
+    // A copy of a refresh credential presented: its device.
+    assert!(matches!(
+        records
+            .rotate(&h("bobs-refresh"), issued("bobs2", T + 5), T + 5)
+            .await
+            .unwrap(),
+        Rotation::Rotated(_)
+    ));
+    // Used, so presenting the old one again is not a retry.
+    assert!(records.access(&h("bobs2-access")).await.unwrap().is_some());
+    assert!(matches!(
+        records
+            .rotate(&h("bobs-refresh"), issued("bobs3", T + 6), T + 6)
+            .await
+            .unwrap(),
+        Rotation::Reused(_)
+    ));
+    // A grant revoked, once; a host removed, once, revoking its grants without entries of their
+    // own.
+    let workstation = host_device(&*records, &bob, "workstation").await;
+    let host = new_host(&bob, &workstation, "Workstation", T);
+    records.add_host(host.clone()).await.unwrap();
+    let revoked = pending(&host, &workstation, T + 7);
+    let removed_with = pending(&host, &bobs, T + 7);
+    records.add_grant(revoked.clone()).await.unwrap();
+    records.add_grant(removed_with.clone()).await.unwrap();
+    assert!(records
+        .revoke_grant(&bob, &revoked.id, T + 8)
+        .await
+        .unwrap());
+    assert!(records
+        .revoke_grant(&bob, &revoked.id, T + 9)
+        .await
+        .unwrap());
+    assert!(records.remove_host(&bob, &host.id, T + 10).await.unwrap());
+    assert!(!records.remove_host(&bob, &host.id, T + 11).await.unwrap());
+    assert_eq!(
+        status(&*records, &bob, &removed_with.id).await,
+        GrantStatus::Revoked
+    );
+    // An account deleted.
+    assert!(records
+        .delete_account(&ada, T + 12)
+        .await
+        .unwrap()
+        .is_some());
+    assert!(records
+        .delete_account(&ada, T + 13)
+        .await
+        .unwrap()
+        .is_none());
+
+    let mut two = vec![laptop.id.as_str().to_owned(), tablet.id.as_str().to_owned()];
+    two.sort();
+    let mut found = waiting(&*records).await;
+    if let Some(Closed::DevicesRevoked { devices, .. }) = found.get_mut(1) {
+        devices.sort();
+    }
+    assert_eq!(
+        found,
+        vec![
+            Closed::DevicesRevoked {
+                account: ada.0.clone(),
+                devices: vec![phone.id.as_str().to_owned()],
+                reason: Reason::ByOwner,
+            },
+            Closed::DevicesRevoked {
+                account: ada.0.clone(),
+                devices: two,
+                reason: Reason::ByOperator,
+            },
+            Closed::DevicesRevoked {
+                account: bob.0.clone(),
+                devices: vec![bobs.id.as_str().to_owned()],
+                reason: Reason::RefreshReused,
+            },
+            Closed::GrantRevoked {
+                account: bob.0.clone(),
+                grant: revoked.id.as_str().to_owned(),
+            },
+            Closed::HostRemoved {
+                account: bob.0.clone(),
+                host: host.id.as_str().to_owned(),
+            },
+            Closed::AccountDeleted {
+                account: ada.0.clone(),
+            },
+        ]
+    );
+
+    // Written out a few at a time, and kept: every key is still known, and the latest is the
+    // deletion's.
+    let rows = records.journal_unwritten(100).await.unwrap();
+    let keys: Vec<String> = rows.iter().map(|r| r.key.clone()).collect();
+    assert_eq!(records.journal_unwritten(2).await.unwrap(), rows[..2]);
+    records.journal_written(&keys[..4]).await.unwrap();
+    assert_eq!(records.journal_unwritten(100).await.unwrap(), rows[4..]);
+    records
+        .journal_written(&[
+            keys[4].clone(),
+            keys[5].clone(),
+            "journal/unknown.json".into(),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(records.journal_unwritten(100).await.unwrap(), vec![]);
+    let mut asked = keys.clone();
+    asked.push("journal/0000000000000001-elsewhere.json".into());
+    assert_eq!(
+        records.journal_known(&asked).await.unwrap(),
+        keys.iter().cloned().collect::<BTreeSet<_>>()
+    );
+    assert_eq!(records.journal_known(&[]).await.unwrap(), BTreeSet::new());
+    assert_eq!(
+        records.journal_latest().await.unwrap().as_deref(),
+        Some(keys[5].as_str())
+    );
+}
+
+async fn a_replayed_entry_closes_what_it_names_once_and_writes_nothing(records: Arc<impl Records>) {
+    let ada = records.account("https://id.one", "ada", T).await.unwrap();
+    let bob = records.account("https://id.one", "bob", T).await.unwrap();
+    let phone = enroll(&*records, &ada, "phone", T).await;
+    let laptop = enroll(&*records, &ada, "laptop", T).await;
+    let workstation = host_device(&*records, &ada, "workstation").await;
+    let host = new_host(&ada, &workstation, "Workstation", T);
+    records.add_host(host.clone()).await.unwrap();
+    let grant = pending(&host, &laptop, T);
+    records.add_grant(grant.clone()).await.unwrap();
+    let bobs = enroll(&*records, &bob, "bobs", T).await;
+
+    let replay = |closed: Closed, at: i64| {
+        let records = &records;
+        async move {
+            let entry = Entry::new(at, closed);
+            let row = journal::Row::of(&entry);
+            let first = records.replay(&row, &entry, T + 100).await.unwrap();
+            let again = records.replay(&row, &entry, T + 100).await.unwrap();
+            assert!(!again, "a key held is not replayed again");
+            assert!(records
+                .journal_known(std::slice::from_ref(&row.key))
+                .await
+                .unwrap()
+                .contains(&row.key));
+            first
+        }
+    };
+    // The device named, at the entry's time and for its reason; one of another account named
+    // with it is left alone.
+    assert!(
+        replay(
+            Closed::DevicesRevoked {
+                account: ada.0.clone(),
+                devices: vec![phone.id.as_str().to_owned(), bobs.id.as_str().to_owned()],
+                reason: Reason::RefreshReused,
+            },
+            T + 1,
+        )
+        .await
+    );
+    let devices = records.devices(&ada).await.unwrap();
+    let of = |id: &DeviceId| devices.iter().find(|d| d.id == *id).unwrap().revoked;
+    assert_eq!(
+        of(&phone.id),
+        Some(Revoked {
+            at: T + 1,
+            reason: RevokeReason::RefreshReused
+        })
+    );
+    assert_eq!(of(&laptop.id), None);
+    assert_eq!(records.devices(&bob).await.unwrap()[0].revoked, None);
+    // A new entry for a device revoked already changes nothing, and the first revocation stands.
+    assert!(
+        !replay(
+            Closed::DevicesRevoked {
+                account: ada.0.clone(),
+                devices: vec![phone.id.as_str().to_owned()],
+                reason: Reason::ByOperator,
+            },
+            T + 2,
+        )
+        .await
+    );
+    assert!(
+        replay(
+            Closed::GrantRevoked {
+                account: ada.0.clone(),
+                grant: grant.id.as_str().to_owned(),
+            },
+            T + 3,
+        )
+        .await
+    );
+    assert_eq!(
+        status(&*records, &ada, &grant.id).await,
+        GrantStatus::Revoked
+    );
+    assert!(
+        replay(
+            Closed::HostRemoved {
+                account: ada.0.clone(),
+                host: host.id.as_str().to_owned(),
+            },
+            T + 4,
+        )
+        .await
+    );
+    assert!(records.hosts(&ada).await.unwrap().is_empty());
+    // Another account's host, by its id, is not this account's to remove.
+    assert!(
+        !replay(
+            Closed::HostRemoved {
+                account: bob.0.clone(),
+                host: "not-a-host".into(),
+            },
+            T + 5,
+        )
+        .await
+    );
+    assert!(
+        replay(
+            Closed::AccountDeleted {
+                account: ada.0.clone(),
+            },
+            T + 6,
+        )
+        .await
+    );
+    assert_eq!(
+        records.find_account("https://id.one", "ada").await.unwrap(),
+        None
+    );
+    // What the deleted devices held is still told apart from an unknown credential.
+    assert!(records
+        .deleted_credential(&h("laptop-refresh"), T + 7)
+        .await
+        .unwrap());
+    // An account deleted already: nothing to do.
+    assert!(
+        !replay(
+            Closed::AccountDeleted {
+                account: ada.0.clone(),
+            },
+            T + 8,
+        )
+        .await
+    );
+    // Bob is untouched, and nothing replayed waits to be written out again.
+    assert_eq!(records.devices(&bob).await.unwrap().len(), 1);
+    assert_eq!(records.journal_unwritten(100).await.unwrap(), vec![]);
 }

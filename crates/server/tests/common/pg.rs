@@ -74,6 +74,41 @@ impl TestDatabase {
     pub async fn drop(self) {
         admin(&self.url, &format!("DROP SCHEMA {} CASCADE", self.schema)).await;
     }
+
+    /// A copy of every row in it, in a schema of its own migrated the same way: the backup a
+    /// database restored from would be. Triggers, and so the foreign keys' checks, are off while
+    /// rows go in, since tables are copied in no particular order.
+    #[allow(dead_code)]
+    pub async fn restored_copy(&self) -> TestDatabase {
+        let copy = database().await.expect("a database, since this one exists");
+        let (client, connection) = tokio_postgres::connect(&self.url, tokio_postgres::NoTls)
+            .await
+            .expect("connecting to the test database");
+        tokio::spawn(connection);
+        let tables: Vec<String> = client
+            .query(
+                "SELECT table_name FROM information_schema.tables
+                 WHERE table_schema = $1 AND table_type = 'BASE TABLE'
+                   AND table_name <> 'schema_migrations'",
+                &[&self.schema],
+            )
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get(0))
+            .collect();
+        let mut sql = String::from("BEGIN; SET LOCAL session_replication_role = replica;");
+        for table in tables {
+            sql.push_str(&format!(
+                "INSERT INTO {to}.{table} SELECT * FROM {from}.{table};",
+                to = copy.schema,
+                from = self.schema
+            ));
+        }
+        sql.push_str("COMMIT;");
+        client.batch_execute(&sql).await.expect("copying the rows");
+        copy
+    }
 }
 
 impl EmptySchema {

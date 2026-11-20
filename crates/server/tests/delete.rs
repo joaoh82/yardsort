@@ -470,10 +470,12 @@ async fn postgres_every_table_cascades_and_nothing_of_a_deleted_account_is_left(
     let (sql, connection) = db.config.connect(tokio_postgres::NoTls).await.unwrap();
     tokio::spawn(connection);
 
-    // Tables that hold nothing of any one account.
-    const NOT_AN_ACCOUNTS: [&str; 6] = [
+    // Tables that hold nothing of any one account. The journal holds a deleted account's id, and
+    // nothing else of it, on purpose: so that a restore cannot bring the account back.
+    const NOT_AN_ACCOUNTS: [&str; 7] = [
         "accounts",
         "deleted_credentials",
+        "journal",
         "pending_logins",
         "rate_limits",
         "schema_migrations",
