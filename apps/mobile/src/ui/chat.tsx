@@ -50,6 +50,7 @@ import { stamp } from "../lib/format";
 import { lineCount } from "../lib/markdown";
 import { type Said, say } from "../lib/say";
 import { askedByWords, TESTS_EVERY_MS, WaitingTests } from "../lib/tests";
+import { CopyButton } from "./copy";
 import { inFront } from "./live";
 import { Markdown } from "./markdown";
 import { Button, FONTS, Problem, useColors, Waiting } from "./parts";
@@ -484,6 +485,7 @@ function TurnView({
         <View style={[styles.bubble, { backgroundColor: colors.raised, borderColor: colors.line }]}>
           <Folded text={turn.user} plain />
         </View>
+        <CopyButton text={turn.user} name="Copy your message" />
       </View>
       {steps.length > 0 && <Steps steps={steps} open={live} />}
       {(commentary.length > 0 || reply !== undefined) && (
@@ -494,6 +496,7 @@ function TurnView({
           ))}
           {reply !== undefined && !live && <Folded text={reply} />}
           {reply !== undefined && live && <Markdown text={reply} muted />}
+          {reply !== undefined && !live && <CopyButton text={reply} name="Copy the reply" />}
         </View>
       )}
       {turn.cut && (
@@ -520,7 +523,7 @@ function Folded({ text, plain }: { text: string; plain?: boolean }) {
           {shown}
         </Text>
       ) : (
-        <Markdown text={shown} />
+        <Markdown text={shown} fullText={text} />
       )}
       {!open && (
         <Pressable accessibilityRole="button" onPress={() => setOpen(true)}>

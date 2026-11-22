@@ -17,7 +17,7 @@ the computer, not on the phone, so they keep going whatever happens to the conne
   [A computer's workspaces](remote.md#a-computers-workspaces).
 - **Read a conversation as a chat.** What you asked, the agent's steps folded to one line, and what
   it wrote back, in one column at the phone's width. Type a message, stop the agent, or give it a
-  picture. **Terminal** shows the terminal itself. See [Chat on the phone](remote.md#chat-on-the-phone).
+  picture. Select any of it, or **Copy** a whole reply, message or block of code. **Terminal** shows the terminal itself. See [Chat on the phone](remote.md#chat-on-the-phone).
 - **Answer a permission question.** When Claude Code asks to run a command, the chat shows it with
   **Allow once** and **Deny**. See
   [When an agent asks for a permission](remote.md#when-an-agent-asks-for-a-permission).

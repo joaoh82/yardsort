@@ -3,38 +3,66 @@
 
 /**
  * What an agent wrote, drawn at the phone's width (43). Everything wraps, code too: nothing here
- * scrolls sideways. A link opens in the system's browser after the person has seen where it leads.
+ * scrolls sideways. Every block can be selected, and a block of code has a Copy of its own. A link opens in the system's browser after the person has seen where it leads.
  */
 
 import { Alert, Linking, StyleSheet, Text, View } from "react-native";
 
 import { type Block, type Span, readMarkdown } from "../lib/markdown";
+import { CopyButton } from "./copy";
 import { FONTS, useColors } from "./parts";
 
-export function Markdown({ text, muted }: { text: string; muted?: boolean }) {
+export function Markdown({
+  text,
+  muted,
+  fullText,
+}: {
+  text: string;
+  muted?: boolean;
+  /** When text is a folded prefix, copy code from the complete Markdown. */
+  fullText?: string;
+}) {
   const blocks = readMarkdown(text);
+  const codes = (
+    fullText !== undefined && fullText !== text ? readMarkdown(fullText) : blocks
+  ).filter((block) => block.kind === "code");
+  let codeIndex = 0;
   return (
     <View style={styles.blocks}>
       {blocks.map((block, i) => (
-        <BlockView key={i} block={block} muted={muted ?? false} />
+        <BlockView
+          key={i}
+          block={block}
+          muted={muted ?? false}
+          copyText={block.kind === "code" ? codes[codeIndex++]?.text : undefined}
+        />
       ))}
     </View>
   );
 }
 
-function BlockView({ block, muted }: { block: Block; muted: boolean }) {
+function BlockView({
+  block,
+  muted,
+  copyText,
+}: {
+  block: Block;
+  muted: boolean;
+  copyText?: string;
+}) {
   const colors = useColors();
   const ink = muted ? colors.muted : colors.ink;
   switch (block.kind) {
     case "paragraph":
       return (
-        <Text style={[styles.body, { color: ink }]}>
+        <Text selectable style={[styles.body, { color: ink }]}>
           <Spans spans={block.spans} />
         </Text>
       );
     case "heading":
       return (
         <Text
+          selectable
           accessibilityRole="header"
           style={[block.level <= 2 ? styles.heading : styles.subheading, { color: ink }]}
         >
@@ -49,7 +77,7 @@ function BlockView({ block, muted }: { block: Block; muted: boolean }) {
               <Text style={[styles.marker, { color: colors.faint }]}>
                 {block.ordered ? `${block.start + i}.` : "•"}
               </Text>
-              <Text style={[styles.body, styles.itemText, { color: ink }]}>
+              <Text selectable style={[styles.body, styles.itemText, { color: ink }]}>
                 <Spans spans={item} />
               </Text>
             </View>
@@ -65,12 +93,15 @@ function BlockView({ block, muted }: { block: Block; muted: boolean }) {
           <Text selectable style={[styles.codeText, { color: colors.ink }]}>
             {block.text}
           </Text>
+          <View style={styles.codeCopy}>
+            <CopyButton text={copyText ?? block.text} name="Copy the code" />
+          </View>
         </View>
       );
     case "quote":
       return (
         <View style={[styles.quote, { borderColor: colors.lineStrong }]}>
-          <Text style={[styles.body, { color: colors.muted }]}>
+          <Text selectable style={[styles.body, { color: colors.muted }]}>
             <Spans spans={block.spans} />
           </Text>
         </View>
@@ -91,7 +122,7 @@ function BlockView({ block, muted }: { block: Block; muted: boolean }) {
               ]}
             >
               {row.map((cell, c) => (
-                <Text key={c} style={[styles.cell, { color: ink }]}>
+                <Text key={c} selectable style={[styles.cell, { color: ink }]}>
                   {block.header[c] && block.header[c].length > 0 ? (
                     <Text style={[styles.cellName, { color: colors.faint }]}>
                       {block.header[c].map((s) => s.text).join("")}
@@ -171,6 +202,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   codeText: { fontFamily: FONTS.mono, fontSize: 13, lineHeight: 20 },
+  codeCopy: { alignItems: "flex-end", marginTop: 6 },
   quote: { borderLeftWidth: 3, paddingLeft: 10 },
   rule: { height: StyleSheet.hairlineWidth },
   table: { gap: 6 },
