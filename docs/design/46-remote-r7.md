@@ -7,7 +7,9 @@ screen on 2026-11-18. Slice 4, entitlements and metering, built the same day (§
 and 4 merged, and `main` deployed to staging on 2026-11-18: its usage counters checked there. The
 owner chose to skip deleting an account on staging, which would be theirs; deletion's proof is the
 local tests and smoke tests. Slice 3, a restore that cannot resurrect, built on 2026-11-19 (§12):
-its tests pass on both stores, and the restore drill passed on staging on 2026-11-22.
+its tests pass on both stores, and the restore drill passed on staging on 2026-11-22. Slice 6,
+load and isolation, built the same day (§13): the isolation test in CI on both stores, and the load
+tool run on this computer; its run on staging waits on the owner's go-ahead.
 
 This is the plan for the last phase of the proposal ([25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)
 §13): what it has to show, what it starts from, the decisions it needs, and the slices in the order
@@ -528,3 +530,68 @@ answers 503 until `reconcile`, so it times out (harmlessly) rather than finishin
 credentials were gone from disk after signing out and deleting, so the restored rows were checked
 in the database rather than by those devices asking again. Whether Tigris honours `If-None-Match`
 was not exercised: no key was written twice.
+
+## 13 · Slice 6, load and isolation
+
+Built on 2026-11-22. The isolation test is in CI; the load test has run on this computer, and its
+run on staging waits on the owner's go-ahead.
+
+**The isolation test** (`crates/server/tests/isolation.rs`, on both stores). Alice has a host and a
+phone, paired and approved, an open offer, a synced project with a note linked on her host, a
+notice from her host, a push route and her preferences. Bob has a host and a phone of his own. Then
+Bob's devices ask every route the server serves: what only reads, with nothing of Alice's in any
+answer (her ids, her devices' and host's names, her words, her credentials, her offer's code and
+secret); and everything that acts on an id, handed hers: revoking her devices, taking her host's id
+as his, offering or removing on her host, redeeming her offer by its secret or its code, reading,
+approving, denying or revoking her grant, tickets to her host as a host and as a device, reading
+her notice. Each is refused with 404 (or 403, for a route not for his kind of device), and changes
+nothing. Then sync is handed her ids: a push putting a note under her note's id in her project and
+revoking her project, then linking, unlinking and a snapshot of it. What Bob makes of her ids is his
+own, so the answers may name an id he gave, never her words; her project is not his to link,
+unlink or read even once he has pushed to it. A deletion confirmed by signing in as Alice is
+refused to Bob's phone. Bob deletes his own account last. Through all of it, nothing of Alice's
+moves: her export (but when each device was last seen, and the day's usage), her host's grants and
+her notice are the same after as before, and her host still reaches her project.
+
+The routes are read from `src/http.rs` itself: one served there that is neither probed nor named
+with its reason not to be (`/health`, `/v1/server`, the sign-in and token routes, which take
+secrets and never an id, `/v1/relay`, which opens only with a ticket, proven in
+`tests/relay.rs`, and the deletion pages, which delete whoever signs in, in `tests/delete.rs`)
+fails the test, as does one named and no longer served. A notice's lookup changed to ignore its
+account was caught at once, by its status and by her host's id and the notice's own in Bob's
+answer. No route gave Alice away.
+
+**The load tool** (`crates/server/examples/load.rs`). It signs in `--hosts` hosts (5 unless given)
+and a phone for each, pairs and approves each, and opens every relay link, keeping to the server's
+rate limits (waiting when told to). Then for `--minutes`: each phone sends `--rate` messages a
+second (20) through the relay, which its host answers at once with `--output` bytes (512), as a
+terminal echoes typing, and the phone times each round trip; each host pushes a note to a project
+of its own once a second and pulls what changed. `--stalled` adds a phone on the first host that
+never reads while the host sends it output at the same rate. At the end the first host revokes its
+phone's grant, and the time until the phone's socket closes is measured, after checking it was
+open. Then every device is signed out and every host removed. It exits non-zero on a missed
+budget, and `--json` keeps the report:
+
+| Budget (25 §14)                            | The tool's measure                                                            |
+| ------------------------------------------ | ----------------------------------------------------------------------------- |
+| Input to echo, p95 under 300 ms            | A round trip through the relay, host answering at once                        |
+| Reconnection within 5 s                    | A link opened: ticket, socket, and the host told, p95                         |
+| A revoked device disconnected within 5 s   | The revoked phone's socket closed                                             |
+| A stalled viewer slows nobody else         | The stalled host's other phone, p95; the stalled one let go                   |
+| No unbounded memory growth over a long run | `--server-pid`: memory at the end within half again of after the first minute |
+| (sync, not in the proposal's list)         | Push and pull, p95 under 1 s                                                  |
+
+The workspace list's budget (p95 under a second with 100 workspaces) is the host's and the
+phone's, not the server's: the relay carries it as it carries any message. The terminal's own time
+is the harness's, which the proposal says to measure apart.
+
+**Run on this computer** on 2026-11-22, against the stand-in (`examples/stand-in.rs`, in memory),
+release builds, `--hosts 10 --minutes 2 --stalled`: 21,609 round trips, p50 0.3 ms, p95 0.5 ms,
+max 2.5 ms, none lost; beside the stalled phone the same; the stalled phone let go; links opened at
+p95 29 ms; the revoked phone's socket closed 1 ms after the revocation; sync push p95 3.5 ms and
+pull 2.1 ms; the server's memory 20 MB after the first minute and 21 MB at the end.
+
+**Not run yet: the load test on staging**, which needs the owner's go-ahead (§6). Each device
+signs in in a browser, or, with `--zitadel-api`, through ZITADEL's API as one user, which needs a
+login client's token from staging's ZITADEL and that user's password. Staging's memory is read
+from Fly's metrics, not `--server-pid`.
