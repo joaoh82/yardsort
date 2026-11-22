@@ -9,7 +9,7 @@ owner chose to skip deleting an account on staging, which would be theirs; delet
 local tests and smoke tests. Slice 3, a restore that cannot resurrect, built on 2026-11-19 (§12):
 its tests pass on both stores, and the restore drill passed on staging on 2026-11-22. Slice 6,
 load and isolation, built the same day (§13): the isolation test in CI on both stores, and the load
-tool run on this computer; its run on staging waits on the owner's go-ahead.
+test within the proposal's budgets on this computer and on staging.
 
 This is the plan for the last phase of the proposal ([25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)
 §13): what it has to show, what it starts from, the decisions it needs, and the slices in the order
@@ -533,8 +533,8 @@ was not exercised: no key was written twice.
 
 ## 13 · Slice 6, load and isolation
 
-Built on 2026-11-22. The isolation test is in CI; the load test has run on this computer, and its
-run on staging waits on the owner's go-ahead.
+Built on 2026-11-22. The isolation test is in CI; the load test passed on this computer and on
+staging the same day.
 
 **The isolation test** (`crates/server/tests/isolation.rs`, on both stores). Alice has a host and a
 phone, paired and approved, an open offer, a synced project with a note linked on her host, a
@@ -572,14 +572,14 @@ phone's grant, and the time until the phone's socket closes is measured, after c
 open. Then every device is signed out and every host removed. It exits non-zero on a missed
 budget, and `--json` keeps the report:
 
-| Budget (25 §14)                            | The tool's measure                                                            |
-| ------------------------------------------ | ----------------------------------------------------------------------------- |
-| Input to echo, p95 under 300 ms            | A round trip through the relay, host answering at once                        |
-| Reconnection within 5 s                    | A link opened: ticket, socket, and the host told, p95                         |
-| A revoked device disconnected within 5 s   | The revoked phone's socket closed                                             |
-| A stalled viewer slows nobody else         | The stalled host's other phone, p95; the stalled one let go                   |
-| No unbounded memory growth over a long run | `--server-pid`: memory at the end within half again of after the first minute |
-| (sync, not in the proposal's list)         | Push and pull, p95 under 1 s                                                  |
+| Budget (25 §14)                               | The tool's measure                                                                                                                      |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Input to echo, p95 under 300 ms at 100 ms RTT | A round trip through the relay, host answering at once, less twice the network's own round trip (`GET /health` every 2 s), under 100 ms |
+| Reconnection within 5 s                       | A link opened: ticket, socket, and the host told, p95                                                                                   |
+| A revoked device disconnected within 5 s      | The revoked phone's socket closed                                                                                                       |
+| A stalled viewer slows nobody else            | The stalled host's other phone, p95; the stalled one let go                                                                             |
+| No unbounded memory growth over a long run    | `--server-pid`: memory at the end within half again of after the first minute                                                           |
+| (sync, not in the proposal's list)            | Push and pull, p95 under 1 s                                                                                                            |
 
 The workspace list's budget (p95 under a second with 100 workspaces) is the host's and the
 phone's, not the server's: the relay carries it as it carries any message. The terminal's own time
@@ -591,7 +591,17 @@ max 2.5 ms, none lost; beside the stalled phone the same; the stalled phone let 
 p95 29 ms; the revoked phone's socket closed 1 ms after the revocation; sync push p95 3.5 ms and
 pull 2.1 ms; the server's memory 20 MB after the first minute and 21 MB at the end.
 
-**Not run yet: the load test on staging**, which needs the owner's go-ahead (§6). Each device
-signs in in a browser, or, with `--zitadel-api`, through ZITADEL's API as one user, which needs a
-login client's token from staging's ZITADEL and that user's password. Staging's memory is read
-from Fly's metrics, not `--server-pid`.
+**Run on staging** on 2026-11-22, with the owner's go-ahead, from this computer, each device
+signed in in the browser as the drill's throwaway user: `--hosts 5 --minutes 3 --stalled`. The
+first run missed the echo budget as the tool then judged it, 596 ms at p95 against 300. The network
+was the cause: from here, Fly's edge is São Paulo and staging is in Frankfurt, and `GET /health`
+took 277 ms with the server's own time under a millisecond. A round trip through the relay with
+both ends here crosses that twice, and its median, 553 ms, was exactly that. The proposal states
+the budget at 100 ms RTT and asks for transport to be measured apart, so the tool now times the
+network during the run and takes it off. Run again: 14,404 round trips, p95 617 ms with the network
+at 277 ms, 63 ms beyond it (beside the stalled phone, 66 ms), none lost; the stalled phone let go;
+links opened at p95 1.2 s; the revoked phone's socket closed 318 ms after the revocation, about one
+network round trip; sync push p95 367 ms and pull 317 ms, one network round trip and the database
+beside it. Every budget met. The server logged no warning, no error, nothing refused for a rate
+limit and no 5xx, and its one Machine stayed up. Its memory was not read: the image has no shell
+for `/proc`, and Fly's dashboard shows it.
