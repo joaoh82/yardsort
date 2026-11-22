@@ -523,7 +523,7 @@ function Folded({ text, plain }: { text: string; plain?: boolean }) {
           {shown}
         </Text>
       ) : (
-        <Markdown text={shown} />
+        <Markdown text={shown} fullText={text} />
       )}
       {!open && (
         <Pressable accessibilityRole="button" onPress={() => setOpen(true)}>

@@ -7,7 +7,8 @@ has the downloads and the full commit lists.
 
 - **Copy from Chat on the phone.** Everything the agent wrote can now be selected, not only its
   code. A **Copy** under each reply and under your own message, and in the corner of each block
-  of code, copies all of it, the part folded behind **Show all** too. Needs the next phone build.
+  of code, copies all of it, the part folded behind **Show all** too — including code blocks that
+  cross the fold. Needs the next phone build.
   See [Chat on the phone](docs/guide/remote.md#chat-on-the-phone).
 - After a merge, a push or a pull request opened from the phone, the computer reads its pull
   requests again at the phone's next question, so the card shows merged within seconds. It kept

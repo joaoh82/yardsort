@@ -12,18 +12,44 @@ import { type Block, type Span, readMarkdown } from "../lib/markdown";
 import { CopyButton } from "./copy";
 import { FONTS, useColors } from "./parts";
 
-export function Markdown({ text, muted }: { text: string; muted?: boolean }) {
+export function Markdown({
+  text,
+  muted,
+  fullText,
+}: {
+  text: string;
+  muted?: boolean;
+  /** When text is a folded prefix, copy code from the complete Markdown. */
+  fullText?: string;
+}) {
   const blocks = readMarkdown(text);
+  const codes = (
+    fullText !== undefined && fullText !== text ? readMarkdown(fullText) : blocks
+  ).filter((block) => block.kind === "code");
+  let codeIndex = 0;
   return (
     <View style={styles.blocks}>
       {blocks.map((block, i) => (
-        <BlockView key={i} block={block} muted={muted ?? false} />
+        <BlockView
+          key={i}
+          block={block}
+          muted={muted ?? false}
+          copyText={block.kind === "code" ? codes[codeIndex++]?.text : undefined}
+        />
       ))}
     </View>
   );
 }
 
-function BlockView({ block, muted }: { block: Block; muted: boolean }) {
+function BlockView({
+  block,
+  muted,
+  copyText,
+}: {
+  block: Block;
+  muted: boolean;
+  copyText?: string;
+}) {
   const colors = useColors();
   const ink = muted ? colors.muted : colors.ink;
   switch (block.kind) {
@@ -68,7 +94,7 @@ function BlockView({ block, muted }: { block: Block; muted: boolean }) {
             {block.text}
           </Text>
           <View style={styles.codeCopy}>
-            <CopyButton text={block.text} name="Copy the code" />
+            <CopyButton text={copyText ?? block.text} name="Copy the code" />
           </View>
         </View>
       );

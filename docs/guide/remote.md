@@ -247,7 +247,8 @@ working and **Stop**, which sends Esc. Scrolled up, **Latest** takes you back to
 To copy, press and hold any paragraph, list item, table row or block of code for the phone's own
 **Copy**. Or press **Copy** under a reply, under your own message, or in the corner of a block of
 code. That copies all of it as the agent wrote it, Markdown and all, including what is folded
-behind **Show all**. It says **Copied** for a moment.
+behind **Show all**. A code block that crosses the fold is copied in full too, without needing to
+expand the reply first. It says **Copied** for a moment.
 
 The header says which agent it is and what it is doing — working, done, needing you, or idle when
 it says it is working but its terminal has been still for a while, as after Esc — and

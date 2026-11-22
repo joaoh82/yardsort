@@ -2561,6 +2561,32 @@ describe("A computer", () => {
         expect(copied()).toEqual([long]);
       });
 
+      test("code crossing the fold is copied whole, independently of earlier code blocks", async () => {
+        const server = new FakeServer();
+        const code = Array.from({ length: 40 }, (_, n) => `echo line${n + 1}`).join("\n");
+        server.computer.turns = [
+          {
+            n: 1,
+            at: 1_700_000_000_000,
+            user: "Go",
+            said: ["```sh\necho first\n```\n\n```sh\n" + code + "\n```"],
+            cut: false,
+          },
+        ];
+        await chatting(server);
+        const more = await screen.findByText(/Show all/);
+        const buttons = screen.getAllByRole("button", { name: "Copy the code" });
+        expect(buttons).toHaveLength(2);
+        for (const button of buttons) await fireEvent.press(button);
+        await settle();
+        expect(copied()).toEqual(["echo first", code]);
+        await fireEvent.press(more);
+        for (const button of screen.getAllByRole("button", { name: "Copy the code" }))
+          await fireEvent.press(button);
+        await settle();
+        expect(copied()).toEqual(["echo first", code, "echo first", code]);
+      });
+
       test("your own message and a block of code each have a Copy", async () => {
         const server = new FakeServer();
         server.computer.turns = [
