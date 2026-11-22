@@ -27,8 +27,11 @@
 //! closed is measured. Then every phone and host is signed out and every host removed. It prints
 //! a report, writes it as JSON with `--json`, and exits non-zero when a budget was missed:
 //!
-//! - a round trip through the relay, p95 under 300 ms (the proposal's input-to-echo budget, of
-//!   which the relay's part is this);
+//! - a round trip through the relay, p95 under 300 ms at a 100 ms network: the proposal's
+//!   input-to-echo budget. A round trip crosses the network twice (phone and server, server and
+//!   host), so the network's own round trip, timed from `GET /health` every two seconds during
+//!   the run, is taken off twice at its median, and what is left must be under the 100 ms that
+//!   two 100 ms crossings leave of 300;
 //! - a link opened (ticket, socket and the host told), p95 under 5 s (reconnection);
 //! - a revoked phone's socket closed within 5 s;
 //! - sync's push and pull, p95 under 1 s;
@@ -60,6 +63,8 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 const ECHO_P95_MS: f64 = 300.0;
+/// The network round trip the proposal's echo budget is stated at, each way to the server.
+const BUDGET_RTT_MS: f64 = 100.0;
 const LINK_P95_MS: f64 = 5_000.0;
 const REVOKE_MS: f64 = 5_000.0;
 const SYNC_P95_MS: f64 = 1_000.0;
@@ -361,6 +366,8 @@ struct Measured {
     link: Timings,
     push: Timings,
     pull: Timings,
+    /// `GET /health` while the load runs: the network's own round trip, the server doing nothing.
+    network: Timings,
     lost: std::sync::atomic::AtomicU64,
 }
 
@@ -651,6 +658,28 @@ async fn run() -> Result<(), String> {
         })
     });
 
+    // The network's own round trip, on a connection of its own, every two seconds.
+    let probing = {
+        let times = Arc::clone(&measured);
+        let health = client.address().join("health").map_err(|e| e.to_string())?;
+        let http = yardsort_server::oidc::http_client_builder()
+            .build()
+            .map_err(|e| e.to_string())?;
+        tokio::spawn(async move {
+            let _ = http.get(health.clone()).send().await;
+            let mut every = tokio::time::interval(Duration::from_secs(2));
+            while Instant::now() < until {
+                every.tick().await;
+                let at = Instant::now();
+                if let Ok(response) = http.get(health.clone()).send().await {
+                    if response.bytes().await.is_ok() {
+                        times.network.add(at);
+                    }
+                }
+            }
+        })
+    };
+
     // The stalled phone: output sent to it at the typing rate, and never read.
     let stalled_closed = Arc::new(Mutex::new(None::<f64>));
     if let Some((mut reader, writer, channel)) = stalled {
@@ -716,6 +745,7 @@ async fn run() -> Result<(), String> {
     for s in syncing {
         s.await.map_err(|e| e.to_string())??;
     }
+    let _ = probing.await;
     if let Some(sampling) = sampling {
         memory = sampling.await.map_err(|e| e.to_string())?;
     }
@@ -770,6 +800,7 @@ async fn run() -> Result<(), String> {
     let link = measured.link.summary();
     let push = measured.push.summary();
     let pull = measured.pull.summary();
+    let network = measured.network.summary();
     let lost = measured.lost.load(std::sync::atomic::Ordering::Relaxed);
     println!(
         "\n{:<26} {:>8} {:>9} {:>9} {:>9} {:>9}",
@@ -782,6 +813,7 @@ async fn run() -> Result<(), String> {
     println!("{}", link.line("link opened"));
     println!("{}", push.line("sync push"));
     println!("{}", pull.line("sync pull"));
+    println!("{}", network.line("network (GET /health)"));
     println!("Messages that never came back: {lost}.");
 
     let mut missed = Vec::new();
@@ -792,16 +824,29 @@ async fn run() -> Result<(), String> {
         }
     };
     println!();
+    // A round trip through the relay crosses the network twice: phone to server and back, and
+    // server to host and back. The budget is 300 ms with each of those at 100 ms, which leaves
+    // 100 ms for the rest. What this run's network took is taken off, and that 100 ms is the
+    // budget for what is left.
+    let beyond = |p95: f64| p95 - 2.0 * network.p50;
+    let left = ECHO_P95_MS - 2.0 * BUDGET_RTT_MS;
+    let said = |p95: f64| {
+        format!(
+            "{p95:.1} ms, with the network at {:.1} ms each way and back: {:.1} ms beyond it",
+            network.p50,
+            beyond(p95)
+        )
+    };
     check(
-        "round trip p95 under 300 ms",
-        echo.p95 < ECHO_P95_MS,
-        format!("{:.1} ms", echo.p95),
+        "round trip p95 under 300 ms at a 100 ms network",
+        beyond(echo.p95) < left,
+        said(echo.p95),
     );
     if o.stalled {
         check(
-            "beside a stalled phone, p95 under 300 ms",
-            beside.p95 < ECHO_P95_MS,
-            format!("{:.1} ms", beside.p95),
+            "beside a stalled phone, the same",
+            beyond(beside.p95) < left,
+            said(beside.p95),
         );
         check(
             "the stalled phone let go by the relay",
@@ -863,7 +908,7 @@ async fn run() -> Result<(), String> {
             "hosts": o.hosts, "rate": o.rate, "output": o.output, "minutes": o.minutes,
             "stalled": o.stalled,
             "echo": echo.json(), "besideStalled": beside.json(), "link": link.json(),
-            "push": push.json(), "pull": pull.json(), "lost": lost,
+            "push": push.json(), "pull": pull.json(), "network": network.json(), "lost": lost,
             "revokedMs": revoked, "stalledLetGo": stalled_let_go.map(|v| v == 1.0),
             "memoryKb": memory.iter().map(|(at, kb)| json!([at, kb])).collect::<Vec<_>>(),
             "missed": missed,
