@@ -74,7 +74,14 @@ jobs:
           flyctl releases --app "$app" --image --json > releases.json
           # Newest first; only releases that finished.
           jq '[.[] | select(.Status == "complete")] | sort_by(-.Version)' releases.json > done.json
-          running=$(jq -r '.[0].ImageRef' done.json)
+          # What the Machines run, not what the newest release says: a deploy that failed its
+          # checks can leave a Machine on its image while its release reads as failed.
+          flyctl machines list --app "$app" --json > machines.json
+          running=$(jq -r '[.[] | select(.state == "started")][0].config.image // empty' machines.json)
+          if [ -z "$running" ]; then
+            running=$(jq -r '.[0].ImageRef' done.json)
+          fi
+          running=registry.fly.io/${running#registry.fly.io/}
           case "$ROLLBACK" in
             previous)
               image=$(jq -r --arg now "$running" '[.[] | select(.ImageRef != $now)][0].ImageRef // empty' done.json) ;;
