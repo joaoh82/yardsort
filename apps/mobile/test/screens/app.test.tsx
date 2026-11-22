@@ -2530,6 +2530,70 @@ describe("A computer", () => {
       expect(server.resizes).toEqual([]);
     });
 
+    describe("copying", () => {
+      /** What the app put on the clipboard, newest last. */
+      const copied = () => jest.requireMock<{ copied: string[] }>("expo-clipboard").copied;
+      beforeEach(() => {
+        copied().length = 0;
+      });
+
+      test("Copy under the reply puts the whole of it on the clipboard as it was written, and says so", async () => {
+        await chatting();
+        const button = await screen.findByRole("button", { name: "Copy the reply" });
+        await fireEvent.press(button);
+        await settle();
+        expect(copied()).toEqual(["I added the `--imperial` flag.\n\n- `src/cli.js` parses it"]);
+        expect(within(button).getByText("Copied")).toBeTruthy();
+        await act(async () => jest.advanceTimersByTimeAsync(2_000));
+        expect(within(button).getByText("Copy")).toBeTruthy();
+      });
+
+      test("a long reply folded behind Show all is copied whole", async () => {
+        const server = new FakeServer();
+        const long = Array.from({ length: 40 }, (_, n) => `Line ${n + 1}`).join("\n\n");
+        server.computer.turns = [
+          { n: 1, at: 1_700_000_000_000, user: "Go", said: [long], cut: false },
+        ];
+        await chatting(server);
+        await screen.findByText(/Show all/);
+        await fireEvent.press(screen.getByRole("button", { name: "Copy the reply" }));
+        await settle();
+        expect(copied()).toEqual([long]);
+      });
+
+      test("your own message and a block of code each have a Copy", async () => {
+        const server = new FakeServer();
+        server.computer.turns = [
+          {
+            n: 1,
+            at: 1_700_000_000_000,
+            user: "How do I run it?",
+            said: ["Run this:\n\n```sh\nnpm test -- --run render\n```"],
+            cut: false,
+          },
+        ];
+        await chatting(server);
+        await fireEvent.press(await screen.findByRole("button", { name: "Copy your message" }));
+        await fireEvent.press(screen.getByRole("button", { name: "Copy the code" }));
+        await settle();
+        expect(copied()).toEqual(["How do I run it?", "npm test -- --run render"]);
+      });
+
+      test("what the agent wrote can be selected, not only its code", async () => {
+        /** Whether a piece of text, or the paragraph it is a span of, can be selected. */
+        const selectable = (text: { props: { selectable?: boolean }; parent: unknown }) => {
+          for (let at: typeof text | null = text; at; at = at.parent as typeof text | null) {
+            if (at.props.selectable !== undefined) return at.props.selectable;
+          }
+          return false;
+        };
+        await chatting();
+        expect(selectable(await screen.findByText("Units go through render.js."))).toBe(true);
+        expect(selectable(screen.getByText(/flag\.$/))).toBe(true);
+        expect(selectable(screen.getByText("src/cli.js"))).toBe(true);
+      });
+    });
+
     test("Terminal shows the terminal, and is where the conversation opens next time", async () => {
       await chatting();
       await fireEvent.press(screen.getByRole("tab", { name: "Terminal" }));

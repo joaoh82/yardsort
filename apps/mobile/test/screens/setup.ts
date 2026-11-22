@@ -55,3 +55,15 @@ jest.mock("expo-network", () => ({
 (globalThis as { networkIs?: (state: object) => void }).networkIs = (state) => {
   for (const listener of mockNetworkListeners) listener(state);
 };
+
+// The clipboard, as far as a screen sees it: what was copied, newest last, in `copied`.
+jest.mock("expo-clipboard", () => {
+  const copied: string[] = [];
+  return {
+    copied,
+    setStringAsync: async (text: string) => {
+      copied.push(text);
+      return true;
+    },
+  };
+});
