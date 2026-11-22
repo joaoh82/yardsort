@@ -7,6 +7,13 @@ name: Deploy the server
 # Staging deploys whichever branch it is run from. Production is not offered yet: it arrives with
 # its ZITADEL instance, as a `production` environment that requires a reviewer and deploys from
 # main only (docs/design/28-remote-infrastructure.md).
+#
+# **Rolling back** (docs/operations/rollback.md): `rollback` puts a release that ran before back,
+# by its image, built nothing: `previous` for the image before the one running now, a release's
+# number from `fly releases` (`12` or `v12`), or an image of this app's own
+# (`registry.fly.io/<app>:deployment-…` or `…@sha256:…`). The Fly config is the branch's, as for
+# any deploy; only the image is the old one. An older server leaves migrations a newer one made as
+# they are (crates/server/src/postgres.rs), so it runs on the database as it is.
 
 on:
   workflow_dispatch:
@@ -16,6 +23,10 @@ on:
         type: choice
         options: [staging]
         default: staging
+      rollback:
+        description: "Roll back instead: previous, a release number, or an image of this app's"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -43,11 +54,67 @@ jobs:
       # Built on Fly's builder from crates/server/Dockerfile. One Machine, not Fly's default of two
       # on a first deploy: staging is one small Machine (28 §1).
       - name: Deploy
+        if: inputs.rollback == ''
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: >-
           flyctl deploy . --config "$CONFIG" --dockerfile crates/server/Dockerfile
           --remote-only --ha=false --wait-timeout 5m
+
+      # The image to put back, found from the app's releases. The input comes in through the
+      # environment, never into the script's text.
+      - name: Find the release to roll back to
+        id: back
+        if: inputs.rollback != ''
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          ROLLBACK: ${{ inputs.rollback }}
+        run: |
+          app=$(sed -n 's/^app = "\(.*\)"/\1/p' "$CONFIG")
+          flyctl releases --app "$app" --image --json > releases.json
+          # Newest first; only releases that finished.
+          jq '[.[] | select(.Status == "complete")] | sort_by(-.Version)' releases.json > done.json
+          # What the Machines run, not what the newest release says: a deploy that failed its
+          # checks can leave a Machine on its image while its release reads as failed.
+          flyctl machines list --app "$app" --json > machines.json
+          running=$(jq -r '[.[] | select(.state == "started")][0].config.image // empty' machines.json)
+          if [ -z "$running" ]; then
+            running=$(jq -r '.[0].ImageRef' done.json)
+          fi
+          running=registry.fly.io/${running#registry.fly.io/}
+          case "$ROLLBACK" in
+            previous)
+              image=$(jq -r --arg now "$running" '[.[] | select(.ImageRef != $now)][0].ImageRef // empty' done.json) ;;
+            v[0-9]* | [0-9]*)
+              version=${ROLLBACK#v}
+              case "$version" in *[!0-9]*) echo "::error::Not a release number: $ROLLBACK"; exit 1 ;; esac
+              image=$(jq -r --argjson v "$version" '[.[] | select(.Version == $v)][0].ImageRef // empty' done.json) ;;
+            "registry.fly.io/$app:"* | "registry.fly.io/$app@sha256:"*)
+              case "$ROLLBACK" in *[!A-Za-z0-9._:/@-]*) echo "::error::Not an image name: $ROLLBACK"; exit 1 ;; esac
+              image=$ROLLBACK ;;
+            *)
+              echo "::error::Roll back to previous, a release number, or an image of $app's own, not: $ROLLBACK"
+              exit 1 ;;
+          esac
+          if [ -z "$image" ]; then
+            echo "::error::No release that finished matches $ROLLBACK"
+            exit 1
+          fi
+          if [ "$image" = "$running" ]; then
+            echo "::error::$image is already running"
+            exit 1
+          fi
+          echo "Running now: $running"
+          echo "Putting back: $image"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Roll back
+        if: inputs.rollback != ''
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          IMAGE: ${{ steps.back.outputs.image }}
+        run: >-
+          flyctl deploy --config "$CONFIG" --image "$IMAGE" --ha=false --wait-timeout 5m
 
       # The app answers, and names the provider this environment was configured with. Through its
       # own fly.dev address, which works before the public name's DNS and certificate do.
@@ -63,3 +130,18 @@ jobs:
           curl -fsS "$url/v1/server" | tee server.json
           echo
           grep -qF "\"issuer\":\"$issuer\"" server.json
+
+      # Which image each Machine runs now: after a rollback, the one put back.
+      - name: Say what runs
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          IMAGE: ${{ steps.back.outputs.image }}
+        run: |
+          app=$(sed -n 's/^app = "\(.*\)"/\1/p' "$CONFIG")
+          flyctl machines list --app "$app" --json > machines.json
+          jq -r '.[] | "\(.id) \(.state) \(.config.image)"' machines.json
+          if [ -n "$IMAGE" ]; then
+            want=${IMAGE#registry.fly.io/}
+            jq -e --arg want "$want" 'all(.[]; .state != "started" or (.config.image | endswith($want)))' machines.json > /dev/null \
+              || { echo "::error::A started Machine is not running $IMAGE"; exit 1; }
+          fi

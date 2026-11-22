@@ -9,7 +9,8 @@ owner chose to skip deleting an account on staging, which would be theirs; delet
 local tests and smoke tests. Slice 3, a restore that cannot resurrect, built on 2026-11-19 (§12):
 its tests pass on both stores, and the restore drill passed on staging on 2026-11-22. Slice 6,
 load and isolation, built the same day (§13): the isolation test in CI on both stores, and the load
-test within the proposal's budgets on this computer and on staging.
+test within the proposal's budgets on this computer and on staging. Slice 5's rollback,
+built the same day (§14), and its drill passed on staging; production waits on ZITADEL on Fly.
 
 This is the plan for the last phase of the proposal ([25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)
 §13): what it has to show, what it starts from, the decisions it needs, and the slices in the order
@@ -605,3 +606,30 @@ network round trip; sync push p95 367 ms and pull 317 ms, one network round trip
 beside it. Every budget met. The server logged no warning, no error, nothing refused for a rate
 limit and no 5xx, and its one Machine stayed up. Its memory was not read: the image has no shell
 for `/proc`, and Fly's dashboard shows it.
+
+## 14 · Slice 5, production and rollback
+
+Started on 2026-11-22 with its rollback, which needs nothing new: production itself waits on the
+owner's go-ahead for ZITADEL on Fly at `auth.yardsort.sh`, its database and its Machines (§6), and
+its Fly config and protected environment come with that ZITADEL (28 §6).
+
+**Rollback** (`.github/workflows/server-deploy.yml`, [the rollback runbook](../operations/rollback.md)).
+The deploy workflow's `rollback` input puts back a release that ran before, by its image, building
+nothing: `previous` (the image before the one running, among releases that finished), a release's
+number, or an image of the app's own registry. The input reaches the script through the
+environment and is checked against those three forms; an image of another app's, or anything else,
+is refused. The image is deployed with the branch's Fly config, then the workflow checks `/health`
+and `/v1/server` as for a deploy, lists each Machine's image, and fails if a started Machine runs
+another. No database step: an older server leaves a newer one's migrations as they are. Tried
+against staging's releases, read-only: a failed release (the restore drill's) skipped, and
+`previous` naming the image before slice 3's.
+
+**The rollback drill on staging, 2026-11-22**
+([the rollback runbook](../operations/rollback.md#the-drill)): passed. The rollback took 38 s from
+the request to its checks passing, and the owner's host was back 0.3 s after the server listened;
+`main` deployed again after it, the host back as fast. Found on the way: staging's Neon database
+ran out of the free plan's compute and refused every connection, so the first deploy crashed and
+staging stopped until the owner moved Neon to its Launch plan (28 §2). The failed deploy left the
+Machine on `main`'s image while Fly kept its release as failed, and the workflow then took the
+running image from the newest release that finished, so `previous` would have gone one image too
+far: it now asks the Machines what they run. Production's drill follows once production exists.

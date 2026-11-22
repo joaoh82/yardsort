@@ -45,7 +45,13 @@ hosts and devices reconnect, which the protocol is built for (a fresh snapshot, 
   for a staging database that is mostly idle, but outside Fly's network, so it is reached over
   the internet with TLS.
 
-Staging uses Neon's free plan (settled 2026-10-24), and production will use Fly Managed Postgres.
+Staging used Neon's free plan (settled 2026-10-24), and production will use Fly Managed Postgres.
+On 2026-11-22 the free plan's monthly compute ran out (about 110 hours used, against about 100) and
+Neon refused every connection, so staging stopped. The server never lets the database sleep: it
+holds a connection open for its signals between instances, and its periodic work runs every few
+minutes, so an always-on staging outgrows the free plan within the month. The owner moved the
+Yardsort organization to Neon's Launch plan, pay as you go, the same day; the database and its
+address stayed as they were.
 
 **Identity on ZITADEL Cloud.** Staging uses the free plan: one instance, 100 daily active users,
 and a `*.zitadel.cloud` domain. Production needs Pro (US$100 a month): a second instance needs
@@ -98,15 +104,15 @@ as the server.
 
 ## 3 · What it costs to start
 
-| Item                                               | Staging          | Production at launch                                                |
-| -------------------------------------------------- | ---------------- | ------------------------------------------------------------------- |
-| Fly Machines (shared-cpu-1x, 512 MB, US$3.69 each) | 1 → ~US$4        | 2 → ~US$7.50                                                        |
-| Fly outbound traffic (US$0.02/GB in NA and EU)     | ~US$0            | Relay traffic: measure in beta (proposal §12)                       |
-| Dedicated IPv4                                     | US$0 (shared)    | US$2                                                                |
-| PostgreSQL                                         | Neon free: US$0  | Fly Managed Postgres Basic: US$38 + storage                         |
-| ZITADEL                                            | Cloud free: US$0 | On Fly: one Machine, ~US$4–7, its database in production's Postgres |
-| Domain and DNS                                     | the owner's      | the owner's                                                         |
-| **About**                                          | **US$5 a month** | **US$55 a month**, before relay traffic                             |
+| Item                                               | Staging                                          | Production at launch                                                |
+| -------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------- |
+| Fly Machines (shared-cpu-1x, 512 MB, US$3.69 each) | 1 → ~US$4                                        | 2 → ~US$7.50                                                        |
+| Fly outbound traffic (US$0.02/GB in NA and EU)     | ~US$0                                            | Relay traffic: measure in beta (proposal §12)                       |
+| Dedicated IPv4                                     | US$0 (shared)                                    | US$2                                                                |
+| PostgreSQL                                         | Neon Launch: pay as you go, from 2026-11-22 (§2) | Fly Managed Postgres Basic: US$38 + storage                         |
+| ZITADEL                                            | Cloud free: US$0                                 | On Fly: one Machine, ~US$4–7, its database in production's Postgres |
+| Domain and DNS                                     | the owner's                                      | the owner's                                                         |
+| **About**                                          | **US$5 a month**                                 | **US$55 a month**, before relay traffic                             |
 
 ## 4 · Names
 
