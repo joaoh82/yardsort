@@ -10,8 +10,7 @@ local tests and smoke tests. Slice 3, a restore that cannot resurrect, built on 
 its tests pass on both stores, and the restore drill passed on staging on 2026-11-22. Slice 6,
 load and isolation, built the same day (§13): the isolation test in CI on both stores, and the load
 test within the proposal's budgets on this computer and on staging. Slice 5's rollback,
-built the same day (§14); its drill on staging waits on the owner's go-ahead, and production on
-ZITADEL on Fly.
+built the same day (§14), and its drill passed on staging; production waits on ZITADEL on Fly.
 
 This is the plan for the last phase of the proposal ([25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)
 §13): what it has to show, what it starts from, the decisions it needs, and the slices in the order
@@ -625,6 +624,12 @@ another. No database step: an older server leaves a newer one's migrations as th
 against staging's releases, read-only: a failed release (the restore drill's) skipped, and
 `previous` naming the image before slice 3's.
 
-**Not run yet: the rollback drill on staging**, which needs the owner's go-ahead for its deploys:
-deploy `main`, roll back with `previous`, see the image before running on the Machine and the
-owner's host reconnected within a minute, then deploy `main` again.
+**The rollback drill on staging, 2026-11-22**
+([the rollback runbook](../operations/rollback.md#the-drill)): passed. The rollback took 38 s from
+the request to its checks passing, and the owner's host was back 0.3 s after the server listened;
+`main` deployed again after it, the host back as fast. Found on the way: staging's Neon database
+ran out of the free plan's compute and refused every connection, so the first deploy crashed and
+staging stopped until the owner moved Neon to its Launch plan (28 §2). The failed deploy left the
+Machine on `main`'s image while Fly kept its release as failed, and the workflow then took the
+running image from the newest release that finished, so `previous` would have gone one image too
+far: it now asks the Machines what they run. Production's drill follows once production exists.

@@ -58,4 +58,21 @@ and the one before it is the newer one.
 ## The drill
 
 Staging's drill is half of the proof of R7's gate (46 §5): deploy, roll back, and every device and
-host back within a minute. Production's follows once production exists. Not run yet on staging.
+host back within a minute. Production's follows once production exists. Run on staging on
+2026-11-22, and passed:
+
+1. `main` deployed (`57f4066`). Its image was built and started, then crashed: staging's Neon
+   database had run out of the free plan's compute and refused every connection (28 §2). The
+   owner moved Neon to its Launch plan, and the Machine, already on `main`'s image, started by
+   itself. Fly kept that release as failed, which showed the workflow taking "what runs" from the
+   newest release that finished: `previous` would then have gone one image too far. It now asks
+   the Machines.
+2. `rollback=previous`, at 18:09:52 UTC: `Running now: …01M826K6…`, `Putting back: …01M7V8YN…`
+   (the image before). The Machine started on it at 18:10:13, the checks passed, and every
+   started Machine ran the image put back. The owner's host reconnected at 18:10:13.7, 0.3 s after
+   the server listened.
+3. `main` deployed again at 18:11, a new image (`…01M82794…`); the host reconnected 0.14 s after
+   the server listened.
+
+Nothing was signed out: the only devices revoked that day were the load test's, by itself. A
+`POST /v1/token` refused once a minute throughout is an older client's credential, from before.

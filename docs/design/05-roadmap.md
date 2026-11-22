@@ -1124,7 +1124,7 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       load tool measuring the relay and sync against the proposal's budgets, met on this
       computer and on staging (46 §13). Slice 5's rollback built the same day: the deploy
       workflow puts back an earlier release's image (46 §14, `docs/operations/rollback.md`); its
-      drill on staging is next.
+      drill passed on staging the same day.
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is
