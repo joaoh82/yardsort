@@ -1119,7 +1119,7 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       reached; and each account's daily usage, with `yardsort-server usage` (46 §11). Slice 3
       built on 2026-11-19: each revocation and deletion journaled outside the database, in
       Tigris on Fly, and `yardsort-server reconcile`, before which a restored database is refused;
-      the restore drill on staging is next (46 §12, `docs/operations/restore.md`).
+      the restore drill passed on staging on 2026-11-22 (46 §12, `docs/operations/restore.md`).
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is

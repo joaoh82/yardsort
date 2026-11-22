@@ -7,8 +7,7 @@ screen on 2026-11-18. Slice 4, entitlements and metering, built the same day (§
 and 4 merged, and `main` deployed to staging on 2026-11-18: its usage counters checked there. The
 owner chose to skip deleting an account on staging, which would be theirs; deletion's proof is the
 local tests and smoke tests. Slice 3, a restore that cannot resurrect, built on 2026-11-19 (§12):
-its tests pass on both stores; the restore drill on staging waits on a deploy and the owner's
-go-ahead.
+its tests pass on both stores, and the restore drill passed on staging on 2026-11-22.
 
 This is the plan for the last phase of the proposal ([25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)
 §13): what it has to show, what it starts from, the decisions it needs, and the slices in the order
@@ -515,9 +514,17 @@ stand-in S3 that checks every request's signature against what arrived, paging t
 with a token that needs escaping, refusing to overwrite and refusing a wrong secret.
 `tests/delete.rs`'s check of every table now names `journal` as holding no account's rows.
 
-**Not run yet: the restore drill on staging** ([the restore runbook](../operations/restore.md)):
-deploy `main` with the journal on, sign a throwaway device in and note the time, revoke it and
-delete a throwaway account, restore staging's database to the time noted as a Neon branch, point
-staging at it, see every request refused, run `reconcile`, and see the device stay out and the
-account stay gone. It needs the owner's go-ahead for the deploy, and a ZITADEL sign-in in the
-browser, which is the owner's.
+**The restore drill on staging, 2026-11-22** ([the restore runbook](../operations/restore.md#the-drill)):
+passed. `main` deployed with the journal on (`e222688`); a throwaway ZITADEL user signed in two
+throwaway hosts; the restore point noted; one host signed out and the account deleted from the
+other, three entries journaled and written to Tigris within seconds. Staging's database branched in
+Neon at the restore point and staging pointed at the branch: every request, `/health` and
+authenticated routes alike, answered 503 with `Retry-After: 60`. `reconcile`, run on the Machine
+over `fly ssh console`, replayed the three entries; the server logged `the records are
+reconciled: serving` within a second, the account, its host and its devices were gone from the
+branch, and a second `reconcile` replayed nothing. Staging pointed back at its own database, and
+no device was signed out by the window. Found: Fly's secret update waits for the health check, which
+answers 503 until `reconcile`, so it times out (harmlessly) rather than finishing. The throwaway
+credentials were gone from disk after signing out and deleting, so the restored rows were checked
+in the database rather than by those devices asking again. Whether Tigris honours `If-None-Match`
+was not exercised: no key was written twice.
