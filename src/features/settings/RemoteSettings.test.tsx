@@ -109,19 +109,23 @@ it("turns on with the server and name given, then shows this computer", async ()
   expect(screen.getByText(/kept in this computer's credential store/)).toBeInTheDocument();
 });
 
-it("says which account the host signed in to, or that it is not known", async () => {
+it("says which account the host signed in to", async () => {
   core.remoteStatus.mockResolvedValue(on);
-  const { unmount } = render(<RemoteSettings />);
-  const section = await screen.findByRole("region", { name: "This computer" });
-  expect(section).toHaveTextContent("Account: ana@example.com");
-  unmount();
-
-  // Signed in before the account was kept: said, rather than shown as nobody's.
-  core.remoteStatus.mockResolvedValue({ ...on, host: { ...on.host!, email: null } });
   render(<RemoteSettings />);
-  const earlier = await screen.findByRole("region", { name: "This computer" });
-  expect(earlier).toHaveTextContent("The account it signed in to is not known here");
-  expect(earlier).not.toHaveTextContent("Account:");
+  expect(await screen.findByText(/^Account:/)).toHaveTextContent("Account: ana@example.com");
+});
+
+it("says the account is not known for a host signed in before it was kept", async () => {
+  // Signed in before the account was kept: said, rather than shown as nobody's.
+  const earlier = { ...on, host: { ...on.host!, email: null } };
+  core.remoteStatus.mockResolvedValue(earlier);
+  // The section asks who is waiting too, and that answer carries the status as well.
+  core.remoteRequests.mockResolvedValue({ requests: [], status: earlier });
+  render(<RemoteSettings />);
+  expect(await screen.findByText(/The account it signed in to is not known here/)).toBeTruthy();
+  // Other computers, below, is a sign-in of its own with its own line: only this one counts.
+  const host = screen.getByRole("region", { name: "This computer" });
+  expect(within(host).queryByText(/^Account:/)).toBeNull();
 });
 
 it("offers the server and name it was last turned on with", async () => {
