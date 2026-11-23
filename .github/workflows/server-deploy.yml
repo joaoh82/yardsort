@@ -4,9 +4,9 @@ name: Deploy the server
 # workflow). Each environment has its own Fly config (crates/server/fly/<environment>.toml), its
 # own app and its own GitHub environment holding FLY_API_TOKEN: a deploy token for that one app.
 #
-# Staging deploys whichever branch it is run from. Production is not offered yet: it arrives with
-# its ZITADEL instance, as a `production` environment that requires a reviewer and deploys from
-# main only (docs/design/28-remote-infrastructure.md).
+# Staging deploys whichever branch it is run from. Production deploys from main only: its GitHub
+# environment requires a reviewer and allows main alone, and the job refuses any other ref. It
+# runs on two Machines, staging on one (docs/design/28-remote-infrastructure.md §1).
 #
 # **Rolling back** (docs/operations/rollback.md): `rollback` puts a release that ran before back,
 # by its image, built nothing: `previous` for the image before the one running now, a release's
@@ -21,7 +21,7 @@ on:
       environment:
         description: Where to deploy
         type: choice
-        options: [staging]
+        options: [staging, production]
         default: staging
       rollback:
         description: "Roll back instead: previous, a release number, or an image of this app's"
@@ -43,7 +43,15 @@ jobs:
     timeout-minutes: 30
     env:
       CONFIG: crates/server/fly/${{ inputs.environment }}.toml
+      # Two Machines on production's first deploy, one on staging's (28 §1).
+      HA: ${{ inputs.environment == 'production' }}
     steps:
+      - name: Production deploys from main only
+        if: inputs.environment == 'production' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Production deploys from main only, not $GITHUB_REF"
+          exit 1
+
       - uses: actions/checkout@v5
 
       # Pinned by commit: this step runs with the deploy token in reach.
@@ -51,15 +59,15 @@ jobs:
         with:
           version: 0.4.122
 
-      # Built on Fly's builder from crates/server/Dockerfile. One Machine, not Fly's default of two
-      # on a first deploy: staging is one small Machine (28 §1).
+      # Built on Fly's builder from crates/server/Dockerfile. On a first deploy, one Machine for
+      # staging and two for production (HA above); later deploys keep the count there is.
       - name: Deploy
         if: inputs.rollback == ''
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: >-
           flyctl deploy . --config "$CONFIG" --dockerfile crates/server/Dockerfile
-          --remote-only --ha=false --wait-timeout 5m
+          --remote-only --ha="$HA" --wait-timeout 5m
 
       # The image to put back, found from the app's releases. The input comes in through the
       # environment, never into the script's text.
@@ -114,7 +122,7 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           IMAGE: ${{ steps.back.outputs.image }}
         run: >-
-          flyctl deploy --config "$CONFIG" --image "$IMAGE" --ha=false --wait-timeout 5m
+          flyctl deploy --config "$CONFIG" --image "$IMAGE" --ha="$HA" --wait-timeout 5m
 
       # The app answers, and names the provider this environment was configured with. Through its
       # own fly.dev address, which works before the public name's DNS and certificate do.

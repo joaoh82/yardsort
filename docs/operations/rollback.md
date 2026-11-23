@@ -28,7 +28,8 @@ not journaled.
 
 ## Rolling back
 
-1. **Actions → Deploy the server → Run workflow**, from `main`. Choose the environment, and in
+1. **Actions → Deploy the server → Run workflow**, from `main`. Choose the environment (production
+   waits for the owner's approval as reviewer), and in
    **Roll back instead** put:
    - `previous`: the image before the one running now (releases that failed are skipped);
    - a release's number, `12` or `v12`, as `fly releases -a <app> --image` lists them;

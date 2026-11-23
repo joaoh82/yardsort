@@ -1,0 +1,16 @@
+# In front of production's ZITADEL, inside its one Machine (machine_config.json). Fly's proxy
+# terminates TLS for auth.yardsort.sh and sends plain HTTP here. ZITADEL wants one address: its
+# login pages from the login container, everything else from the API over HTTP/2 without TLS
+# (h2c), which its gRPC needs. As in crates/server/self-host/Caddyfile, less the certificates.
+{
+	admin off
+}
+
+:8000 {
+	handle /ui/v2/login* {
+		reverse_proxy localhost:3000
+	}
+	handle {
+		reverse_proxy h2c://localhost:8080
+	}
+}
