@@ -353,6 +353,10 @@ pub struct Dashboard {
 pub struct RemoteStatus {
     pub server_url: String,
     pub name: String,
+    /// The account it signed in to, by the email the identity provider gave then; absent when
+    /// it would not say, for a sign-in from before this was kept, or from an earlier host.
+    #[serde(default)]
+    pub email: Option<String>,
     /// The link to the relay, in words.
     pub link: String,
     pub devices: usize,

@@ -301,6 +301,7 @@ pub fn status(home: &HostHome) -> Status {
         .map(|row| RemoteStatus {
             server_url: row.server_url,
             name: row.name,
+            email: row.email,
             link: match account::link(home) {
                 None => "not kept".into(),
                 Some(remote_host::Status::Connecting) => "connecting".into(),

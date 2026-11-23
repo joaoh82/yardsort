@@ -199,6 +199,80 @@ async fn signing_in_asks_the_provider_once_and_the_device_then_holds_the_servers
 }
 
 #[tokio::test]
+async fn every_sign_in_lets_the_person_choose_the_account_and_asks_for_the_email() {
+    let s = setup(None).await;
+    let authorize = s
+        .service
+        .begin_login(&params(&tokens::random(), APP), now_ms())
+        .await
+        .unwrap();
+    // A browser left signed in as someone else would otherwise put the device in their account.
+    assert_eq!(
+        query(&authorize, "prompt").as_deref(),
+        Some("select_account")
+    );
+    assert_eq!(query(&authorize, "max_age"), None);
+    assert_eq!(query(&authorize, "scope").as_deref(), Some("openid email"));
+}
+
+#[tokio::test]
+async fn the_device_is_told_the_email_it_signed_in_as_once_and_a_refresh_never_repeats_it() {
+    let s = setup(None).await;
+    let now = now_ms();
+    s.idp
+        .with(|i| i.email = Email::InToken("ana@example.invalid".into()));
+    let credentials = sign_in(&s, "subject-1", "Phone", now).await;
+    assert_eq!(credentials.email.as_deref(), Some("ana@example.invalid"));
+    assert_eq!(
+        s.idp.with(|i| i.userinfo_calls),
+        0,
+        "an ID token that says it is enough"
+    );
+
+    let refreshed = refresh(&s, &credentials.refresh, now + 1).await.unwrap();
+    assert_eq!(refreshed.email, None, "the server keeps no email to repeat");
+}
+
+#[tokio::test]
+async fn an_email_only_at_userinfo_is_asked_for_once_with_the_providers_access_token() {
+    let s = setup(Some("a secret")).await;
+    s.idp
+        .with(|i| i.email = Email::FromUserInfo("ana@example.invalid".into()));
+    let credentials = sign_in(&s, "subject-1", "Phone", now_ms()).await;
+    assert_eq!(credentials.email.as_deref(), Some("ana@example.invalid"));
+    assert_eq!(s.idp.with(|i| i.userinfo_calls), 1);
+}
+
+#[tokio::test]
+async fn without_an_email_it_can_show_the_person_signs_in_without_one() {
+    for (email, why) in [
+        (
+            Email::ForSomeoneElse("eve@example.invalid".into()),
+            "userinfo answered for another subject",
+        ),
+        (Email::Never, "the provider would not say"),
+        (
+            Email::InToken("not an address".into()),
+            "it is no email address",
+        ),
+        (
+            Email::InToken("ana@example.invalid\nsomething else".into()),
+            "it is more than one line",
+        ),
+        (
+            Email::InToken(format!("{}@example.invalid", "a".repeat(250))),
+            "it is longer than an address can be",
+        ),
+    ] {
+        let s = setup(None).await;
+        s.idp.with(|i| i.email = email);
+        let credentials = sign_in(&s, "subject-1", "Phone", now_ms()).await;
+        assert_eq!(credentials.email, None, "{why}");
+        assert!(caller(&s, &credentials, now_ms()).await.is_ok(), "{why}");
+    }
+}
+
+#[tokio::test]
 async fn a_public_client_sends_its_id_and_no_secret() {
     let s = setup(None).await;
     let credentials = sign_in(&s, "subject-1", "Phone", now_ms()).await;

@@ -253,6 +253,34 @@ describe("Connect", () => {
 });
 
 describe("Account", () => {
+  test("says which account this phone signed in to", async () => {
+    await start();
+    await signIn();
+    expect(screen.getByText("Account: ana@example.com")).toBeTruthy();
+  });
+
+  test("keeps the account it signed in to, though no refresh repeats it", async () => {
+    const server = new FakeServer();
+    const vault = new MemoryVault();
+    const first = new Accounts(envFor(server), vault);
+    await first.load();
+    await first.signIn(await first.lookUp(ADDRESS), "Ana’s phone", signedInBrowser);
+
+    // Opening again refreshes, and the server answers with no email: it keeps none.
+    server.email = "eve@example.com";
+    await start({ server, vault });
+    await screen.findByText("Signed in to Example Remote as Ana’s phone.");
+    expect(screen.getByText("Account: ana@example.com")).toBeTruthy();
+  });
+
+  test("says the account is not known when the server did not say", async () => {
+    const { server } = await start();
+    server.email = null;
+    await signIn();
+    expect(screen.getByText(/The account is not known here/)).toBeTruthy();
+    expect(screen.queryByText(/^Account:/)).toBeNull();
+  });
+
   test("signing out asks first, and a no changes nothing", async () => {
     const { server, vault } = await start();
     await signIn();
@@ -740,6 +768,20 @@ describe("Pairing", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Pair with ABCD-2345" }));
     expect(await screen.findByText(/wrong or has expired/)).toBeTruthy();
     expect(screen.getByLabelText("Pairing code")).toBeTruthy();
+    // A computer signed in to another account shows codes this phone's account cannot find: the
+    // account is in sight, to compare with the computer's.
+    expect(
+      screen.getByText(
+        "This phone is in the account ana@example.com on Example Remote. The computer must be signed in to the same account, or its code is not found.",
+      ),
+    ).toBeTruthy();
+  });
+
+  test("says nothing of the account when it is not known", async () => {
+    const server = new FakeServer();
+    server.email = null;
+    await pairScreen({ server });
+    expect(screen.queryByText(/This phone is in the account/)).toBeNull();
   });
 
   for (const [state, says] of [

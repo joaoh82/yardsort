@@ -50,6 +50,7 @@ const on: RemoteStatus = {
     serverUrl: "https://remote.example.com",
     name: "Workstation",
     since: 1,
+    email: "ana@example.com",
     link: { kind: "connected", devices: 0 },
   },
 };
@@ -106,6 +107,21 @@ it("turns on with the server and name given, then shows this computer", async ()
   expect(await screen.findByText("Workstation")).toBeInTheDocument();
   expect(screen.getByText("https://remote.example.com")).toBeInTheDocument();
   expect(screen.getByText(/kept in this computer's credential store/)).toBeInTheDocument();
+});
+
+it("says which account the host signed in to, or that it is not known", async () => {
+  core.remoteStatus.mockResolvedValue(on);
+  const { unmount } = render(<RemoteSettings />);
+  const section = await screen.findByRole("region", { name: "This computer" });
+  expect(section).toHaveTextContent("Account: ana@example.com");
+  unmount();
+
+  // Signed in before the account was kept: said, rather than shown as nobody's.
+  core.remoteStatus.mockResolvedValue({ ...on, host: { ...on.host!, email: null } });
+  render(<RemoteSettings />);
+  const earlier = await screen.findByRole("region", { name: "This computer" });
+  expect(earlier).toHaveTextContent("The account it signed in to is not known here");
+  expect(earlier).not.toHaveTextContent("Account:");
 });
 
 it("offers the server and name it was last turned on with", async () => {

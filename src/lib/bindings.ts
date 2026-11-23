@@ -2475,6 +2475,11 @@ export type OtherClient = {
 	serverUrl: string,
 	name: string,
 	since: number | null,
+	/**
+	 *  Who it signed in as, as the identity provider said; `None` when it would not say, or for
+	 *  a sign-in from before this was kept.
+	 */
+	email: string | null,
 };
 
 /**  A project another computer cloned and added at this one's asking. */
@@ -3279,6 +3284,11 @@ export type RemoteHost = {
 	serverUrl: string,
 	name: string,
 	since: number | null,
+	/**
+	 *  Who it signed in as, as the identity provider said; `None` when it would not say, or for a
+	 *  sign-in from before this was kept.
+	 */
+	email: string | null,
 	/**  The link to the server's relay. */
 	link: RemoteLink,
 };

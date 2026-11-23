@@ -70,6 +70,19 @@ pub enum Tamper {
     NoAuthTime,
 }
 
+/// Where the provider tells the person's email, if it does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Email {
+    /// In the ID token, as a provider set to put user information there does.
+    InToken(String),
+    /// Only at the userinfo endpoint, as ZITADEL does by default when it issues an access token.
+    FromUserInfo(String),
+    /// At the userinfo endpoint, but for a subject other than the one signing in.
+    ForSomeoneElse(String),
+    /// Nowhere.
+    Never,
+}
+
 #[derive(Clone)]
 pub struct Signer {
     pub kid: &'static str,
@@ -94,6 +107,10 @@ pub struct IdpState {
     pub grants: HashMap<String, Grant>,
     pub token_calls: usize,
     pub jwks_calls: usize,
+    pub userinfo_calls: usize,
+    pub email: Email,
+    /// Each access token handed out, with the subject it is for.
+    pub access: HashMap<String, String>,
     /// Who signs in at `/authorize`, where the browser comes when nothing calls [`Idp::approve`].
     pub subject: String,
 }
@@ -122,6 +139,9 @@ impl Idp {
             grants: HashMap::new(),
             token_calls: 0,
             jwks_calls: 0,
+            userinfo_calls: 0,
+            email: Email::InToken("someone@example.invalid".into()),
+            access: HashMap::new(),
             subject: "someone".into(),
         }));
         let app = Router::new()
@@ -129,6 +149,7 @@ impl Idp {
             .route("/jwks", get(jwks))
             .route("/authorize", get(authorize))
             .route("/token", post(token))
+            .route("/userinfo", get(userinfo))
             .with_state(state.clone());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         Self { state }
@@ -149,9 +170,15 @@ impl Idp {
         assert_eq!(q["response_type"], "code");
         assert_eq!(q["client_id"], CLIENT_ID);
         assert_eq!(
-            q["scope"], "openid",
-            "nothing beyond who signed in is asked for"
+            q["scope"], "openid email",
+            "nothing beyond who signed in and their email is asked for"
         );
+        // A sign-in to delete the account asks to sign in again; every other lets the person
+        // choose the account, whatever the browser is signed in as.
+        let again = q.get("prompt").map(String::as_str) == Some("login");
+        if !again {
+            assert_eq!(q["prompt"], "select_account");
+        }
         assert_eq!(q["code_challenge_method"], "S256");
         let code = tokens::random();
         self.with(|s| {
@@ -184,6 +211,7 @@ pub async fn discovery(State(state): State<Shared>) -> Json<Value> {
         "authorization_endpoint": format!("{base}/authorize"),
         "token_endpoint": format!("{base}/token"),
         "jwks_uri": format!("{base}/jwks"),
+        "userinfo_endpoint": format!("{base}/userinfo"),
         "code_challenge_methods_supported": ["S256"],
     }))
 }
@@ -258,13 +286,34 @@ pub async fn token(
         return refuse(StatusCode::BAD_REQUEST, "invalid_grant");
     }
     let id_token = id_token(&s, &grant);
+    let access = format!("the-providers-own-access-token-{}", tokens::random());
+    s.access.insert(access.clone(), grant.subject.clone());
     Json(json!({
-        "access_token": "the-providers-own-access-token",
+        "access_token": access,
         "token_type": "Bearer",
         "expires_in": 3600,
         "id_token": id_token,
     }))
     .into_response()
+}
+
+/// OIDC Core §5.3: who the access token is for, and their email when the provider tells it here.
+pub async fn userinfo(State(state): State<Shared>, headers: HeaderMap) -> Response {
+    let mut s = state.lock().unwrap();
+    s.userinfo_calls += 1;
+    let bearer = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+    let Some(subject) = bearer.and_then(|token| s.access.get(token)).cloned() else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let answer = match &s.email {
+        Email::FromUserInfo(email) => json!({ "sub": subject, "email": email }),
+        Email::ForSomeoneElse(email) => json!({ "sub": "someone-else", "email": email }),
+        Email::InToken(_) | Email::Never => json!({ "sub": subject }),
+    };
+    Json(answer).into_response()
 }
 
 pub fn basic(headers: &HeaderMap) -> Option<(String, String)> {
@@ -289,9 +338,11 @@ pub fn id_token(s: &IdpState, grant: &Grant) -> String {
         "iat": now,
         "auth_time": now,
         "nonce": grant.nonce,
-        "email": "someone@example.invalid",
     });
     let c = claims.as_object_mut().unwrap();
+    if let Email::InToken(email) = &s.email {
+        c.insert("email".into(), json!(email));
+    }
     match s.tamper {
         Tamper::Issuer => {
             c.insert("iss".into(), json!(format!("{}/elsewhere", s.base)));

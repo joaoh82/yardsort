@@ -56,6 +56,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0044_sync_notes.sql"),
     include_str!("../migrations/0045_sync_workspaces.sql"),
     include_str!("../migrations/0046_notifications.sql"),
+    include_str!("../migrations/0047_remote_email.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -89,6 +90,9 @@ pub struct RemoteHostRow {
     pub device_id: String,
     pub name: String,
     pub enabled_at: i64,
+    /// Who it signed in as, as the identity provider said at that sign-in; `None` when it would
+    /// not say, or for a sign-in from before this was kept.
+    pub email: Option<String>,
 }
 
 /// This machine as a client of other hosts. See `migrations/0026_remote_computer.sql`.
@@ -99,6 +103,8 @@ pub struct RemoteComputerRow {
     pub device_id: String,
     pub name: String,
     pub signed_in_at: i64,
+    /// Who it signed in as, as for [`RemoteHostRow::email`].
+    pub email: Option<String>,
 }
 
 /// A device this host's person let in. `scopes` and `projects` are JSON, as on the wire.
@@ -5541,7 +5547,7 @@ impl Store {
         Ok(self
             .conn()
             .query_row(
-                "SELECT server_url, server_id, host_id, device_id, name, enabled_at
+                "SELECT server_url, server_id, host_id, device_id, name, enabled_at, email
                  FROM remote_host",
                 [],
                 |r| {
@@ -5552,6 +5558,7 @@ impl Store {
                         device_id: r.get(3)?,
                         name: r.get(4)?,
                         enabled_at: r.get(5)?,
+                        email: r.get(6)?,
                     })
                 },
             )
@@ -5578,19 +5585,21 @@ impl Store {
         }
         tx.execute(
             "INSERT INTO remote_host
-                 (singleton, server_url, server_id, host_id, device_id, name, enabled_at)
-             VALUES (1, ?, ?, ?, ?, ?, ?)
+                 (singleton, server_url, server_id, host_id, device_id, name, enabled_at, email)
+             VALUES (1, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(singleton) DO UPDATE SET
                  server_url = excluded.server_url, server_id = excluded.server_id,
                  host_id = excluded.host_id, device_id = excluded.device_id,
-                 name = excluded.name, enabled_at = excluded.enabled_at",
+                 name = excluded.name, enabled_at = excluded.enabled_at,
+                 email = excluded.email",
             params![
                 host.server_url,
                 host.server_id,
                 host.host_id,
                 host.device_id,
                 host.name,
-                host.enabled_at
+                host.enabled_at,
+                host.email
             ],
         )?;
         tx.commit()?;
@@ -5613,7 +5622,8 @@ impl Store {
         Ok(self
             .conn()
             .query_row(
-                "SELECT server_url, server_id, device_id, name, signed_in_at FROM remote_computer",
+                "SELECT server_url, server_id, device_id, name, signed_in_at, email
+                 FROM remote_computer",
                 [],
                 |r| {
                     Ok(RemoteComputerRow {
@@ -5622,6 +5632,7 @@ impl Store {
                         device_id: r.get(2)?,
                         name: r.get(3)?,
                         signed_in_at: r.get(4)?,
+                        email: r.get(5)?,
                     })
                 },
             )
@@ -5631,18 +5642,19 @@ impl Store {
     pub fn set_remote_computer(&self, computer: &RemoteComputerRow) -> StoreResult<()> {
         self.conn().execute(
             "INSERT INTO remote_computer
-                 (singleton, server_url, server_id, device_id, name, signed_in_at)
-             VALUES (1, ?, ?, ?, ?, ?)
+                 (singleton, server_url, server_id, device_id, name, signed_in_at, email)
+             VALUES (1, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(singleton) DO UPDATE SET
                  server_url = excluded.server_url, server_id = excluded.server_id,
                  device_id = excluded.device_id, name = excluded.name,
-                 signed_in_at = excluded.signed_in_at",
+                 signed_in_at = excluded.signed_in_at, email = excluded.email",
             params![
                 computer.server_url,
                 computer.server_id,
                 computer.device_id,
                 computer.name,
-                computer.signed_in_at
+                computer.signed_in_at,
+                computer.email
             ],
         )?;
         Ok(())
@@ -5975,6 +5987,7 @@ mod tests {
             device_id: "device-host".into(),
             name: "Workstation".into(),
             enabled_at: 1,
+            email: Some("ana@example.com".into()),
         };
         let computer = RemoteComputerRow {
             server_url: "https://remote.example.com".into(),
@@ -5982,9 +5995,13 @@ mod tests {
             device_id: "device-client".into(),
             name: "Workstation".into(),
             signed_in_at: 2,
+            // Each sign-in keeps its own: they need not be the same account.
+            email: Some("ana+work@example.com".into()),
         };
         store.set_remote_host(&host).unwrap();
         store.set_remote_computer(&computer).unwrap();
+        assert_eq!(store.remote_host().unwrap(), Some(host.clone()));
+        assert_eq!(store.remote_computer().unwrap(), Some(computer.clone()));
         store.forget_remote_host().unwrap();
         assert_eq!(store.remote_computer().unwrap(), Some(computer.clone()));
 
@@ -6717,9 +6734,9 @@ steps:
             // requests runs made, 0041 three columns with defaults to schedules and an empty
             // table of the workspaces schedules made, 0042 a column with a default to sessions,
             // 0043 sync's three empty tables, 0044 six nullable columns to memory entries,
-            // 0045 an empty table of other hosts' workspaces, and 0046 an empty table of
-            // notifications.
-            assert_eq!(MIGRATIONS.len(), 46);
+            // 0045 an empty table of other hosts' workspaces, 0046 an empty table of
+            // notifications, and 0047 a nullable email to the Remote sign-ins.
+            assert_eq!(MIGRATIONS.len(), 47);
             upgrade(&mut conn, &MIGRATIONS[..30], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs
@@ -6791,9 +6808,9 @@ steps:
             // requests runs made, 0041 three columns with defaults to schedules and an empty
             // table of the workspaces schedules made, 0042 a column with a default to sessions,
             // 0043 sync's three empty tables, 0044 six nullable columns to memory entries,
-            // 0045 an empty table of other hosts' workspaces, and 0046 an empty table of
-            // notifications.
-            assert_eq!(MIGRATIONS.len(), 46);
+            // 0045 an empty table of other hosts' workspaces, 0046 an empty table of
+            // notifications, and 0047 a nullable email to the Remote sign-ins.
+            assert_eq!(MIGRATIONS.len(), 47);
             upgrade(&mut conn, &MIGRATIONS[..31], None).unwrap();
             conn.execute(
                 "INSERT INTO workflow_runs

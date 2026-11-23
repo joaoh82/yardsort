@@ -290,6 +290,7 @@ export class Accounts {
       device: issued.device,
       deviceName: deviceName.trim(),
       signedInAt: (this.env.clock ?? Date.now)(),
+      ...(issued.email ? { email: issued.email } : {}),
     };
     try {
       await profiles.add(profile, issued.refresh);

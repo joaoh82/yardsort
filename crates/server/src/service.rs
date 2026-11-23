@@ -367,6 +367,8 @@ impl<R: Records> ControlService<R> {
                     device_challenge: login.device_challenge,
                     confirm: login.confirm,
                     expires_at,
+                    // A confirming sign-in enrolls nothing, so has no device to tell.
+                    email: identity.email.filter(|_| !login.confirm),
                 },
                 now,
             )
@@ -439,7 +441,10 @@ impl<R: Records> ControlService<R> {
                     .await?;
                 let id = DeviceId::new(uuid::Uuid::new_v4().to_string()).map_err(unreadable)?;
                 let (issued, pair) = issue(now);
-                let credentials = pair.for_device(id.clone());
+                let credentials = Credentials {
+                    email: handoff.email,
+                    ..pair.for_device(id.clone())
+                };
                 self.records
                     .add_device(
                         Device {
@@ -718,6 +723,7 @@ impl Pair {
             access: self.access,
             access_expires_in_ms: ACCESS_TTL_MS as u64,
             refresh: self.refresh,
+            email: None,
         }
     }
 }

@@ -113,6 +113,11 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         "journal",
         include_str!("../migrations/0014_journal.sql"),
     ),
+    (
+        15,
+        "handoff_email",
+        include_str!("../migrations/0015_handoff_email.sql"),
+    ),
 ];
 
 /// Held while migrating, so instances starting together take turns. Any constant will do, as
@@ -606,8 +611,9 @@ impl Records for PgRecords {
             .await?
             .execute(
                 "WITH lapsed AS (DELETE FROM handoffs WHERE expires_at <= $5)
-                 INSERT INTO handoffs (code, account, device_challenge, expires_at, confirm)
-                 VALUES ($1, $2, $3, $4, $6)",
+                 INSERT INTO handoffs
+                     (code, account, device_challenge, expires_at, confirm, email)
+                 VALUES ($1, $2, $3, $4, $6, $7)",
                 &[
                     &bytes(&handoff.code),
                     &handoff.account.0,
@@ -615,6 +621,7 @@ impl Records for PgRecords {
                     &handoff.expires_at,
                     &now,
                     &handoff.confirm,
+                    &handoff.email,
                 ],
             )
             .await
@@ -628,7 +635,7 @@ impl Records for PgRecords {
             .await?
             .query_opt(
                 "DELETE FROM handoffs WHERE code = $1
-                 RETURNING account, device_challenge, expires_at, confirm",
+                 RETURNING account, device_challenge, expires_at, confirm, email",
                 &[&bytes(code)],
             )
             .await
@@ -639,6 +646,7 @@ impl Records for PgRecords {
             device_challenge: row.get(1),
             expires_at: row.get(2),
             confirm: row.get(3),
+            email: row.get(4),
         }))
     }
 

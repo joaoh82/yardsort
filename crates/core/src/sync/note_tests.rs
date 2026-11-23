@@ -107,6 +107,7 @@ impl Host {
                 device_id: format!("device-{id}"),
                 name: name.into(),
                 enabled_at: 1,
+                email: None,
             })
             .unwrap();
         Self { store, id }

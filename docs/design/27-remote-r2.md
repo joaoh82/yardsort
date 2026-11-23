@@ -75,6 +75,8 @@ Why the server is the provider's client, and not the app:
 - **The provider's secrets and tokens stay on the server.** Devices never hold a provider
   token. Only `openid` is asked for, never `offline_access`, so the provider issues no refresh
   token, and the ID token's issuer and subject are all that is kept: not the email, not the name.
+  _Since [50](50-which-account.md): `email` is asked for too, and handed to the device signing in
+  for it to show which account it is in; the server still keeps only issuer and subject._
 - **One redirect URI is registered at the provider**: the server's own `/v1/login/callback`.
   The app's scheme and a computer's loopback address are the server's business, so a self-host
   operator does not set up the provider anew for each kind of device.

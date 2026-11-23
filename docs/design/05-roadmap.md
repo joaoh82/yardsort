@@ -1495,6 +1495,19 @@ Asked for by the owner on 2026-11-18, after the phone's pull requests (45). Buil
       Cancel, a stale commit refused, a merge, a draft and a conflict. It found the card staying
       open after a merge, fixed in [#288](https://github.com/joaoh82/yardsort/pull/288).
 
+## M37 — Which account
+
+Asked for by the owner on 2026-11-23, after a phone and a computer on staging turned out to be in
+two accounts (a browser left signed in as the load test's user). Built the same day:
+[50-which-account](50-which-account.md). No protocol minor.
+
+- [x] Every sign-in asks the identity provider to let the person choose the account.
+- [x] The server asks for the email and hands it to the device once, keeping none.
+- [x] Shown on the desktop (host and other computers), by `yardsort-host`, and on the phone's
+      account and pairing screens.
+- [ ] A sign-in on staging once deployed: ZITADEL's account picker, and the email from userinfo.
+- [ ] The host dashboard's Remote tab shows the account too.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

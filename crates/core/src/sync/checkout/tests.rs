@@ -150,6 +150,7 @@ fn here() -> Here {
             device_id: "device".into(),
             name: "Workstation".into(),
             enabled_at: 1,
+            email: None,
         })
         .unwrap();
     let project = Projects {

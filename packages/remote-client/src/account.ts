@@ -17,6 +17,8 @@ import {
   nullable,
   object,
   oneOf,
+  optional,
+  type Optional,
   tagged,
   text,
   u64,
@@ -141,13 +143,38 @@ export interface Credentials {
   accessExpiresInMs: number;
   /** Kept in the device's credential store, and nowhere else. */
   refresh: Secret;
+  /**
+   * Who signed in, as the identity provider gave it at this sign-in, for the device to show which
+   * account it is in. Only a sign-in's answer has it, never a refresh's; absent from a provider
+   * that would not say, and from an older server.
+   */
+  email?: string | undefined;
 }
+
+/** As the server's `MAX_EMAIL_LEN`. */
+export const MAX_EMAIL_LEN = 254;
+
+/**
+ * An email to show, or absent: a sign-in that worked is never refused for the words it came with,
+ * so one that is not a one-line address of at most {@link MAX_EMAIL_LEN} bytes is dropped.
+ */
+export const shownEmail: Optional<string | undefined> = optional((value: unknown) => {
+  if (typeof value !== "string") return undefined;
+  const email = value.trim();
+  const fits =
+    email.length > 0 &&
+    utf8Length(email) <= MAX_EMAIL_LEN &&
+    email.includes("@") &&
+    !hasControl(email);
+  return fits ? email : undefined;
+});
 
 export const credentials: Decoder<Credentials> = object({
   device: id<DeviceId>(),
   access: secret,
   accessExpiresInMs: u64,
   refresh: secret,
+  email: shownEmail,
 });
 
 export interface DeviceSummary {

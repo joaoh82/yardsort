@@ -197,6 +197,7 @@ pub async fn sign_in<H: ComputerHome>(
         device_id: signed_in.device.to_string(),
         name: name.to_owned(),
         signed_in_at: now_ms(),
+        email: signed_in.email.clone(),
     };
     let mut session = Session::new(client.clone(), signed_in);
     if let Some(earlier) = earlier.filter(|e| e.device_id != row.device_id) {

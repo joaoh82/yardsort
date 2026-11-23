@@ -309,6 +309,7 @@ mod tests {
             device_id: "host-device".into(),
             name: "Workstation".into(),
             enabled_at: 1,
+            email: None,
         }
     }
 

@@ -6161,6 +6161,7 @@ fn sync_status_is_read_from_the_records_and_nothing_else_is_offered() {
             device_id: "device".into(),
             name: "Workstation".into(),
             enabled_at: 1,
+            email: None,
         })
         .unwrap();
     let none = fx.ys(&["sync", "status"]).ok();

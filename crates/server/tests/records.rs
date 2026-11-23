@@ -210,6 +210,7 @@ fn handoff(code: &str, account: &AccountId, expires_at: i64) -> Handoff {
         device_challenge: format!("{code}-challenge"),
         confirm: false,
         expires_at,
+        email: None,
     }
 }
 
@@ -223,7 +224,23 @@ async fn a_handoff_is_taken_once(records: Arc<impl Records>) {
     assert_eq!(taken.account, account);
     assert_eq!(taken.device_challenge, "c-challenge");
     assert_eq!(taken.expires_at, T + 60);
+    assert_eq!(taken.email, None);
     assert!(records.take_handoff(&h("c")).await.unwrap().is_none());
+
+    // The email the provider gave goes to the device with the handoff, and with it from here.
+    records
+        .put_handoff(
+            Handoff {
+                email: Some("alice@example.invalid".into()),
+                ..handoff("e", &account, T + 60)
+            },
+            T,
+        )
+        .await
+        .unwrap();
+    let taken = records.take_handoff(&h("e")).await.unwrap().unwrap();
+    assert_eq!(taken.email.as_deref(), Some("alice@example.invalid"));
+    assert!(records.take_handoff(&h("e")).await.unwrap().is_none());
 }
 
 async fn an_access_credential_finds_its_device(records: Arc<impl Records>) {
