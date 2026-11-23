@@ -102,6 +102,7 @@ async fn token() -> Json<Credentials> {
         access: Secret::new("access"),
         access_expires_in_ms: 3_600_000,
         refresh: Secret::new("refresh"),
+        email: None,
     })
 }
 
@@ -281,6 +282,7 @@ async fn here() -> (Arc<Here>, Server) {
             device_id: DEVICE.into(),
             name: "Here".into(),
             enabled_at: 1,
+            email: None,
         })
         .unwrap();
     let credentials = Arc::new(MemoryCredentials::default());

@@ -522,6 +522,7 @@ pub async fn enable<H: Home>(
     // Kept before anything else: from here on, it is the only way back in.
     keep_refresh(home.as_ref(), signed_in.device.as_str(), &signed_in.refresh)
         .map_err(|e| Failure::new("remote_credentials", e))?;
+    let email = signed_in.email.clone();
     let mut session = Session::new(client.clone(), signed_in);
     let access = access(home.as_ref(), &mut session).await?;
 
@@ -573,6 +574,7 @@ pub async fn enable<H: Home>(
         device_id: session.device.to_string(),
         name: registered.name,
         enabled_at: now_ms(),
+        email,
     };
     home.store().set_remote_host(&row).map_err(store_failed)?;
     if let Some(earlier) = earlier.filter(|h| h.device_id != row.device_id) {
@@ -896,6 +898,7 @@ mod tests {
             device_id: DEVICE.into(),
             name: "Workstation".into(),
             enabled_at: 1,
+            email: None,
         }
     }
 

@@ -35,6 +35,11 @@ export interface Profile {
   deviceName: string;
   /** When it signed in, in milliseconds since the epoch. */
   signedInAt: number;
+  /**
+   * Which account it signed in to, by the email the identity provider gave then. Absent when it
+   * would not say, from an older server, or for a profile signed in before this was kept.
+   */
+  email?: string;
 }
 
 interface Index {
@@ -176,6 +181,7 @@ function isProfile(value: unknown): value is Profile {
     typeof value.serverName === "string" &&
     typeof value.device === "string" &&
     typeof value.deviceName === "string" &&
-    typeof value.signedInAt === "number"
+    typeof value.signedInAt === "number" &&
+    (value.email === undefined || typeof value.email === "string")
   );
 }

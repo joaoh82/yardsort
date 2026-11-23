@@ -3,6 +3,7 @@ import { ipc, type OtherHost } from "@/lib/ipc";
 import { useOtherComputersStore } from "@/stores/otherComputers";
 import { buttonClass, Field, inputClass, primaryButtonClass } from "./fields";
 import { pairingText } from "@/features/sidebar/otherComputersText";
+import { AccountLine } from "./AccountLine";
 
 /**
  * Remote the other way round: this computer reaching other hosts, as a phone does. It signs in as a
@@ -57,6 +58,7 @@ export function OtherComputersSettings() {
             Signed in as <span className="text-ink">{client.name}</span> at{" "}
             <span className="font-mono text-detail select-text">{client.serverUrl}</span>.
           </p>
+          <AccountLine email={client.email} />
           {status.signedOut && (
             <p role="alert" className="text-red-400 select-text">
               This computer was signed out at the server, and reaches no other computer now.

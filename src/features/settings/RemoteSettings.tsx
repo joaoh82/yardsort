@@ -20,6 +20,7 @@ import { buttonClass, Field, inputClass, primaryButtonClass } from "./fields";
 import { ProjectsFolderSettings } from "./ProjectsFolderSettings";
 import { OtherComputersSettings } from "./OtherComputersSettings";
 import { HostDashboardSettings } from "./HostDashboardSettings";
+import { AccountLine } from "./AccountLine";
 
 /** How often the open section asks the server who is waiting. */
 const POLL_MS = 3000;
@@ -159,6 +160,7 @@ export function RemoteSettings() {
               On, as <span className="text-ink">{status.host.name}</span> at{" "}
               <span className="font-mono text-detail select-text">{status.host.serverUrl}</span>.
             </p>
+            <AccountLine email={status.host.email} />
             <p className="text-ink-faint">Its sign-in is kept {status.credentials}.</p>
             <LinkLine link={status.host.link} />
             <div className="flex items-center gap-2">

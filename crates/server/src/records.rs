@@ -76,6 +76,9 @@ pub struct Handoff {
     /// and lapses [`remote_proto::delete::FRESH_SIGN_IN_MS`] after the person signed in.
     pub confirm: bool,
     pub expires_at: i64,
+    /// Who signed in, as the provider said, for the device redeeming this to show; kept with
+    /// the handoff and nowhere else. Never set on a confirming one.
+    pub email: Option<String>,
 }
 
 /// What deleting an account took with it.

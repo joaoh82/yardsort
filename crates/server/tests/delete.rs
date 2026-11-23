@@ -223,7 +223,9 @@ async fn only_a_fresh_sign_in_again_as_the_same_account_deletes_it(
         .append_pair("challengeMethod", "S256")
         .append_pair("redirect", common::idp::APP);
     let to_provider = location(&s.client.get(start).send().await.unwrap());
-    assert!(!query(&to_provider).contains_key("prompt"));
+    // It lets the person choose the account, and forces no sign-in again.
+    assert_eq!(query(&to_provider)["prompt"], "select_account");
+    assert!(!query(&to_provider).contains_key("max_age"));
     let (code, state) = s.idp.approve(&to_provider, "ada");
     let back = callback(&s, &code, &state).await;
     let refused = delete(&s, &phone.access, &query(&back)["code"], &verifier).await;

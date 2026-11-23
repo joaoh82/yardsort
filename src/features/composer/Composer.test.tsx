@@ -188,7 +188,12 @@ describe("Composer", () => {
     });
     useOtherComputersStore.setState({
       status: {
-        client: { serverUrl: "https://remote.example.com", name: "Workstation", since: 1 },
+        client: {
+          serverUrl: "https://remote.example.com",
+          name: "Workstation",
+          since: 1,
+          email: null,
+        },
         signingIn: false,
         hosts: [
           host("h-1", "Build box", { kind: "online" }),

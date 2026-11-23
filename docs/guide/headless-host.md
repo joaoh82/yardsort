@@ -134,6 +134,10 @@ ssh -L <port>:127.0.0.1:<port> build-box
 The address you paste holds a one-time code that is worth nothing without a secret `sign-in` keeps to
 itself, so passing it through a clipboard gives nothing away.
 
+Once signed in, `sign-in` prints the account it signed in to, by its email: a phone has to be signed
+in to the same account on the same server to pair. The identity provider asks which account to use
+even when the browser is already signed in to one.
+
 Sign in while `yardsort-host serve` is stopped: one sign-in held by two programs gets it revoked at
 the server, so `sign-in` refuses while anything runs on the profile. Signing in again later, as the
 same name or another, keeps this computer as the same host, with its devices still paired.
@@ -186,8 +190,8 @@ the daemon and the agents running: `systemctl status` then still lists them unde
 is expected. A service of your own needs the same line, or stopping it ends the agents with it. To
 sign in again, or sign in as another name, stop the service first, and start it after.
 
-`yardsort-host status` says whether the host is running, whether it is signed in, how its link to the
-server stands, how many devices are let in, how many terminals are running, and where the dashboard
+`yardsort-host status` says whether the host is running, whether it is signed in and to which account,
+how its link to the server stands, how many devices are let in, how many terminals are running, and where the dashboard
 is.
 
 ## The dashboard

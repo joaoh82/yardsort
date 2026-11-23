@@ -192,6 +192,29 @@ pub struct Credentials {
     pub access_expires_in_ms: u64,
     /// Kept in the device's credential store; never in a log, a URL or a terminal's environment.
     pub refresh: Secret,
+    /// Who signed in, as the identity provider gave it at this sign-in: for the device to show,
+    /// so its person can see which account it is in. Only a sign-in's answer carries it, never a
+    /// refresh's, and the server does not keep it: absent from a provider that would not say,
+    /// and from a server older than it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+/// The longest email a device is handed ([RFC 5321] allows 254 in a path); a longer one is
+/// dropped, not cut.
+///
+/// [RFC 5321]: https://www.rfc-editor.org/rfc/rfc5321#section-4.5.3.1.3
+pub const MAX_EMAIL_LEN: usize = 254;
+
+/// An email as the provider gave it, fit to show: trimmed, one line, at most [`MAX_EMAIL_LEN`]
+/// bytes, with an `@` in it. Anything else is `None`.
+pub fn shown_email(email: &str) -> Option<String> {
+    let email = email.trim();
+    let fits = !email.is_empty()
+        && email.len() <= MAX_EMAIL_LEN
+        && email.contains('@')
+        && !email.chars().any(char::is_control);
+    fits.then(|| email.to_owned())
 }
 
 /// `GET /v1/devices`: the signed-in account's devices, newest first.

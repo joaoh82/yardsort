@@ -634,6 +634,14 @@ const FIXTURES: Record<string, (name: string) => void> = {
     // A credential is never printed whole.
     expect(String(issued.refresh)).toBe("Secret(…)");
     expect(Bun.inspect(issued)).not.toContain("ys1.");
+    expect(issued.email).toBe("ana@example.com");
+    // The email is only shown: one that cannot be is dropped, and the sign-in stands.
+    const json = raw(name) as Record<string, unknown>;
+    for (const email of ["", "no address", "ana@example.com\nmore", `${"a".repeat(251)}@x.y`, 7]) {
+      expect(decode(credentials, { ...json, email }).email).toBeUndefined();
+    }
+    const { email: _, ...without } = json;
+    expect(decode(credentials, without).email).toBeUndefined();
   },
   "account-devices.json": (name) => {
     expect(pinned(devicePage, name).devices[1]?.kind).toBe("host");

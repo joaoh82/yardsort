@@ -46,7 +46,10 @@ the computer, not on the phone, so they keep going whatever happens to the conne
 1. **Yardsort on your computer, with Remote on.** Remote is off until you turn it on in
    **Settings → Remote**, where you sign in to a Yardsort server. See
    [Turning it on](remote.md#turning-it-on).
-2. **The app on your phone**, signed in to the same server.
+2. **The app on your phone**, signed in to the same server, as the same account. The phone's
+   account screen shows the account it signed in to, and **Settings → Remote** on the computer shows
+   its own: they must match. Each sign-in asks which account to use, so a browser left signed in as
+   someone else does not choose for you.
 3. **A yes at the computer.** **Pair a device** on the computer shows a code. Enter it on the phone,
    then say yes at the computer and choose whether the phone may only watch or also type, and which
    projects it reaches. See [Letting a device in](remote.md#letting-a-device-in).

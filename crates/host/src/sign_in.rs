@@ -94,6 +94,9 @@ pub async fn run(profile: Profile, server: String, name: Option<String>) -> Resu
         row.server_url,
         home.profile.credentials_dir.display()
     );
+    if let Some(email) = &row.email {
+        println!("Account: {email}. A phone must be signed in to the same account to pair.");
+    }
     println!(
         "Start the host with `yardsort-host serve`, then pair a phone with `yardsort-host pair`."
     );

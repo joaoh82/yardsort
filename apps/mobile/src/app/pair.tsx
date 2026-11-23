@@ -244,6 +244,7 @@ export default function Pair() {
   return (
     <Entry
       serverName={active?.serverName ?? ""}
+      email={active?.email}
       problem={problem}
       onCode={(code) => {
         setProblem(null);
@@ -313,12 +314,15 @@ function Answered({
 
 function Entry({
   serverName,
+  email,
   problem,
   onCode,
   onLink,
   onNotOurs,
 }: {
   serverName: string;
+  /** The account this phone is in, when it is known. */
+  email?: string | undefined;
   problem: string | null;
   onCode: (code: string) => void;
   onLink: (link: NonNullable<ReturnType<typeof parsePairingLink>>) => void;
@@ -334,6 +338,12 @@ function Entry({
         On the computer, open Yardsort’s Settings and choose Pair a device. It shows a code that is
         good for five minutes.
       </Body>
+      {email && (
+        <Body muted>
+          This phone is in the account {email} on {serverName}. The computer must be signed in to
+          the same account, or its code is not found.
+        </Body>
+      )}
       {problem && <Problem>{problem}</Problem>}
 
       {scanning ? (

@@ -89,7 +89,7 @@ const signedOut: OtherComputers = {
 };
 const paired: OtherComputers = {
   ...signedOut,
-  client: { serverUrl: "https://remote.example.com", name: "Workstation", since: 1 },
+  client: { serverUrl: "https://remote.example.com", name: "Workstation", since: 1, email: null },
   hosts: [
     {
       grantId: "g-1",
@@ -1171,6 +1171,17 @@ describe("Settings → Remote → Other computers", () => {
     expect(await screen.findByText(/Signed in as/)).toHaveTextContent(
       "Signed in as Workstation at https://remote.example.com.",
     );
+  });
+
+  it("says which account it signed in to, which need not be the host's", async () => {
+    const signedIn = {
+      ...paired,
+      client: { ...paired.client!, email: "ana+work@example.com" },
+    };
+    core.otherComputers.mockResolvedValue(signedIn);
+    useOtherComputersStore.setState({ status: signedIn });
+    render(<OtherComputersSettings />);
+    expect(await screen.findByText(/Account:/)).toHaveTextContent("Account: ana+work@example.com");
   });
 
   it("pairs by the other computer's code, and says what the server said when it is wrong", async () => {

@@ -5,6 +5,15 @@ has the downloads and the full commit lists.
 
 ## 0.36.0
 
+- **Which account you signed in to, and a choice each time.** Settings → Remote shows **Account:**,
+  the email this computer signed in as, for this computer as a host and for its **Other computers**
+  sign-in, and the phone shows its own on the account screen and beside the pairing code. Every
+  sign-in now asks which account to use, even when the browser is signed in to one already: a
+  browser left signed in as someone else put the computer in that account, where the phone could
+  not find its pairing code and showed the computer offline. `yardsort-host sign-in` and `status`
+  say the account too. The server keeps no email: it passes it to the device once, as it signs in.
+  Needs the server from this release, and the next phone build for the phone's side. See
+  [Turning it on](docs/guide/remote.md#turning-it-on).
 - **Copy from Chat on the phone.** Everything the agent wrote can now be selected, not only its
   code. A **Copy** under each reply and under your own message, and in the corner of each block
   of code, copies all of it, the part folded behind **Show all** too — including code blocks that

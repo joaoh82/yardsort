@@ -1,9 +1,15 @@
 //! The server as an OpenID Connect client of its identity provider.
 //!
 //! The authorization-code flow with PKCE ([OIDC Core §3.1], [RFC 7636]), and nothing else: no
-//! implicit flow, no refresh tokens from the provider (only `openid` is asked for, never
-//! `offline_access`), and no user information beyond the ID token's issuer and subject. The
-//! provider's access token is never kept or passed on.
+//! implicit flow, and no refresh tokens from the provider (`openid` and `email` are asked for,
+//! never `offline_access`). The account is the ID token's issuer and subject; nothing else about
+//! the person is kept. The email, from the ID token or else asked of the provider's userinfo
+//! endpoint once with its access token, is passed to the device signing in for it to show, and
+//! that access token is then dropped: never kept or passed on.
+//!
+//! Every sign-in asks the provider to let the person choose which account to sign in as
+//! (`prompt=select_account`), rather than going on silently as whoever the browser is signed in
+//! as: a browser left signed in as someone else would otherwise put the device in that account.
 //!
 //! An ID token is accepted only when all of these hold:
 //!
@@ -18,7 +24,7 @@
 //! - `exp` has not passed and `iat` is not in the future, each within [`CLOCK_LEEWAY_MS`].
 //! - `nonce` is the one this sign-in sent.
 //!
-//! A sign-in that confirms deleting an account asks the provider to sign the person in again
+//! A sign-in that confirms deleting an account asks instead for the person to sign in again
 //! (`prompt=login`, `max_age=0`), and its token must then carry `auth_time` (OIDC Core §3.1.2.1),
 //! which the caller checks is recent.
 //!
@@ -40,7 +46,7 @@ use jsonwebtoken::jwk::{
     AlgorithmParameters, EllipticCurve, Jwk, JwkSet, KeyAlgorithm, PublicKeyUse,
 };
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
-use remote_proto::account::Secret;
+use remote_proto::account::{shown_email, Secret};
 use serde::Deserialize;
 use url::Url;
 
@@ -88,6 +94,9 @@ pub struct Identity {
     pub subject: String,
     /// When the person last signed in at the provider, as its token says, in milliseconds.
     pub auth_time: Option<i64>,
+    /// Their email, as the provider says, fit to show ([`remote_proto::account::shown_email`]);
+    /// `None` when it would not say. For the device signing in, and not kept.
+    pub email: Option<String>,
 }
 
 /// An HTTP client for talking to providers: no redirects followed, a timeout on everything, and
@@ -130,6 +139,8 @@ struct Discovery {
     authorization_endpoint: Url,
     token_endpoint: Url,
     jwks_uri: Url,
+    /// Where to ask for the email when the ID token does not carry it (OIDC Core §5.3).
+    userinfo_endpoint: Option<Url>,
 }
 
 #[derive(Default)]
@@ -145,12 +156,25 @@ struct DiscoveryDocument {
     token_endpoint: String,
     jwks_uri: String,
     #[serde(default)]
+    userinfo_endpoint: Option<String>,
+    #[serde(default)]
     code_challenge_methods_supported: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
 struct TokenResponse {
     id_token: Option<String>,
+    /// Used once, for the email, if the ID token has none.
+    #[serde(default)]
+    access_token: Option<String>,
+}
+
+/// What the userinfo endpoint says: whose it is, and their email.
+#[derive(Deserialize)]
+struct UserInfo {
+    sub: String,
+    #[serde(default)]
+    email: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -168,6 +192,8 @@ struct Claims {
     azp: Option<String>,
     #[serde(default)]
     auth_time: Option<i64>,
+    #[serde(default)]
+    email: Option<String>,
 }
 
 /// How many audiences there are. Which they are is checked by `jsonwebtoken`.
@@ -206,7 +232,8 @@ impl Provider {
 
     /// Where to send the browser: the provider's authorization endpoint, asking for a code for
     /// `redirect_uri`, bound to `state`, `nonce` and the PKCE `challenge`. With `again`, the
-    /// provider is asked to have the person sign in again, whatever session it already has.
+    /// provider is asked to have the person sign in again, whatever session it already has;
+    /// otherwise to let them choose which account, whichever the browser is signed in as.
     pub async fn authorize_url(
         &self,
         redirect_uri: &Url,
@@ -222,7 +249,7 @@ impl Provider {
             .append_pair("response_type", "code")
             .append_pair("client_id", &self.config.client_id)
             .append_pair("redirect_uri", redirect_uri.as_str())
-            .append_pair("scope", "openid")
+            .append_pair("scope", "openid email")
             .append_pair("state", state)
             .append_pair("nonce", nonce)
             .append_pair("code_challenge", challenge)
@@ -231,6 +258,9 @@ impl Provider {
             url.query_pairs_mut()
                 .append_pair("prompt", "login")
                 .append_pair("max_age", "0");
+        } else {
+            url.query_pairs_mut()
+                .append_pair("prompt", "select_account");
         }
         Ok(url)
     }
@@ -282,7 +312,36 @@ impl Provider {
         let id_token = body
             .id_token
             .ok_or(OidcError::Refused("the answer had no ID token".into()))?;
-        self.verify(&id_token, nonce, now).await
+        let mut identity = self.verify(&id_token, nonce, now).await?;
+        if identity.email.is_none() {
+            if let (Some(endpoint), Some(access)) =
+                (discovery.userinfo_endpoint.as_ref(), body.access_token)
+            {
+                identity.email = self.user_email(endpoint, &access, &identity.subject).await;
+            }
+        }
+        Ok(identity)
+    }
+
+    /// The email the userinfo endpoint gives for `subject`, or `None`: it is only shown, so a
+    /// provider that will not say, or says it for someone else, signs the person in without it.
+    async fn user_email(&self, endpoint: &Url, access: &str, subject: &str) -> Option<String> {
+        let response = self
+            .http
+            .get(endpoint.clone())
+            .bearer_auth(access)
+            .send()
+            .await
+            .ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        // OIDC Core §5.3.2: the answer's subject must be the ID token's, or it is not used.
+        let info: UserInfo = response.json().await.ok()?;
+        if info.sub != subject {
+            return None;
+        }
+        info.email.as_deref().and_then(shown_email)
     }
 
     async fn verify(
@@ -360,6 +419,7 @@ impl Provider {
             issuer: claims.iss,
             subject: claims.sub,
             auth_time: claims.auth_time.map(ms),
+            email: claims.email.as_deref().and_then(shown_email),
         })
     }
 
@@ -428,6 +488,11 @@ impl Provider {
             )?,
             token_endpoint: endpoint("token_endpoint", &document.token_endpoint)?,
             jwks_uri: endpoint("jwks_uri", &document.jwks_uri)?,
+            userinfo_endpoint: document
+                .userinfo_endpoint
+                .as_deref()
+                .map(|url| endpoint("userinfo_endpoint", url))
+                .transpose()?,
         });
         *self.discovery.lock().expect("discovery lock") = Some((found.clone(), now));
         Ok(found)

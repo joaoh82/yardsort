@@ -252,10 +252,10 @@ async fn a_computer_pairs_by_code_sees_what_the_host_shows_once_let_in_and_loses
     computer::sign_in(&desk, client, &server, "Laptop", signed_in)
         .await
         .unwrap();
-    assert_eq!(
-        desk.store.remote_computer().unwrap().unwrap().device_id,
-        device.to_string()
-    );
+    let row = desk.store.remote_computer().unwrap().unwrap();
+    assert_eq!(row.device_id, device.to_string());
+    // Which account it is in, as the provider said at sign-in, kept here to be shown.
+    assert_eq!(row.email.as_deref(), Some("someone@example.invalid"));
     assert!(desk
         .kept
         .get(&computer::refresh_entry(device.as_str()))

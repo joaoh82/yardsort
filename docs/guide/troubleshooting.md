@@ -253,6 +253,21 @@ ys --data-dir ~/.local/share/dev.yardsort.app project list
 `ys` will not create a database, on purpose. If it did, a wrong directory would look exactly like
 a Yardsort you had never used.
 
+## The phone says a pairing code "is wrong or has expired", or shows the computer offline
+
+The phone and the computer are most likely signed in to two different accounts on the same server.
+An account is the identity provider's user, not the email address, and a computer whose browser was
+signed in as someone else, a test user say, ended up in that account. A device finds pairing codes
+only in its own account, and sees only that account's computers: the computer it shows offline is
+then an earlier one of yours, which nothing links to any more.
+
+Compare the **Account:** line in the computer's **Settings → Remote** with the one on the phone's
+account screen, or `yardsort-host status` on a computer with no screen. If they differ, sign the
+wrong one in again and choose your account when the browser asks: on the computer, **Turn off** and
+turn Remote on again (it becomes a new computer at the server, so pair your devices again); under
+**Other computers**, sign out and in; on the phone, sign out and in. A sign-in from before Yardsort
+kept the account says it is not known; it shows from the next sign-in.
+
 ## Where Yardsort keeps things
 
 |                                                  | Linux                                      | macOS                                             | Windows                       |

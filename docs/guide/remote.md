@@ -38,9 +38,17 @@ when, and the errors.
 ## Turning it on
 
 Open **Settings**, then **Remote**. Give the server's address and a name for this computer, then press
-**Turn on and sign in**, which opens your browser. Its sign-in is kept in this computer's credential
-store, and the section says where. While it is on, Yardsort keeps a link to the server from the moment it
-starts.
+**Turn on and sign in**, which opens your browser. The identity provider asks which account to sign in
+as, even when the browser is already signed in to one: pick yours. Its sign-in is kept in this
+computer's credential store, and the section says where. While it is on, Yardsort keeps a link to the
+server from the moment it starts.
+
+**Account:** shows the email you signed in as. Your phone has to be signed in to the same account on
+the same server to pair with this computer: a device in another account cannot find its pairing code,
+and does not see it at all. Two sign-ins with the same email address can still be two accounts, when
+the identity provider has two users with it. Compare with the account on the phone's account screen.
+A computer that signed in before Yardsort kept the account says it is not known here; it shows from
+the next sign-in. The server keeps no email: it hands it to the device once, as it signs in.
 
 **Turn off** ends that link.
 
@@ -321,7 +329,9 @@ computer's agents to start.
 
 1. In **Settings → Remote**, under **Other computers**, give the server the other computer is signed in
    to and a name for this one, then press **Sign in to reach other computers**, which opens your
-   browser. The server is filled in for you when this computer is a host on one.
+   browser, and asks which account to sign in as. The server is filled in for you when this computer
+   is a host on one. Its **Account:** line says which account this sign-in is in: the same as the
+   other computer's, or its code is not found.
 2. On the other computer, show a code: **Pair a device** in its **Settings → Remote**, or
    `yardsort-host pair` on one with no screen.
 3. Type the code under **Pairing code** here and press **Pair**. This computer asks to watch and to

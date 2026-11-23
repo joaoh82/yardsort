@@ -438,6 +438,9 @@ pub struct RemoteHost {
     pub server_url: String,
     pub name: String,
     pub since: f64,
+    /// Who it signed in as, as the identity provider said; `None` when it would not say, or for a
+    /// sign-in from before this was kept.
+    pub email: Option<String>,
     /// The link to the server's relay.
     pub link: RemoteLink,
 }
@@ -673,6 +676,7 @@ fn status(app: &AppHandle) -> IpcResult<RemoteStatus> {
             server_url: h.server_url,
             name: h.name,
             since: h.enabled_at as f64,
+            email: h.email,
             link: link(app),
         }),
         devices,

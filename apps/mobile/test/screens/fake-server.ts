@@ -46,6 +46,8 @@ class NotThere extends Error {}
 export class FakeServer {
   name = "Example Remote";
   server = "srv-example";
+  /** Who signs in, as the identity provider says; `null` for a server that does not say. */
+  email: string | null = "ana@example.com";
   /** The refresh credential in force for each device, by device id. */
   refresh = new Map<string, string>();
   devices: Device[] = [
@@ -293,7 +295,8 @@ export class FakeServer {
           lastSeenAt: null,
           revokedAt: null,
         });
-        return this.#issue(id);
+        // Only a sign-in says who signed in; a refresh never does.
+        return this.#issue(id, this.email);
       }
       const device = [...this.refresh].find(([, r]) => r === body.refresh)?.[0];
       if (!device || this.devices.find((d) => d.id === device)?.revokedAt) {
@@ -848,7 +851,7 @@ export class FakeServer {
     this.refresh.delete(id);
   }
 
-  #issue(device: string): Response {
+  #issue(device: string, email: string | null = null): Response {
     const refresh = `refresh-${device}-${++this.#issued}`;
     this.refresh.set(device, refresh);
     return Response.json({
@@ -856,6 +859,7 @@ export class FakeServer {
       access: `access-${device}`,
       accessExpiresInMs: 3_600_000,
       refresh,
+      ...(email ? { email } : {}),
     });
   }
 }

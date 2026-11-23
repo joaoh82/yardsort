@@ -76,7 +76,7 @@ beforeEach(() => {
 
 /** Another computer this one is let into, with one workspace that has an agent and a shell. */
 const others: OtherComputers = {
-  client: { serverUrl: "https://remote.example.com", name: "Workstation", since: 1 },
+  client: { serverUrl: "https://remote.example.com", name: "Workstation", since: 1, email: null },
   signingIn: false,
   hosts: [
     {

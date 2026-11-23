@@ -155,6 +155,15 @@ function SignedIn({ profile, title }: { profile: Profile; title: ReactNode }) {
         Signed in to {profile.serverName} as {profile.deviceName}.
       </Body>
       <Mono>{profile.address}</Mono>
+      {/* Two sign-ins at one server can be two accounts; a computer in another sees nothing here. */}
+      {profile.email ? (
+        <Body>Account: {profile.email}</Body>
+      ) : (
+        <Body muted>
+          The account is not known here: this phone signed in before Yardsort kept it, or the server
+          did not say. It shows from the next sign-in.
+        </Body>
+      )}
 
       <Computers asked={asked} />
 

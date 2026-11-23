@@ -114,6 +114,9 @@ pub struct OtherClient {
     pub server_url: String,
     pub name: String,
     pub since: f64,
+    /// Who it signed in as, as the identity provider said; `None` when it would not say, or for
+    /// a sign-in from before this was kept.
+    pub email: Option<String>,
 }
 
 /// A host this computer asked to reach.
@@ -551,6 +554,7 @@ fn status(app: &AppHandle) -> IpcResult<OtherComputers> {
             server_url: row.server_url,
             name: row.name,
             since: row.signed_in_at as f64,
+            email: row.email,
         }),
         signing_in,
         hosts: hosts.into_iter().map(host).collect(),

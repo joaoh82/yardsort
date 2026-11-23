@@ -678,6 +678,13 @@ mod cli {
             None => println!("Remote: off. Sign in with `yardsort-host sign-in <server>`."),
             Some(remote) => {
                 println!("Remote: on, as {} at {}", remote.name, remote.server_url);
+                match &remote.email {
+                    Some(email) => println!("Account: {email}"),
+                    None => println!(
+                        "Account: not known here (signed in before it was kept, or the server \
+                         did not say)"
+                    ),
+                }
                 println!("Link: {}", remote.link);
                 println!("Devices let in: {}", remote.devices);
             }

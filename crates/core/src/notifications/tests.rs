@@ -598,6 +598,7 @@ fn signed_in(store: &Store) {
             device_id: "device-host".into(),
             name: "Workstation".into(),
             enabled_at: 1,
+            email: None,
         })
         .unwrap();
 }
