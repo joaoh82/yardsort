@@ -11,8 +11,8 @@ choices, credentials and paid provisioning are owner-supplied). Section 5 is the
 | Environment    | Runs on                                 | Identity provider                         | Database                  | Who uses it                     |
 | -------------- | --------------------------------------- | ----------------------------------------- | ------------------------- | ------------------------------- |
 | **Local**      | Docker Compose on a developer's machine | ZITADEL in a container, throwaway         | PostgreSQL in a container | Development and tests           |
-| **Staging**    | Fly.io `fra`, one small Machine         | ZITADEL Cloud, the free instance          | PostgreSQL (see §2)       | The team, and beta testers      |
-| **Production** | Fly.io `fra`, two Machines              | ZITADEL run on Fly, at `auth.yardsort.sh` | Fly Managed Postgres      | Everyone on the managed service |
+| **Staging**    | Fly.io `fra`, one small Machine         | ZITADEL Cloud, the free instance          | Neon (§2)                 | The team, and beta testers      |
+| **Production** | Fly.io `fra`, two small Machines        | ZITADEL run on Fly, at `auth.yardsort.sh` | Neon, its own project     | Everyone on the managed service |
 
 Self-hosters run the same server image with the self-host recipe (R2's third slice): their own
 ZITADEL, their own PostgreSQL, behind their own reverse proxy. Nothing in it calls our
@@ -32,30 +32,40 @@ program behind a documented interface ([30 §2](30-open-source-and-managed.md#2-
 6, the relay. The relay holds WebSocket connections for as long as hosts and phones stay
 connected, which rules out request-scoped serverless platforms such as Cloud Run or Lambda. Fly
 runs a container as a long-lived Machine and proxies WebSockets, terminates TLS and issues
-certificates. It bills by the second, and its private network reaches its managed PostgreSQL.
+certificates. It bills by the second.
 `flyctl` is already installed here. A deploy restarts Machines and so drops live connections:
 hosts and devices reconnect, which the protocol is built for (a fresh snapshot, never a replay).
 
-**PostgreSQL.** Two choices:
+**PostgreSQL on Neon**, for staging and production alike. Neon is usage-based: US$0.106 per
+compute-hour on its Launch plan, plus storage. It is outside Fly's network, so the server reaches
+it over the internet with TLS. Production has a Neon project of its own in the Yardsort
+organization, on the same Launch plan and the same bill as staging's: its own compute, so a load
+test or a restore drill on staging cannot slow it, and its own credentials, so staging's open
+nothing of production's (§1).
 
-- **Fly Managed Postgres**: high availability, backups and connection pooling on every plan, and
-  reachable over Fly's private network. Basic, with shared CPUs and 1 GB, is US$38 a month plus
-  US$0.28 per GB of storage. This is the choice for production.
-- **Neon**: usage-based, with a free plan, and US$0.106 per compute-hour on Launch. It is cheaper
-  for a staging database that is mostly idle, but outside Fly's network, so it is reached over
-  the internet with TLS.
+Settled by the owner on 2026-11-23: production is built like staging, but on two Machines. The
+plan before had production on Fly Managed Postgres (Basic, US$38 a month plus storage, reached
+over Fly's private network) and a dedicated IPv4, neither the owner's choice and neither needed:
+everything the server serves is HTTPS on port 443, which Fly's shared IPv4 carries. The owner
+kept two Machines, so that one crashing leaves the other taking connections; the server runs as
+several instances already (`fly-replay`, signals through the database, §6), and `fly scale count`
+adds more.
 
-Staging used Neon's free plan (settled 2026-10-24), and production will use Fly Managed Postgres.
+Staging used Neon's free plan (settled 2026-10-24).
 On 2026-11-22 the free plan's monthly compute ran out (about 110 hours used, against about 100) and
 Neon refused every connection, so staging stopped. The server never lets the database sleep: it
 holds a connection open for its signals between instances, and its periodic work runs every few
 minutes, so an always-on staging outgrows the free plan within the month. The owner moved the
 Yardsort organization to Neon's Launch plan, pay as you go, the same day; the database and its
-address stayed as they were.
+address stayed as they were. Launch bills compute by the hour at its size: always on at the
+smallest size, 0.25, that is about 183 compute-hours, about US$19 a month at the listed rate,
+plus storage. Neon's bill for staging's first month on Launch gives the real figure.
 
-**Identity on ZITADEL Cloud.** Staging uses the free plan: one instance, 100 daily active users,
-and a `*.zitadel.cloud` domain. Production needs Pro (US$100 a month): a second instance needs
-it, and so do a custom domain and the uptime guarantee. With sign-in only (27 §2), each device
+**Identity: ZITADEL.** Staging uses ZITADEL Cloud's free plan: one instance, 100 daily active
+users, and a `*.zitadel.cloud` domain. Production does not use the Cloud: a second instance, a
+custom domain and the uptime guarantee all need Pro (US$100 a month), which the owner declined
+on 2026-11-19. Production runs ZITADEL itself on Fly at `auth.yardsort.sh` instead (§3, §5). On
+the Cloud, with sign-in only (27 §2), each device
 counts on the days its person signs in, not every day it is used. Data locations are the United
 States, the European Union, Switzerland and Australia, all on Google Cloud. ZITADEL's own pages
 disagree on whether the free plan may choose one. Put the instance in the same part of the world
@@ -104,15 +114,20 @@ as the server.
 
 ## 3 · What it costs to start
 
-| Item                                               | Staging                                          | Production at launch                                                |
-| -------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------- |
-| Fly Machines (shared-cpu-1x, 512 MB, US$3.69 each) | 1 → ~US$4                                        | 2 → ~US$7.50                                                        |
-| Fly outbound traffic (US$0.02/GB in NA and EU)     | ~US$0                                            | Relay traffic: measure in beta (proposal §12)                       |
-| Dedicated IPv4                                     | US$0 (shared)                                    | US$2                                                                |
-| PostgreSQL                                         | Neon Launch: pay as you go, from 2026-11-22 (§2) | Fly Managed Postgres Basic: US$38 + storage                         |
-| ZITADEL                                            | Cloud free: US$0                                 | On Fly: one Machine, ~US$4–7, its database in production's Postgres |
-| Domain and DNS                                     | the owner's                                      | the owner's                                                         |
-| **About**                                          | **US$5 a month**                                 | **US$55 a month**, before relay traffic                             |
+| Item                                               | Staging                            | Production at launch                                            |
+| -------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------- |
+| Fly Machines (shared-cpu-1x, 512 MB, US$3.69 each) | 1 → ~US$4                          | 2 → ~US$7.50                                                    |
+| Fly outbound traffic (US$0.02/GB in NA and EU)     | ~US$0                              | Relay traffic: measure in beta (proposal §12)                   |
+| IPv4                                               | shared: US$0                       | shared: US$0                                                    |
+| PostgreSQL                                         | Neon Launch: ~US$19 + storage (§2) | Neon Launch, its own project: ~US$19 + storage (§2)             |
+| ZITADEL                                            | Cloud free: US$0                   | On Fly: one Machine, ~US$4–7, its database in production's Neon |
+| Journal                                            | Tigris: cents                      | Tigris, its own bucket: cents                                   |
+| Domain and DNS                                     | the owner's                        | the owner's                                                     |
+| **About**                                          | **US$25 a month**                  | **US$31–34 a month**, before relay traffic                      |
+
+Neon's ~US$19 is an estimate, a compute that never sleeps at the smallest size (§2); staging's
+first bill on Launch gives the real figure. Production matches staging but for its second
+Machine and its identity provider: ZITADEL Cloud's free plan has one instance, which staging uses.
 
 ## 4 · Names
 
@@ -212,7 +227,8 @@ Settled on 2026-10-23:
   `sslmode=require`: the server keeps its own pool of eight connections per instance, listens for
   its instances' signals on one more, which a pooler would not carry, and makes its tables itself
   when it first starts.
-- **Production, later:** `fly mpg create`, on the Basic plan, in the primary region.
+- **Production, later:** the same, in a second Neon project of the Yardsort organization, in the
+  same region: its own compute and credentials, on the same Launch plan.
 
 **E. DNS**
 
