@@ -1,0 +1,46 @@
+# Production on Fly.io: https://remote.yardsort.sh (docs/design/28-remote-infrastructure.md).
+# Built like staging, on two Machines (28 §1). Deployed by .github/workflows/server-deploy.yml,
+# from `main` only, after a reviewer approves, from the repository root:
+#
+#   fly deploy . --config crates/server/fly/production.toml --dockerfile crates/server/Dockerfile
+#
+# Only settings that are not secret live here. The client secret, DATABASE_URL (production's Neon
+# project), the journal bucket's AWS_* and BUCKET_NAME, and the push keys are Fly secrets
+# (`fly secrets list -a yardsort-remote` shows their names, never their values).
+
+app = "yardsort-remote"
+primary_region = "fra"
+# SIGTERM is what the server waits for to finish its requests and stop.
+kill_signal = "SIGTERM"
+kill_timeout = "10s"
+
+[env]
+  YARDSORT_PUBLIC_URL = "https://remote.yardsort.sh"
+  YARDSORT_SERVER_NAME = "Yardsort"
+  # Production's own ZITADEL, on Fly (crates/server/fly/auth/).
+  YARDSORT_OIDC_ISSUER = "https://auth.yardsort.sh"
+  YARDSORT_OIDC_CLIENT_ID = "400806398243376274"
+  # Fly's proxy names the client's address here; the rate limits count by it.
+  YARDSORT_CLIENT_IP_HEADER = "Fly-Client-IP"
+  # The relay answers `fly-replay` to send a device's requests to the Machine holding its host's
+  # link, named by FLY_MACHINE_ID, which Fly sets (docs/design/27-remote-r2.md §12).
+  YARDSORT_ROUTING = "fly-replay"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Two Machines, both always running, so that one crashing leaves the other taking connections.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 2
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

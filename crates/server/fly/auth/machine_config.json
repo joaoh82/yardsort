@@ -1,0 +1,114 @@
+{
+  "containers": [
+    {
+      "name": "zitadel-api",
+      "image": "ghcr.io/zitadel/zitadel:v4.19.5",
+      "user": "0",
+      "cmd": ["start-from-init", "--masterkeyFromEnv"],
+      "env": {
+        "ZITADEL_PORT": "8080",
+        "ZITADEL_EXTERNALDOMAIN": "auth.yardsort.sh",
+        "ZITADEL_EXTERNALPORT": "443",
+        "ZITADEL_EXTERNALSECURE": "true",
+        "ZITADEL_TLS_ENABLED": "false",
+        "ZITADEL_FIRSTINSTANCE_INSTANCENAME": "Yardsort",
+        "ZITADEL_FIRSTINSTANCE_ORG_NAME": "Yardsort",
+        "ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL_VERIFIED": "true",
+        "ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED": "true",
+        "ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME": "setup",
+        "ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME": "Production setup",
+        "ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE": "2027-01-01T00:00:00Z",
+        "ZITADEL_FIRSTINSTANCE_PATPATH": "/zitadel/bootstrap/setup.pat",
+        "ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH": "/zitadel/bootstrap/login-client.pat",
+        "ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME": "login-client",
+        "ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME": "Login client",
+        "ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE": "2099-01-01T00:00:00Z",
+        "ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED": "true",
+        "ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI": "https://auth.yardsort.sh/ui/v2/login/",
+        "ZITADEL_OIDC_DEFAULTLOGINURLV2": "https://auth.yardsort.sh/ui/v2/login/login?authRequest=",
+        "ZITADEL_OIDC_DEFAULTLOGOUTURLV2": "https://auth.yardsort.sh/ui/v2/login/logout?post_logout_redirect=",
+        "ZITADEL_SAML_DEFAULTLOGINURLV2": "https://auth.yardsort.sh/ui/v2/login/login?samlRequest="
+      },
+      "secrets": [
+        {
+          "env_var": "ZITADEL_DATABASE_POSTGRES_DSN"
+        },
+        {
+          "env_var": "ZITADEL_MASTERKEY"
+        },
+        {
+          "env_var": "ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME"
+        },
+        {
+          "env_var": "ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL_ADDRESS"
+        },
+        {
+          "env_var": "ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD"
+        }
+      ],
+      "files": [
+        {
+          "guest_path": "/zitadel/bootstrap/setup.pat",
+          "raw_value": "Cg==",
+          "mode": 384
+        },
+        {
+          "guest_path": "/zitadel/bootstrap/login-client.pat",
+          "raw_value": "Cg==",
+          "mode": 384
+        }
+      ],
+      "healthchecks": [
+        {
+          "exec": {
+            "command": ["/app/zitadel", "ready"]
+          },
+          "grace_period": 300,
+          "interval": 15,
+          "timeout": 10,
+          "failure_threshold": 20
+        }
+      ]
+    },
+    {
+      "name": "zitadel-login",
+      "image": "ghcr.io/zitadel/zitadel-login:v4.19.5",
+      "env": {
+        "ZITADEL_API_URL": "http://localhost:8080",
+        "NEXT_PUBLIC_BASE_PATH": "/ui/v2/login",
+        "PORT": "3000",
+        "CUSTOM_REQUEST_HEADERS": "Host:auth.yardsort.sh,X-Forwarded-Proto:https"
+      },
+      "secrets": [
+        {
+          "env_var": "ZITADEL_SESSION_COOKIE_SECRET"
+        },
+        {
+          "env_var": "ZITADEL_SERVICE_USER_TOKEN"
+        }
+      ],
+      "depends_on": [
+        {
+          "name": "zitadel-api",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "caddy",
+      "image": "caddy:2.11.2-alpine",
+      "files": [
+        {
+          "guest_path": "/etc/caddy/Caddyfile",
+          "local_path": "Caddyfile"
+        }
+      ],
+      "depends_on": [
+        {
+          "name": "zitadel-api",
+          "condition": "healthy"
+        }
+      ]
+    }
+  ]
+}

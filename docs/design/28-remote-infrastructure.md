@@ -256,11 +256,29 @@ Pass these back to whoever builds the deploy (slice 3):
 
 None of them is a secret.
 
-**Production, at launch:**
+**Production, set up on 2026-11-23:**
 
-- Not B again: production's ZITADEL is a Fly app of its own (`yardsort-auth`), unmodified, with its
-  database in production's Postgres and `auth.yardsort.sh` as its domain (2026-11-19).
-- Do C, D and E again for `yardsort-remote`.
+- **Neon:** project `yardsort-production` in the Yardsort organization, in `aws-eu-central-1`,
+  PostgreSQL 17, its compute as staging's. Two roles, each owning its database: `yardsort` for the
+  server and `zitadel` for ZITADEL.
+- **ZITADEL:** Fly app `yardsort-auth`, unmodified ZITADEL v4.19.5 at `auth.yardsort.sh`, one
+  Machine of three containers (`crates/server/fly/auth/`): the API, its login pages, and Caddy
+  routing between them. Deployed by hand: `fly deploy --config crates/server/fly/auth/fly.toml
+--ha=false`. Its first start makes the instance, the first administrator, a `setup` service
+  user (IAM owner) and the login client; their tokens are written to `/zitadel/bootstrap` in the
+  API container, and the login client's goes into the app's secrets as
+  `ZITADEL_SERVICE_USER_TOKEN`. The project `Yardsort server` and its web application `Yardsort`
+  (B4's settings, redirect `https://remote.yardsort.sh/v1/login/callback`) were made through its
+  API, and self-registration is off. A first start that fails part way leaves the instance half
+  made, and every start after it fails on `Errors.Instance.Domain.AlreadyExists`: empty the
+  `zitadel` database and start again.
+- **The server:** Fly app `yardsort-remote`, two Machines (`crates/server/fly/production.toml`),
+  its journal bucket `yardsort-journal-production` on Tigris, and shared IPv4 on both apps.
+- **GitHub:** the deploy workflow's `production` runs in the repository's `Production`
+  environment (GitHub's names ignore case; the website's Vercel deployments use it too), which
+  requires the owner's review, allows `main` alone, and holds a deploy token for
+  `yardsort-remote`.
+- **DNS:** `auth` and `remote`, A and AAAA records to each app's addresses, DNS only.
 
 ## 6 · What gets built, and when
 
