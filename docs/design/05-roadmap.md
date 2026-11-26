@@ -1505,7 +1505,9 @@ two accounts (a browser left signed in as the load test's user). Built the same 
 - [x] The server asks for the email and hands it to the device once, keeping none.
 - [x] Shown on the desktop (host and other computers), by `yardsort-host`, and on the phone's
       account and pairing screens.
-- [ ] A sign-in on staging once deployed: ZITADEL's account picker, and the email from userinfo.
+- [x] A sign-in on staging once deployed (v18, 2026-11-23): ZITADEL shows its account picker
+      (owner, 2026-11-24). The app has "Include user's profile info in the ID Token" on, so the
+      email comes in the ID token; the userinfo fallback stays for providers that leave it out.
 - [ ] The host dashboard's Remote tab shows the account too.
 
 ## Later (unordered)
