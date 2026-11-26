@@ -69,5 +69,6 @@ computer's sign-in through the real server keeps the provider's email in `remote
 TypeScript client's fixture pins `email` on the wire and drops a bad one. The desktop's and the
 phone's screens show it, and say when it is not known.
 
-Not yet run against ZITADEL itself: staging's sign-in, after this server is deployed there, is the
-check that ZITADEL answers userinfo with the email and shows its account picker.
+On staging (release v18, 2026-11-23) the owner signed in and ZITADEL asked which account. The
+staging app has "Include user's profile info in the ID Token" on, so ZITADEL puts the email in the
+ID token and the userinfo call is not needed there; it stays for a provider that leaves it out.
